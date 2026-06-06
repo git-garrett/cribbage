@@ -1,7 +1,27 @@
 from itertools import combinations
 from random import shuffle
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    class _Array(list):
+        def mean(self):
+            return sum(self) / len(self)
+
+    class _NumpyFallback:
+        @staticmethod
+        def array(items):
+            return _Array(items)
+
+        @staticmethod
+        def argmax(items):
+            return max(range(len(items)), key=items.__getitem__)
+
+        @staticmethod
+        def argmin(items):
+            return min(range(len(items)), key=items.__getitem__)
+
+    np = _NumpyFallback()
 
 from .score import score_hand, score_count
 from .card import Deck

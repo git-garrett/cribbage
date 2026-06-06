@@ -71,3 +71,17 @@ Help
 ---- 
 
 Run `cribbage --help`  for an explanation of the command line arguments 
+
+
+Web UI
+------
+
+This checkout also includes a small local browser UI that drives the same
+cribbage engine one action at a time.
+
+```
+PYTHONPATH=src python3 webapp.py
+```
+
+Then open http://127.0.0.1:8765. Select two cards to discard, then click cards
+to peg. The board shows both scores with peg dots.
