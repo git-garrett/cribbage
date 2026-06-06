@@ -51,3 +51,46 @@ def test_webapp_awards_last_card_after_final_play():
     assert game.ai.score == 3
     assert "DCarlin pegged 1 for last card." in game.log
     assert game.phase == "score_pone"
+
+
+def test_webapp_first_dealer_stays_stable_when_dealer_alternates():
+    game = WebCribbageGame(opponent="random")
+    game.deal = 0
+    game.first_deal = 0
+    game.start_hand()
+    assert game.state()["dealer"] == "You"
+    assert game.state()["firstDealer"] == "You"
+
+    game.deal = game.deal ^ 1
+    game.start_hand()
+
+    assert game.state()["dealer"] == "DCarlin"
+    assert game.state()["firstDealer"] == "You"
+
+
+def test_webapp_discards_selected_card_ids_not_display_positions():
+    game = WebCribbageGame(opponent="random")
+    game.phase = "discard"
+    game.dealer = game.human
+    game.human.hand = cards_from_str("Ks 2d 9h Ac 5s 3c")
+
+    game.discard(ids=[card.index for card in cards_from_str("2d Ac")])
+
+    assert {card.ascii_str for card in game.crib} == {"2d", "Ac"}
+    assert {card.ascii_str for card in game.human.hand} == {"Ks", "9h", "5s", "3c"}
+
+
+def test_webapp_plays_selected_card_id_not_display_position():
+    game = WebCribbageGame(opponent="random")
+    game.phase = "pegging"
+    game.turn = 0
+    game.pone = game.human
+    game.dealer = game.ai
+    game.human.hand = cards_from_str("Ks 2d 9h Ac")
+    game.ai.hand = []
+    game.count = 0
+
+    game.play(card_id=cards_from_str("9h")[0].index)
+
+    assert [card.ascii_str for card in game.human.table] == ["9h"]
+    assert {card.ascii_str for card in game.human.hand} == {"Ks", "2d", "Ac"}

@@ -24,6 +24,7 @@ class WebCribbageGame:
         self.human = BrowserPlayer("You")
         self.ai = self._make_ai(opponent)
         self.deal = choice((0, 1))
+        self.first_deal = self.deal
         self.dealer = None
         self.pone = None
         self.turn_card = None
@@ -110,15 +111,10 @@ class WebCribbageGame:
         except TypeError:
             return player.ask_for_discards()
 
-    def discard(self, indexes):
+    def discard(self, indexes=None, ids=None):
         if self.phase != "discard":
             raise ValueError("It is not discard time.")
-        if len(indexes) != 2:
-            raise ValueError("Choose exactly two cards.")
-        hand = self.human.sorted_hand
-        if any(index < 0 or index >= len(hand) for index in indexes):
-            raise ValueError("Discard selection is out of range.")
-        discards = [hand[index] for index in indexes]
+        discards = self.selected_cards(self.human.sorted_hand, indexes, ids, 2)
         self.remove_cards(self.human.hand, discards)
         self.crib.extend(discards)
         if self.dealer is self.human:
@@ -142,7 +138,7 @@ class WebCribbageGame:
             self.log_event(f"{self.name(self.dealer)} pegged 2 for his heels.")
         self.advance_until_human()
 
-    def play(self, index):
+    def play(self, index=None, card_id=None):
         if self.phase != "pegging" or self.current_player() is not self.human:
             raise ValueError("It is not your turn to play.")
         legal = self.legal_cards(self.human)
@@ -150,13 +146,33 @@ class WebCribbageGame:
             self.say_go(self.human)
             self.advance_until_human()
             return
-        if index < 0 or index >= len(self.human.hand):
-            raise ValueError("Card selection is out of range.")
-        card = self.human.hand[index]
+        card = self.selected_cards(self.human.hand, [index] if index is not None else None, [card_id] if card_id is not None else None, 1)[0]
         if card not in legal:
             raise ValueError("That card would take the count over 31.")
         self.play_card(self.human, card)
         self.advance_until_human()
+
+    @staticmethod
+    def selected_cards(hand, indexes=None, ids=None, expected_count=1):
+        if ids is not None:
+            if len(ids) != expected_count:
+                raise ValueError(f"Choose exactly {expected_count} card{'s' if expected_count != 1 else ''}.")
+            by_id = {card.index: card for card in hand}
+            try:
+                cards = [by_id[card_id] for card_id in ids]
+            except KeyError as error:
+                raise ValueError("Card selection is out of range.") from error
+            if len(set(ids)) != expected_count:
+                raise ValueError("Card selection contains duplicates.")
+            return cards
+
+        if indexes is None or len(indexes) != expected_count:
+            raise ValueError(f"Choose exactly {expected_count} card{'s' if expected_count != 1 else ''}.")
+        if any(index < 0 or index >= len(hand) for index in indexes):
+            raise ValueError("Card selection is out of range.")
+        if len(set(indexes)) != expected_count:
+            raise ValueError("Card selection contains duplicates.")
+        return [hand[index] for index in indexes]
 
     def current_player(self):
         return {0: self.pone, 1: self.dealer}[self.turn]
@@ -356,6 +372,7 @@ class WebCribbageGame:
             "scores": {"human": self.human.score, "ai": self.ai.score},
             "pegPositions": self.peg_positions,
             "dealer": self.name(self.dealer),
+            "firstDealer": self.name([self.human, self.ai][self.first_deal]),
             "cribOwner": self.name(self.dealer),
             "turn": self.name(player) if player else None,
             "count": self.count,
@@ -402,13 +419,13 @@ class Handler(SimpleHTTPRequestHandler):
                     new_game(payload.get("opponent", "expert"))
                     self.send_json(current_state())
                 elif self.path == "/api/discard":
-                    GAME.discard(payload.get("indexes", []))
+                    GAME.discard(payload.get("indexes"), payload.get("ids"))
                     self.send_json(current_state())
                 elif self.path == "/api/finish-discard":
                     GAME.finish_discard()
                     self.send_json(current_state())
                 elif self.path == "/api/play":
-                    GAME.play(payload.get("index"))
+                    GAME.play(payload.get("index"), payload.get("id"))
                     self.send_json(current_state())
                 elif self.path == "/api/continue-scoring":
                     GAME.continue_scoring()

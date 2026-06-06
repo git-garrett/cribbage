@@ -111,9 +111,9 @@ function fallbackPegPositions(scores) {
   };
 }
 
-function renderBoard(scores, pegPositions = fallbackPegPositions(scores), dealer = null) {
+function renderBoard(scores, pegPositions = fallbackPegPositions(scores), firstDealer = null) {
   const fallback = fallbackPegPositions(scores);
-  const dealerPlayer = dealer === "You" ? "human" : "ai";
+  const firstDealerPlayer = firstDealer === "You" ? "human" : "ai";
   for (const lane of els.board.querySelectorAll(".lane")) {
     const player = lane.classList.contains("human") ? "human" : "ai";
     const positions = pegPositions[player] || fallback[player];
@@ -121,10 +121,10 @@ function renderBoard(scores, pegPositions = fallbackPegPositions(scores), dealer
       const wrap = hole.closest(".hole-wrap");
       hole.classList.remove("peg", "back-peg", "front-peg");
       if (hole.dataset.position === "7") {
-        wrap.classList.toggle("ringed", player === dealerPlayer);
+        wrap.classList.toggle("ringed", player === firstDealerPlayer);
       }
       if (hole.dataset.position === "111") {
-        wrap.classList.toggle("ringed", player !== dealerPlayer);
+        wrap.classList.toggle("ringed", player !== firstDealerPlayer);
       }
       if (String(positions[0]) === hole.dataset.position) {
         hole.classList.add("peg", "back-peg");
@@ -158,7 +158,7 @@ function cardElement(card, options = {}) {
   button.className = `card ${card.suit}`;
   button.dataset.index = card.index;
   button.dataset.id = card.id;
-  if (state.selected.has(card.index)) button.classList.add("selected");
+  if (state.selected.has(card.id)) button.classList.add("selected");
   if (options.disabled) button.disabled = true;
   if (options.clickable) {
     button.type = "button";
@@ -183,21 +183,21 @@ async function onCardClick(card) {
   if (state.pending) return;
   const game = state.game;
   if (game.phase === "discard") {
-    if (state.selected.has(card.index)) {
-      state.selected.delete(card.index);
+    if (state.selected.has(card.id)) {
+      state.selected.delete(card.id);
     } else if (state.selected.size < 2) {
-      state.selected.add(card.index);
+      state.selected.add(card.id);
     }
     render(game);
     return;
   }
   if (game.phase === "pegging" && game.turn === "You") {
     if (!game.legalCardIds.includes(card.id)) return;
-    if (state.selected.has(card.index)) {
-      state.selected.delete(card.index);
+    if (state.selected.has(card.id)) {
+      state.selected.delete(card.id);
     } else {
       state.selected.clear();
-      state.selected.add(card.index);
+      state.selected.add(card.id);
     }
     render(game);
   }
@@ -237,7 +237,7 @@ function renderCutCard(card) {
 
 function selectedPlayableCard(game) {
   return game.humanHand.find(
-    (card) => state.selected.has(card.index) && game.legalCardIds.includes(card.id),
+    (card) => state.selected.has(card.id) && game.legalCardIds.includes(card.id),
   );
 }
 
@@ -265,7 +265,7 @@ function render(game) {
   renderCutCard(game.turnCard);
   renderScoring(game.scoring);
 
-  renderBoard(game.scores, game.pegPositions, game.dealer);
+  renderBoard(game.scores, game.pegPositions, game.firstDealer);
   renderPlayedCards(game.plays, game.completedPlays);
   renderCards(els.humanHand, game.humanHand, {
     clickable: game.phase === "discard" || (game.phase === "pegging" && game.turn === "You"),
@@ -300,7 +300,7 @@ els.discard.addEventListener("click", async () => {
   state.pending = true;
   render(state.game);
   try {
-    const next = await api("/api/discard", { indexes: Array.from(state.selected) });
+    const next = await api("/api/discard", { ids: Array.from(state.selected) });
     state.selected.clear();
     render(next);
     if (next.phase === "ai_discarding") {
@@ -322,7 +322,7 @@ els.play.addEventListener("click", async () => {
   state.pending = true;
   render(state.game);
   try {
-    const next = await api("/api/play", { index: card.index });
+    const next = await api("/api/play", { id: card.id });
     state.selected.clear();
     render(next);
   } finally {
