@@ -31,6 +31,7 @@ class WebCribbageGame:
         self.count = 0
         self.turn = 0
         self.go_has_been_said = False
+        self.go_player = None
         self.last_player = None
         self.phase = "new"
         self.message = ""
@@ -178,7 +179,7 @@ class WebCribbageGame:
         return max(legal, key=lambda card: score_count(self.plays + [card]))
 
     def say_go(self, player):
-        if self.go_has_been_said:
+        if self.go_player is not None:
             if self.last_player and self.count != 31:
                 self.peg(self.last_player, 1)
                 self.log_event(f"{self.name(self.last_player)} pegged 1 for go.")
@@ -186,10 +187,13 @@ class WebCribbageGame:
             self.plays = []
             self.count = 0
             self.go_has_been_said = False
+            self.go_player = None
             self.last_player = None
             self.log_event("Count resets to 0.")
+            self.other_turn()
         else:
             self.go_has_been_said = True
+            self.go_player = player
             self.log_event(f"{self.name(player)} says go.")
             self.other_turn()
 
@@ -198,7 +202,6 @@ class WebCribbageGame:
         self.plays.append(card)
         self.count += card.value
         self.last_player = player
-        self.go_has_been_said = False
         points = score_count(self.plays)
         if points:
             self.peg(player, points)
@@ -211,9 +214,12 @@ class WebCribbageGame:
             self.plays = []
             self.count = 0
             self.go_has_been_said = False
+            self.go_player = None
             self.last_player = None
             self.log_event("Count hit 31 and resets.")
-        self.other_turn()
+            self.other_turn()
+        elif self.go_player is None:
+            self.other_turn()
 
     def score_hands(self):
         pone_points = score_hand(self.pone.table, self.turn_card)
