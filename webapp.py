@@ -170,6 +170,7 @@ class WebCribbageGame:
     def advance_until_human(self):
         while self.phase == "pegging":
             if len(self.dealer.hand) + len(self.pone.hand) == 0:
+                self.finish_pegging()
                 self.start_scoring()
                 return
             player = self.current_player()
@@ -184,6 +185,17 @@ class WebCribbageGame:
                 continue
             card = self.choose_play(player)
             self.play_card(player, card)
+
+    def finish_pegging(self):
+        if self.last_player and self.count != 0:
+            self.peg(self.last_player, 1)
+            self.log_event(f"{self.name(self.last_player)} pegged 1 for last card.")
+            self.archive_plays()
+            self.plays = []
+            self.count = 0
+            self.go_has_been_said = False
+            self.go_player = None
+            self.last_player = None
 
     def choose_play(self, player):
         legal = self.legal_cards(player)
