@@ -120,7 +120,7 @@ class Player:
 
     def count_crib(self, turn_card):
         """Count crib, with side effect of pegging the score"""
-        score = score_hand(self.crib, turn_card)
+        score = score_hand(self.crib, turn_card, crib=True)
         self.peg(score)
         return score 
 
@@ -204,46 +204,48 @@ class EnumerativeAIPlayer(Player):
 
     def ask_for_discards(self, my_crib=True, choose='mean'):
         """
-        For each possible discard, score and select
-        highest scoring move
+        For each possible discard, score the expected kept hand value and
+        expected crib value, then select the highest scoring move.
 
         Parameters
         ----------
         my_crib: bool
             Is it my crib?
         choose: str
-            Choose the discard with either the best `"mean"` possible score or the
+            Choose the discard with either the best `"mean"` expected score or the
             best `"max"` possible score given the six cards in my hand
         """
 
         #print("cribbage: {} is choosing discards".format(self))
-        deck = Deck().draw(52)
+        deck = list(Deck().draw(52))
         potential_cards = [n for n in deck if n not in self.hand]
         assert 6 == len(self.hand)
         assert 52 - 6 == len(potential_cards)
 
-        #bar = tqdm(total=226994)
-        discards = []
-        scores = []
+        scored_discards = []
         for discard in combinations(self.hand, 2):  # 6 choose 2 == 15
-            inner_scores = []
-            for pot in combinations(potential_cards, 3):  # 46 choose 3 == 15,180
-                inner_scores.append(score_hand([*discard, *pot[:-1]], pot[-1]))
-                #bar.update(1)
-            inner_scores = np.array(inner_scores)
-            discards.append(discard)
+            keep = [card for card in self.hand if card not in discard]
+            hand_scores = [score_hand(keep, cut) for cut in potential_cards]
+
+            crib_scores = [
+                score_hand([*discard, *crib_cards], cut, crib=True)
+                for *crib_cards, cut in combinations(potential_cards, 3)
+            ]
+
             if choose == 'mean':
-                scores.append(inner_scores.mean())
+                hand_score = sum(hand_scores) / len(hand_scores)
+                crib_score = sum(crib_scores) / len(crib_scores)
             elif choose == 'max':
-                scores.append(inner_scores.max())
+                hand_score = max(hand_scores)
+                crib_score = max(crib_scores)
+            else:
+                raise ValueError(f"Unknown discard strategy: {choose}")
 
-        # return either the best (if my crib) or the worst (if not)
-        if my_crib:
-            selected = np.argmax(scores)
-        else:
-            selected = np.argmin(scores)
+            total_score = hand_score + crib_score if my_crib else hand_score - crib_score
+            scored_discards.append((total_score, discard))
 
-        return list(discards[selected])
+        _, discard = max(scored_discards, key=lambda item: item[0])
+        return list(discard)
 
 
     def ask_for_play(self, plays):
@@ -252,14 +254,14 @@ class EnumerativeAIPlayer(Player):
         and choose the one that maximizes the points
         """
 
-        scores = []
-        plays = []
-        for card in self.hand:
-            plays.append(card)
-            scores.append(score_count(plays + [card]))
-        max_index = np.argmax(scores)
+        count = sum(card.value for card in plays)
+        legal = [card for card in self.hand if count + card.value <= 31]
+        candidates = legal or list(self.hand)
 
-        return plays[max_index]
+        return max(
+            candidates,
+            key=lambda card: (score_count(plays + [card]), -card.value, -card.run_val),
+        )
 
 
 class StudentAIPlayer(Player):

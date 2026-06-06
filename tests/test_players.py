@@ -22,7 +22,7 @@ def test_enumerative_ai_chooses_good_crib():
     player = EnumerativeAIPlayer()
     player.hand = cards_from_str("5d 5h Ad 3s 7h 9s")
     discards = player.ask_for_discards(my_crib=True)
-    assert all(x.value == 5 for x in discards)
+    assert {x.ascii_str for x in discards} == {"Ad", "9s"}
 
 
 @pytest.mark.slow
@@ -42,9 +42,15 @@ def test_enumerative_ai_counting():
     hand.counting()
 
 
+def test_enumerative_ai_counts_pegging_runs():
+    player = EnumerativeAIPlayer()
+    player.hand = cards_from_str("5s 9d")
+    plays = cards_from_str("3d 4h")
+    assert player.ask_for_play(plays).ascii_str == "5s"
+
+
 def test_student_chooses_good_crib():
     player = StudentAIPlayer()
     player.hand = cards_from_str("5d 5h Ad 3s 7h 9s")
     discards = player.ask_for_discards()
-    assert all(x.rank == 5 for x in discards)
-
+    assert all(x.value == 5 for x in discards)

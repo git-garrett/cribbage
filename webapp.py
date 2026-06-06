@@ -271,7 +271,7 @@ class WebCribbageGame:
         elif stage == "crib":
             player = self.dealer
             cards = self.dealer.crib
-            points = score_hand(cards, self.turn_card)
+            points = score_hand(cards, self.turn_card, crib=True)
             title = f"{self.name(player)} crib"
             next_label = "Next hand"
             self.phase = "score_crib"

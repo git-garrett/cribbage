@@ -3,6 +3,7 @@ import pytest
 from cribbage.card import Deck, cards_from_str
 from cribbage.score import (
     score_hand,
+    score_count,
     score_runs,
     score_fifteens,
     score_sets,
@@ -35,6 +36,18 @@ def test_score_runs():
     assert 5 == score_runs(hand, turn_card)
 
 
+def test_score_double_run_of_four():
+    *hand, turn_card = cards_from_str("Ad 2c 3h 4s 3d")
+    assert 8 == score_runs(hand, turn_card)
+    assert 10 == score_hand(hand, turn_card)
+
+
+def test_score_double_double_run():
+    *hand, turn_card = cards_from_str("Ad 2c 3h 3s 2d")
+    assert 12 == score_runs(hand, turn_card)
+    assert 16 == score_hand(hand, turn_card)
+
+
 def test_score_of_a_hand():
     deck = Deck(shuffled=False)
     hand = list(deck.draw(4))
@@ -62,6 +75,38 @@ def test_right_jack():
     assert 1 == score_flush_and_right_jack(hand, turn_card) 
 
 
+def test_non_crib_four_card_flush():
+    *hand, turn_card = cards_from_str("Ah 7h 8h 10h Ks")
+    assert 4 == score_flush_and_right_jack(hand, turn_card)
+    assert 6 == score_hand(hand, turn_card)
+
+
+def test_crib_needs_five_card_flush():
+    *hand, turn_card = cards_from_str("Ah 7h 8h 10h Ks")
+    assert 0 == score_flush_and_right_jack(hand, turn_card, crib=True)
+    assert 2 == score_hand(hand, turn_card, crib=True)
+
+
 def test_perfect_hand():
     *hand, turn_card = cards_from_str("Jh 5d 5c 5s 5h")
     assert 29 == score_hand(hand, turn_card)
+
+
+def test_score_count_run():
+    plays = cards_from_str("3d 4h 5s")
+    assert 3 == score_count(plays)
+
+
+def test_score_count_run_out_of_order():
+    plays = cards_from_str("4h 3d 5s")
+    assert 3 == score_count(plays)
+
+
+def test_score_count_triple():
+    plays = cards_from_str("8d 8h 8s")
+    assert 6 == score_count(plays)
+
+
+def test_score_count_31():
+    plays = cards_from_str("10d 9h 7s 5c")
+    assert 2 == score_count(plays)
