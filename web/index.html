@@ -3,47 +3,63 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Cribbage</title>
+    <title>Strong Cribbage</title>
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
     <main class="app">
       <section class="topbar">
         <div>
-          <h1>Cribbage</h1>
-          <p id="message">Loading...</p>
+          <h1>Strong Cribbage</h1>
         </div>
-        <div class="controls">
-          <select id="opponent">
-            <option value="expert">Expert</option>
-            <option value="random">Random</option>
-          </select>
+        <button id="menu-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="settings-panel" aria-label="Menu">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+        <div id="settings-panel" class="settings-panel" hidden>
+          <label>
+            Opponent
+            <select id="opponent">
+              <option value="expert">Expert</option>
+              <option value="random">Random</option>
+            </select>
+          </label>
           <button id="new-game" type="button">New game</button>
         </div>
       </section>
 
       <section class="scoreboard">
         <div class="score">
-          <span>You</span>
+          <span>User</span>
           <strong id="human-score">0</strong>
         </div>
-        <div class="board" id="board" aria-label="Cribbage board"></div>
+        <div id="score-cut" class="score-cut">
+          <span>Cut</span>
+          <span id="turn-card" class="cut-card"></span>
+        </div>
         <div class="score ai">
-          <span>DCarlin</span>
+          <span>AI</span>
           <strong id="ai-score">0</strong>
         </div>
+        <div class="board" id="board" aria-label="Cribbage board"></div>
       </section>
 
       <section class="table">
+        <div class="ai-strip">
+          <h2>AI hand</h2>
+          <div id="ai-hand" class="cards small"></div>
+        </div>
         <div class="status">
           <span>Dealer: <strong id="dealer">-</strong></span>
           <span>Turn: <strong id="turn">-</strong></span>
           <span>Count: <strong id="count">0</strong></span>
-          <span>Cut: <span id="turn-card" class="cut-card"></span></span>
         </div>
         <div class="played">
-          <h2>Current count</h2>
+          <h2 id="play-area-title">Current count</h2>
           <div id="plays" class="cards"></div>
+          <div id="result" class="result" aria-live="polite"></div>
+          <button id="continue-pegging" class="inline-continue" type="button" hidden>Count hands</button>
         </div>
         <div id="scoring-review" class="scoring-review" hidden>
           <h2 id="scoring-title">Hand score</h2>
@@ -52,16 +68,10 @@
             <strong id="scoring-points">0</strong>
             <button id="continue-scoring" type="button">Continue</button>
           </div>
+          <div id="scoring-result" class="result scoring-result" aria-live="polite"></div>
         </div>
-      </section>
-
-      <section class="hands">
-        <div>
-          <h2>DCarlin hand</h2>
-          <div id="ai-hand" class="cards small"></div>
-        </div>
-        <div>
-          <h2>Your hand</h2>
+        <div class="user-panel">
+          <h2 id="user-hand-title">User hand</h2>
           <div id="human-hand" class="cards"></div>
           <div class="actions">
             <button id="discard" type="button" disabled>Discard selected</button>
@@ -70,11 +80,6 @@
           </div>
         </div>
       </section>
-
-      <aside class="log">
-        <h2>Log</h2>
-        <ol id="log"></ol>
-      </aside>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -44,13 +44,13 @@ describe("game state", () => {
     game.deal = 0;
     game.firstDeal = 0;
     game.startHand();
-    expect(game.state().dealer).toBe("You");
-    expect(game.state().firstDealer).toBe("You");
+    expect(game.state().dealer).toBe("User");
+    expect(game.state().firstDealer).toBe("User");
 
     game.deal = 1;
     game.startHand();
-    expect(game.state().dealer).toBe("DCarlin");
-    expect(game.state().firstDealer).toBe("You");
+    expect(game.state().dealer).toBe("AI");
+    expect(game.state().firstDealer).toBe("User");
   });
 
   test("discards selected card ids instead of display positions", () => {
@@ -66,6 +66,7 @@ describe("game state", () => {
     expect(new Set(game.human.hand.map((card) => card.ascii))).toEqual(
       new Set(["Ks", "9h", "5s", "3c"]),
     );
+    expect(game.state().result).toContain("User discarded two cards to the crib.");
   });
 
   test("awards last card before show scoring", () => {
@@ -89,7 +90,64 @@ describe("game state", () => {
     (game as any).advanceUntilHuman();
 
     expect(game.ai.score).toBe(3);
-    expect(game.log).toContain("DCarlin pegged 1 for last card.");
+    expect(game.log).toContain("AI pegged 1 for last card.");
+    expect(game.phase).toBe("pegging_complete");
+
+    game.continueScoring();
+
     expect(game.phase).toBe("score_pone");
+  });
+
+  test("restores a saved game snapshot", () => {
+    const game = new CribbageGame("random");
+    game.deal = 0;
+    game.firstDeal = 0;
+    game.startHand();
+    game.human.hand = cardsFromString("Ad 2c 3h 4s 9d 10c");
+    game.ai.hand = cardsFromString("5d 6c 7h 8s Jd Qc");
+    game.turnCard = cardsFromString("Ks")[0];
+
+    game.discard(cardsFromString("9d 10c").map((card) => card.id));
+    game.finishDiscard();
+
+    const restored = CribbageGame.restore(game.snapshot());
+
+    expect(restored.state()).toEqual(game.state());
+    expect(restored.snapshot()).toEqual(game.snapshot());
+  });
+
+  test("restores scoring review without recounting points", () => {
+    const game = new CribbageGame("random");
+    game.phase = "pegging_complete";
+    game.pone = game.human;
+    game.dealer = game.ai;
+    game.turnCard = cardsFromString("5s")[0];
+    game.human.table = cardsFromString("Ad 2c 3h 4s");
+    game.ai.table = cardsFromString("Kh Qc 9d 8s");
+    game.ai.crib = cardsFromString("6d 7c 8h 9s");
+    game.human.score = 10;
+    game.ai.score = 20;
+
+    game.continueScoring();
+    const scoreAfterCounting = game.human.score;
+    const restored = CribbageGame.restore(game.snapshot());
+
+    expect(restored.phase).toBe("score_pone");
+    expect(restored.human.score).toBe(scoreAfterCounting);
+    expect(restored.state().scoring?.title).toBe("User hand");
+    expect(restored.state().scoring?.points).toBe(game.state().scoring?.points);
+  });
+
+  test("infers hand number when restoring an older saved game", () => {
+    const game = new CribbageGame("random");
+    game.human.score = 18;
+    game.ai.score = 7;
+    game.phase = "discard";
+    const snapshot = game.snapshot();
+    snapshot.handNumber = 1;
+
+    const restored = CribbageGame.restore(snapshot);
+
+    expect(restored.state().handNumber).toBe(2);
   });
 });

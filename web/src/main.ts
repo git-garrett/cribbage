@@ -1,28 +1,36 @@
-import { CribbageGame, type GameState, type Opponent, WinGame } from "./engine";
+import { CribbageGame, type GameSnapshot, type GameState, type Opponent, WinGame } from "./engine";
 
 const state: {
   game: GameState | null;
   selected: Set<number>;
   pending: boolean;
+  resultOverride: string[] | null;
 } = {
   game: null,
   selected: new Set(),
   pending: false,
+  resultOverride: null,
 };
 
 const els = {
+  app: document.querySelector(".app") as HTMLElement,
   board: document.querySelector("#board") as HTMLElement,
-  message: document.querySelector("#message") as HTMLElement,
+  menuToggle: document.querySelector("#menu-toggle") as HTMLButtonElement,
+  settingsPanel: document.querySelector("#settings-panel") as HTMLElement,
+  result: document.querySelector("#result") as HTMLElement,
+  scoringResult: document.querySelector("#scoring-result") as HTMLElement,
   humanScore: document.querySelector("#human-score") as HTMLElement,
+  scoreCut: document.querySelector("#score-cut") as HTMLElement,
   aiScore: document.querySelector("#ai-score") as HTMLElement,
   dealer: document.querySelector("#dealer") as HTMLElement,
   turn: document.querySelector("#turn") as HTMLElement,
   count: document.querySelector("#count") as HTMLElement,
   turnCard: document.querySelector("#turn-card") as HTMLElement,
+  playAreaTitle: document.querySelector("#play-area-title") as HTMLElement,
   plays: document.querySelector("#plays") as HTMLElement,
+  userHandTitle: document.querySelector("#user-hand-title") as HTMLElement,
   humanHand: document.querySelector("#human-hand") as HTMLElement,
   aiHand: document.querySelector("#ai-hand") as HTMLElement,
-  log: document.querySelector("#log") as HTMLOListElement,
   discard: document.querySelector("#discard") as HTMLButtonElement,
   play: document.querySelector("#play") as HTMLButtonElement,
   go: document.querySelector("#go") as HTMLButtonElement,
@@ -33,10 +41,30 @@ const els = {
   scoringCards: document.querySelector("#scoring-cards") as HTMLElement,
   scoringPoints: document.querySelector("#scoring-points") as HTMLElement,
   continueScoring: document.querySelector("#continue-scoring") as HTMLButtonElement,
+  continuePegging: document.querySelector("#continue-pegging") as HTMLButtonElement,
 };
 
 const RINGED_HOLES = new Set([17, 33, 43, 59, 69, 85, 95]);
-let localGame = new CribbageGame("expert");
+const SHARED_PAR_HOLES = [17, 33, 43, 59, 69, 85, 95];
+const SAVE_KEY = "strong-cribbage.game.v1";
+
+function loadSavedGame(): CribbageGame {
+  const saved = localStorage.getItem(SAVE_KEY);
+  if (!saved) return new CribbageGame("expert");
+  try {
+    return CribbageGame.restore(JSON.parse(saved) as GameSnapshot);
+  } catch {
+    localStorage.removeItem(SAVE_KEY);
+    return new CribbageGame("expert");
+  }
+}
+
+function saveGame(): void {
+  localStorage.setItem(SAVE_KEY, JSON.stringify(localGame.snapshot()));
+}
+
+let localGame = loadSavedGame();
+saveGame();
 
 function buildBoard(): void {
   els.board.innerHTML = "";
@@ -46,7 +74,7 @@ function buildBoard(): void {
 
     const label = document.createElement("div");
     label.className = "lane-label";
-    label.textContent = player === "human" ? "You" : "DCarlin";
+    label.textContent = player === "human" ? "User" : "AI";
     lane.append(label);
 
     const track = document.createElement("div");
@@ -57,6 +85,7 @@ function buildBoard(): void {
     for (let i = 1; i <= 60; i += 1) track.append(holeElement(i, false, outboundColumn(i), 1));
     for (let i = 61; i <= 120; i += 1) track.append(holeElement(i, false, returnColumn(i), 2));
     track.append(holeElement(121, false, 2, 2));
+    track.append(paceSvg());
 
     lane.append(track);
     els.board.append(lane);
@@ -77,6 +106,7 @@ function holeElement(position: number | string, start: boolean, column: number, 
   const wrap = document.createElement("span");
   wrap.className = "hole-wrap";
   wrap.dataset.position = String(position);
+  wrap.dataset.row = String(row);
   wrap.style.gridColumn = String(column);
   wrap.style.gridRow = String(row);
 
@@ -99,6 +129,13 @@ function holeElement(position: number | string, start: boolean, column: number, 
   return wrap;
 }
 
+function paceSvg(): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.classList.add("pace-lines");
+  svg.setAttribute("aria-hidden", "true");
+  return svg;
+}
+
 function fallbackPegPositions(scores: GameState["scores"]): GameState["pegPositions"] {
   return {
     human: ["start-front", Math.min(scores.human, 121)],
@@ -110,22 +147,191 @@ function renderBoard(
   scores: GameState["scores"],
   pegPositions: GameState["pegPositions"] = fallbackPegPositions(scores),
   firstDealer: string | null = null,
+  phase: GameState["phase"] = "discard",
+  handNumber = 1,
 ): void {
   const fallback = fallbackPegPositions(scores);
-  const firstDealerPlayer = firstDealer === "You" ? "human" : "ai";
+  const firstDealerPlayer = firstDealer === "User" ? "human" : "ai";
+  const completedHands = completedHandCount(phase, handNumber);
+  const projections = projectedCourse(scores, firstDealerPlayer, completedHands);
   for (const lane of els.board.querySelectorAll(".lane")) {
     const player = lane.classList.contains("human") ? "human" : "ai";
     const positions = pegPositions[player] || fallback[player];
+    const projectedPositions = projections[player];
     for (const hole of lane.querySelectorAll<HTMLElement>(".hole")) {
       const wrap = hole.closest<HTMLElement>(".hole-wrap");
       if (!wrap) continue;
       hole.classList.remove("peg", "back-peg", "front-peg");
+      wrap.classList.remove("expected-human", "expected-ai");
+      wrap.removeAttribute("title");
       if (hole.dataset.position === "7") wrap.classList.toggle("ringed", player === firstDealerPlayer);
       if (hole.dataset.position === "111") wrap.classList.toggle("ringed", player !== firstDealerPlayer);
+      const projection = projectedPositions.get(hole.dataset.position || "");
+      if (projection) {
+        wrap.classList.add(player === "human" ? "expected-human" : "expected-ai");
+        wrap.title = `${player === "human" ? "User" : "AI"} expected after hand ${projection.hand}: ${projection.score.toFixed(1)}`;
+      }
       if (String(positions[0]) === hole.dataset.position) hole.classList.add("peg", "back-peg");
       if (String(positions[1]) === hole.dataset.position) hole.classList.add("peg", "front-peg");
     }
   }
+  requestAnimationFrame(() => renderPaceLines(pegPositions, projections, firstDealerPlayer, completedHands));
+}
+
+function renderPaceLines(
+  pegPositions: GameState["pegPositions"],
+  projections: Record<"human" | "ai", Map<string, { hand: number; score: number }>>,
+  firstDealerPlayer: "human" | "ai",
+  completedHands: number,
+): void {
+  for (const lane of els.board.querySelectorAll<HTMLElement>(".lane")) {
+    const player = lane.classList.contains("human") ? "human" : "ai";
+    const track = lane.querySelector<HTMLElement>(".track");
+    const svg = lane.querySelector<SVGSVGElement>(".pace-lines");
+    if (!track || !svg) continue;
+    svg.replaceChildren();
+    svg.setAttribute("viewBox", `0 0 ${track.clientWidth} ${track.clientHeight}`);
+    const parHoles = parHolesFor(player, firstDealerPlayer);
+    const currentParIndex = completedHands - 1;
+    let lineIndex = 0;
+    if (currentParIndex >= 0) {
+      addPaceLine(svg, track, pegPositions[player]?.[1], parHoles[currentParIndex], player, lineSide(lineIndex));
+      lineIndex += 1;
+    }
+    for (const [hole, projection] of projections[player]) {
+      const parHole = parHoles[currentParIndex + projection.hand];
+      if (parHole) {
+        addPaceLine(svg, track, parHole, hole, player, lineSide(lineIndex));
+        lineIndex += 1;
+      }
+    }
+  }
+}
+
+function lineSide(index: number): "outside" | "inside" {
+  return index % 2 === 0 ? "outside" : "inside";
+}
+
+function addPaceLine(
+  svg: SVGSVGElement,
+  track: HTMLElement,
+  fromPosition: number | string | undefined,
+  toPosition: number | string | undefined,
+  player: "human" | "ai",
+  side: "outside" | "inside",
+): void {
+  if (fromPosition === undefined || toPosition === undefined) return;
+  const start = holeLinePoint(track, fromPosition, side);
+  const end = holeLinePoint(track, toPosition, side);
+  if (!start || !end) return;
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  if (start.row === end.row) {
+    path.setAttribute("d", `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} H ${end.x.toFixed(2)}`);
+  } else {
+    const turnX = uTurnLineX(track);
+    path.setAttribute(
+      "d",
+      `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} H ${turnX.toFixed(2)} V ${end.y.toFixed(2)} H ${end.x.toFixed(2)}`,
+    );
+  }
+  path.classList.add("pace-line", `pace-${player}`);
+  svg.append(path);
+}
+
+function holeLinePoint(
+  track: HTMLElement,
+  position: number | string,
+  side: "outside" | "inside",
+): { x: number; y: number; row: 1 | 2 } | null {
+  const wrap = track.querySelector<HTMLElement>(`.hole-wrap[data-position="${position}"]`);
+  if (!wrap) return null;
+  const trackRect = track.getBoundingClientRect();
+  const wrapRect = wrap.getBoundingClientRect();
+  const row = wrap.dataset.row === "2" ? 2 : 1;
+  const centerY = wrapRect.top - trackRect.top + 2;
+  const tangentOffset = 5;
+  const outside = row === 1 ? centerY - tangentOffset : centerY + tangentOffset;
+  const inside = row === 1 ? centerY + tangentOffset : centerY - tangentOffset;
+  const y = side === "outside" ? outside : inside;
+  return {
+    x: wrapRect.left - trackRect.left + wrapRect.width / 2,
+    y,
+    row,
+  };
+}
+
+function uTurnLineX(track: HTMLElement): number {
+  const wrap60 = track.querySelector<HTMLElement>('.hole-wrap[data-position="60"]');
+  if (!wrap60) return track.clientWidth;
+  const trackRect = track.getBoundingClientRect();
+  const wrapRect = wrap60.getBoundingClientRect();
+  return wrapRect.left - trackRect.left + wrapRect.width / 2 + 5;
+}
+
+function completedHandCount(phase: GameState["phase"], handNumber: number): number {
+  if (["pegging_complete", "score_pone", "score_dealer", "score_crib"].includes(phase)) {
+    return handNumber;
+  }
+  return Math.max(0, handNumber - 1);
+}
+
+function parHolesFor(player: "human" | "ai", firstDealerPlayer: "human" | "ai"): number[] {
+  return player === firstDealerPlayer
+    ? [7, ...SHARED_PAR_HOLES, 121]
+    : [...SHARED_PAR_HOLES, 111, 121];
+}
+
+function projectedCourse(
+  scores: GameState["scores"],
+  firstDealerPlayer: "human" | "ai",
+  completedHands: number,
+): Record<"human" | "ai", Map<string, { hand: number; score: number }>> {
+  const result = {
+    human: new Map<string, { hand: number; score: number }>(),
+    ai: new Map<string, { hand: number; score: number }>(),
+  };
+  if (completedHands <= 0) return result;
+  const projections = {
+    human: projectedPlayerCourse("human", scores.human, firstDealerPlayer, completedHands),
+    ai: projectedPlayerCourse("ai", scores.ai, firstDealerPlayer, completedHands),
+  };
+  const winningHand = Math.min(
+    ...Object.values(projections)
+      .flat()
+      .filter((projection) => projection.score >= 121)
+      .map((projection) => projection.hand),
+    Number.POSITIVE_INFINITY,
+  );
+  for (const player of ["human", "ai"] as const) {
+    for (const projection of projections[player]) {
+      if (projection.hand > winningHand) continue;
+      result[player].set(String(projection.position), { hand: projection.hand, score: projection.score });
+    }
+  }
+  return result;
+}
+
+function projectedPlayerCourse(
+  player: "human" | "ai",
+  score: number,
+  firstDealerPlayer: "human" | "ai",
+  completedHands: number,
+): Array<{ hand: number; position: number; score: number }> {
+  const result: Array<{ hand: number; position: number; score: number }> = [];
+  const parHoles = parHolesFor(player, firstDealerPlayer);
+  const currentParIndex = completedHands - 1;
+  const currentPar = parHoles[currentParIndex];
+  if (!currentPar) return result;
+  const offset = score - currentPar;
+  for (let index = currentParIndex + 1; index < parHoles.length; index += 1) {
+    const projectedScore = Math.min(121, Math.max(1, parHoles[index] + offset));
+    result.push({
+      hand: index - currentParIndex,
+      position: Math.min(121, Math.max(1, Math.round(projectedScore))),
+      score: projectedScore,
+    });
+  }
+  return result;
 }
 
 async function api(path: string, body: Record<string, unknown> | null = null): Promise<GameState> {
@@ -133,31 +339,40 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
     if (path === "/api/state") return localGame.state();
     if (path === "/api/new") {
       localGame = new CribbageGame((body?.opponent as Opponent) || "expert");
+      saveGame();
       return localGame.state();
     }
     if (path === "/api/discard") {
       localGame.discard((body?.ids as number[]) || []);
+      saveGame();
       return localGame.state();
     }
     if (path === "/api/finish-discard") {
       localGame.finishDiscard();
+      saveGame();
       return localGame.state();
     }
     if (path === "/api/play") {
       localGame.play(body?.id as number);
+      saveGame();
       return localGame.state();
     }
     if (path === "/api/go") {
       localGame.go();
+      saveGame();
       return localGame.state();
     }
     if (path === "/api/continue-scoring") {
       localGame.continueScoring();
+      saveGame();
       return localGame.state();
     }
     throw new Error("Unknown local action.");
   } catch (error) {
-    if (error instanceof WinGame) return localGame.state();
+    if (error instanceof WinGame) {
+      saveGame();
+      return localGame.state();
+    }
     render(localGame.state());
     throw error;
   }
@@ -168,6 +383,7 @@ function cardElement(card: GameState["humanHand"][number], options: { clickable?
   button.className = `card ${card.suit}`;
   button.dataset.index = String(card.index);
   button.dataset.id = String(card.id);
+  if (card.owner) button.dataset.owner = card.owner;
   if (state.selected.has(card.id)) button.classList.add("selected");
   if (options.disabled && button instanceof HTMLButtonElement) button.disabled = true;
   if (options.clickable && button instanceof HTMLButtonElement) {
@@ -175,9 +391,12 @@ function cardElement(card: GameState["humanHand"][number], options: { clickable?
     button.addEventListener("click", () => onCardClick(card));
   }
   button.innerHTML = `
+    <span class="corner">
+      <span>${card.rank}</span>
+      <span>${card.symbol}</span>
+    </span>
     <span class="rank">${card.rank}</span>
     <span class="suit">${card.symbol}</span>
-    <span class="corner">${card.rank}${card.symbol}</span>
   `;
   return button;
 }
@@ -195,16 +414,18 @@ function onCardClick(card: GameState["humanHand"][number]): void {
   if (game.phase === "discard") {
     if (state.selected.has(card.id)) state.selected.delete(card.id);
     else if (state.selected.size < 2) state.selected.add(card.id);
+    state.resultOverride = [];
     render(game);
     return;
   }
-  if (game.phase === "pegging" && game.turn === "You") {
+  if (game.phase === "pegging" && game.turn === "User") {
     if (!game.legalCardIds.includes(card.id)) return;
     if (state.selected.has(card.id)) state.selected.delete(card.id);
     else {
       state.selected.clear();
       state.selected.add(card.id);
     }
+    state.resultOverride = [];
     render(game);
   }
 }
@@ -214,25 +435,29 @@ function renderCards(container: HTMLElement, cards: GameState["humanHand"], opti
   for (const card of cards) container.append(cardElement(card, options));
 }
 
-function renderPlayedCards(activeCards: GameState["plays"], completedGroups: GameState["completedPlays"] = []): void {
+function renderPlayedCards(
+  activeCards: GameState["plays"],
+  completedGroups: GameState["completedPlays"] = [],
+): void {
   els.plays.innerHTML = "";
-  for (const group of completedGroups) {
+  const active = document.createElement("div");
+  active.className = "cards played-active pegging-row";
+  for (const card of activeCards) active.append(cardElement(card));
+  els.plays.append(active);
+  for (const group of [...completedGroups].reverse()) {
     const archived = document.createElement("div");
-    archived.className = "cards small played-archive";
+    archived.className = "cards played-archive pegging-row";
     for (const card of group) archived.append(cardElement(card));
     els.plays.append(archived);
   }
-
-  const active = document.createElement("div");
-  active.className = "cards played-active";
-  for (const card of activeCards) active.append(cardElement(card));
-  els.plays.append(active);
 }
 
 function renderCutCard(card: GameState["turnCard"]): void {
   els.turnCard.innerHTML = "";
   els.turnCard.className = "cut-card";
-  els.turnCard.append(card ? cardElement(card) : cardBack());
+  els.scoreCut.hidden = !card;
+  els.turnCard.hidden = !card;
+  if (card) els.turnCard.append(cardElement(card));
 }
 
 function selectedPlayableCard(game: GameState): GameState["humanHand"][number] | undefined {
@@ -243,6 +468,7 @@ function renderScoring(scoring: GameState["scoring"]): void {
   els.scoringReview.hidden = !scoring;
   if (!scoring) {
     els.scoringCards.innerHTML = "";
+    els.scoringResult.innerHTML = "";
     return;
   }
   els.scoringTitle.textContent = scoring.title;
@@ -251,10 +477,37 @@ function renderScoring(scoring: GameState["scoring"]): void {
   renderCards(els.scoringCards, scoring.cards);
 }
 
+function renderResult(game: GameState): void {
+  const lines = (state.resultOverride ?? (game.result.length ? game.result : [game.message])).filter(
+    (line) => line !== "User turn.",
+  );
+  const target = game.scoring ? els.scoringResult : els.result;
+  const other = game.scoring ? els.result : els.scoringResult;
+  other.innerHTML = "";
+  target.innerHTML = "";
+  for (const line of [...lines].reverse().filter(Boolean)) {
+    const item = document.createElement("div");
+    item.textContent = line;
+    target.append(item);
+  }
+}
+
+function playAreaTitle(game: GameState): string {
+  if (game.phase === "discard") {
+    return game.cribOwner === "User"
+      ? "Select two cards to discard to your crib"
+      : "Select two cards to discard to AI's crib";
+  }
+  if (game.phase === "ai_discarding") return "Waiting for AI to discard";
+  if (game.phase === "pegging") return "Current count";
+  if (game.phase === "pegging_complete") return "Pegging complete";
+  return "Current count";
+}
+
 function render(game: GameState | null): void {
   if (!game) return;
   state.game = game;
-  els.message.textContent = game.message;
+  els.app.dataset.phase = game.phase;
   els.humanScore.textContent = String(game.scores.human);
   els.aiScore.textContent = String(game.scores.ai);
   els.dealer.textContent = game.dealer;
@@ -262,42 +515,58 @@ function render(game: GameState | null): void {
   els.count.textContent = String(game.count);
   renderCutCard(game.turnCard);
   renderScoring(game.scoring);
-  renderBoard(game.scores, game.pegPositions, game.firstDealer);
-  renderPlayedCards(game.plays, game.completedPlays);
+  renderResult(game);
+  renderBoard(game.scores, game.pegPositions, game.firstDealer, game.phase, game.handNumber);
+  els.playAreaTitle.textContent = playAreaTitle(game);
+  els.userHandTitle.textContent = game.phase === "pegging" ? "Select card to play" : "User hand";
+  if (game.phase === "discard") {
+    renderCards(els.plays, game.humanHand, { clickable: true });
+  } else if (game.scoring) {
+    els.plays.innerHTML = "";
+  } else {
+    renderPlayedCards(game.plays, game.completedPlays);
+  }
   renderCards(els.humanHand, game.humanHand, {
-    clickable: game.phase === "discard" || (game.phase === "pegging" && game.turn === "You"),
+    clickable: game.phase !== "discard" && game.phase === "pegging" && game.turn === "User",
   });
 
   els.aiHand.innerHTML = "";
   for (let i = 0; i < game.aiHandCount; i += 1) els.aiHand.append(cardBack());
 
+  els.discard.hidden = game.phase !== "discard";
+  els.play.hidden = !(game.phase === "pegging" && game.turn === "User");
+  els.go.hidden = !(game.phase === "pegging" && game.turn === "User" && game.canGo);
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
-  els.play.disabled = !(game.phase === "pegging" && game.turn === "You" && selectedPlayableCard(game));
+  els.play.disabled = !(game.phase === "pegging" && game.turn === "User" && selectedPlayableCard(game));
   els.go.disabled = !game.canGo;
   els.continueScoring.disabled = !game.scoring;
+  els.continuePegging.hidden = game.phase !== "pegging_complete";
   if (state.pending) {
     els.discard.disabled = true;
     els.play.disabled = true;
     els.go.disabled = true;
     els.newGame.disabled = true;
     els.continueScoring.disabled = true;
+    els.continuePegging.disabled = true;
   } else {
     els.newGame.disabled = false;
+    els.continuePegging.disabled = false;
   }
 
-  els.log.innerHTML = "";
-  for (const entry of game.log) {
-    const item = document.createElement("li");
-    item.textContent = entry;
-    els.log.append(item);
-  }
 }
+
+els.menuToggle.addEventListener("click", () => {
+  const open = els.settingsPanel.hidden;
+  els.settingsPanel.hidden = !open;
+  els.menuToggle.setAttribute("aria-expanded", String(open));
+});
 
 els.discard.addEventListener("click", async () => {
   if (state.pending) return;
   state.pending = true;
   render(state.game);
   try {
+    state.resultOverride = null;
     const next = await api("/api/discard", { ids: Array.from(state.selected) });
     state.selected.clear();
     render(next);
@@ -320,6 +589,7 @@ els.play.addEventListener("click", async () => {
   state.pending = true;
   render(state.game);
   try {
+    state.resultOverride = null;
     const next = await api("/api/play", { id: card.id });
     state.selected.clear();
     render(next);
@@ -334,6 +604,7 @@ els.go.addEventListener("click", async () => {
   state.pending = true;
   render(state.game);
   try {
+    state.resultOverride = null;
     const next = await api("/api/go", {});
     render(next);
   } finally {
@@ -347,6 +618,22 @@ els.continueScoring.addEventListener("click", async () => {
   state.pending = true;
   render(state.game);
   try {
+    state.resultOverride = null;
+    const next = await api("/api/continue-scoring", {});
+    state.selected.clear();
+    render(next);
+  } finally {
+    state.pending = false;
+    render(state.game);
+  }
+});
+
+els.continuePegging.addEventListener("click", async () => {
+  if (state.pending) return;
+  state.pending = true;
+  render(state.game);
+  try {
+    state.resultOverride = null;
     const next = await api("/api/continue-scoring", {});
     state.selected.clear();
     render(next);
@@ -362,7 +649,10 @@ els.newGame.addEventListener("click", async () => {
   state.selected.clear();
   render(state.game);
   try {
+    state.resultOverride = null;
     const next = await api("/api/new", { opponent: els.opponent.value });
+    els.settingsPanel.hidden = true;
+    els.menuToggle.setAttribute("aria-expanded", "false");
     render(next);
   } finally {
     state.pending = false;
@@ -370,16 +660,24 @@ els.newGame.addEventListener("click", async () => {
   }
 });
 
+window.addEventListener("resize", () => render(state.game));
+
 async function finishDiscardInBackground(): Promise<void> {
   try {
+    state.resultOverride = null;
     const next = await api("/api/finish-discard", {});
     render(next);
   } catch (error) {
-    els.message.textContent = error instanceof Error ? error.message : "Request failed";
+    els.result.textContent = error instanceof Error ? error.message : "Request failed";
   }
 }
 
 buildBoard();
-api("/api/state").then(render).catch((error) => {
-  els.message.textContent = error instanceof Error ? error.message : "Request failed";
-});
+api("/api/state")
+  .then((game) => {
+    render(game);
+    if (game.phase === "ai_discarding") finishDiscardInBackground();
+  })
+  .catch((error) => {
+    els.result.textContent = error instanceof Error ? error.message : "Request failed";
+  });

@@ -4,6 +4,7 @@ export type Phase =
   | "discard"
   | "ai_discarding"
   | "pegging"
+  | "pegging_complete"
   | "score_pone"
   | "score_dealer"
   | "score_crib"
@@ -58,12 +59,15 @@ export interface SerializedCard {
   symbol: string;
   value: number;
   label: string;
+  owner?: string;
 }
 
 export interface GameState {
   phase: Phase;
   message: string;
   log: string[];
+  result: string[];
+  handNumber: number;
   scores: Record<PlayerKey, number>;
   pegPositions: Record<PlayerKey, [number | string, number | string]>;
   dealer: string;
@@ -91,6 +95,46 @@ export interface GameState {
 }
 
 type ScoringReview = NonNullable<GameState["scoring"]> & { rawCards: Card[] };
+
+interface PlayerSnapshot {
+  hand: number[];
+  table: number[];
+  crib: number[];
+  score: number;
+}
+
+export interface GameSnapshot {
+  version: 1;
+  opponent: Opponent;
+  deal: 0 | 1;
+  firstDeal: 0 | 1;
+  handNumber?: number;
+  human: PlayerSnapshot;
+  ai: PlayerSnapshot;
+  turnCard: number;
+  crib: number[];
+  plays: number[];
+  playOwners: PlayerKey[];
+  completedPlays: number[][];
+  completedPlayOwners: PlayerKey[][];
+  count: number;
+  turn: 0 | 1;
+  goPlayer: PlayerKey | null;
+  lastPlayer: PlayerKey | null;
+  scoringReview: {
+    stage: "pone" | "dealer" | "crib";
+    title: string;
+    owner: string;
+    rawCards: number[];
+    points: number;
+    nextLabel: string;
+  } | null;
+  phase: Phase;
+  message: string;
+  log: string[];
+  result: string[];
+  pegPositions: Record<PlayerKey, [number | string, number | string]>;
+}
 
 export function cardFromString(input: string): Card {
   const rankText = input.slice(0, -1);
@@ -215,7 +259,10 @@ export class CribbageGame {
   turnCard!: Card;
   crib: Card[] = [];
   plays: Card[] = [];
+  playOwners: PlayerKey[] = [];
   completedPlays: Card[][] = [];
+  completedPlayOwners: PlayerKey[][] = [];
+  handNumber = 1;
   count = 0;
   turn: 0 | 1 = 0;
   goPlayer: PlayerState | null = null;
@@ -224,6 +271,7 @@ export class CribbageGame {
   phase: Phase = "discard";
   message = "";
   log: string[] = [];
+  result: string[] = [];
   pegPositions: Record<PlayerKey, [number | string, number | string]> = {
     human: ["start-back", "start-front"],
     ai: ["start-back", "start-front"],
@@ -231,11 +279,100 @@ export class CribbageGame {
 
   constructor(opponent: Opponent = "expert") {
     this.opponent = opponent;
-    this.human = { key: "human", name: "You", hand: [], table: [], crib: [], score: 0 };
-    this.ai = { key: "ai", name: "DCarlin", hand: [], table: [], crib: [], score: 0 };
+    this.human = { key: "human", name: "User", hand: [], table: [], crib: [], score: 0 };
+    this.ai = { key: "ai", name: "AI", hand: [], table: [], crib: [], score: 0 };
     this.deal = Math.random() < 0.5 ? 0 : 1;
     this.firstDeal = this.deal;
     this.startHand();
+  }
+
+  static restore(snapshot: GameSnapshot): CribbageGame {
+    if (snapshot.version !== 1) throw new Error("Unsupported saved game version.");
+    const game = new CribbageGame(snapshot.opponent);
+    game.opponent = snapshot.opponent;
+    game.deal = snapshot.deal;
+    game.firstDeal = snapshot.firstDeal;
+    game.human.hand = snapshot.human.hand.map((id) => new Card(id));
+    game.human.table = snapshot.human.table.map((id) => new Card(id));
+    game.human.crib = snapshot.human.crib.map((id) => new Card(id));
+    game.human.score = snapshot.human.score;
+    game.ai.hand = snapshot.ai.hand.map((id) => new Card(id));
+    game.ai.table = snapshot.ai.table.map((id) => new Card(id));
+    game.ai.crib = snapshot.ai.crib.map((id) => new Card(id));
+    game.ai.score = snapshot.ai.score;
+    game.handNumber = Math.max(snapshot.handNumber ?? 1, game.inferHandNumber(snapshot.phase));
+    game.dealer = [game.human, game.ai][game.deal];
+    game.pone = [game.human, game.ai][game.deal ^ 1];
+    game.turnCard = new Card(snapshot.turnCard);
+    game.crib = snapshot.crib.map((id) => new Card(id));
+    game.plays = snapshot.plays.map((id) => new Card(id));
+    game.playOwners = [...snapshot.playOwners];
+    game.completedPlays = snapshot.completedPlays.map((group) => group.map((id) => new Card(id)));
+    game.completedPlayOwners = snapshot.completedPlayOwners.map((group) => [...group]);
+    game.count = snapshot.count;
+    game.turn = snapshot.turn;
+    game.goPlayer = snapshot.goPlayer ? game.playerByKey(snapshot.goPlayer) : null;
+    game.lastPlayer = snapshot.lastPlayer ? game.playerByKey(snapshot.lastPlayer) : null;
+    game.scoringReview = snapshot.scoringReview
+      ? {
+          stage: snapshot.scoringReview.stage,
+          title: snapshot.scoringReview.title,
+          owner: snapshot.scoringReview.owner,
+          rawCards: snapshot.scoringReview.rawCards.map((id) => new Card(id)),
+          cards: snapshot.scoringReview.rawCards.map((id) => game.serializeCard(new Card(id))),
+          points: snapshot.scoringReview.points,
+          nextLabel: snapshot.scoringReview.nextLabel,
+        }
+      : null;
+    game.phase = snapshot.phase;
+    game.message = snapshot.message;
+    game.log = [...snapshot.log];
+    game.result = [...snapshot.result];
+    game.pegPositions = {
+      human: [...snapshot.pegPositions.human],
+      ai: [...snapshot.pegPositions.ai],
+    };
+    return game;
+  }
+
+  snapshot(): GameSnapshot {
+    return {
+      version: 1,
+      opponent: this.opponent,
+      deal: this.deal,
+      firstDeal: this.firstDeal,
+      handNumber: this.handNumber,
+      human: this.playerSnapshot(this.human),
+      ai: this.playerSnapshot(this.ai),
+      turnCard: this.turnCard.id,
+      crib: this.crib.map((card) => card.id),
+      plays: this.plays.map((card) => card.id),
+      playOwners: [...this.playOwners],
+      completedPlays: this.completedPlays.map((group) => group.map((card) => card.id)),
+      completedPlayOwners: this.completedPlayOwners.map((group) => [...group]),
+      count: this.count,
+      turn: this.turn,
+      goPlayer: this.goPlayer?.key ?? null,
+      lastPlayer: this.lastPlayer?.key ?? null,
+      scoringReview: this.scoringReview
+        ? {
+            stage: this.scoringReview.stage,
+            title: this.scoringReview.title,
+            owner: this.scoringReview.owner,
+            rawCards: this.scoringReview.rawCards.map((card) => card.id),
+            points: this.scoringReview.points,
+            nextLabel: this.scoringReview.nextLabel,
+          }
+        : null,
+      phase: this.phase,
+      message: this.message,
+      log: [...this.log],
+      result: [...this.result],
+      pegPositions: {
+        human: [...this.pegPositions.human],
+        ai: [...this.pegPositions.ai],
+      },
+    };
   }
 
   startHand(): void {
@@ -251,7 +388,9 @@ export class CribbageGame {
     this.turnCard = deck.shift()!;
     this.crib = [];
     this.plays = [];
+    this.playOwners = [];
     this.completedPlays = [];
+    this.completedPlayOwners = [];
     this.count = 0;
     this.turn = 0;
     this.goPlayer = null;
@@ -259,7 +398,7 @@ export class CribbageGame {
     this.scoringReview = null;
     this.phase = "discard";
     this.logEvent(
-      `New hand. Dealer and crib: ${this.name(this.dealer)}. ${this.name(this.pone)} pegs first.`,
+      `Dealer: ${this.name(this.dealer)}. ${this.name(this.pone)} pegs first.`,
     );
     if (this.dealer === this.ai) this.aiDiscard();
   }
@@ -272,6 +411,8 @@ export class CribbageGame {
       phase: this.phase,
       message: this.message,
       log: this.log,
+      result: this.result,
+      handNumber: this.handNumber,
       scores: { human: this.human.score, ai: this.ai.score },
       pegPositions: this.pegPositions,
       dealer: this.name(this.dealer),
@@ -282,9 +423,11 @@ export class CribbageGame {
       turnCard: this.phase === "discard" || this.phase === "ai_discarding"
         ? null
         : this.serializeCard(this.turnCard),
-      plays: this.plays.map((card) => this.serializeCard(card)),
-      completedPlays: this.completedPlays.map((group) =>
-        group.map((card) => this.serializeCard(card)),
+      plays: this.plays.map((card, index) => this.serializeCard(card, null, this.playOwners[index])),
+      completedPlays: this.completedPlays.map((group, groupIndex) =>
+        group.map((card, cardIndex) =>
+          this.serializeCard(card, null, this.completedPlayOwners[groupIndex]?.[cardIndex]),
+        ),
       ),
       humanHand: humanHand.map((card, index) => this.serializeCard(card, index)),
       aiHandCount: this.ai.hand.length,
@@ -306,25 +449,29 @@ export class CribbageGame {
   }
 
   discard(ids: number[]): void {
+    this.beginInteraction();
     if (this.phase !== "discard") throw new Error("It is not discard time.");
     const discards = this.selectedCards(sortedCards(this.human.hand), ids, 2);
     removeCards(this.human.hand, discards);
     this.crib.push(...discards);
+    this.logEvent("User discarded two cards to the crib.");
     if (this.dealer === this.human) {
       this.phase = "ai_discarding";
-      this.logEvent("Waiting for DCarlin to discard.");
+      this.logEvent("Waiting for AI to discard.");
       return;
     }
     this.beginPegging();
   }
 
   finishDiscard(): void {
-    if (this.phase !== "ai_discarding") throw new Error("DCarlin is not waiting to discard.");
+    this.beginInteraction();
+    if (this.phase !== "ai_discarding") throw new Error("AI is not waiting to discard.");
     this.aiDiscard();
     this.beginPegging();
   }
 
   play(cardId: number): void {
+    this.beginInteraction();
     if (this.phase !== "pegging" || this.currentPlayer() !== this.human) {
       throw new Error("It is not your turn to play.");
     }
@@ -341,24 +488,52 @@ export class CribbageGame {
   }
 
   go(): void {
+    this.beginInteraction();
     if (this.phase !== "pegging" || this.currentPlayer() !== this.human) {
       throw new Error("It is not your turn.");
     }
-    if (this.legalCards(this.human).length > 0) throw new Error("You have a legal card to play.");
+    if (this.legalCards(this.human).length > 0) throw new Error("User has a legal card to play.");
     this.sayGo(this.human);
     this.advanceUntilHuman();
   }
 
   continueScoring(): void {
-    if (this.phase === "score_pone") this.showScoreStage("dealer");
+    this.beginInteraction();
+    if (this.phase === "pegging_complete") this.startScoring();
+    else if (this.phase === "score_pone") this.showScoreStage("dealer");
     else if (this.phase === "score_dealer") this.showScoreStage("crib");
     else if (this.phase === "score_crib") {
       this.scoringReview = null;
       this.deal = (this.deal ^ 1) as 0 | 1;
+      this.handNumber += 1;
       this.startHand();
     } else {
       throw new Error("There is no hand score to continue.");
     }
+  }
+
+  private playerSnapshot(player: PlayerState): PlayerSnapshot {
+    return {
+      hand: player.hand.map((card) => card.id),
+      table: player.table.map((card) => card.id),
+      crib: player.crib.map((card) => card.id),
+      score: player.score,
+    };
+  }
+
+  private playerByKey(key: PlayerKey): PlayerState {
+    return key === "human" ? this.human : this.ai;
+  }
+
+  private inferHandNumber(phase: Phase): number {
+    if (
+      this.human.score > 0 &&
+      this.ai.score > 0 &&
+      ["discard", "ai_discarding", "pegging"].includes(phase)
+    ) {
+      return 2;
+    }
+    return 1;
   }
 
   private selectedCards(hand: Card[], ids: number[], expectedCount: number): Card[] {
@@ -378,7 +553,7 @@ export class CribbageGame {
     const discards = this.chooseDiscards(this.ai, this.dealer === this.ai);
     removeCards(this.ai.hand, discards);
     this.crib.push(...discards);
-    this.logEvent("DCarlin discarded two cards to the crib.");
+    this.logEvent("AI discarded two cards to the crib.");
   }
 
   private chooseDiscards(player: PlayerState, myCrib: boolean): Card[] {
@@ -421,7 +596,7 @@ export class CribbageGame {
     while (this.phase === "pegging") {
       if (this.dealer.hand.length + this.pone.hand.length === 0) {
         this.finishPegging();
-        this.startScoring();
+        this.phase = "pegging_complete";
         return;
       }
       const player = this.currentPlayer();
@@ -430,7 +605,7 @@ export class CribbageGame {
           this.sayGo(player);
           continue;
         }
-        this.logEvent("Your turn.");
+        this.logEvent("User turn.");
         return;
       }
       if (this.legalCards(player).length === 0) {
@@ -447,6 +622,7 @@ export class CribbageGame {
       this.logEvent(`${this.name(this.lastPlayer)} pegged 1 for last card.`);
       this.archivePlays();
       this.plays = [];
+      this.playOwners = [];
       this.count = 0;
       this.goPlayer = null;
       this.lastPlayer = null;
@@ -467,6 +643,7 @@ export class CribbageGame {
     player.table.push(card);
     removeCards(player.hand, [card]);
     this.plays.push(card);
+    this.playOwners.push(player.key);
     this.count += card.value;
     this.lastPlayer = player;
     const points = scoreCount(this.plays);
@@ -478,6 +655,7 @@ export class CribbageGame {
     if (this.count === 31) {
       this.archivePlays();
       this.plays = [];
+      this.playOwners = [];
       this.count = 0;
       this.goPlayer = null;
       this.lastPlayer = null;
@@ -496,6 +674,7 @@ export class CribbageGame {
       }
       this.archivePlays();
       this.plays = [];
+      this.playOwners = [];
       this.count = 0;
       this.goPlayer = null;
       this.lastPlayer = null;
@@ -581,24 +760,32 @@ export class CribbageGame {
   }
 
   private archivePlays(): void {
-    if (this.plays.length) this.completedPlays.push([...this.plays]);
+    if (this.plays.length) {
+      this.completedPlays.push([...this.plays]);
+      this.completedPlayOwners.push([...this.playOwners]);
+    }
   }
 
   private logEvent(message: string): void {
     this.message = message;
     this.log.unshift(message);
     this.log = this.log.slice(0, 12);
+    this.result.push(message);
+  }
+
+  private beginInteraction(): void {
+    this.result = [];
   }
 
   private name(player: PlayerState): string {
-    return player === this.human ? "You" : "DCarlin";
+    return player === this.human ? "User" : "AI";
   }
 
   private cardLabel(card: Card): string {
     return card.ascii;
   }
 
-  private serializeCard(card: Card, index: number | null = null): SerializedCard {
+  private serializeCard(card: Card, index: number | null = null, owner?: PlayerKey): SerializedCard {
     return {
       index,
       id: card.id,
@@ -607,6 +794,7 @@ export class CribbageGame {
       symbol: SUIT_SYMBOLS[card.suit],
       value: card.value,
       label: this.cardLabel(card),
+      owner,
     };
   }
 }
