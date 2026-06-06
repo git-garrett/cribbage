@@ -1,6 +1,7 @@
 const state = {
   game: null,
   selected: new Set(),
+  pending: false,
 };
 
 const els = {
@@ -173,6 +174,7 @@ function cardBack() {
 }
 
 async function onCardClick(card) {
+  if (state.pending) return;
   const game = state.game;
   if (game.phase === "discard") {
     if (state.selected.has(card.index)) {
@@ -184,9 +186,16 @@ async function onCardClick(card) {
     return;
   }
   if (game.phase === "pegging" && game.turn === "You") {
-    const next = await api("/api/play", { index: card.index });
-    state.selected.clear();
-    render(next);
+    state.pending = true;
+    render(game);
+    try {
+      const next = await api("/api/play", { index: card.index });
+      state.selected.clear();
+      render(next);
+    } finally {
+      state.pending = false;
+      render(state.game);
+    }
   }
 }
 
@@ -244,6 +253,13 @@ function render(game) {
 
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
   els.go.disabled = !game.canGo;
+  if (state.pending) {
+    els.discard.disabled = true;
+    els.go.disabled = true;
+    els.newGame.disabled = true;
+  } else {
+    els.newGame.disabled = false;
+  }
   els.log.innerHTML = "";
   for (const entry of game.log) {
     const item = document.createElement("li");
@@ -253,20 +269,44 @@ function render(game) {
 }
 
 els.discard.addEventListener("click", async () => {
-  const next = await api("/api/discard", { indexes: Array.from(state.selected) });
-  state.selected.clear();
-  render(next);
+  if (state.pending) return;
+  state.pending = true;
+  render(state.game);
+  try {
+    const next = await api("/api/discard", { indexes: Array.from(state.selected) });
+    state.selected.clear();
+    render(next);
+  } finally {
+    state.pending = false;
+    render(state.game);
+  }
 });
 
 els.go.addEventListener("click", async () => {
-  const next = await api("/api/go", {});
-  render(next);
+  if (state.pending) return;
+  state.pending = true;
+  render(state.game);
+  try {
+    const next = await api("/api/go", {});
+    render(next);
+  } finally {
+    state.pending = false;
+    render(state.game);
+  }
 });
 
 els.newGame.addEventListener("click", async () => {
+  if (state.pending) return;
+  state.pending = true;
   state.selected.clear();
-  const next = await api("/api/new", { opponent: els.opponent.value });
-  render(next);
+  render(state.game);
+  try {
+    const next = await api("/api/new", { opponent: els.opponent.value });
+    render(next);
+  } finally {
+    state.pending = false;
+    render(state.game);
+  }
 });
 
 buildBoard();

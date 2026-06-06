@@ -1,4 +1,6 @@
 import json
+import socket
+from threading import Lock
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from random import choice
@@ -60,9 +62,11 @@ class WebCribbageGame:
         self.turn_card = next(deck.draw(1))
         self.crib = []
         self.plays = []
+        self.completed_plays = []
         self.count = 0
         self.turn = 0
         self.go_has_been_said = False
+        self.go_player = None
         self.last_player = None
         self.phase = "discard"
         self.log_event(
@@ -298,6 +302,7 @@ class WebCribbageGame:
 
 
 GAME = None
+GAME_LOCK = Lock()
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -316,25 +321,26 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         try:
             payload = self.read_json()
-            if self.path == "/api/new":
-                new_game(payload.get("opponent", "expert"))
-                self.send_json(current_state())
-            elif self.path == "/api/discard":
-                GAME.discard(payload.get("indexes", []))
-                self.send_json(current_state())
-            elif self.path == "/api/play":
-                GAME.play(payload.get("index"))
-                self.send_json(current_state())
-            elif self.path == "/api/go":
-                if GAME.phase != "pegging" or GAME.current_player() is not GAME.human:
-                    raise ValueError("It is not your turn.")
-                if GAME.legal_cards(GAME.human):
-                    raise ValueError("You have a legal card to play.")
-                GAME.say_go(GAME.human)
-                GAME.advance_until_human()
-                self.send_json(current_state())
-            else:
-                self.send_error(404)
+            with GAME_LOCK:
+                if self.path == "/api/new":
+                    new_game(payload.get("opponent", "expert"))
+                    self.send_json(current_state())
+                elif self.path == "/api/discard":
+                    GAME.discard(payload.get("indexes", []))
+                    self.send_json(current_state())
+                elif self.path == "/api/play":
+                    GAME.play(payload.get("index"))
+                    self.send_json(current_state())
+                elif self.path == "/api/go":
+                    if GAME.phase != "pegging" or GAME.current_player() is not GAME.human:
+                        raise ValueError("It is not your turn.")
+                    if GAME.legal_cards(GAME.human):
+                        raise ValueError("You have a legal card to play.")
+                    GAME.say_go(GAME.human)
+                    GAME.advance_until_human()
+                    self.send_json(current_state())
+                else:
+                    self.send_error(404)
         except WinGame as error:
             GAME.phase = "game_over"
             GAME.log_event(str(error))
@@ -369,8 +375,24 @@ def current_state():
     return GAME.state()
 
 
+def local_urls(port):
+    urls = [f"http://127.0.0.1:{port}"]
+    try:
+        hostname = socket.gethostname()
+        for _, _, _, _, sockaddr in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            address = sockaddr[0]
+            if not address.startswith("127.") and f"http://{address}:{port}" not in urls:
+                urls.append(f"http://{address}:{port}")
+    except socket.gaierror:
+        pass
+    return urls
+
+
 if __name__ == "__main__":
+    port = 8765
     new_game("expert")
-    server = ThreadingHTTPServer(("127.0.0.1", 8765), Handler)
-    print("Cribbage web UI: http://127.0.0.1:8765")
+    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    print("Cribbage web UI:")
+    for url in local_urls(port):
+        print(f"  {url}")
     server.serve_forever()
