@@ -72,6 +72,7 @@ def test_webapp_discards_selected_card_ids_not_display_positions():
     game = WebCribbageGame(opponent="random")
     game.phase = "discard"
     game.dealer = game.human
+    game.crib = []
     game.human.hand = cards_from_str("Ks 2d 9h Ac 5s 3c")
 
     game.discard(ids=[card.index for card in cards_from_str("2d Ac")])

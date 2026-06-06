@@ -1,0 +1,21 @@
+{
+  "scripts": {
+    "build": "vite build",
+    "cap:copy": "npm run build && cap copy",
+    "cap:sync:ios": "npm run build && cap sync ios",
+    "dev": "vite --host 0.0.0.0",
+    "ios": "npm run cap:sync:ios && cap open ios",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@capacitor/core": "^7.4.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.4",
+    "@capacitor/ios": "^7.4.4",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.7",
+    "vitest": "^4.0.15"
+  }
+}
