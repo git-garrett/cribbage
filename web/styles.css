@@ -283,6 +283,31 @@ button:disabled {
   min-height: 104px;
 }
 
+.scoring-review {
+  display: grid;
+  gap: 10px;
+}
+
+.scoring-review[hidden] {
+  display: none;
+}
+
+.scoring-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.scoring-summary strong {
+  color: #fff;
+  font-size: 20px;
+}
+
+.scoring-summary button {
+  width: auto;
+}
+
 .hands {
   display: grid;
   gap: 20px;
@@ -616,12 +641,25 @@ button.card {
     bottom: 0;
     z-index: 5;
     display: grid;
-    grid-template-columns: 1fr 88px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
     margin: 12px -12px -12px;
     padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
     background: rgba(255, 255, 255, 0.96);
     border-top: 1px solid var(--line);
+  }
+
+  .actions button {
+    padding: 0 8px;
+  }
+
+  .scoring-summary {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .scoring-summary button {
+    width: 100%;
   }
 
   .log ol {

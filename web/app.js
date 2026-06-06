@@ -18,9 +18,15 @@ const els = {
   aiHand: document.querySelector("#ai-hand"),
   log: document.querySelector("#log"),
   discard: document.querySelector("#discard"),
+  play: document.querySelector("#play"),
   go: document.querySelector("#go"),
   newGame: document.querySelector("#new-game"),
   opponent: document.querySelector("#opponent"),
+  scoringReview: document.querySelector("#scoring-review"),
+  scoringTitle: document.querySelector("#scoring-title"),
+  scoringCards: document.querySelector("#scoring-cards"),
+  scoringPoints: document.querySelector("#scoring-points"),
+  continueScoring: document.querySelector("#continue-scoring"),
 };
 
 const RINGED_HOLES = new Set([17, 33, 43, 59, 69, 85, 95]);
@@ -186,16 +192,14 @@ async function onCardClick(card) {
     return;
   }
   if (game.phase === "pegging" && game.turn === "You") {
-    state.pending = true;
-    render(game);
-    try {
-      const next = await api("/api/play", { index: card.index });
+    if (!game.legalCardIds.includes(card.id)) return;
+    if (state.selected.has(card.index)) {
+      state.selected.delete(card.index);
+    } else {
       state.selected.clear();
-      render(next);
-    } finally {
-      state.pending = false;
-      render(state.game);
+      state.selected.add(card.index);
     }
+    render(game);
   }
 }
 
@@ -231,6 +235,24 @@ function renderCutCard(card) {
   els.turnCard.append(card ? cardElement(card) : cardBack());
 }
 
+function selectedPlayableCard(game) {
+  return game.humanHand.find(
+    (card) => state.selected.has(card.index) && game.legalCardIds.includes(card.id),
+  );
+}
+
+function renderScoring(scoring) {
+  els.scoringReview.hidden = !scoring;
+  if (!scoring) {
+    els.scoringCards.innerHTML = "";
+    return;
+  }
+  els.scoringTitle.textContent = scoring.title;
+  els.scoringPoints.textContent = `${scoring.points} point${scoring.points === 1 ? "" : "s"}`;
+  els.continueScoring.textContent = scoring.nextLabel;
+  renderCards(els.scoringCards, scoring.cards);
+}
+
 function render(game) {
   if (!game) return;
   state.game = game;
@@ -241,6 +263,7 @@ function render(game) {
   els.turn.textContent = game.turn || "-";
   els.count.textContent = game.count;
   renderCutCard(game.turnCard);
+  renderScoring(game.scoring);
 
   renderBoard(game.scores, game.pegPositions, game.dealer);
   renderPlayedCards(game.plays, game.completedPlays);
@@ -252,11 +275,15 @@ function render(game) {
   for (let i = 0; i < game.aiHandCount; i += 1) els.aiHand.append(cardBack());
 
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
+  els.play.disabled = !(game.phase === "pegging" && game.turn === "You" && selectedPlayableCard(game));
   els.go.disabled = !game.canGo;
+  els.continueScoring.disabled = !game.scoring;
   if (state.pending) {
     els.discard.disabled = true;
+    els.play.disabled = true;
     els.go.disabled = true;
     els.newGame.disabled = true;
+    els.continueScoring.disabled = true;
   } else {
     els.newGame.disabled = false;
   }
@@ -274,6 +301,28 @@ els.discard.addEventListener("click", async () => {
   render(state.game);
   try {
     const next = await api("/api/discard", { indexes: Array.from(state.selected) });
+    state.selected.clear();
+    render(next);
+    if (next.phase === "ai_discarding") {
+      state.pending = false;
+      render(state.game);
+      finishDiscardInBackground();
+      return;
+    }
+  } finally {
+    state.pending = false;
+    render(state.game);
+  }
+});
+
+els.play.addEventListener("click", async () => {
+  if (state.pending) return;
+  const card = selectedPlayableCard(state.game);
+  if (!card) return;
+  state.pending = true;
+  render(state.game);
+  try {
+    const next = await api("/api/play", { index: card.index });
     state.selected.clear();
     render(next);
   } finally {
@@ -295,6 +344,20 @@ els.go.addEventListener("click", async () => {
   }
 });
 
+els.continueScoring.addEventListener("click", async () => {
+  if (state.pending) return;
+  state.pending = true;
+  render(state.game);
+  try {
+    const next = await api("/api/continue-scoring", {});
+    state.selected.clear();
+    render(next);
+  } finally {
+    state.pending = false;
+    render(state.game);
+  }
+});
+
 els.newGame.addEventListener("click", async () => {
   if (state.pending) return;
   state.pending = true;
@@ -308,6 +371,15 @@ els.newGame.addEventListener("click", async () => {
     render(state.game);
   }
 });
+
+async function finishDiscardInBackground() {
+  try {
+    const next = await api("/api/finish-discard", {});
+    render(next);
+  } catch (error) {
+    els.message.textContent = error.message;
+  }
+}
 
 buildBoard();
 api("/api/state").then(render).catch((error) => {

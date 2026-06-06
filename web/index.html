@@ -45,6 +45,14 @@
           <h2>Current count</h2>
           <div id="plays" class="cards"></div>
         </div>
+        <div id="scoring-review" class="scoring-review" hidden>
+          <h2 id="scoring-title">Hand score</h2>
+          <div id="scoring-cards" class="cards"></div>
+          <div class="scoring-summary">
+            <strong id="scoring-points">0</strong>
+            <button id="continue-scoring" type="button">Continue</button>
+          </div>
+        </div>
       </section>
 
       <section class="hands">
@@ -57,6 +65,7 @@
           <div id="human-hand" class="cards"></div>
           <div class="actions">
             <button id="discard" type="button" disabled>Discard selected</button>
+            <button id="play" type="button" disabled>Play selected</button>
             <button id="go" type="button" disabled>Go</button>
           </div>
         </div>

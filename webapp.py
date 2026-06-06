@@ -35,6 +35,7 @@ class WebCribbageGame:
         self.go_has_been_said = False
         self.go_player = None
         self.last_player = None
+        self.scoring_review = None
         self.phase = "new"
         self.message = ""
         self.log = []
@@ -68,6 +69,7 @@ class WebCribbageGame:
         self.go_has_been_said = False
         self.go_player = None
         self.last_player = None
+        self.scoring_review = None
         self.phase = "discard"
         self.log_event(
             f"New hand. Dealer and crib: {self.name(self.dealer)}. "
@@ -120,9 +122,20 @@ class WebCribbageGame:
         self.remove_cards(self.human.hand, discards)
         self.crib.extend(discards)
         if self.dealer is self.human:
-            self.ai_discard()
-        self.dealer.crib = list(self.crib)
+            self.phase = "ai_discarding"
+            self.log_event("Waiting for DCarlin to discard.")
+            return
+        self.begin_pegging()
+
+    def finish_discard(self):
+        if self.phase != "ai_discarding":
+            raise ValueError("DCarlin is not waiting to discard.")
+        self.ai_discard()
+        self.begin_pegging()
+
+    def begin_pegging(self):
         self.phase = "pegging"
+        self.dealer.crib = list(self.crib)
         self.log_event(f"Turn card is {self.card_label(self.turn_card)}.")
         if self.turn_card.rank_str == "J":
             self.peg(self.dealer, 2)
@@ -157,7 +170,7 @@ class WebCribbageGame:
     def advance_until_human(self):
         while self.phase == "pegging":
             if len(self.dealer.hand) + len(self.pone.hand) == 0:
-                self.score_hands()
+                self.start_scoring()
                 return
             player = self.current_player()
             if player is self.human:
@@ -225,18 +238,56 @@ class WebCribbageGame:
         elif self.go_player is None:
             self.other_turn()
 
-    def score_hands(self):
-        pone_points = score_hand(self.pone.table, self.turn_card)
-        self.peg(self.pone, pone_points)
-        dealer_points = score_hand(self.dealer.table, self.turn_card)
-        self.peg(self.dealer, dealer_points)
-        crib_points = score_hand(self.dealer.crib, self.turn_card)
-        self.peg(self.dealer, crib_points)
-        self.log_event(
-            f"Hand scored: pone {pone_points}, dealer {dealer_points}, crib {crib_points}."
-        )
-        self.deal = self.deal ^ 1
-        self.start_hand()
+    def start_scoring(self):
+        self.show_score_stage("pone")
+
+    def continue_scoring(self):
+        if self.phase == "score_pone":
+            self.show_score_stage("dealer")
+        elif self.phase == "score_dealer":
+            self.show_score_stage("crib")
+        elif self.phase == "score_crib":
+            self.scoring_review = None
+            self.deal = self.deal ^ 1
+            self.start_hand()
+        else:
+            raise ValueError("There is no hand score to continue.")
+
+    def show_score_stage(self, stage):
+        if stage == "pone":
+            player = self.pone
+            cards = self.pone.table
+            points = score_hand(cards, self.turn_card)
+            title = f"{self.name(player)} hand"
+            next_label = "Show dealer hand"
+            self.phase = "score_pone"
+        elif stage == "dealer":
+            player = self.dealer
+            cards = self.dealer.table
+            points = score_hand(cards, self.turn_card)
+            title = f"{self.name(player)} hand"
+            next_label = "Show crib"
+            self.phase = "score_dealer"
+        elif stage == "crib":
+            player = self.dealer
+            cards = self.dealer.crib
+            points = score_hand(cards, self.turn_card)
+            title = f"{self.name(player)} crib"
+            next_label = "Next hand"
+            self.phase = "score_crib"
+        else:
+            raise ValueError("Unknown scoring stage.")
+
+        self.scoring_review = {
+            "stage": stage,
+            "title": title,
+            "owner": self.name(player),
+            "cards": list(cards),
+            "points": points,
+            "nextLabel": next_label,
+        }
+        self.peg(player, points)
+        self.log_event(f"{title} scored {points}.")
 
     def archive_plays(self):
         if self.plays:
@@ -274,6 +325,18 @@ class WebCribbageGame:
         player = self.current_player() if self.phase == "pegging" else None
         legal_ids = {card.index for card in self.legal_cards(self.human)}
         human_hand = self.human.sorted_hand if self.phase == "discard" else self.human.hand
+        scoring = None
+        if self.scoring_review:
+            scoring = {
+                "stage": self.scoring_review["stage"],
+                "title": self.scoring_review["title"],
+                "owner": self.scoring_review["owner"],
+                "cards": [
+                    self.serialize_card(card) for card in self.scoring_review["cards"]
+                ],
+                "points": self.scoring_review["points"],
+                "nextLabel": self.scoring_review["nextLabel"],
+            }
         return {
             "phase": self.phase,
             "message": self.message,
@@ -284,7 +347,7 @@ class WebCribbageGame:
             "cribOwner": self.name(self.dealer),
             "turn": self.name(player) if player else None,
             "count": self.count,
-            "turnCard": None if self.phase == "discard" else self.serialize_card(self.turn_card),
+            "turnCard": None if self.phase in ("discard", "ai_discarding") else self.serialize_card(self.turn_card),
             "plays": [self.serialize_card(card) for card in self.plays],
             "completedPlays": [
                 [self.serialize_card(card) for card in group]
@@ -298,6 +361,7 @@ class WebCribbageGame:
             "aiTable": [self.serialize_card(card) for card in self.ai.table],
             "legalCardIds": list(legal_ids),
             "canGo": self.phase == "pegging" and player is self.human and not legal_ids,
+            "scoring": scoring,
         }
 
 
@@ -328,8 +392,14 @@ class Handler(SimpleHTTPRequestHandler):
                 elif self.path == "/api/discard":
                     GAME.discard(payload.get("indexes", []))
                     self.send_json(current_state())
+                elif self.path == "/api/finish-discard":
+                    GAME.finish_discard()
+                    self.send_json(current_state())
                 elif self.path == "/api/play":
                     GAME.play(payload.get("index"))
+                    self.send_json(current_state())
+                elif self.path == "/api/continue-scoring":
+                    GAME.continue_scoring()
                     self.send_json(current_state())
                 elif self.path == "/api/go":
                     if GAME.phase != "pegging" or GAME.current_player() is not GAME.human:
