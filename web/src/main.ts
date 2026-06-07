@@ -41,8 +41,10 @@ const els = {
   result: document.querySelector("#result") as HTMLElement,
   scoringResult: document.querySelector("#scoring-result") as HTMLElement,
   humanScore: document.querySelector("#human-score") as HTMLElement,
+  humanDealer: document.querySelector("#human-dealer") as HTMLElement,
   scoreCut: document.querySelector("#score-cut") as HTMLElement,
   aiScore: document.querySelector("#ai-score") as HTMLElement,
+  aiDealer: document.querySelector("#ai-dealer") as HTMLElement,
   dealer: document.querySelector("#dealer") as HTMLElement,
   turn: document.querySelector("#turn") as HTMLElement,
   count: document.querySelector("#count") as HTMLElement,
@@ -66,7 +68,6 @@ const els = {
   continuePegging: document.querySelector("#continue-pegging") as HTMLButtonElement,
 };
 
-const RINGED_HOLES = new Set([17, 33, 43, 59, 69, 85, 95]);
 const SHARED_PAR_HOLES = [17, 33, 43, 59, 69, 85, 95];
 const SAVE_KEY = "strong-cribbage.game.v1";
 const ANALYTICS_KEY = "strong-cribbage.analytics.v1";
@@ -179,7 +180,6 @@ function holeElement(position: number | string, start: boolean, column: number, 
   if (start) hole.classList.add("start");
   if (!start && Number(position) % 5 === 0 && Number(position) !== 120) wrap.classList.add("group-end");
   if (Number(position) === 121) hole.classList.add("finish");
-  if (RINGED_HOLES.has(Number(position))) wrap.classList.add("ringed");
   wrap.append(hole);
 
   if (!start && Number(position) % 5 === 0 && Number(position) !== 120) {
@@ -225,10 +225,9 @@ function renderBoard(
       const wrap = hole.closest<HTMLElement>(".hole-wrap");
       if (!wrap) continue;
       hole.classList.remove("peg", "back-peg", "front-peg");
-      wrap.classList.remove("expected-human", "expected-ai");
+      wrap.classList.remove("expected-human", "expected-ai", "ringed", "ring-short", "ring-long");
       wrap.removeAttribute("title");
-      if (hole.dataset.position === "7") wrap.classList.toggle("ringed", player === firstDealerPlayer);
-      if (hole.dataset.position === "111") wrap.classList.toggle("ringed", player !== firstDealerPlayer);
+      applyRingMarker(wrap, Number(hole.dataset.position), player, firstDealerPlayer);
       const projection = projectedPositions.get(hole.dataset.position || "");
       if (projection) {
         wrap.classList.add(player === "human" ? "expected-human" : "expected-ai");
@@ -239,6 +238,21 @@ function renderBoard(
     }
   }
   requestAnimationFrame(() => renderPaceLines(pegPositions, projections, firstDealerPlayer, completedHands));
+}
+
+function applyRingMarker(
+  wrap: HTMLElement,
+  position: number,
+  player: "human" | "ai",
+  firstDealerPlayer: "human" | "ai",
+): void {
+  if (!Number.isFinite(position)) return;
+  const parHoles = parHolesFor(player, firstDealerPlayer);
+  const index = parHoles.indexOf(position);
+  if (index === -1 || index === parHoles.length - 1) return;
+  wrap.classList.add("ringed");
+  const nextHole = parHoles[index + 1];
+  wrap.classList.add(nextHole - position <= 12 ? "ring-short" : "ring-long");
 }
 
 function renderPaceLines(
@@ -794,10 +808,13 @@ function render(game: GameState | null): void {
   syncAnalytics(game.analyticsEvents);
   state.game = game;
   els.app.dataset.phase = game.phase;
+  els.app.dataset.view = state.analyticsOpen ? "analytics" : "game";
   els.analyticsPage.hidden = !state.analyticsOpen;
   if (state.analyticsOpen) renderAnalytics();
   els.humanScore.textContent = String(game.scores.human);
   els.aiScore.textContent = String(game.scores.ai);
+  els.humanDealer.hidden = game.dealer !== "User";
+  els.aiDealer.hidden = game.dealer !== "AI";
   els.dealer.textContent = game.dealer;
   els.turn.textContent = game.turn || "-";
   els.count.textContent = String(game.count);

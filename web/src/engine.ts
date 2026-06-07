@@ -474,9 +474,6 @@ export class CribbageGame {
     this.lastPlayer = null;
     this.scoringReview = null;
     this.phase = "discard";
-    this.logEvent(
-      `Dealer: ${this.name(this.dealer)}. ${this.name(this.pone)} pegs first.`,
-    );
     this.recordAnalytics({
       type: "hand",
       action: "start",

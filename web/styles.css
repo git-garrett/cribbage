@@ -178,6 +178,31 @@ button:disabled {
   font-size: 13px;
 }
 
+.score-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dealer-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 1px 6px;
+  border: 1px solid #c79a31;
+  border-radius: 999px;
+  background: #f5d676;
+  color: #493511;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.dealer-button[hidden] {
+  display: none;
+}
+
 .score strong {
   color: var(--human);
   font-size: 30px;
@@ -331,10 +356,18 @@ button:disabled {
   left: 50%;
   width: 7px;
   height: 7px;
-  border: 1px solid #ffffff;
+  border: 1px solid var(--ring-color, #ffffff);
   border-radius: 50%;
   pointer-events: none;
   transform: translate(-50%, -50%);
+}
+
+.hole-wrap.ring-short {
+  --ring-color: rgba(70, 70, 70, 0.78);
+}
+
+.hole-wrap.ring-long {
+  --ring-color: #ffffff;
 }
 
 .hole-wrap.expected-human::after,
@@ -429,6 +462,11 @@ button:disabled {
 }
 
 .analytics-page[hidden] {
+  display: none;
+}
+
+.app[data-view="analytics"] .scoreboard,
+.app[data-view="analytics"] .table {
   display: none;
 }
 
