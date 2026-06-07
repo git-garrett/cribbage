@@ -796,7 +796,7 @@ button.card {
   }
 
   .app {
-    padding: 8px;
+    padding: max(48px, calc(env(safe-area-inset-top) + 10px)) 8px max(8px, env(safe-area-inset-bottom));
   }
 
   .topbar,
