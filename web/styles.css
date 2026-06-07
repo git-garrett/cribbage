@@ -37,6 +37,12 @@ select {
   padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
 }
 
+@supports (padding: max(0px)) {
+  .app {
+    padding-top: max(10px, calc(env(safe-area-inset-top) + 10px));
+  }
+}
+
 .topbar,
 .scoreboard,
 .table {
@@ -187,7 +193,7 @@ button:disabled {
   gap: 2px;
   justify-items: center;
   align-items: center;
-  min-width: 54px;
+  min-width: 64px;
 }
 
 .score-cut[hidden] {
@@ -275,6 +281,18 @@ button:disabled {
 
 .pace-ai {
   stroke: var(--ai);
+}
+
+.pace-label {
+  fill: rgba(55, 34, 13, 0.84);
+  dominant-baseline: middle;
+  paint-order: stroke;
+  stroke: rgba(205, 168, 95, 0.9);
+  stroke-linejoin: round;
+  stroke-width: 3px;
+  font-size: 7px;
+  font-weight: 850;
+  pointer-events: none;
 }
 
 .hole {
@@ -367,6 +385,10 @@ button:disabled {
   min-width: 0;
 }
 
+.ai-strip[hidden] {
+  display: none;
+}
+
 .ai-strip h2 {
   flex: 0 0 auto;
   margin: 0;
@@ -395,6 +417,101 @@ button:disabled {
   background: var(--felt);
   color: #fff;
   border-color: var(--felt-dark);
+}
+
+.analytics-page {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.analytics-page[hidden] {
+  display: none;
+}
+
+.analytics-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.analytics-header h2,
+.analytics-section h3 {
+  margin: 0;
+}
+
+.analytics-header p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.analytics-totals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.analytics-total {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f8faf7;
+  font-size: 13px;
+}
+
+.analytics-total strong {
+  grid-column: 1 / -1;
+  font-size: 15px;
+}
+
+.analytics-total.human strong {
+  color: var(--human);
+}
+
+.analytics-total.ai strong {
+  color: var(--ai);
+}
+
+.analytics-section {
+  display: grid;
+  gap: 8px;
+}
+
+.analytics-list {
+  display: grid;
+  gap: 6px;
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.analytics-row {
+  display: grid;
+  grid-template-columns: minmax(92px, 0.8fr) minmax(110px, 1fr) minmax(110px, 1.2fr);
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #e3e8e4;
+  border-radius: 6px;
+  background: #fbfcfa;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.analytics-row span:first-child {
+  font-weight: 750;
+}
+
+.analytics-empty {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .status {
@@ -456,7 +573,7 @@ button:disabled {
 }
 
 .played-active.pegging-row {
-  min-height: 78px;
+  min-height: 90px;
 }
 
 .pegging-row .card {
@@ -464,6 +581,12 @@ button:disabled {
   height: 54px;
   margin-left: -20px;
   border-radius: 5px;
+}
+
+.played-active.pegging-row .card {
+  width: 52px;
+  height: 72px;
+  margin-left: -24px;
 }
 
 .pegging-row .card:first-child {
@@ -484,12 +607,26 @@ button:disabled {
   font-size: 9px;
 }
 
+.played-active.pegging-row .card .corner {
+  top: 5px;
+  left: 6px;
+  font-size: 11px;
+}
+
 .pegging-row .card .rank {
   font-size: 16px;
 }
 
+.played-active.pegging-row .card .rank {
+  font-size: 22px;
+}
+
 .pegging-row .card .suit {
   font-size: 13px;
+}
+
+.played-active.pegging-row .card .suit {
+  font-size: 18px;
 }
 
 .scoring-review {
@@ -614,23 +751,23 @@ button.card {
 
 .cut-card .card,
 .score-cut .card {
-  width: 34px;
-  height: 48px;
+  width: 52px;
+  height: 72px;
   border-radius: 5px;
 }
 
 .score-cut .card .rank {
-  font-size: 16px;
+  font-size: 22px;
 }
 
 .score-cut .card .suit {
-  font-size: 13px;
+  font-size: 18px;
 }
 
 .score-cut .card .corner {
-  top: 4px;
-  left: 4px;
-  font-size: 9px;
+  top: 5px;
+  left: 6px;
+  font-size: 11px;
 }
 
 .cut-card .card {
@@ -705,6 +842,30 @@ button.card {
     font-size: 30px;
   }
 
+  .score-cut {
+    min-width: 54px;
+  }
+
+  .cut-card .card,
+  .score-cut .card {
+    width: 34px;
+    height: 48px;
+  }
+
+  .score-cut .card .rank {
+    font-size: 16px;
+  }
+
+  .score-cut .card .suit {
+    font-size: 13px;
+  }
+
+  .score-cut .card .corner {
+    top: 4px;
+    left: 4px;
+    font-size: 9px;
+  }
+
   .board {
     gap: 5px;
     padding: 7px 5px;
@@ -758,6 +919,33 @@ button.card {
 
   .table {
     padding: 12px;
+  }
+
+  .analytics-page {
+    padding: 12px;
+    border-radius: 7px;
+  }
+
+  .analytics-header {
+    align-items: stretch;
+  }
+
+  .analytics-header button {
+    flex: 0 0 auto;
+    width: auto;
+  }
+
+  .analytics-totals {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-row {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  .analytics-list {
+    max-height: 220px;
   }
 
   .status {
@@ -816,6 +1004,30 @@ button.card {
 
   .played-active {
     min-height: 72px;
+  }
+
+  .played-active.pegging-row {
+    min-height: 72px;
+  }
+
+  .played-active.pegging-row .card {
+    width: 44px;
+    height: 62px;
+    margin-left: -22px;
+  }
+
+  .played-active.pegging-row .card .corner {
+    top: 4px;
+    left: 5px;
+    font-size: 10px;
+  }
+
+  .played-active.pegging-row .card .rank {
+    font-size: 18px;
+  }
+
+  .played-active.pegging-row .card .suit {
+    font-size: 15px;
   }
 
   .played-archive {

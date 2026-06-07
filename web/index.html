@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Strong Cribbage</title>
     <link rel="stylesheet" href="styles.css">
   </head>
@@ -25,6 +25,7 @@
               <option value="random">Random</option>
             </select>
           </label>
+          <button id="analytics-open" type="button">Analytics</button>
           <button id="new-game" type="button">New game</button>
         </div>
       </section>
@@ -78,6 +79,33 @@
             <button id="play" type="button" disabled>Play selected</button>
             <button id="go" type="button" disabled>Go</button>
           </div>
+        </div>
+      </section>
+
+      <section id="analytics-page" class="analytics-page" aria-label="Analytics" hidden>
+        <div class="analytics-header">
+          <div>
+            <h2>Analytics</h2>
+            <p id="analytics-summary">No gameplay recorded yet.</p>
+          </div>
+          <button id="analytics-close" type="button">Done</button>
+        </div>
+        <div id="analytics-totals" class="analytics-totals"></div>
+        <div class="analytics-section">
+          <h3>Games</h3>
+          <div id="analytics-games" class="analytics-list"></div>
+        </div>
+        <div class="analytics-section">
+          <h3>Hands</h3>
+          <div id="analytics-hands" class="analytics-list"></div>
+        </div>
+        <div class="analytics-section">
+          <h3>Scoring</h3>
+          <div id="analytics-scores" class="analytics-list"></div>
+        </div>
+        <div class="analytics-section">
+          <h3>Pegging</h3>
+          <div id="analytics-pegging" class="analytics-list"></div>
         </div>
       </section>
     </main>

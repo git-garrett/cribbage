@@ -92,9 +92,69 @@ export interface GameState {
     points: number;
     nextLabel: string;
   } | null;
+  analyticsEvents: AnalyticsEvent[];
 }
 
 type ScoringReview = NonNullable<GameState["scoring"]> & { rawCards: Card[] };
+
+export type AnalyticsRole = "dealer" | "pone";
+export type AnalyticsScoreCategory = "pegging" | "hand" | "crib";
+export type AnalyticsEvent =
+  | {
+      id: string;
+      at: string;
+      type: "game";
+      action: "start" | "end";
+      gameId: string;
+      opponent: Opponent;
+      winner?: PlayerKey;
+      finalScores?: Record<PlayerKey, number>;
+    }
+  | {
+      id: string;
+      at: string;
+      type: "hand";
+      action: "start" | "end";
+      gameId: string;
+      handNumber: number;
+      dealer: PlayerKey;
+      pone: PlayerKey;
+      turnCard?: string;
+      scores: Record<PlayerKey, number>;
+    }
+  | {
+      id: string;
+      at: string;
+      type: "pegging";
+      action: "play" | "go" | "reset";
+      gameId: string;
+      handNumber: number;
+      player?: PlayerKey;
+      role?: AnalyticsRole;
+      card?: string;
+      count: number;
+      message: string;
+    }
+  | {
+      id: string;
+      at: string;
+      type: "score";
+      gameId: string;
+      handNumber: number;
+      player: PlayerKey;
+      role: AnalyticsRole;
+      category: AnalyticsScoreCategory;
+      points: number;
+      reason: string;
+      totalScore: number;
+      card?: string;
+      count?: number;
+    };
+type NewAnalyticsEvent = AnalyticsEvent extends infer Event
+  ? Event extends AnalyticsEvent
+    ? Omit<Event, "id" | "at" | "gameId">
+    : never
+  : never;
 
 interface PlayerSnapshot {
   hand: number[];
@@ -105,6 +165,9 @@ interface PlayerSnapshot {
 
 export interface GameSnapshot {
   version: 1;
+  gameId?: string;
+  analyticsCounter?: number;
+  analyticsEvents?: AnalyticsEvent[];
   opponent: Opponent;
   deal: 0 | 1;
   firstDeal: 0 | 1;
@@ -272,6 +335,9 @@ export class CribbageGame {
   message = "";
   log: string[] = [];
   result: string[] = [];
+  gameId = createAnalyticsId("game");
+  analyticsCounter = 0;
+  analyticsEvents: AnalyticsEvent[] = [];
   pegPositions: Record<PlayerKey, [number | string, number | string]> = {
     human: ["start-back", "start-front"],
     ai: ["start-back", "start-front"],
@@ -283,12 +349,20 @@ export class CribbageGame {
     this.ai = { key: "ai", name: "AI", hand: [], table: [], crib: [], score: 0 };
     this.deal = Math.random() < 0.5 ? 0 : 1;
     this.firstDeal = this.deal;
+    this.recordAnalytics({
+      type: "game",
+      action: "start",
+      opponent: this.opponent,
+    });
     this.startHand();
   }
 
   static restore(snapshot: GameSnapshot): CribbageGame {
     if (snapshot.version !== 1) throw new Error("Unsupported saved game version.");
     const game = new CribbageGame(snapshot.opponent);
+    game.gameId = snapshot.gameId ?? createAnalyticsId("game");
+    game.analyticsCounter = snapshot.analyticsCounter ?? 0;
+    game.analyticsEvents = snapshot.analyticsEvents ? [...snapshot.analyticsEvents] : [];
     game.opponent = snapshot.opponent;
     game.deal = snapshot.deal;
     game.firstDeal = snapshot.firstDeal;
@@ -338,6 +412,9 @@ export class CribbageGame {
   snapshot(): GameSnapshot {
     return {
       version: 1,
+      gameId: this.gameId,
+      analyticsCounter: this.analyticsCounter,
+      analyticsEvents: [...this.analyticsEvents],
       opponent: this.opponent,
       deal: this.deal,
       firstDeal: this.firstDeal,
@@ -400,6 +477,14 @@ export class CribbageGame {
     this.logEvent(
       `Dealer: ${this.name(this.dealer)}. ${this.name(this.pone)} pegs first.`,
     );
+    this.recordAnalytics({
+      type: "hand",
+      action: "start",
+      handNumber: this.handNumber,
+      dealer: this.dealer.key,
+      pone: this.pone.key,
+      scores: { human: this.human.score, ai: this.ai.score },
+    });
     if (this.dealer === this.ai) this.aiDiscard();
   }
 
@@ -445,6 +530,7 @@ export class CribbageGame {
             nextLabel: this.scoringReview.nextLabel,
           }
         : null,
+      analyticsEvents: [...this.analyticsEvents],
     };
   }
 
@@ -503,6 +589,15 @@ export class CribbageGame {
     else if (this.phase === "score_pone") this.showScoreStage("dealer");
     else if (this.phase === "score_dealer") this.showScoreStage("crib");
     else if (this.phase === "score_crib") {
+      this.recordAnalytics({
+        type: "hand",
+        action: "end",
+        handNumber: this.handNumber,
+        dealer: this.dealer.key,
+        pone: this.pone.key,
+        turnCard: this.cardLabel(this.turnCard),
+        scores: { human: this.human.score, ai: this.ai.score },
+      });
       this.scoringReview = null;
       this.deal = (this.deal ^ 1) as 0 | 1;
       this.handNumber += 1;
@@ -586,6 +681,7 @@ export class CribbageGame {
     this.dealer.crib = [...this.crib];
     this.logEvent(`Turn card is ${this.cardLabel(this.turnCard)}.`);
     if (this.turnCard.rankStr === "J") {
+      this.recordScore(this.dealer, "pegging", 2, "his heels", this.turnCard);
       this.peg(this.dealer, 2);
       this.logEvent(`${this.name(this.dealer)} pegged 2 for his heels.`);
     }
@@ -618,6 +714,7 @@ export class CribbageGame {
 
   private finishPegging(): void {
     if (this.lastPlayer && this.count !== 0) {
+      this.recordScore(this.lastPlayer, "pegging", 1, "last card", undefined, this.count);
       this.peg(this.lastPlayer, 1);
       this.logEvent(`${this.name(this.lastPlayer)} pegged 1 for last card.`);
       this.archivePlays();
@@ -647,6 +744,17 @@ export class CribbageGame {
     this.count += card.value;
     this.lastPlayer = player;
     const points = scoreCount(this.plays);
+    this.recordAnalytics({
+      type: "pegging",
+      action: "play",
+      handNumber: this.handNumber,
+      player: player.key,
+      role: this.roleFor(player),
+      card: this.cardLabel(card),
+      count: this.count,
+      message: `${this.name(player)} played ${this.cardLabel(card)}: ${this.count}`,
+    });
+    if (points) this.recordScore(player, "pegging", points, "count", card, this.count);
     if (points) this.peg(player, points);
     this.logEvent(
       `${this.name(player)} played ${this.cardLabel(card)}: ${this.count}` +
@@ -659,6 +767,13 @@ export class CribbageGame {
       this.count = 0;
       this.goPlayer = null;
       this.lastPlayer = null;
+      this.recordAnalytics({
+        type: "pegging",
+        action: "reset",
+        handNumber: this.handNumber,
+        count: 0,
+        message: "Count hit 31 and resets.",
+      });
       this.logEvent("Count hit 31 and resets.");
       this.otherTurn();
     } else if (!this.goPlayer) {
@@ -669,6 +784,7 @@ export class CribbageGame {
   private sayGo(player: PlayerState): void {
     if (this.goPlayer) {
       if (this.lastPlayer && this.count !== 31) {
+        this.recordScore(this.lastPlayer, "pegging", 1, "go", undefined, this.count);
         this.peg(this.lastPlayer, 1);
         this.logEvent(`${this.name(this.lastPlayer)} pegged 1 for go.`);
       }
@@ -678,10 +794,26 @@ export class CribbageGame {
       this.count = 0;
       this.goPlayer = null;
       this.lastPlayer = null;
+      this.recordAnalytics({
+        type: "pegging",
+        action: "reset",
+        handNumber: this.handNumber,
+        count: 0,
+        message: "Count resets to 0.",
+      });
       this.logEvent("Count resets to 0.");
       this.otherTurn();
     } else {
       this.goPlayer = player;
+      this.recordAnalytics({
+        type: "pegging",
+        action: "go",
+        handNumber: this.handNumber,
+        player: player.key,
+        role: this.roleFor(player),
+        count: this.count,
+        message: `${this.name(player)} says go.`,
+      });
       this.logEvent(`${this.name(player)} says go.`);
       this.otherTurn();
     }
@@ -730,6 +862,7 @@ export class CribbageGame {
       points,
       nextLabel,
     };
+    this.recordScore(player, stage === "crib" ? "crib" : "hand", points, title);
     this.peg(player, points);
     this.logEvent(`${title} scored ${points}.`);
   }
@@ -754,9 +887,65 @@ export class CribbageGame {
     if (player.score >= 121) {
       this.phase = "game_over";
       const message = `${this.name(player)} won.`;
+      this.recordAnalytics({
+        type: "hand",
+        action: "end",
+        handNumber: this.handNumber,
+        dealer: this.dealer.key,
+        pone: this.pone.key,
+        turnCard: this.cardLabel(this.turnCard),
+        scores: { human: this.human.score, ai: this.ai.score },
+      });
+      this.recordAnalytics({
+        type: "game",
+        action: "end",
+        opponent: this.opponent,
+        winner: player.key,
+        finalScores: { human: this.human.score, ai: this.ai.score },
+      });
       this.logEvent(message);
       throw new WinGame(message);
     }
+  }
+
+  private recordScore(
+    player: PlayerState,
+    category: AnalyticsScoreCategory,
+    points: number,
+    reason: string,
+    card?: Card,
+    count?: number,
+  ): void {
+    if (points <= 0) return;
+    this.recordAnalytics({
+      type: "score",
+      handNumber: this.handNumber,
+      player: player.key,
+      role: this.roleFor(player),
+      category,
+      points,
+      reason,
+      totalScore: Math.min(player.score + points, 121),
+      card: card ? this.cardLabel(card) : undefined,
+      count,
+    });
+  }
+
+  private recordAnalytics(
+    event: NewAnalyticsEvent,
+  ): void {
+    this.analyticsCounter += 1;
+    this.analyticsEvents.push({
+      ...event,
+      id: `${this.gameId}-${this.analyticsCounter}`,
+      at: new Date().toISOString(),
+      gameId: this.gameId,
+    } as AnalyticsEvent);
+    this.analyticsEvents = this.analyticsEvents.slice(-2000);
+  }
+
+  private roleFor(player: PlayerState): AnalyticsRole {
+    return player === this.dealer ? "dealer" : "pone";
   }
 
   private archivePlays(): void {
@@ -852,4 +1041,8 @@ function compareTuple(a: number[], b: number[]): number {
     if (a[i] !== b[i]) return a[i] - b[i];
   }
   return a.length - b.length;
+}
+
+function createAnalyticsId(prefix: string): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }

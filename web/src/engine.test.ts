@@ -150,4 +150,52 @@ describe("game state", () => {
 
     expect(restored.state().handNumber).toBe(2);
   });
+
+  test("tracks analytics for pegging and hand scoring by role", () => {
+    const game = new CribbageGame("random");
+    game.phase = "pegging";
+    game.pone = game.human;
+    game.dealer = game.ai;
+    game.turn = 0;
+    game.human.hand = cardsFromString("5d");
+    game.ai.hand = cardsFromString("Kh");
+    game.human.table = [];
+    game.ai.table = [];
+    game.turnCard = cardsFromString("9s")[0];
+    game.plays = cardsFromString("10c");
+    game.playOwners = ["ai"];
+    game.count = 10;
+
+    game.play(cardsFromString("5d")[0].id);
+    const peggingScore = game.state().analyticsEvents.find(
+      (event) => event.type === "score" && event.category === "pegging",
+    );
+
+    expect(peggingScore).toMatchObject({
+      player: "human",
+      role: "pone",
+      category: "pegging",
+      points: 2,
+      count: 15,
+    });
+
+    game.phase = "pegging_complete";
+    game.pone = game.human;
+    game.dealer = game.ai;
+    game.human.table = cardsFromString("Ad 2c 3h 4s");
+    game.ai.table = cardsFromString("Kh Qc 9d 8s");
+    game.ai.crib = cardsFromString("6d 7c 8h 9s");
+    game.turnCard = cardsFromString("5s")[0];
+    game.continueScoring();
+
+    const handScore = game.state().analyticsEvents.find(
+      (event) => event.type === "score" && event.category === "hand" && event.player === "human",
+    );
+    expect(handScore).toMatchObject({
+      player: "human",
+      role: "pone",
+      category: "hand",
+      points: scoreHand(game.human.table, game.turnCard),
+    });
+  });
 });

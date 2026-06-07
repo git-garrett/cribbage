@@ -1,15 +1,27 @@
-import { CribbageGame, type GameSnapshot, type GameState, type Opponent, WinGame } from "./engine";
+import {
+  CribbageGame,
+  type AnalyticsEvent,
+  type AnalyticsScoreCategory,
+  type AnalyticsRole,
+  type GameSnapshot,
+  type GameState,
+  type Opponent,
+  type PlayerKey,
+  WinGame,
+} from "./engine";
 
 const state: {
   game: GameState | null;
   selected: Set<number>;
   pending: boolean;
   resultOverride: string[] | null;
+  analyticsOpen: boolean;
 } = {
   game: null,
   selected: new Set(),
   pending: false,
   resultOverride: null,
+  analyticsOpen: false,
 };
 
 const els = {
@@ -17,6 +29,15 @@ const els = {
   board: document.querySelector("#board") as HTMLElement,
   menuToggle: document.querySelector("#menu-toggle") as HTMLButtonElement,
   settingsPanel: document.querySelector("#settings-panel") as HTMLElement,
+  analyticsOpen: document.querySelector("#analytics-open") as HTMLButtonElement,
+  analyticsClose: document.querySelector("#analytics-close") as HTMLButtonElement,
+  analyticsPage: document.querySelector("#analytics-page") as HTMLElement,
+  analyticsSummary: document.querySelector("#analytics-summary") as HTMLElement,
+  analyticsTotals: document.querySelector("#analytics-totals") as HTMLElement,
+  analyticsGames: document.querySelector("#analytics-games") as HTMLElement,
+  analyticsHands: document.querySelector("#analytics-hands") as HTMLElement,
+  analyticsScores: document.querySelector("#analytics-scores") as HTMLElement,
+  analyticsPegging: document.querySelector("#analytics-pegging") as HTMLElement,
   result: document.querySelector("#result") as HTMLElement,
   scoringResult: document.querySelector("#scoring-result") as HTMLElement,
   humanScore: document.querySelector("#human-score") as HTMLElement,
@@ -29,6 +50,7 @@ const els = {
   playAreaTitle: document.querySelector("#play-area-title") as HTMLElement,
   plays: document.querySelector("#plays") as HTMLElement,
   userHandTitle: document.querySelector("#user-hand-title") as HTMLElement,
+  aiStrip: document.querySelector(".ai-strip") as HTMLElement,
   humanHand: document.querySelector("#human-hand") as HTMLElement,
   aiHand: document.querySelector("#ai-hand") as HTMLElement,
   discard: document.querySelector("#discard") as HTMLButtonElement,
@@ -47,6 +69,12 @@ const els = {
 const RINGED_HOLES = new Set([17, 33, 43, 59, 69, 85, 95]);
 const SHARED_PAR_HOLES = [17, 33, 43, 59, 69, 85, 95];
 const SAVE_KEY = "strong-cribbage.game.v1";
+const ANALYTICS_KEY = "strong-cribbage.analytics.v1";
+
+interface AnalyticsStore {
+  version: 1;
+  events: AnalyticsEvent[];
+}
 
 function loadSavedGame(): CribbageGame {
   const saved = localStorage.getItem(SAVE_KEY);
@@ -60,11 +88,46 @@ function loadSavedGame(): CribbageGame {
 }
 
 function saveGame(): void {
-  localStorage.setItem(SAVE_KEY, JSON.stringify(localGame.snapshot()));
+  const snapshot = localGame.snapshot();
+  localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot));
+  syncAnalytics(snapshot.analyticsEvents ?? []);
 }
 
 let localGame = loadSavedGame();
 saveGame();
+
+function loadAnalytics(): AnalyticsStore {
+  const fallback: AnalyticsStore = { version: 1, events: [] };
+  const saved = localStorage.getItem(ANALYTICS_KEY);
+  if (!saved) return fallback;
+  try {
+    const parsed = JSON.parse(saved) as AnalyticsStore;
+    if (parsed.version !== 1 || !Array.isArray(parsed.events)) return fallback;
+    return parsed;
+  } catch {
+    localStorage.removeItem(ANALYTICS_KEY);
+    return fallback;
+  }
+}
+
+function saveAnalytics(store: AnalyticsStore): void {
+  localStorage.setItem(ANALYTICS_KEY, JSON.stringify(store));
+}
+
+function syncAnalytics(events: AnalyticsEvent[]): void {
+  if (!events.length) return;
+  const store = loadAnalytics();
+  const known = new Set(store.events.map((event) => event.id));
+  for (const event of events) {
+    if (!known.has(event.id)) {
+      store.events.push(event);
+      known.add(event.id);
+    }
+  }
+  store.events.sort((a, b) => a.at.localeCompare(b.at));
+  store.events = store.events.slice(-8000);
+  saveAnalytics(store);
+}
 
 function buildBoard(): void {
   els.board.innerHTML = "";
@@ -195,13 +258,29 @@ function renderPaceLines(
     const currentParIndex = completedHands - 1;
     let lineIndex = 0;
     if (currentParIndex >= 0) {
-      addPaceLine(svg, track, pegPositions[player]?.[1], parHoles[currentParIndex], player, lineSide(lineIndex));
+      addPaceLine(
+        svg,
+        track,
+        pegPositions[player]?.[1],
+        parHoles[currentParIndex],
+        player,
+        lineSide(lineIndex),
+        completedHands,
+      );
       lineIndex += 1;
     }
     for (const [hole, projection] of projections[player]) {
       const parHole = parHoles[currentParIndex + projection.hand];
       if (parHole) {
-        addPaceLine(svg, track, parHole, hole, player, lineSide(lineIndex));
+        addPaceLine(
+          svg,
+          track,
+          parHole,
+          hole,
+          player,
+          lineSide(lineIndex),
+          completedHands + projection.hand,
+        );
         lineIndex += 1;
       }
     }
@@ -212,6 +291,8 @@ function lineSide(index: number): "outside" | "inside" {
   return index % 2 === 0 ? "outside" : "inside";
 }
 
+type LinePoint = { x: number; y: number };
+
 function addPaceLine(
   svg: SVGSVGElement,
   track: HTMLElement,
@@ -219,23 +300,96 @@ function addPaceLine(
   toPosition: number | string | undefined,
   player: "human" | "ai",
   side: "outside" | "inside",
+  label: number,
 ): void {
   if (fromPosition === undefined || toPosition === undefined) return;
   const start = holeLinePoint(track, fromPosition, side);
   const end = holeLinePoint(track, toPosition, side);
   if (!start || !end) return;
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+
+  const points: LinePoint[] = [{ x: start.x, y: start.y }];
   if (start.row === end.row) {
-    path.setAttribute("d", `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} H ${end.x.toFixed(2)}`);
+    points.push({ x: end.x, y: end.y });
   } else {
     const turnX = uTurnLineX(track);
-    path.setAttribute(
-      "d",
-      `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} H ${turnX.toFixed(2)} V ${end.y.toFixed(2)} H ${end.x.toFixed(2)}`,
-    );
+    points.push({ x: turnX, y: start.y }, { x: turnX, y: end.y }, { x: end.x, y: end.y });
   }
+
+  const totalLength = polylineLength(points);
+  const labelGap = Math.min(16, Math.max(10, totalLength * 0.34));
+  const labelCenter = pointAtPolylineDistance(points, totalLength / 2);
+  const gapStart = Math.max(0, totalLength / 2 - labelGap / 2);
+  const gapEnd = Math.min(totalLength, totalLength / 2 + labelGap / 2);
+  appendPacePath(svg, player, subPolyline(points, 0, gapStart));
+  appendPacePath(svg, player, subPolyline(points, gapEnd, totalLength));
+
+  const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  text.classList.add("pace-label", `pace-label-${player}`);
+  text.textContent = String(label);
+  text.setAttribute("x", labelCenter.x.toFixed(2));
+  text.setAttribute("y", labelCenter.y.toFixed(2));
+  text.setAttribute("text-anchor", "middle");
+  svg.append(text);
+}
+
+function appendPacePath(svg: SVGSVGElement, player: "human" | "ai", points: LinePoint[]): void {
+  if (points.length < 2) return;
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", pathData(points));
   path.classList.add("pace-line", `pace-${player}`);
   svg.append(path);
+}
+
+function pathData(points: LinePoint[]): string {
+  const [first, ...rest] = points;
+  return `M ${first.x.toFixed(2)} ${first.y.toFixed(2)} ${rest
+    .map((point) => `L ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+    .join(" ")}`;
+}
+
+function subPolyline(points: LinePoint[], fromDistance: number, toDistance: number): LinePoint[] {
+  if (toDistance <= fromDistance) return [];
+  const result = [pointAtPolylineDistance(points, fromDistance)];
+  let walked = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const length = pointDistance(previous, current);
+    const segmentStart = walked;
+    const segmentEnd = walked + length;
+    if (segmentEnd > fromDistance && segmentEnd < toDistance) result.push(current);
+    walked = segmentEnd;
+  }
+  result.push(pointAtPolylineDistance(points, toDistance));
+  return result;
+}
+
+function pointAtPolylineDistance(points: LinePoint[], targetDistance: number): LinePoint {
+  let walked = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const length = pointDistance(previous, current);
+    if (walked + length >= targetDistance) {
+      const ratio = length === 0 ? 0 : (targetDistance - walked) / length;
+      return {
+        x: previous.x + (current.x - previous.x) * ratio,
+        y: previous.y + (current.y - previous.y) * ratio,
+      };
+    }
+    walked += length;
+  }
+  return points[points.length - 1];
+}
+
+function polylineLength(points: LinePoint[]): number {
+  return points.reduce((total, point, index) => (
+    index === 0 ? 0 : total + pointDistance(points[index - 1], point)
+  ), 0);
+}
+
+function pointDistance(a: LinePoint, b: LinePoint): number {
+  return Math.hypot(b.x - a.x, b.y - a.y);
 }
 
 function holeLinePoint(
@@ -492,6 +646,137 @@ function renderResult(game: GameState): void {
   }
 }
 
+function renderAnalytics(): void {
+  const events = loadAnalytics().events;
+  const scoreEvents = events.filter((event): event is Extract<AnalyticsEvent, { type: "score" }> =>
+    event.type === "score"
+  );
+  const gameEvents = events.filter((event): event is Extract<AnalyticsEvent, { type: "game" }> =>
+    event.type === "game"
+  );
+  const handEvents = events.filter((event): event is Extract<AnalyticsEvent, { type: "hand" }> =>
+    event.type === "hand"
+  );
+  const peggingEvents = events.filter((event): event is Extract<AnalyticsEvent, { type: "pegging" }> =>
+    event.type === "pegging"
+  );
+
+  const completedGames = gameEvents.filter((event) => event.action === "end").length;
+  const startedHands = handEvents.filter((event) => event.action === "start").length;
+  els.analyticsSummary.textContent = `${completedGames} completed game${completedGames === 1 ? "" : "s"}; ${startedHands} hand${startedHands === 1 ? "" : "s"} logged.`;
+
+  renderAnalyticsTotals(scoreEvents);
+  renderAnalyticsRows(
+    els.analyticsGames,
+    [...gameEvents].reverse().slice(0, 40).map((event) =>
+      event.action === "start"
+        ? [`Game started`, `Opponent: ${event.opponent}`, shortDate(event.at)]
+        : [
+            `${playerName(event.winner)} won`,
+            `Final ${event.finalScores?.human ?? 0}-${event.finalScores?.ai ?? 0}`,
+            shortDate(event.at),
+          ],
+    ),
+  );
+  renderAnalyticsRows(
+    els.analyticsHands,
+    [...handEvents].reverse().slice(0, 80).map((event) => [
+      `Hand ${event.handNumber} ${event.action}`,
+      `Dealer: ${playerName(event.dealer)}; Pone: ${playerName(event.pone)}`,
+      `Score ${event.scores.human}-${event.scores.ai}${event.turnCard ? `; Cut ${event.turnCard}` : ""}`,
+    ]),
+  );
+  renderAnalyticsRows(
+    els.analyticsScores,
+    [...scoreEvents].reverse().slice(0, 120).map((event) => [
+      `Hand ${event.handNumber}: ${playerName(event.player)} +${event.points}`,
+      `${scoreLabel(event.category, event.role)}: ${event.reason}`,
+      `Total ${event.totalScore}${event.card ? `; Card ${event.card}` : ""}${event.count ? `; Count ${event.count}` : ""}`,
+    ]),
+  );
+  renderAnalyticsRows(
+    els.analyticsPegging,
+    [...peggingEvents].reverse().slice(0, 160).map((event) => [
+      `Hand ${event.handNumber}: ${event.action}`,
+      event.player ? `${playerName(event.player)} as ${event.role}` : "Count",
+      event.message,
+    ]),
+  );
+}
+
+function renderAnalyticsTotals(scoreEvents: Extract<AnalyticsEvent, { type: "score" }>[]): void {
+  const totals = emptyAnalyticsTotals();
+  for (const event of scoreEvents) {
+    totals[event.player][scoreKey(event.category, event.role)] += event.points;
+  }
+  els.analyticsTotals.innerHTML = "";
+  for (const player of ["human", "ai"] as const) {
+    const card = document.createElement("div");
+    card.className = `analytics-total ${player}`;
+    card.innerHTML = `
+      <strong>${playerName(player)}</strong>
+      <span>Peg dealer: ${totals[player].peggingDealer}</span>
+      <span>Peg pone: ${totals[player].peggingPone}</span>
+      <span>Hand dealer: ${totals[player].handDealer}</span>
+      <span>Hand pone: ${totals[player].handPone}</span>
+      <span>Crib: ${totals[player].crib}</span>
+    `;
+    els.analyticsTotals.append(card);
+  }
+}
+
+function renderAnalyticsRows(container: HTMLElement, rows: string[][]): void {
+  container.innerHTML = "";
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.className = "analytics-empty";
+    empty.textContent = "No records yet.";
+    container.append(empty);
+    return;
+  }
+  for (const row of rows) {
+    const item = document.createElement("div");
+    item.className = "analytics-row";
+    for (const value of row) {
+      const span = document.createElement("span");
+      span.textContent = value;
+      item.append(span);
+    }
+    container.append(item);
+  }
+}
+
+function emptyAnalyticsTotals(): Record<PlayerKey, Record<string, number>> {
+  return {
+    human: { peggingDealer: 0, peggingPone: 0, handDealer: 0, handPone: 0, crib: 0 },
+    ai: { peggingDealer: 0, peggingPone: 0, handDealer: 0, handPone: 0, crib: 0 },
+  };
+}
+
+function scoreKey(category: AnalyticsScoreCategory, role: AnalyticsRole): string {
+  if (category === "crib") return "crib";
+  return `${category}${role === "dealer" ? "Dealer" : "Pone"}`;
+}
+
+function scoreLabel(category: AnalyticsScoreCategory, role: AnalyticsRole): string {
+  if (category === "crib") return "Crib";
+  return `${category === "pegging" ? "Pegging" : "Hand"} as ${role}`;
+}
+
+function playerName(player: PlayerKey | undefined): string {
+  if (!player) return "-";
+  return player === "human" ? "User" : "AI";
+}
+
+function shortDate(value: string): string {
+  return new Date(value).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function playAreaTitle(game: GameState): string {
   if (game.phase === "discard") {
     return game.cribOwner === "User"
@@ -506,8 +791,11 @@ function playAreaTitle(game: GameState): string {
 
 function render(game: GameState | null): void {
   if (!game) return;
+  syncAnalytics(game.analyticsEvents);
   state.game = game;
   els.app.dataset.phase = game.phase;
+  els.analyticsPage.hidden = !state.analyticsOpen;
+  if (state.analyticsOpen) renderAnalytics();
   els.humanScore.textContent = String(game.scores.human);
   els.aiScore.textContent = String(game.scores.ai);
   els.dealer.textContent = game.dealer;
@@ -531,6 +819,7 @@ function render(game: GameState | null): void {
   });
 
   els.aiHand.innerHTML = "";
+  els.aiStrip.hidden = game.aiHandCount === 0;
   for (let i = 0; i < game.aiHandCount; i += 1) els.aiHand.append(cardBack());
 
   els.discard.hidden = game.phase !== "discard";
@@ -559,6 +848,18 @@ els.menuToggle.addEventListener("click", () => {
   const open = els.settingsPanel.hidden;
   els.settingsPanel.hidden = !open;
   els.menuToggle.setAttribute("aria-expanded", String(open));
+});
+
+els.analyticsOpen.addEventListener("click", () => {
+  state.analyticsOpen = true;
+  els.settingsPanel.hidden = true;
+  els.menuToggle.setAttribute("aria-expanded", "false");
+  render(state.game);
+});
+
+els.analyticsClose.addEventListener("click", () => {
+  state.analyticsOpen = false;
+  render(state.game);
 });
 
 els.discard.addEventListener("click", async () => {
