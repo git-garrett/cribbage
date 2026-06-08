@@ -90,17 +90,22 @@ interface AnalyticsTotals {
   handDealer: number;
   handPone: number;
   crib: number;
+  peggingDealerHands: number;
+  peggingPoneHands: number;
+  handDealerHands: number;
+  handPoneHands: number;
+  cribHands: number;
   baselineGames?: number;
 }
 
 function loadSavedGame(): CribbageGame {
   const saved = localStorage.getItem(SAVE_KEY);
-  if (!saved) return new CribbageGame("expert");
+  if (!saved) return new CribbageGame("expert-1.1");
   try {
     return CribbageGame.restore(JSON.parse(saved) as GameSnapshot);
   } catch {
     localStorage.removeItem(SAVE_KEY);
-    return new CribbageGame("expert");
+    return new CribbageGame("expert-1.1");
   }
 }
 
@@ -461,7 +466,7 @@ function completedHandCount(phase: GameState["phase"], handNumber: number): numb
 
 function parHolesFor(player: "human" | "ai", firstDealerPlayer: "human" | "ai"): number[] {
   return player === firstDealerPlayer
-    ? [7, ...SHARED_PAR_HOLES, 121]
+    ? [7, ...SHARED_PAR_HOLES, 111, 121]
     : [...SHARED_PAR_HOLES, 111, 121];
 }
 
@@ -522,7 +527,7 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
   try {
     if (path === "/api/state") return localGame.state();
     if (path === "/api/new") {
-      localGame = new CribbageGame((body?.opponent as Opponent) || "expert");
+      localGame = new CribbageGame((body?.opponent as Opponent) || "expert-1.1");
       saveGame();
       return localGame.state();
     }
@@ -700,7 +705,7 @@ function renderAnalytics(): void {
     els.analyticsGames,
     [...gameEvents].reverse().slice(0, 40).map((event) =>
       event.action === "start"
-        ? [`Game started`, `Opponent: ${event.opponent}`, shortDate(event.at)]
+        ? [`Game started`, `Engine: ${engineName(event.opponent)}`, shortDate(event.at)]
         : [
             `${playerName(event.winner)} won${event.result && event.result !== "regular" ? ` by ${event.result}` : ""}`,
             `Final ${event.finalScores?.human ?? 0}-${event.finalScores?.ai ?? 0}`,
@@ -739,8 +744,33 @@ function renderAnalyticsTotals(
   gameEvents: Extract<AnalyticsEvent, { type: "game" }>[],
 ): void {
   const totals = emptyAnalyticsTotals();
+  const opportunities = {
+    human: {
+      peggingDealer: new Set<string>(),
+      peggingPone: new Set<string>(),
+      handDealer: new Set<string>(),
+      handPone: new Set<string>(),
+      crib: new Set<string>(),
+    },
+    ai: {
+      peggingDealer: new Set<string>(),
+      peggingPone: new Set<string>(),
+      handDealer: new Set<string>(),
+      handPone: new Set<string>(),
+      crib: new Set<string>(),
+    },
+  };
   for (const event of scoreEvents) {
-    totals[event.player][scoreKey(event.category, event.role)] += event.points;
+    const key = scoreKey(event.category, event.role);
+    totals[event.player][key] += event.points;
+    opportunities[event.player][key].add(`${event.gameId}:${event.handNumber}`);
+  }
+  for (const player of ["human", "ai"] as const) {
+    totals[player].peggingDealerHands = opportunities[player].peggingDealer.size;
+    totals[player].peggingPoneHands = opportunities[player].peggingPone.size;
+    totals[player].handDealerHands = opportunities[player].handDealer.size;
+    totals[player].handPoneHands = opportunities[player].handPone.size;
+    totals[player].cribHands = opportunities[player].crib.size;
   }
   for (const event of gameEvents) {
     if (event.action !== "end" || !event.winner) continue;
@@ -773,11 +803,11 @@ function renderAnalyticsTotals(
       <span>Skunked: ${totals[player].skunked}</span>
       <span>Double skunks: ${totals[player].doubleSkunks}</span>
       <span>Double skunked: ${totals[player].doubleSkunked}</span>
-      <span>Peg dealer: ${totals[player].peggingDealer}</span>
-      <span>Peg pone: ${totals[player].peggingPone}</span>
-      <span>Hand dealer: ${totals[player].handDealer}</span>
-      <span>Hand pone: ${totals[player].handPone}</span>
-      <span>Crib: ${totals[player].crib}</span>
+      <span>Avg peg as dealer: ${averageLabel(totals[player].peggingDealer, totals[player].peggingDealerHands)}</span>
+      <span>Avg peg as pone: ${averageLabel(totals[player].peggingPone, totals[player].peggingPoneHands)}</span>
+      <span>Avg hand as dealer: ${averageLabel(totals[player].handDealer, totals[player].handDealerHands)}</span>
+      <span>Avg hand as pone: ${averageLabel(totals[player].handPone, totals[player].handPoneHands)}</span>
+      <span>Avg crib: ${averageLabel(totals[player].crib, totals[player].cribHands)}</span>
     `;
     els.analyticsTotals.append(card);
   }
@@ -818,6 +848,11 @@ function emptyAnalyticsTotals(): Record<PlayerKey, AnalyticsTotals> {
       handDealer: 0,
       handPone: 0,
       crib: 0,
+      peggingDealerHands: 0,
+      peggingPoneHands: 0,
+      handDealerHands: 0,
+      handPoneHands: 0,
+      cribHands: 0,
     },
     ai: {
       wins: 0,
@@ -831,17 +866,44 @@ function emptyAnalyticsTotals(): Record<PlayerKey, AnalyticsTotals> {
       handDealer: 0,
       handPone: 0,
       crib: 0,
+      peggingDealerHands: 0,
+      peggingPoneHands: 0,
+      handDealerHands: 0,
+      handPoneHands: 0,
+      cribHands: 0,
     },
   };
 }
 
 function addAiBaselineTotals(aiTotals: AnalyticsTotals): void {
   if (aiBaseline.version !== 1 || !aiBaseline.aiTotals) return;
-  for (const key of Object.keys(aiTotals) as Array<keyof AnalyticsTotals>) {
-    if (key === "baselineGames") continue;
+  const baselineTotalKeys = [
+    "wins",
+    "losses",
+    "skunks",
+    "skunked",
+    "doubleSkunks",
+    "doubleSkunked",
+    "peggingDealer",
+    "peggingPone",
+    "handDealer",
+    "handPone",
+    "crib",
+  ] as const;
+  for (const key of baselineTotalKeys) {
     aiTotals[key] += Number(aiBaseline.aiTotals[key] ?? 0);
   }
+  aiTotals.peggingDealerHands += Number(aiBaseline.opportunities?.peggingDealer ?? 0);
+  aiTotals.peggingPoneHands += Number(aiBaseline.opportunities?.peggingPone ?? 0);
+  aiTotals.handDealerHands += Number(aiBaseline.opportunities?.handDealer ?? 0);
+  aiTotals.handPoneHands += Number(aiBaseline.opportunities?.handPone ?? 0);
+  aiTotals.cribHands += Number(aiBaseline.opportunities?.crib ?? 0);
   aiTotals.baselineGames = Number(aiBaseline.games ?? 0);
+}
+
+function averageLabel(points: number, hands: number): string {
+  if (!hands) return "-";
+  return `${(points / hands).toFixed(2)} (${hands})`;
 }
 
 function gameResultFromScores(
@@ -871,6 +933,11 @@ function scoreLabel(category: AnalyticsScoreCategory, role: AnalyticsRole): stri
 function playerName(player: PlayerKey | undefined): string {
   if (!player) return "-";
   return player === "human" ? "User" : "AI";
+}
+
+function engineName(engine: string | undefined): string {
+  if (engine === "expert" || engine === "expert-1.1") return "Expert 1.1";
+  return engine || "-";
 }
 
 function shortDate(value: string): string {

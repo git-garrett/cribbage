@@ -1,5 +1,6 @@
 export type PlayerKey = "human" | "ai";
-export type Opponent = "expert" | "random";
+export type Opponent = "expert-1.1";
+type StoredOpponent = Opponent | "expert";
 export type Phase =
   | "discard"
   | "ai_discarding"
@@ -107,7 +108,7 @@ export type AnalyticsEvent =
       type: "game";
       action: "start" | "end";
       gameId: string;
-      opponent: Opponent;
+      opponent: StoredOpponent;
       winner?: PlayerKey;
       loser?: PlayerKey;
       result?: AnalyticsGameResult;
@@ -192,7 +193,7 @@ export interface GameSnapshot {
   gameId?: string;
   analyticsCounter?: number;
   analyticsEvents?: AnalyticsEvent[];
-  opponent: Opponent;
+  opponent: StoredOpponent;
   deal: 0 | 1;
   firstDeal: 0 | 1;
   handNumber?: number;
@@ -236,13 +237,23 @@ export function cardsFromString(input: string): Card[] {
   return input.trim().split(/\s+/).filter(Boolean).map(cardFromString);
 }
 
+const handScoreCache = new Map<string, number>();
+
 export function scoreHand(hand: Card[], turnCard: Card, crib = false): number {
-  return (
+  const key = `${crib ? "crib" : "hand"}:${[...hand, turnCard]
+    .map((card) => card.id)
+    .sort((a, b) => a - b)
+    .join(",")}`;
+  const cached = handScoreCache.get(key);
+  if (cached !== undefined) return cached;
+  const score = (
     scoreFifteens(hand, turnCard) +
     scoreSets(hand, turnCard) +
     scoreRuns(hand, turnCard) +
     scoreFlushAndRightJack(hand, turnCard, crib)
   );
+  handScoreCache.set(key, score);
+  return score;
 }
 
 export function scoreFifteens(hand: Card[], turnCard: Card): number {
@@ -338,7 +349,7 @@ export function scoreCount(plays: Card[]): number {
 export class CribbageGame {
   human: PlayerState;
   ai: PlayerState;
-  opponent: Opponent;
+  opponent: StoredOpponent;
   deal: 0 | 1;
   firstDeal: 0 | 1;
   dealer!: PlayerState;
@@ -367,8 +378,8 @@ export class CribbageGame {
     ai: ["start-back", "start-front"],
   };
 
-  constructor(opponent: Opponent = "expert") {
-    this.opponent = opponent;
+  constructor(opponent: StoredOpponent = "expert-1.1") {
+    this.opponent = normalizeOpponent(opponent);
     this.human = { key: "human", name: "User", hand: [], table: [], crib: [], score: 0 };
     this.ai = { key: "ai", name: "AI", hand: [], table: [], crib: [], score: 0 };
     this.deal = Math.random() < 0.5 ? 0 : 1;
@@ -383,11 +394,11 @@ export class CribbageGame {
 
   static restore(snapshot: GameSnapshot): CribbageGame {
     if (snapshot.version !== 1) throw new Error("Unsupported saved game version.");
-    const game = new CribbageGame(snapshot.opponent);
+    const game = new CribbageGame();
     game.gameId = snapshot.gameId ?? createAnalyticsId("game");
     game.analyticsCounter = snapshot.analyticsCounter ?? 0;
     game.analyticsEvents = snapshot.analyticsEvents ? [...snapshot.analyticsEvents] : [];
-    game.opponent = snapshot.opponent;
+    game.opponent = normalizeOpponent(snapshot.opponent);
     game.deal = snapshot.deal;
     game.firstDeal = snapshot.firstDeal;
     game.human.hand = snapshot.human.hand.map((id) => new Card(id));
@@ -730,7 +741,6 @@ export class CribbageGame {
   }
 
   private chooseDiscards(player: PlayerState, myCrib: boolean): Card[] {
-    if (this.opponent === "random") return player.hand.slice(0, 2);
     const deck = fullDeck().filter((card) => !player.hand.some((held) => held.id === card.id));
     let bestScore = Number.NEGATIVE_INFINITY;
     let bestDiscard = player.hand.slice(0, 2);
@@ -822,7 +832,6 @@ export class CribbageGame {
 
   private choosePlay(player: PlayerState): Card {
     const legal = this.legalCards(player);
-    if (this.opponent === "random") return legal[Math.floor(Math.random() * legal.length)];
     return legal.reduce((best, card) => {
       const bestKey = [scoreCount([...this.plays, best]), -best.value, -best.runVal];
       const cardKey = [scoreCount([...this.plays, card]), -card.value, -card.runVal];
@@ -1193,4 +1202,9 @@ function compareTuple(a: number[], b: number[]): number {
 
 function createAnalyticsId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function normalizeOpponent(opponent: StoredOpponent): Opponent {
+  if (opponent === "expert") return "expert-1.1";
+  return opponent;
 }

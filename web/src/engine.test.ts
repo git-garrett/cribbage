@@ -40,7 +40,7 @@ describe("scoring", () => {
 
 describe("game state", () => {
   test("keeps first dealer stable while current dealer alternates", () => {
-    const game = new CribbageGame("random");
+    const game = new CribbageGame();
     game.deal = 0;
     game.firstDeal = 0;
     game.startHand();
@@ -54,7 +54,7 @@ describe("game state", () => {
   });
 
   test("discards selected card ids instead of display positions", () => {
-    const game = new CribbageGame("random");
+    const game = new CribbageGame();
     game.phase = "discard";
     game.dealer = game.human;
     game.crib = [];
@@ -70,7 +70,7 @@ describe("game state", () => {
   });
 
   test("awards last card before show scoring", () => {
-    const game = new CribbageGame("random");
+    const game = new CribbageGame();
     game.phase = "pegging";
     game.pone = game.human;
     game.dealer = game.ai;
@@ -99,7 +99,7 @@ describe("game state", () => {
   });
 
   test("restores a saved game snapshot", () => {
-    const game = new CribbageGame("random");
+    const game = new CribbageGame();
     game.deal = 0;
     game.firstDeal = 0;
     game.startHand();
@@ -117,7 +117,7 @@ describe("game state", () => {
   });
 
   test("restores scoring review without recounting points", () => {
-    const game = new CribbageGame("random");
+    const game = new CribbageGame();
     game.phase = "pegging_complete";
     game.pone = game.human;
     game.dealer = game.ai;
@@ -139,7 +139,7 @@ describe("game state", () => {
   });
 
   test("infers hand number when restoring an older saved game", () => {
-    const game = new CribbageGame("random");
+    const game = new CribbageGame();
     game.human.score = 18;
     game.ai.score = 7;
     game.phase = "discard";
@@ -152,7 +152,7 @@ describe("game state", () => {
   });
 
   test("tracks analytics for pegging and hand scoring by role", () => {
-    const game = new CribbageGame("random");
+    const game = new CribbageGame();
     game.phase = "pegging";
     game.pone = game.human;
     game.dealer = game.ai;
@@ -200,7 +200,7 @@ describe("game state", () => {
   });
 
   test("records enough analytics detail to reconstruct a hand", () => {
-    const game = new CribbageGame("random");
+    const game = new CribbageGame();
     game.deal = 0;
     game.firstDeal = 0;
     game.startHand();
@@ -277,7 +277,7 @@ describe("game state", () => {
   });
 
   test("records game outcome totals including skunks", () => {
-    const game = new CribbageGame("random");
+    const game = new CribbageGame();
     game.human.score = 119;
     game.ai.score = 60;
     game.analyticsEvents = [];
@@ -296,7 +296,7 @@ describe("game state", () => {
   });
 
   test("autoplays AI versus AI games to completion", () => {
-    const game = new CribbageGame("random");
+    const game = new CribbageGame();
 
     game.autoPlayToEnd();
 

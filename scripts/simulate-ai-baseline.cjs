@@ -4,7 +4,7 @@ const Module = require("node:module");
 const ts = require("typescript");
 
 const gameCount = Number.parseInt(process.argv[2] || "1000", 10);
-const opponent = process.argv[3] || "random";
+const opponent = process.argv[3] || "expert-1.1";
 const root = path.resolve(__dirname, "..");
 const enginePath = path.join(root, "web/src/engine.ts");
 const outputPath = path.join(root, "web/src/ai-baseline.json");
@@ -12,8 +12,8 @@ const outputPath = path.join(root, "web/src/ai-baseline.json");
 if (!Number.isInteger(gameCount) || gameCount <= 0) {
   throw new Error("Game count must be a positive integer.");
 }
-if (!["random", "expert"].includes(opponent)) {
-  throw new Error("Opponent must be random or expert.");
+if (opponent !== "expert-1.1") {
+  throw new Error("Opponent must be expert-1.1.");
 }
 
 const source = fs.readFileSync(enginePath, "utf8");
@@ -45,6 +45,14 @@ const totals = {
   crib: 0,
 };
 
+const opportunities = {
+  peggingDealer: 0,
+  peggingPone: 0,
+  handDealer: 0,
+  handPone: 0,
+  crib: 0,
+};
+
 function scoreKey(category, role) {
   if (category === "crib") return "crib";
   return `${category}${role === "dealer" ? "Dealer" : "Pone"}`;
@@ -61,7 +69,23 @@ function resultFromScores(winner, scores) {
 for (let index = 0; index < gameCount; index += 1) {
   const game = new CribbageGame(opponent);
   game.autoPlayToEnd();
-  for (const event of game.state().analyticsEvents) {
+  const events = game.state().analyticsEvents;
+  const hands = new Map();
+  const ensureHand = (handNumber) => {
+    if (!hands.has(handNumber)) {
+      hands.set(handNumber, {
+        roles: {},
+      });
+    }
+    return hands.get(handNumber);
+  };
+
+  for (const event of events) {
+    if (event.handNumber && event.type === "hand" && event.action === "start") {
+      const hand = ensureHand(event.handNumber);
+      hand.roles[event.dealer] = "dealer";
+      hand.roles[event.pone] = "pone";
+    }
     if (event.type === "score") {
       totals[scoreKey(event.category, event.role)] += event.points;
     } else if (event.type === "game" && event.action === "end" && event.winner) {
@@ -78,10 +102,26 @@ for (let index = 0; index < gameCount; index += 1) {
       }
     }
   }
+  for (const hand of hands.values()) {
+    for (const player of ["human", "ai"]) {
+      const role = hand.roles[player];
+      if (!role) continue;
+      opportunities[role === "dealer" ? "peggingDealer" : "peggingPone"] += 1;
+      opportunities[role === "dealer" ? "handDealer" : "handPone"] += 1;
+      if (role === "dealer") opportunities.crib += 1;
+    }
+  }
   if ((index + 1) % 100 === 0) {
     process.stdout.write(`Simulated ${index + 1}/${gameCount} games\n`);
   }
 }
+
+const averages = Object.fromEntries(
+  Object.keys(opportunities).map((key) => [
+    key,
+    opportunities[key] ? totals[key] / opportunities[key] : 0,
+  ]),
+);
 
 const baseline = {
   version: 1,
@@ -90,6 +130,8 @@ const baseline = {
   opponent,
   source: "ai-vs-ai-baseline",
   aiTotals: totals,
+  opportunities,
+  averages,
 };
 
 fs.writeFileSync(outputPath, `${JSON.stringify(baseline, null, 2)}\n`);

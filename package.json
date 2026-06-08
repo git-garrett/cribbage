@@ -5,7 +5,7 @@
     "cap:sync:ios": "npm run build && cap sync ios",
     "dev": "vite --host 0.0.0.0",
     "ios": "npm run cap:sync:ios && cap open ios",
-    "simulate:ai-baseline": "node scripts/simulate-ai-baseline.cjs 1000 random",
+    "simulate:ai-baseline": "node scripts/simulate-ai-baseline.cjs 1000 expert-1.1",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

@@ -1,20 +1,34 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-07T22:45:34.863Z",
+  "generatedAt": "2026-06-08T02:32:35.770Z",
   "games": 1000,
-  "opponent": "random",
+  "opponent": "expert-1.1",
   "source": "ai-vs-ai-baseline",
   "aiTotals": {
     "wins": 1000,
     "losses": 1000,
-    "skunks": 130,
-    "skunked": 130,
+    "skunks": 137,
+    "skunked": 137,
     "doubleSkunks": 2,
     "doubleSkunked": 2,
-    "peggingDealer": 34689,
-    "peggingPone": 20060,
-    "handDealer": 57635,
-    "handPone": 58829,
-    "crib": 56144
+    "peggingDealer": 33826,
+    "peggingPone": 21618,
+    "handDealer": 65284,
+    "handPone": 69603,
+    "crib": 37963
+  },
+  "opportunities": {
+    "peggingDealer": 8807,
+    "peggingPone": 8807,
+    "handDealer": 8807,
+    "handPone": 8807,
+    "crib": 8807
+  },
+  "averages": {
+    "peggingDealer": 3.8408084478255935,
+    "peggingPone": 2.4546383558532985,
+    "handDealer": 7.412739866015669,
+    "handPone": 7.903145225388895,
+    "crib": 4.310548427387306
   }
 }
