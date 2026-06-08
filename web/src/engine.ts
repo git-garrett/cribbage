@@ -1,5 +1,5 @@
 export type PlayerKey = "human" | "ai";
-export type Opponent = "expert-1.1";
+export type Opponent = "expert-1.1" | "ras-table-1.0" | "schell-table-1.0";
 type StoredOpponent = Opponent | "expert";
 export type Phase =
   | "discard"
@@ -17,6 +17,79 @@ const SUIT_NAMES = ["diamonds", "clubs", "hearts", "spades"];
 const SUIT_SYMBOLS = ["♦", "♣", "♥", "♠"];
 const VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10];
 const RUN_VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+const ENGINE_LABELS: Record<Opponent, string> = {
+  "expert-1.1": "Expert 1.1",
+  "ras-table-1.0": "Ras Table 1.0",
+  "schell-table-1.0": "Schell Table 1.0",
+};
+type DiscardTableEngine = Exclude<Opponent, "expert-1.1">;
+type CribTable = { own: number[][]; opponent: number[][] };
+const DISCARD_TABLES: Record<DiscardTableEngine, CribTable> = {
+  "ras-table-1.0": {
+    own: [
+      [5.51, 4.35, 4.69, 5.42, 5.38, 3.98, 4.05, 3.77, 3.49, 3.51, 3.57, 3.50, 3.36],
+      [4.35, 5.82, 7.14, 4.64, 5.54, 4.15, 3.78, 3.82, 3.91, 3.71, 4.05, 3.86, 3.57],
+      [4.69, 7.13, 6.08, 5.13, 5.97, 4.05, 3.33, 4.13, 4.09, 3.51, 4.07, 3.65, 3.89],
+      [5.41, 4.63, 5.12, 5.54, 6.53, 3.95, 3.61, 3.77, 3.82, 3.60, 3.98, 3.63, 3.61],
+      [5.38, 5.53, 5.97, 6.53, 8.88, 6.81, 6.01, 5.56, 5.43, 6.70, 7.09, 6.59, 6.73],
+      [3.97, 4.15, 4.05, 3.95, 6.80, 5.76, 5.14, 4.63, 5.11, 3.31, 3.45, 3.73, 3.21],
+      [4.05, 3.77, 3.33, 3.61, 6.00, 5.14, 5.87, 6.44, 4.06, 3.59, 3.83, 3.39, 3.47],
+      [3.76, 3.82, 4.13, 3.77, 5.56, 4.63, 6.44, 5.50, 4.77, 3.72, 3.93, 3.19, 3.04],
+      [3.49, 3.90, 4.08, 3.82, 5.43, 5.11, 4.06, 4.76, 5.21, 4.40, 4.01, 2.99, 3.07],
+      [3.50, 3.71, 3.51, 3.60, 6.69, 3.31, 3.59, 3.72, 4.39, 4.72, 4.76, 3.17, 2.84],
+      [3.56, 4.05, 4.06, 3.98, 7.08, 3.45, 3.83, 3.92, 4.01, 4.75, 5.28, 4.83, 3.92],
+      [3.50, 3.85, 3.64, 3.63, 6.59, 3.73, 3.38, 3.19, 2.99, 3.16, 4.82, 4.93, 3.48],
+      [3.36, 3.56, 3.89, 3.61, 6.72, 3.20, 3.46, 3.04, 3.07, 2.83, 3.92, 3.48, 4.30],
+    ],
+    opponent: [
+      [5.59, 5.17, 4.96, 5.62, 5.81, 4.97, 4.81, 4.84, 4.34, 4.54, 4.64, 4.24, 4.33],
+      [5.17, 6.19, 7.52, 5.21, 5.79, 4.79, 4.80, 4.90, 4.57, 4.54, 4.61, 4.58, 4.45],
+      [4.95, 7.52, 6.11, 5.74, 6.72, 4.81, 4.85, 5.20, 5.18, 4.58, 4.71, 4.61, 4.43],
+      [5.61, 5.20, 5.74, 6.00, 6.44, 5.06, 5.00, 4.94, 4.57, 4.58, 5.14, 4.50, 4.36],
+      [5.81, 5.79, 6.72, 6.43, 9.09, 6.87, 7.08, 6.39, 6.06, 7.22, 8.14, 7.10, 7.13],
+      [4.96, 4.79, 4.81, 5.05, 6.86, 6.30, 6.18, 5.86, 6.20, 4.22, 4.53, 4.14, 4.08],
+      [4.81, 4.80, 4.84, 4.99, 7.08, 6.17, 6.93, 6.67, 5.10, 4.17, 4.69, 4.24, 4.25],
+      [4.84, 4.90, 5.19, 4.93, 6.39, 5.86, 6.67, 7.91, 5.89, 5.59, 4.58, 4.30, 4.15],
+      [4.33, 4.57, 5.17, 4.57, 6.06, 6.20, 5.10, 5.89, 6.52, 5.30, 4.86, 4.12, 3.94],
+      [4.54, 4.53, 4.57, 4.57, 7.21, 4.22, 4.17, 5.58, 5.29, 6.19, 5.95, 4.64, 3.85],
+      [4.64, 4.61, 4.70, 5.14, 8.13, 4.53, 4.69, 4.57, 4.86, 5.95, 5.64, 5.46, 4.63],
+      [4.23, 4.57, 4.61, 4.50, 7.10, 4.14, 4.24, 4.29, 4.11, 4.63, 5.46, 5.36, 4.52],
+      [4.33, 4.45, 4.43, 4.36, 7.12, 4.07, 4.24, 4.15, 3.93, 3.84, 4.62, 4.51, 5.59],
+    ],
+  },
+  "schell-table-1.0": {
+    own: [
+      [5.38, 4.23, 4.52, 5.43, 5.45, 3.85, 3.85, 3.80, 3.40, 3.42, 3.65, 3.42, 3.41],
+      [4.23, 5.72, 7.00, 4.52, 5.45, 3.93, 3.81, 3.66, 3.71, 3.55, 3.84, 3.58, 3.52],
+      [4.52, 7.00, 5.94, 4.91, 5.97, 3.81, 3.58, 3.92, 3.78, 3.57, 3.90, 3.59, 3.67],
+      [5.43, 4.52, 4.91, 5.63, 6.48, 3.85, 3.72, 3.83, 3.72, 3.59, 3.88, 3.59, 3.60],
+      [5.45, 5.45, 5.97, 6.48, 8.79, 6.63, 6.01, 5.48, 5.43, 6.66, 7.00, 6.63, 6.66],
+      [3.85, 3.93, 3.81, 3.85, 6.63, 5.76, 4.98, 4.63, 5.13, 3.17, 3.41, 3.23, 3.13],
+      [3.85, 3.81, 3.58, 3.72, 6.01, 4.98, 5.92, 6.53, 4.04, 3.23, 3.53, 3.23, 3.26],
+      [3.80, 3.66, 3.92, 3.83, 5.48, 4.63, 6.53, 5.45, 4.72, 3.80, 3.52, 3.19, 3.16],
+      [3.40, 3.71, 3.78, 3.72, 5.43, 5.13, 4.04, 4.72, 5.16, 4.29, 3.97, 2.99, 3.06],
+      [3.42, 3.55, 3.57, 3.59, 6.66, 3.17, 3.23, 3.80, 4.29, 4.76, 4.61, 3.31, 2.84],
+      [3.65, 3.84, 3.90, 3.88, 7.00, 3.41, 3.53, 3.52, 3.97, 4.61, 5.33, 4.81, 3.96],
+      [3.42, 3.58, 3.59, 3.59, 6.63, 3.23, 3.23, 3.19, 2.99, 3.31, 4.81, 4.79, 3.46],
+      [3.41, 3.52, 3.67, 3.60, 6.66, 3.13, 3.26, 3.16, 3.06, 2.84, 3.96, 3.46, 4.58],
+    ],
+    opponent: [
+      [6.02, 5.07, 5.07, 5.72, 6.01, 4.91, 4.89, 4.85, 4.55, 4.48, 4.68, 4.33, 4.30],
+      [5.07, 6.38, 7.33, 5.33, 6.11, 4.97, 4.97, 4.94, 4.70, 4.59, 4.81, 4.56, 4.45],
+      [5.07, 7.33, 6.68, 5.96, 6.78, 4.87, 5.01, 5.05, 4.87, 4.63, 4.86, 4.59, 4.48],
+      [5.72, 5.33, 5.96, 6.53, 7.26, 5.34, 4.88, 4.94, 4.68, 4.53, 4.85, 4.46, 4.36],
+      [6.01, 6.11, 6.78, 7.26, 9.37, 7.47, 7.00, 6.30, 6.15, 7.41, 7.76, 7.34, 7.25],
+      [4.91, 4.97, 4.87, 5.34, 7.47, 7.08, 6.42, 5.86, 6.26, 4.31, 4.57, 4.22, 4.14],
+      [4.89, 4.97, 5.01, 4.88, 7.00, 6.42, 7.14, 7.63, 5.26, 4.31, 4.68, 4.32, 4.27],
+      [4.85, 4.94, 5.05, 4.94, 6.30, 5.86, 7.63, 6.82, 5.83, 5.10, 4.59, 4.31, 4.20],
+      [4.55, 4.70, 4.87, 4.68, 6.15, 6.26, 5.26, 5.83, 6.39, 5.43, 4.96, 4.11, 4.03],
+      [4.48, 4.59, 4.63, 4.53, 7.41, 4.31, 4.31, 5.10, 5.43, 6.08, 5.63, 4.61, 3.88],
+      [4.68, 4.81, 4.86, 4.85, 7.76, 4.57, 4.68, 4.59, 4.96, 5.63, 6.42, 5.46, 4.77],
+      [4.33, 4.56, 4.59, 4.46, 7.34, 4.22, 4.32, 4.31, 4.11, 4.61, 5.46, 5.79, 4.49],
+      [4.30, 4.45, 4.48, 4.36, 7.25, 4.14, 4.27, 4.20, 4.03, 3.88, 4.77, 4.49, 5.65],
+    ],
+  },
+};
 
 export class WinGame extends Error {}
 
@@ -350,6 +423,7 @@ export class CribbageGame {
   human: PlayerState;
   ai: PlayerState;
   opponent: StoredOpponent;
+  playerEngines: Record<PlayerKey, Opponent>;
   deal: 0 | 1;
   firstDeal: 0 | 1;
   dealer!: PlayerState;
@@ -378,8 +452,12 @@ export class CribbageGame {
     ai: ["start-back", "start-front"],
   };
 
-  constructor(opponent: StoredOpponent = "expert-1.1") {
+  constructor(opponent: StoredOpponent = "expert-1.1", humanEngine: StoredOpponent = opponent) {
     this.opponent = normalizeOpponent(opponent);
+    this.playerEngines = {
+      human: normalizeOpponent(humanEngine),
+      ai: this.opponent,
+    };
     this.human = { key: "human", name: "User", hand: [], table: [], crib: [], score: 0 };
     this.ai = { key: "ai", name: "AI", hand: [], table: [], crib: [], score: 0 };
     this.deal = Math.random() < 0.5 ? 0 : 1;
@@ -399,6 +477,10 @@ export class CribbageGame {
     game.analyticsCounter = snapshot.analyticsCounter ?? 0;
     game.analyticsEvents = snapshot.analyticsEvents ? [...snapshot.analyticsEvents] : [];
     game.opponent = normalizeOpponent(snapshot.opponent);
+    game.playerEngines = {
+      human: game.opponent,
+      ai: game.opponent,
+    };
     game.deal = snapshot.deal;
     game.firstDeal = snapshot.firstDeal;
     game.human.hand = snapshot.human.hand.map((id) => new Card(id));
@@ -742,19 +824,14 @@ export class CribbageGame {
 
   private chooseDiscards(player: PlayerState, myCrib: boolean): Card[] {
     const deck = fullDeck().filter((card) => !player.hand.some((held) => held.id === card.id));
+    const engine = this.playerEngines[player.key];
     let bestScore = Number.NEGATIVE_INFINITY;
     let bestDiscard = player.hand.slice(0, 2);
 
     for (const discard of combinations(player.hand, 2, 2)) {
       const keep = player.hand.filter((card) => !discard.includes(card));
       const handScore = mean(deck.map((cut) => scoreHand(keep, cut)));
-      let cribTotal = 0;
-      let cribCount = 0;
-      for (const pot of combinations(deck, 3, 3)) {
-        cribTotal += scoreHand([...discard, pot[0], pot[1]], pot[2], true);
-        cribCount += 1;
-      }
-      const cribScore = cribTotal / cribCount;
+      const cribScore = expectedCribScore(discard, deck, myCrib, engine);
       const total = myCrib ? handScore + cribScore : handScore - cribScore;
       if (total > bestScore) {
         bestScore = total;
@@ -1198,6 +1275,26 @@ function compareTuple(a: number[], b: number[]): number {
     if (a[i] !== b[i]) return a[i] - b[i];
   }
   return a.length - b.length;
+}
+
+function expectedCribScore(
+  discard: Card[],
+  deck: Card[],
+  myCrib: boolean,
+  engine: Opponent,
+): number {
+  const table = DISCARD_TABLES[engine as DiscardTableEngine];
+  if (table) {
+    const ranks = discard.map((card) => card.rank).sort((a, b) => a - b);
+    return (myCrib ? table.own : table.opponent)[ranks[0]][ranks[1]];
+  }
+  let cribTotal = 0;
+  let cribCount = 0;
+  for (const pot of combinations(deck, 3, 3)) {
+    cribTotal += scoreHand([...discard, pot[0], pot[1]], pot[2], true);
+    cribCount += 1;
+  }
+  return cribTotal / cribCount;
 }
 
 function createAnalyticsId(prefix: string): string {

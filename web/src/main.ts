@@ -937,6 +937,8 @@ function playerName(player: PlayerKey | undefined): string {
 
 function engineName(engine: string | undefined): string {
   if (engine === "expert" || engine === "expert-1.1") return "Expert 1.1";
+  if (engine === "ras-table-1.0") return "Ras Table 1.0";
+  if (engine === "schell-table-1.0") return "Schell Table 1.0";
   return engine || "-";
 }
 
