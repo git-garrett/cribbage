@@ -1,6 +1,11 @@
 export type PlayerKey = "human" | "ai";
-export type Opponent = "expert-1.1" | "ras-table-1.0" | "schell-table-1.0";
+export type Opponent =
+  | "expert-1.1"
+  | "expert-2.0-ras-tables"
+  | "ras-table-1.0"
+  | "schell-table-1.0";
 type StoredOpponent = Opponent | "expert";
+export const DEFAULT_OPPONENT: Opponent = "expert-2.0-ras-tables";
 export type Phase =
   | "discard"
   | "ai_discarding"
@@ -19,12 +24,13 @@ const VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10];
 const RUN_VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
 const ENGINE_LABELS: Record<Opponent, string> = {
   "expert-1.1": "Expert 1.1",
+  "expert-2.0-ras-tables": "Expert 2.0 Ras Tables",
   "ras-table-1.0": "Ras Table 1.0",
   "schell-table-1.0": "Schell Table 1.0",
 };
 type DiscardTableEngine = Exclude<Opponent, "expert-1.1">;
 type CribTable = { own: number[][]; opponent: number[][] };
-const DISCARD_TABLES: Record<DiscardTableEngine, CribTable> = {
+const DISCARD_TABLES: Record<string, CribTable> = {
   "ras-table-1.0": {
     own: [
       [5.51, 4.35, 4.69, 5.42, 5.38, 3.98, 4.05, 3.77, 3.49, 3.51, 3.57, 3.50, 3.36],
@@ -90,6 +96,7 @@ const DISCARD_TABLES: Record<DiscardTableEngine, CribTable> = {
     ],
   },
 };
+DISCARD_TABLES["expert-2.0-ras-tables"] = DISCARD_TABLES["ras-table-1.0"];
 
 export class WinGame extends Error {}
 
@@ -452,7 +459,7 @@ export class CribbageGame {
     ai: ["start-back", "start-front"],
   };
 
-  constructor(opponent: StoredOpponent = "expert-1.1", humanEngine: StoredOpponent = opponent) {
+  constructor(opponent: StoredOpponent = DEFAULT_OPPONENT, humanEngine: StoredOpponent = opponent) {
     this.opponent = normalizeOpponent(opponent);
     this.playerEngines = {
       human: normalizeOpponent(humanEngine),
@@ -1302,6 +1309,6 @@ function createAnalyticsId(prefix: string): string {
 }
 
 function normalizeOpponent(opponent: StoredOpponent): Opponent {
-  if (opponent === "expert") return "expert-1.1";
+  if (opponent === "expert") return DEFAULT_OPPONENT;
   return opponent;
 }

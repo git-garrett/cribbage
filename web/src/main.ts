@@ -1,5 +1,6 @@
 import {
   CribbageGame,
+  DEFAULT_OPPONENT,
   type AnalyticsEvent,
   type AnalyticsScoreCategory,
   type AnalyticsRole,
@@ -10,6 +11,44 @@ import {
   WinGame,
 } from "./engine";
 import aiBaseline from "./ai-baseline.json";
+
+type BaselineScoreTotals = Pick<
+  AnalyticsTotals,
+  | "wins"
+  | "losses"
+  | "skunks"
+  | "skunked"
+  | "doubleSkunks"
+  | "doubleSkunked"
+  | "peggingDealer"
+  | "peggingPone"
+  | "handDealer"
+  | "handPone"
+  | "crib"
+>;
+
+interface AiBaselineSource {
+  version: number;
+  source?: string;
+  games?: number;
+  opponent?: string;
+  aiTotals?: Partial<BaselineScoreTotals>;
+  opportunities?: Partial<Record<ScoreKey, number>>;
+  models?: Record<string, {
+    games?: number;
+    aiTotals?: Partial<BaselineScoreTotals>;
+    opportunities?: Partial<Record<ScoreKey, number>>;
+  }>;
+  benchmarks?: Array<{
+    source?: string;
+    games?: number;
+    models?: Record<string, {
+      games?: number;
+      aiTotals?: Partial<BaselineScoreTotals>;
+      opportunities?: Partial<Record<ScoreKey, number>>;
+    }>;
+  }>;
+}
 
 const state: {
   game: GameState | null;
@@ -79,6 +118,7 @@ interface AnalyticsStore {
 }
 
 interface AnalyticsTotals {
+  games: number;
   wins: number;
   losses: number;
   skunks: number;
@@ -96,16 +136,19 @@ interface AnalyticsTotals {
   handPoneHands: number;
   cribHands: number;
   baselineGames?: number;
+  baselineSources?: string[];
 }
+
+type ScoreKey = "peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib";
 
 function loadSavedGame(): CribbageGame {
   const saved = localStorage.getItem(SAVE_KEY);
-  if (!saved) return new CribbageGame("expert-1.1");
+  if (!saved) return new CribbageGame(DEFAULT_OPPONENT);
   try {
     return CribbageGame.restore(JSON.parse(saved) as GameSnapshot);
   } catch {
     localStorage.removeItem(SAVE_KEY);
-    return new CribbageGame("expert-1.1");
+    return new CribbageGame(DEFAULT_OPPONENT);
   }
 }
 
@@ -527,7 +570,7 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
   try {
     if (path === "/api/state") return localGame.state();
     if (path === "/api/new") {
-      localGame = new CribbageGame((body?.opponent as Opponent) || "expert-1.1");
+      localGame = new CribbageGame((body?.opponent as Opponent) || DEFAULT_OPPONENT);
       saveGame();
       return localGame.state();
     }
@@ -743,73 +786,80 @@ function renderAnalyticsTotals(
   scoreEvents: Extract<AnalyticsEvent, { type: "score" }>[],
   gameEvents: Extract<AnalyticsEvent, { type: "game" }>[],
 ): void {
-  const totals = emptyAnalyticsTotals();
-  const opportunities = {
-    human: {
-      peggingDealer: new Set<string>(),
-      peggingPone: new Set<string>(),
-      handDealer: new Set<string>(),
-      handPone: new Set<string>(),
-      crib: new Set<string>(),
-    },
-    ai: {
-      peggingDealer: new Set<string>(),
-      peggingPone: new Set<string>(),
-      handDealer: new Set<string>(),
-      handPone: new Set<string>(),
-      crib: new Set<string>(),
-    },
+  const humanTotals = emptyAnalyticsTotals();
+  const aiAllTotals = emptyAnalyticsTotals();
+  const aiByModel = new Map<Opponent, AnalyticsTotals>();
+  const gameEngines = engineByGame(gameEvents);
+  const opportunities = new Map<AnalyticsTotals, Record<ScoreKey, Set<string>>>();
+  const ensureOpportunities = (totals: AnalyticsTotals): Record<ScoreKey, Set<string>> => {
+    const existing = opportunities.get(totals);
+    if (existing) return existing;
+    const next = emptyOpportunitySets();
+    opportunities.set(totals, next);
+    return next;
   };
+  const modelTotals = (engine: Opponent): AnalyticsTotals => {
+    const existing = aiByModel.get(engine);
+    if (existing) return existing;
+    const next = emptyAnalyticsTotals();
+    aiByModel.set(engine, next);
+    return next;
+  };
+
   for (const event of scoreEvents) {
     const key = scoreKey(event.category, event.role);
-    totals[event.player][key] += event.points;
-    opportunities[event.player][key].add(`${event.gameId}:${event.handNumber}`);
-  }
-  for (const player of ["human", "ai"] as const) {
-    totals[player].peggingDealerHands = opportunities[player].peggingDealer.size;
-    totals[player].peggingPoneHands = opportunities[player].peggingPone.size;
-    totals[player].handDealerHands = opportunities[player].handDealer.size;
-    totals[player].handPoneHands = opportunities[player].handPone.size;
-    totals[player].cribHands = opportunities[player].crib.size;
+    const handKey = `${event.gameId}:${event.handNumber}`;
+    if (event.player === "human") {
+      humanTotals[key] += event.points;
+      ensureOpportunities(humanTotals)[key].add(handKey);
+    } else {
+      const engine = gameEngines.get(event.gameId) ?? DEFAULT_OPPONENT;
+      const perModel = modelTotals(engine);
+      aiAllTotals[key] += event.points;
+      perModel[key] += event.points;
+      ensureOpportunities(aiAllTotals)[key].add(handKey);
+      ensureOpportunities(perModel)[key].add(handKey);
+    }
   }
   for (const event of gameEvents) {
     if (event.action !== "end" || !event.winner) continue;
     const loser = event.loser ?? (event.winner === "human" ? "ai" : "human");
     const result = event.result ?? gameResultFromScores(event.winner, event.finalScores);
-    totals[event.winner].wins += 1;
-    totals[loser].losses += 1;
+    humanTotals.games += 1;
+    aiAllTotals.games += 1;
+    const engine = gameEngines.get(event.gameId) ?? normalizeAnalyticsEngine(event.opponent);
+    const perModel = modelTotals(engine);
+    perModel.games += 1;
+    const winnerTotals = event.winner === "human" ? humanTotals : aiAllTotals;
+    const loserTotals = loser === "human" ? humanTotals : aiAllTotals;
+    winnerTotals.wins += 1;
+    loserTotals.losses += 1;
+    if (event.winner === "ai") perModel.wins += 1;
+    else perModel.losses += 1;
     if (result === "skunk" || result === "double-skunk") {
-      totals[event.winner].skunks += 1;
-      totals[loser].skunked += 1;
+      winnerTotals.skunks += 1;
+      loserTotals.skunked += 1;
+      if (event.winner === "ai") perModel.skunks += 1;
+      else perModel.skunked += 1;
     }
     if (result === "double-skunk") {
-      totals[event.winner].doubleSkunks += 1;
-      totals[loser].doubleSkunked += 1;
+      winnerTotals.doubleSkunks += 1;
+      loserTotals.doubleSkunked += 1;
+      if (event.winner === "ai") perModel.doubleSkunks += 1;
+      else perModel.doubleSkunked += 1;
     }
   }
-  addAiBaselineTotals(totals.ai);
+  applyOpportunityCounts(humanTotals, ensureOpportunities(humanTotals));
+  applyOpportunityCounts(aiAllTotals, ensureOpportunities(aiAllTotals));
+  for (const totals of aiByModel.values()) applyOpportunityCounts(totals, ensureOpportunities(totals));
+  addAiBaselineTotals(aiAllTotals, aiByModel);
   els.analyticsTotals.innerHTML = "";
-  for (const player of ["human", "ai"] as const) {
-    const card = document.createElement("div");
-    card.className = `analytics-total ${player}`;
-    card.innerHTML = `
-      <strong>${playerName(player)}</strong>
-      ${player === "ai" && totals.ai.baselineGames
-        ? `<span class="analytics-baseline-note">Includes AI baseline: ${totals.ai.baselineGames} games</span>`
-        : ""}
-      <span>Wins: ${totals[player].wins}</span>
-      <span>Losses: ${totals[player].losses}</span>
-      <span>Skunks: ${totals[player].skunks}</span>
-      <span>Skunked: ${totals[player].skunked}</span>
-      <span>Double skunks: ${totals[player].doubleSkunks}</span>
-      <span>Double skunked: ${totals[player].doubleSkunked}</span>
-      <span>Avg peg as dealer: ${averageLabel(totals[player].peggingDealer, totals[player].peggingDealerHands)}</span>
-      <span>Avg peg as pone: ${averageLabel(totals[player].peggingPone, totals[player].peggingPoneHands)}</span>
-      <span>Avg hand as dealer: ${averageLabel(totals[player].handDealer, totals[player].handDealerHands)}</span>
-      <span>Avg hand as pone: ${averageLabel(totals[player].handPone, totals[player].handPoneHands)}</span>
-      <span>Avg crib: ${averageLabel(totals[player].crib, totals[player].cribHands)}</span>
-    `;
-    els.analyticsTotals.append(card);
+  els.analyticsTotals.append(
+    analyticsTotalCard("User", humanTotals, "human"),
+    analyticsTotalCard("All AI", aiAllTotals, "ai"),
+  );
+  for (const [engine, totals] of [...aiByModel.entries()].sort((a, b) => engineName(a[0]).localeCompare(engineName(b[0])))) {
+    els.analyticsTotals.append(analyticsTotalCard(engineName(engine), totals, "ai"));
   }
 }
 
@@ -834,49 +884,98 @@ function renderAnalyticsRows(container: HTMLElement, rows: string[][]): void {
   }
 }
 
-function emptyAnalyticsTotals(): Record<PlayerKey, AnalyticsTotals> {
+function emptyAnalyticsTotals(): AnalyticsTotals {
   return {
-    human: {
-      wins: 0,
-      losses: 0,
-      skunks: 0,
-      skunked: 0,
-      doubleSkunks: 0,
-      doubleSkunked: 0,
-      peggingDealer: 0,
-      peggingPone: 0,
-      handDealer: 0,
-      handPone: 0,
-      crib: 0,
-      peggingDealerHands: 0,
-      peggingPoneHands: 0,
-      handDealerHands: 0,
-      handPoneHands: 0,
-      cribHands: 0,
-    },
-    ai: {
-      wins: 0,
-      losses: 0,
-      skunks: 0,
-      skunked: 0,
-      doubleSkunks: 0,
-      doubleSkunked: 0,
-      peggingDealer: 0,
-      peggingPone: 0,
-      handDealer: 0,
-      handPone: 0,
-      crib: 0,
-      peggingDealerHands: 0,
-      peggingPoneHands: 0,
-      handDealerHands: 0,
-      handPoneHands: 0,
-      cribHands: 0,
-    },
+    games: 0,
+    wins: 0,
+    losses: 0,
+    skunks: 0,
+    skunked: 0,
+    doubleSkunks: 0,
+    doubleSkunked: 0,
+    peggingDealer: 0,
+    peggingPone: 0,
+    handDealer: 0,
+    handPone: 0,
+    crib: 0,
+    peggingDealerHands: 0,
+    peggingPoneHands: 0,
+    handDealerHands: 0,
+    handPoneHands: 0,
+    cribHands: 0,
   };
 }
 
-function addAiBaselineTotals(aiTotals: AnalyticsTotals): void {
-  if (aiBaseline.version !== 1 || !aiBaseline.aiTotals) return;
+function emptyOpportunitySets(): Record<ScoreKey, Set<string>> {
+  return {
+    peggingDealer: new Set<string>(),
+    peggingPone: new Set<string>(),
+    handDealer: new Set<string>(),
+    handPone: new Set<string>(),
+    crib: new Set<string>(),
+  };
+}
+
+function applyOpportunityCounts(
+  totals: AnalyticsTotals,
+  opportunities: Record<ScoreKey, Set<string>>,
+): void {
+  totals.peggingDealerHands += opportunities.peggingDealer.size;
+  totals.peggingPoneHands += opportunities.peggingPone.size;
+  totals.handDealerHands += opportunities.handDealer.size;
+  totals.handPoneHands += opportunities.handPone.size;
+  totals.cribHands += opportunities.crib.size;
+}
+
+function engineByGame(gameEvents: Extract<AnalyticsEvent, { type: "game" }>[]): Map<string, Opponent> {
+  const engines = new Map<string, Opponent>();
+  for (const event of gameEvents) engines.set(event.gameId, normalizeAnalyticsEngine(event.opponent));
+  return engines;
+}
+
+function addAiBaselineTotals(aiAllTotals: AnalyticsTotals, aiByModel: Map<Opponent, AnalyticsTotals>): void {
+  const baseline = aiBaseline as unknown as AiBaselineSource;
+  if (baseline.version !== 1) return;
+  const addModel = (
+    engineValue: string | undefined,
+    games: number | undefined,
+    totals: Partial<BaselineScoreTotals> | undefined,
+    opportunities: Partial<Record<ScoreKey, number>> | undefined,
+    sourceLabel: string,
+  ): void => {
+    if (!totals) return;
+    const engine = normalizeAnalyticsEngine(engineValue);
+    const perModel = aiByModel.get(engine) ?? emptyAnalyticsTotals();
+    aiByModel.set(engine, perModel);
+    addBaselineStats(aiAllTotals, games, totals, opportunities, sourceLabel);
+    addBaselineStats(perModel, games, totals, opportunities, sourceLabel);
+  };
+
+  addModel(
+    baseline.opponent,
+    baseline.games,
+    baseline.aiTotals,
+    baseline.opportunities,
+    benchmarkLabel(baseline.source, baseline.games),
+  );
+  for (const [engine, model] of Object.entries(baseline.models ?? {})) {
+    addModel(engine, model.games, model.aiTotals, model.opportunities, benchmarkLabel(baseline.source, model.games));
+  }
+  for (const benchmark of baseline.benchmarks ?? []) {
+    const label = benchmarkLabel(benchmark.source, benchmark.games);
+    for (const [engine, model] of Object.entries(benchmark.models ?? {})) {
+      addModel(engine, model.games ?? benchmark.games, model.aiTotals, model.opportunities, label);
+    }
+  }
+}
+
+function addBaselineStats(
+  totals: AnalyticsTotals,
+  games: number | undefined,
+  baselineTotals: Partial<BaselineScoreTotals>,
+  opportunities: Partial<Record<ScoreKey, number>> | undefined,
+  sourceLabel: string,
+): void {
   const baselineTotalKeys = [
     "wins",
     "losses",
@@ -891,14 +990,49 @@ function addAiBaselineTotals(aiTotals: AnalyticsTotals): void {
     "crib",
   ] as const;
   for (const key of baselineTotalKeys) {
-    aiTotals[key] += Number(aiBaseline.aiTotals[key] ?? 0);
+    totals[key] += Number(baselineTotals[key] ?? 0);
   }
-  aiTotals.peggingDealerHands += Number(aiBaseline.opportunities?.peggingDealer ?? 0);
-  aiTotals.peggingPoneHands += Number(aiBaseline.opportunities?.peggingPone ?? 0);
-  aiTotals.handDealerHands += Number(aiBaseline.opportunities?.handDealer ?? 0);
-  aiTotals.handPoneHands += Number(aiBaseline.opportunities?.handPone ?? 0);
-  aiTotals.cribHands += Number(aiBaseline.opportunities?.crib ?? 0);
-  aiTotals.baselineGames = Number(aiBaseline.games ?? 0);
+  totals.games += Number(games ?? 0);
+  totals.peggingDealerHands += Number(opportunities?.peggingDealer ?? 0);
+  totals.peggingPoneHands += Number(opportunities?.peggingPone ?? 0);
+  totals.handDealerHands += Number(opportunities?.handDealer ?? 0);
+  totals.handPoneHands += Number(opportunities?.handPone ?? 0);
+  totals.cribHands += Number(opportunities?.crib ?? 0);
+  totals.baselineGames = (totals.baselineGames ?? 0) + Number(games ?? 0);
+  if (sourceLabel) totals.baselineSources = [...new Set([...(totals.baselineSources ?? []), sourceLabel])];
+}
+
+function analyticsTotalCard(label: string, totals: AnalyticsTotals, kind: "human" | "ai"): HTMLElement {
+  const card = document.createElement("div");
+  card.className = `analytics-total ${kind}`;
+  const benchmarkNote = totals.baselineGames
+    ? `Includes benchmarks: ${(totals.baselineSources ?? ["AI baseline"]).join("; ")} (${totals.baselineGames} model-games)`
+    : "";
+  card.innerHTML = `
+    <strong>${label}</strong>
+    ${kind === "ai" && benchmarkNote ? `<span class="analytics-baseline-note">${benchmarkNote}</span>` : ""}
+    <span>Games: ${totals.games}</span>
+    <span>Wins: ${totals.wins}</span>
+    <span>Losses: ${totals.losses}</span>
+    <span>Skunks: ${totals.skunks}</span>
+    <span>Skunked: ${totals.skunked}</span>
+    <span>Double skunks: ${totals.doubleSkunks}</span>
+    <span>Double skunked: ${totals.doubleSkunked}</span>
+    <span>Avg peg as dealer: ${averageLabel(totals.peggingDealer, totals.peggingDealerHands)}</span>
+    <span>Avg peg as pone: ${averageLabel(totals.peggingPone, totals.peggingPoneHands)}</span>
+    <span>Avg hand as dealer: ${averageLabel(totals.handDealer, totals.handDealerHands)}</span>
+    <span>Avg hand as pone: ${averageLabel(totals.handPone, totals.handPoneHands)}</span>
+    <span>Avg crib: ${averageLabel(totals.crib, totals.cribHands)}</span>
+  `;
+  return card;
+}
+
+function benchmarkLabel(source: string | undefined, games: number | undefined): string {
+  if (source === "ras-v-schell-1000") return "1,000 Ras vs Schell";
+  if (source === "three-way-ai-vs-ai-900") return "900 three-way AI vs AI";
+  if (source === "three-way-expert-1.1-900") return "900 three-way with Expert 1.1";
+  if (source === "ai-vs-ai-baseline") return `${games ?? 0} Expert 1.1 AI baseline`;
+  return source || "AI baseline";
 }
 
 function averageLabel(points: number, hands: number): string {
@@ -937,9 +1071,23 @@ function playerName(player: PlayerKey | undefined): string {
 
 function engineName(engine: string | undefined): string {
   if (engine === "expert" || engine === "expert-1.1") return "Expert 1.1";
+  if (engine === "expert-2.0-ras-tables") return "Expert 2.0 Ras Tables";
   if (engine === "ras-table-1.0") return "Ras Table 1.0";
   if (engine === "schell-table-1.0") return "Schell Table 1.0";
   return engine || "-";
+}
+
+function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
+  if (engine === "expert") return "expert-1.1";
+  if (
+    engine === "expert-1.1" ||
+    engine === "expert-2.0-ras-tables" ||
+    engine === "ras-table-1.0" ||
+    engine === "schell-table-1.0"
+  ) {
+    return engine;
+  }
+  return DEFAULT_OPPONENT;
 }
 
 function shortDate(value: string): string {

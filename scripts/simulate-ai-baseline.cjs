@@ -4,7 +4,14 @@ const Module = require("node:module");
 const ts = require("typescript");
 
 const gameCount = Number.parseInt(process.argv[2] || "1000", 10);
-const opponent = process.argv[3] || "expert-1.1";
+const defaultOpponent = "expert-2.0-ras-tables";
+const validOpponents = new Set([
+  "expert-1.1",
+  "expert-2.0-ras-tables",
+  "ras-table-1.0",
+  "schell-table-1.0",
+]);
+const opponent = process.argv[3] || defaultOpponent;
 const root = path.resolve(__dirname, "..");
 const enginePath = path.join(root, "web/src/engine.ts");
 const outputPath = path.join(root, "web/src/ai-baseline.json");
@@ -12,8 +19,8 @@ const outputPath = path.join(root, "web/src/ai-baseline.json");
 if (!Number.isInteger(gameCount) || gameCount <= 0) {
   throw new Error("Game count must be a positive integer.");
 }
-if (opponent !== "expert-1.1") {
-  throw new Error("Opponent must be expert-1.1.");
+if (!validOpponents.has(opponent)) {
+  throw new Error(`Opponent must be one of: ${[...validOpponents].join(", ")}.`);
 }
 
 const source = fs.readFileSync(enginePath, "utf8");

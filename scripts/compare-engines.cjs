@@ -4,11 +4,16 @@ const Module = require("node:module");
 const ts = require("typescript");
 
 const gamesPerMatchup = Number.parseInt(process.argv[2] || "300", 10);
+const mode = process.argv[3] || "three-way";
+const outputPath = process.argv[4] || "";
 const root = path.resolve(__dirname, "..");
 const enginePath = path.join(root, "web/src/engine.ts");
 
 if (!Number.isInteger(gamesPerMatchup) || gamesPerMatchup <= 0) {
   throw new Error("Game count must be a positive integer.");
+}
+if (!["three-way", "three-way-expert-1.1", "ras-v-schell"].includes(mode)) {
+  throw new Error("Mode must be three-way, three-way-expert-1.1, or ras-v-schell.");
 }
 
 const source = fs.readFileSync(enginePath, "utf8");
@@ -27,22 +32,36 @@ engineModule._compile(compiled, enginePath);
 const { CribbageGame } = engineModule.exports;
 
 const engines = {
-  expert: "expert-1.1",
+  expert: "expert-2.0-ras-tables",
+  expert11: "expert-1.1",
   ras: "ras-table-1.0",
   schell: "schell-table-1.0",
 };
 
 const labels = {
-  [engines.expert]: "Expert 1.1",
+  [engines.expert]: "Expert 2.0 Ras Tables",
+  [engines.expert11]: "Expert 1.1",
   [engines.ras]: "Ras Table 1.0",
   [engines.schell]: "Schell Table 1.0",
 };
 
-const matchups = [
+const threeWayMatchups = [
   [engines.ras, engines.expert],
   [engines.ras, engines.schell],
   [engines.schell, engines.expert],
 ];
+const threeWayExpert11Matchups = [
+  [engines.ras, engines.expert11],
+  [engines.ras, engines.schell],
+  [engines.schell, engines.expert11],
+];
+const rasVsSchellMatchups = [[engines.ras, engines.schell]];
+const matchups =
+  mode === "ras-v-schell"
+    ? rasVsSchellMatchups
+    : mode === "three-way-expert-1.1"
+      ? threeWayExpert11Matchups
+      : threeWayMatchups;
 
 function emptyStats() {
   return {
@@ -139,6 +158,33 @@ function summarize(stats) {
   };
 }
 
+function baselineModel(stats) {
+  return {
+    games: stats.games,
+    aiTotals: {
+      wins: stats.wins,
+      losses: stats.losses,
+      skunks: stats.skunks,
+      skunked: stats.skunked,
+      doubleSkunks: stats.doubleSkunks,
+      doubleSkunked: stats.doubleSkunked,
+      peggingDealer: stats.peggingDealer,
+      peggingPone: stats.peggingPone,
+      handDealer: stats.handDealer,
+      handPone: stats.handPone,
+      crib: stats.crib,
+    },
+    opportunities: stats.opportunities,
+    averages: {
+      peggingDealer: stats.opportunities.peggingDealer ? stats.peggingDealer / stats.opportunities.peggingDealer : 0,
+      peggingPone: stats.opportunities.peggingPone ? stats.peggingPone / stats.opportunities.peggingPone : 0,
+      handDealer: stats.opportunities.handDealer ? stats.handDealer / stats.opportunities.handDealer : 0,
+      handPone: stats.opportunities.handPone ? stats.handPone / stats.opportunities.handPone : 0,
+      crib: stats.opportunities.crib ? stats.crib / stats.opportunities.crib : 0,
+    },
+  };
+}
+
 const totals = Object.fromEntries(Object.values(engines).map((engine) => [engine, emptyStats()]));
 const matchupResults = [];
 
@@ -174,13 +220,24 @@ for (const [leftEngine, rightEngine] of matchups) {
 }
 
 const report = {
+  version: 1,
   generatedAt: new Date().toISOString(),
+  source: mode,
+  physicalGames: gamesPerMatchup * matchups.length,
   gamesPerMatchup,
   matchups: matchupResults,
   totals: Object.fromEntries(Object.entries(totals).map(([engine, stats]) => [
     engine,
     { label: labels[engine], ...summarize(stats) },
   ])),
+  models: Object.fromEntries(Object.entries(totals)
+    .filter(([, stats]) => stats.games > 0)
+    .map(([engine, stats]) => [engine, baselineModel(stats)])),
 };
 
-process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+if (outputPath) {
+  fs.writeFileSync(path.resolve(outputPath), `${JSON.stringify(report, null, 2)}\n`);
+  process.stdout.write(`Wrote ${outputPath}\n`);
+} else {
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+}
