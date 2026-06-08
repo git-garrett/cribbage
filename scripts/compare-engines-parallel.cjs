@@ -9,17 +9,25 @@ const root = path.resolve(__dirname, "..");
 const enginePath = path.join(root, "web/src/engine.ts");
 
 const engines = {
-  expert: "expert-2.0-ras-tables",
+  expert: "expert-peg-2.1",
+  expert20: "expert-2.0-ras-tables",
   expert11: "expert-1.1",
+  expertPeg12: "expert-peg-1.2",
   ras: "ras-table-1.0",
+  rasPeg: "ras-table-peg-1.1",
   schell: "schell-table-1.0",
+  schellPeg: "schell-table-peg-1.1",
 };
 
 const labels = {
-  [engines.expert]: "Expert 2.0 Ras Tables",
+  [engines.expert]: "Expert Peg 2.1",
+  [engines.expert20]: "Expert 2.0 Ras Tables",
   [engines.expert11]: "Expert 1.1",
+  [engines.expertPeg12]: "Expert Peg 1.2",
   [engines.ras]: "Ras Table 1.0",
+  [engines.rasPeg]: "Ras Table Peg 1.1",
   [engines.schell]: "Schell Table 1.0",
+  [engines.schellPeg]: "Schell Table Peg 1.1",
 };
 
 const matchupModes = {
@@ -32,6 +40,12 @@ const matchupModes = {
     [engines.ras, engines.expert11],
     [engines.ras, engines.schell],
     [engines.schell, engines.expert11],
+  ],
+  "peg-variants": [
+    [engines.expert20, engines.expert],
+    [engines.expert11, engines.expertPeg12],
+    [engines.ras, engines.rasPeg],
+    [engines.schell, engines.schellPeg],
   ],
   "ras-v-expert-1.1": [[engines.ras, engines.expert11]],
   "schell-v-expert-1.1": [[engines.schell, engines.expert11]],

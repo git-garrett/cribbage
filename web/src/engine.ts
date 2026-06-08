@@ -1,11 +1,15 @@
 export type PlayerKey = "human" | "ai";
 export type Opponent =
   | "expert-1.1"
+  | "expert-peg-1.2"
   | "expert-2.0-ras-tables"
+  | "expert-peg-2.1"
   | "ras-table-1.0"
+  | "ras-table-peg-1.1"
+  | "schell-table-peg-1.1"
   | "schell-table-1.0";
 type StoredOpponent = Opponent | "expert";
-export const DEFAULT_OPPONENT: Opponent = "expert-2.0-ras-tables";
+export const DEFAULT_OPPONENT: Opponent = "expert-peg-2.1";
 export type Phase =
   | "discard"
   | "ai_discarding"
@@ -24,11 +28,15 @@ const VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10];
 const RUN_VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
 const ENGINE_LABELS: Record<Opponent, string> = {
   "expert-1.1": "Expert 1.1",
+  "expert-peg-1.2": "Expert Peg 1.2",
   "expert-2.0-ras-tables": "Expert 2.0 Ras Tables",
+  "expert-peg-2.1": "Expert Peg 2.1",
   "ras-table-1.0": "Ras Table 1.0",
+  "ras-table-peg-1.1": "Ras Table Peg 1.1",
   "schell-table-1.0": "Schell Table 1.0",
+  "schell-table-peg-1.1": "Schell Table Peg 1.1",
 };
-type DiscardTableEngine = Exclude<Opponent, "expert-1.1">;
+type DiscardTableEngine = Exclude<Opponent, "expert-1.1" | "expert-peg-1.2">;
 type CribTable = { own: number[][]; opponent: number[][] };
 const DISCARD_TABLES: Record<string, CribTable> = {
   "ras-table-1.0": {
@@ -97,6 +105,9 @@ const DISCARD_TABLES: Record<string, CribTable> = {
   },
 };
 DISCARD_TABLES["expert-2.0-ras-tables"] = DISCARD_TABLES["ras-table-1.0"];
+DISCARD_TABLES["expert-peg-2.1"] = DISCARD_TABLES["ras-table-1.0"];
+DISCARD_TABLES["ras-table-peg-1.1"] = DISCARD_TABLES["ras-table-1.0"];
+DISCARD_TABLES["schell-table-peg-1.1"] = DISCARD_TABLES["schell-table-1.0"];
 
 export class WinGame extends Error {}
 
@@ -916,11 +927,66 @@ export class CribbageGame {
 
   private choosePlay(player: PlayerState): Card {
     const legal = this.legalCards(player);
+    if (usesExhaustivePegging(this.playerEngines[player.key])) {
+      return this.chooseExhaustivePegPlay(player, legal);
+    }
     return legal.reduce((best, card) => {
       const bestKey = [scoreCount([...this.plays, best]), -best.value, -best.runVal];
       const cardKey = [scoreCount([...this.plays, card]), -card.value, -card.runVal];
       return compareTuple(cardKey, bestKey) > 0 ? card : best;
     });
+  }
+
+  private chooseExhaustivePegPlay(player: PlayerState, legal: Card[]): Card {
+    const opponent = player === this.human ? this.ai : this.human;
+    const knownCards = [
+      ...player.hand,
+      ...player.table,
+      ...opponent.table,
+      ...this.crib,
+      this.turnCard,
+    ];
+    const rankCounts = remainingRankCounts(knownCards);
+    const opponentHands = enumerateRankHands(rankCounts, opponent.hand.length);
+    let bestCard = legal[0];
+    let bestScore = Number.NEGATIVE_INFINITY;
+
+    for (const card of legal) {
+      const ownRanks = ranksAfterPlaying(player.hand, card);
+      let weightedTotal = 0;
+      let totalWeight = 0;
+      const immediateScore = scoreCount([...this.plays, card]);
+      const countAfterPlay = this.count + card.value;
+      for (const possibleOpponentHand of opponentHands) {
+        const result = simulatePegging({
+          hands: player === this.human
+            ? { human: ownRanks, ai: possibleOpponentHand.ranks }
+            : { human: possibleOpponentHand.ranks, ai: ownRanks },
+          plays: countAfterPlay === 31 ? [] : [...this.plays, card].map((playedCard) => playedCard.rank),
+          count: countAfterPlay === 31 ? 0 : countAfterPlay,
+          current: otherPlayerKey(player.key),
+          goPlayer: null,
+          lastPlayer: countAfterPlay === 31 ? null : player.key,
+          perspective: player.key,
+        });
+        weightedTotal += ((immediateScore * result.weight) + result.total) * possibleOpponentHand.weight;
+        totalWeight += result.weight * possibleOpponentHand.weight;
+      }
+
+      const averageScore = totalWeight ? weightedTotal / totalWeight : immediateScore;
+      const key = [averageScore, scoreCount([...this.plays, card]), -card.value, -card.runVal];
+      const bestKey = [
+        bestScore,
+        scoreCount([...this.plays, bestCard]),
+        -bestCard.value,
+        -bestCard.runVal,
+      ];
+      if (compareTuple(key, bestKey) > 0) {
+        bestScore = averageScore;
+        bestCard = card;
+      }
+    }
+    return bestCard;
   }
 
   private playCard(player: PlayerState, card: Card): void {
@@ -1282,6 +1348,200 @@ function compareTuple(a: number[], b: number[]): number {
     if (a[i] !== b[i]) return a[i] - b[i];
   }
   return a.length - b.length;
+}
+
+type RankCounts = number[];
+type WeightedRankHand = { ranks: RankCounts; weight: number };
+type PegSimulationState = {
+  hands: Record<PlayerKey, RankCounts>;
+  plays: number[];
+  count: number;
+  current: PlayerKey;
+  goPlayer: PlayerKey | null;
+  lastPlayer: PlayerKey | null;
+  perspective: PlayerKey;
+};
+type WeightedScore = { total: number; weight: number };
+
+const pegCardCache = Array.from({ length: 13 }, (_, rank) => new Card(rank));
+
+function usesExhaustivePegging(engine: Opponent): boolean {
+  return engine.includes("-peg-");
+}
+
+function otherPlayerKey(player: PlayerKey): PlayerKey {
+  return player === "human" ? "ai" : "human";
+}
+
+function perspectiveScore(perspective: PlayerKey, scorer: PlayerKey, points: number): number {
+  return scorer === perspective ? points : -points;
+}
+
+function remainingRankCounts(knownCards: Card[]): RankCounts {
+  const counts = Array.from({ length: 13 }, () => 4);
+  for (const card of knownCards) {
+    counts[card.rank] -= 1;
+  }
+  return counts.map((count) => Math.max(0, count));
+}
+
+function ranksAfterPlaying(hand: Card[], played: Card): RankCounts {
+  const ranks = emptyRankCounts();
+  for (const card of hand) ranks[card.rank] += 1;
+  ranks[played.rank] -= 1;
+  return ranks;
+}
+
+function emptyRankCounts(): RankCounts {
+  return Array.from({ length: 13 }, () => 0);
+}
+
+function enumerateRankHands(available: RankCounts, size: number): WeightedRankHand[] {
+  const hands: WeightedRankHand[] = [];
+  const ranks = emptyRankCounts();
+
+  function visit(rank: number, remaining: number, weight: number): void {
+    if (rank === 13) {
+      if (remaining === 0) hands.push({ ranks: [...ranks], weight });
+      return;
+    }
+    const maxUse = Math.min(available[rank], remaining);
+    for (let used = 0; used <= maxUse; used += 1) {
+      ranks[rank] = used;
+      visit(rank + 1, remaining - used, weight * choose(available[rank], used));
+    }
+    ranks[rank] = 0;
+  }
+
+  visit(0, size, 1);
+  return hands;
+}
+
+function choose(n: number, k: number): number {
+  if (k < 0 || k > n) return 0;
+  if (k === 0 || k === n) return 1;
+  let result = 1;
+  for (let i = 1; i <= k; i += 1) {
+    result = (result * (n - k + i)) / i;
+  }
+  return result;
+}
+
+function simulatePegging(state: PegSimulationState): WeightedScore {
+  const memo = new Map<string, WeightedScore>();
+  return simulatePeggingFuture(state, memo);
+}
+
+function simulatePeggingFuture(
+  state: PegSimulationState,
+  memo: Map<string, WeightedScore>,
+): WeightedScore {
+  const key = pegSimulationKey(state);
+  const cached = memo.get(key);
+  if (cached) return cached;
+
+  const remainingCards = rankCountTotal(state.hands.human) + rankCountTotal(state.hands.ai);
+  if (remainingCards === 0) {
+    const lastPoint = state.lastPlayer && state.count !== 0
+      ? perspectiveScore(state.perspective, state.lastPlayer, 1)
+      : 0;
+    const terminal = { total: lastPoint, weight: 1 };
+    memo.set(key, terminal);
+    return terminal;
+  }
+
+  const legalRanks = legalPegRanks(state.hands[state.current], state.count);
+  if (legalRanks.length === 0) {
+    if (state.goPlayer) {
+      const goPoint = state.lastPlayer && state.count !== 31
+        ? perspectiveScore(state.perspective, state.lastPlayer, 1)
+        : 0;
+      const future = simulatePeggingFuture({
+        ...state,
+        plays: [],
+        count: 0,
+        current: otherPlayerKey(state.current),
+        goPlayer: null,
+        lastPlayer: null,
+      }, memo);
+      const result = { total: (goPoint * future.weight) + future.total, weight: future.weight };
+      memo.set(key, result);
+      return result;
+    }
+    const result = simulatePeggingFuture({
+      ...state,
+      current: otherPlayerKey(state.current),
+      goPlayer: state.current,
+    }, memo);
+    memo.set(key, result);
+    return result;
+  }
+
+  let total = 0;
+  let weight = 0;
+  for (const rank of legalRanks) {
+    const branchWeight = state.hands[state.current][rank];
+    const hands = {
+      human: [...state.hands.human],
+      ai: [...state.hands.ai],
+    };
+    hands[state.current][rank] -= 1;
+    const plays = [...state.plays, rank];
+    const points = scoreCount(plays.map((playedRank) => pegCardCache[playedRank]));
+    const nextCount = state.count + pegCardCache[rank].value;
+    const nextState: PegSimulationState = nextCount === 31
+      ? {
+          ...state,
+          hands,
+          plays: [],
+          count: 0,
+          current: otherPlayerKey(state.current),
+          goPlayer: null,
+          lastPlayer: null,
+        }
+      : {
+          ...state,
+          hands,
+          plays,
+          count: nextCount,
+          current: otherPlayerKey(state.current),
+          goPlayer: null,
+          lastPlayer: state.current,
+        };
+    const future = simulatePeggingFuture(nextState, memo);
+    const signedPoints = perspectiveScore(state.perspective, state.current, points);
+    total += branchWeight * ((signedPoints * future.weight) + future.total);
+    weight += branchWeight * future.weight;
+  }
+
+  const result = { total, weight };
+  memo.set(key, result);
+  return result;
+}
+
+function legalPegRanks(ranks: RankCounts, count: number): number[] {
+  const legal: number[] = [];
+  for (let rank = 0; rank < ranks.length; rank += 1) {
+    if (ranks[rank] > 0 && count + pegCardCache[rank].value <= 31) legal.push(rank);
+  }
+  return legal;
+}
+
+function rankCountTotal(ranks: RankCounts): number {
+  return ranks.reduce((total, count) => total + count, 0);
+}
+
+function pegSimulationKey(state: PegSimulationState): string {
+  return [
+    state.hands.human.join(""),
+    state.hands.ai.join(""),
+    state.plays.join(","),
+    state.count,
+    state.current,
+    state.goPlayer ?? "-",
+    state.lastPlayer ?? "-",
+    state.perspective,
+  ].join("|");
 }
 
 function expectedCribScore(

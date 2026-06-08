@@ -12,8 +12,8 @@ const enginePath = path.join(root, "web/src/engine.ts");
 if (!Number.isInteger(gamesPerMatchup) || gamesPerMatchup <= 0) {
   throw new Error("Game count must be a positive integer.");
 }
-if (!["three-way", "three-way-expert-1.1", "ras-v-schell"].includes(mode)) {
-  throw new Error("Mode must be three-way, three-way-expert-1.1, or ras-v-schell.");
+if (!["three-way", "three-way-expert-1.1", "ras-v-schell", "peg-variants"].includes(mode)) {
+  throw new Error("Mode must be three-way, three-way-expert-1.1, ras-v-schell, or peg-variants.");
 }
 
 const source = fs.readFileSync(enginePath, "utf8");
@@ -32,17 +32,25 @@ engineModule._compile(compiled, enginePath);
 const { CribbageGame } = engineModule.exports;
 
 const engines = {
-  expert: "expert-2.0-ras-tables",
+  expert: "expert-peg-2.1",
+  expert20: "expert-2.0-ras-tables",
   expert11: "expert-1.1",
+  expertPeg12: "expert-peg-1.2",
   ras: "ras-table-1.0",
+  rasPeg: "ras-table-peg-1.1",
   schell: "schell-table-1.0",
+  schellPeg: "schell-table-peg-1.1",
 };
 
 const labels = {
-  [engines.expert]: "Expert 2.0 Ras Tables",
+  [engines.expert]: "Expert Peg 2.1",
+  [engines.expert20]: "Expert 2.0 Ras Tables",
   [engines.expert11]: "Expert 1.1",
+  [engines.expertPeg12]: "Expert Peg 1.2",
   [engines.ras]: "Ras Table 1.0",
+  [engines.rasPeg]: "Ras Table Peg 1.1",
   [engines.schell]: "Schell Table 1.0",
+  [engines.schellPeg]: "Schell Table Peg 1.1",
 };
 
 const threeWayMatchups = [
@@ -56,9 +64,17 @@ const threeWayExpert11Matchups = [
   [engines.schell, engines.expert11],
 ];
 const rasVsSchellMatchups = [[engines.ras, engines.schell]];
+const pegVariantMatchups = [
+  [engines.expert20, engines.expert],
+  [engines.expert11, engines.expertPeg12],
+  [engines.ras, engines.rasPeg],
+  [engines.schell, engines.schellPeg],
+];
 const matchups =
   mode === "ras-v-schell"
     ? rasVsSchellMatchups
+    : mode === "peg-variants"
+      ? pegVariantMatchups
     : mode === "three-way-expert-1.1"
       ? threeWayExpert11Matchups
       : threeWayMatchups;

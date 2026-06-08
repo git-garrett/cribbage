@@ -308,6 +308,219 @@
           }
         }
       }
+    },
+    {
+      "source": "ras-v-expert-1.1-1000-large",
+      "generatedAt": "2026-06-08T21:36:04.659Z",
+      "games": 1000,
+      "gamesPerMatchup": 1000,
+      "matchups": [
+        "Ras Table 1.0 vs Expert 1.1"
+      ],
+      "models": {
+        "expert-1.1": {
+          "games": 1000,
+          "aiTotals": {
+            "wins": 508,
+            "losses": 492,
+            "skunks": 60,
+            "skunked": 64,
+            "doubleSkunks": 0,
+            "doubleSkunked": 2,
+            "peggingDealer": 16768,
+            "peggingPone": 11076,
+            "handDealer": 32988,
+            "handPone": 34591,
+            "crib": 19130
+          },
+          "opportunities": {
+            "peggingDealer": 4387,
+            "peggingPone": 3644,
+            "handDealer": 4091,
+            "handPone": 4253,
+            "crib": 3693
+          },
+          "averages": {
+            "peggingDealer": 3.8222019603373605,
+            "peggingPone": 3.0395170142700327,
+            "handDealer": 8.06355414324126,
+            "handPone": 8.133317658123678,
+            "crib": 5.180070403466017
+          }
+        },
+        "ras-table-1.0": {
+          "games": 1000,
+          "aiTotals": {
+            "wins": 492,
+            "losses": 508,
+            "skunks": 64,
+            "skunked": 60,
+            "doubleSkunks": 2,
+            "doubleSkunked": 0,
+            "peggingDealer": 16984,
+            "peggingPone": 11018,
+            "handDealer": 32919,
+            "handPone": 34493,
+            "crib": 19045
+          },
+          "opportunities": {
+            "peggingDealer": 4351,
+            "peggingPone": 3685,
+            "handDealer": 4073,
+            "handPone": 4269,
+            "crib": 3667
+          },
+          "averages": {
+            "peggingDealer": 3.9034704665594115,
+            "peggingPone": 2.9899592944369062,
+            "handDealer": 8.082248956543088,
+            "handPone": 8.079878191613961,
+            "crib": 5.1936187619307335
+          }
+        }
+      }
+    },
+    {
+      "source": "ras-v-schell-100000-large",
+      "generatedAt": "2026-06-08T21:40:13.608Z",
+      "games": 100000,
+      "gamesPerMatchup": 100000,
+      "matchups": [
+        "Ras Table 1.0 vs Schell Table 1.0"
+      ],
+      "models": {
+        "ras-table-1.0": {
+          "games": 100000,
+          "aiTotals": {
+            "wins": 49883,
+            "losses": 50117,
+            "skunks": 6962,
+            "skunked": 7188,
+            "doubleSkunks": 63,
+            "doubleSkunked": 64,
+            "peggingDealer": 1680241,
+            "peggingPone": 1107457,
+            "handDealer": 3250448,
+            "handPone": 3457373,
+            "crib": 1912510
+          },
+          "opportunities": {
+            "peggingDealer": 437815,
+            "peggingPone": 369734,
+            "handDealer": 407816,
+            "handPone": 427124,
+            "crib": 368788
+          },
+          "averages": {
+            "peggingDealer": 3.8377876500348322,
+            "peggingPone": 2.9952803907674164,
+            "handDealer": 7.970378798281578,
+            "handPone": 8.094541631938267,
+            "crib": 5.185933381780318
+          }
+        },
+        "schell-table-1.0": {
+          "games": 100000,
+          "aiTotals": {
+            "wins": 50117,
+            "losses": 49883,
+            "skunks": 7188,
+            "skunked": 6962,
+            "doubleSkunks": 64,
+            "doubleSkunked": 63,
+            "peggingDealer": 1686061,
+            "peggingPone": 1104926,
+            "handDealer": 3250929,
+            "handPone": 3452268,
+            "crib": 1927128
+          },
+          "opportunities": {
+            "peggingDealer": 438146,
+            "peggingPone": 369285,
+            "handDealer": 407863,
+            "handPone": 426708,
+            "crib": 369840
+          },
+          "averages": {
+            "peggingDealer": 3.8481716140282005,
+            "peggingPone": 2.9920684566121016,
+            "handDealer": 7.970639651059302,
+            "handPone": 8.090469360780675,
+            "crib": 5.210707332900713
+          }
+        }
+      }
+    },
+    {
+      "source": "schell-v-expert-1.1-1000-large",
+      "generatedAt": "2026-06-08T21:48:12.482Z",
+      "games": 1000,
+      "gamesPerMatchup": 1000,
+      "matchups": [
+        "Schell Table 1.0 vs Expert 1.1"
+      ],
+      "models": {
+        "expert-1.1": {
+          "games": 1000,
+          "aiTotals": {
+            "wins": 460,
+            "losses": 540,
+            "skunks": 67,
+            "skunked": 93,
+            "doubleSkunks": 3,
+            "doubleSkunked": 2,
+            "peggingDealer": 16594,
+            "peggingPone": 10793,
+            "handDealer": 32270,
+            "handPone": 34580,
+            "crib": 19028
+          },
+          "opportunities": {
+            "peggingDealer": 4342,
+            "peggingPone": 3652,
+            "handDealer": 4046,
+            "handPone": 4247,
+            "crib": 3659
+          },
+          "averages": {
+            "peggingDealer": 3.821741133118379,
+            "peggingPone": 2.955366922234392,
+            "handDealer": 7.975778546712803,
+            "handPone": 8.142218036260891,
+            "crib": 5.200327958458595
+          }
+        },
+        "schell-table-1.0": {
+          "games": 1000,
+          "aiTotals": {
+            "wins": 540,
+            "losses": 460,
+            "skunks": 93,
+            "skunked": 67,
+            "doubleSkunks": 2,
+            "doubleSkunked": 3,
+            "peggingDealer": 16933,
+            "peggingPone": 11250,
+            "handDealer": 32714,
+            "handPone": 34828,
+            "crib": 19007
+          },
+          "opportunities": {
+            "peggingDealer": 4360,
+            "peggingPone": 3683,
+            "handDealer": 4055,
+            "handPone": 4247,
+            "crib": 3670
+          },
+          "averages": {
+            "peggingDealer": 3.8837155963302754,
+            "peggingPone": 3.0545750746673908,
+            "handDealer": 8.067570900123304,
+            "handPone": 8.200612196844832,
+            "crib": 5.179019073569482
+          }
+        }
+      }
     }
   ]
 }

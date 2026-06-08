@@ -8,7 +8,8 @@
     "compare:engines": "node scripts/compare-engines.cjs 300",
     "compare:engines:parallel": "node scripts/compare-engines-parallel.cjs 300",
     "benchmark:large-mixed": "node scripts/run-large-mixed-benchmark.cjs",
-    "simulate:ai-baseline": "node scripts/simulate-ai-baseline.cjs 1000 expert-2.0-ras-tables",
+    "calibrate:pegging-table": "node --max-old-space-size=4096 scripts/calibrate-pegging-table.cjs 100 997 10",
+    "simulate:ai-baseline": "node scripts/simulate-ai-baseline.cjs 1000 expert-peg-2.1",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

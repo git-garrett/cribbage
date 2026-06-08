@@ -1031,6 +1031,9 @@ function benchmarkLabel(source: string | undefined, games: number | undefined): 
   if (source === "ras-v-schell-1000") return "1,000 Ras vs Schell";
   if (source === "three-way-ai-vs-ai-900") return "900 three-way AI vs AI";
   if (source === "three-way-expert-1.1-900") return "900 three-way with Expert 1.1";
+  if (source === "ras-v-expert-1.1-1000-large") return "1,000 Ras vs Expert 1.1";
+  if (source === "ras-v-schell-100000-large") return "100,000 Ras vs Schell";
+  if (source === "schell-v-expert-1.1-1000-large") return "1,000 Schell vs Expert 1.1";
   if (source === "ai-vs-ai-baseline") return `${games ?? 0} Expert 1.1 AI baseline`;
   return source || "AI baseline";
 }
@@ -1071,9 +1074,13 @@ function playerName(player: PlayerKey | undefined): string {
 
 function engineName(engine: string | undefined): string {
   if (engine === "expert" || engine === "expert-1.1") return "Expert 1.1";
+  if (engine === "expert-peg-1.2") return "Expert Peg 1.2";
   if (engine === "expert-2.0-ras-tables") return "Expert 2.0 Ras Tables";
+  if (engine === "expert-peg-2.1") return "Expert Peg 2.1";
   if (engine === "ras-table-1.0") return "Ras Table 1.0";
+  if (engine === "ras-table-peg-1.1") return "Ras Table Peg 1.1";
   if (engine === "schell-table-1.0") return "Schell Table 1.0";
+  if (engine === "schell-table-peg-1.1") return "Schell Table Peg 1.1";
   return engine || "-";
 }
 
@@ -1081,8 +1088,12 @@ function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
   if (engine === "expert") return "expert-1.1";
   if (
     engine === "expert-1.1" ||
+    engine === "expert-peg-1.2" ||
     engine === "expert-2.0-ras-tables" ||
+    engine === "expert-peg-2.1" ||
     engine === "ras-table-1.0" ||
+    engine === "ras-table-peg-1.1" ||
+    engine === "schell-table-peg-1.1" ||
     engine === "schell-table-1.0"
   ) {
     return engine;

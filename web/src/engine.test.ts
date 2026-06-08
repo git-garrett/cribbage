@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   CribbageGame,
+  DEFAULT_OPPONENT,
   cardsFromString,
   scoreCount,
   scoreFlushAndRightJack,
@@ -39,6 +40,11 @@ describe("scoring", () => {
 });
 
 describe("game state", () => {
+  test("defaults to the latest expert peg engine", () => {
+    expect(DEFAULT_OPPONENT).toBe("expert-peg-2.1");
+    expect(new CribbageGame().opponent).toBe("expert-peg-2.1");
+  });
+
   test("keeps first dealer stable while current dealer alternates", () => {
     const game = new CribbageGame();
     game.deal = 0;
@@ -296,7 +302,7 @@ describe("game state", () => {
   });
 
   test("autoplays AI versus AI games to completion", () => {
-    const game = new CribbageGame();
+    const game = new CribbageGame("expert-2.0-ras-tables");
 
     game.autoPlayToEnd();
 
@@ -309,5 +315,27 @@ describe("game state", () => {
       loser: expect.stringMatching(/human|ai/),
       finalScores: expect.objectContaining({ human: expect.any(Number), ai: expect.any(Number) }),
     });
+  });
+
+  test("exhaustive peg variants choose legal plays", () => {
+    const game = new CribbageGame("expert-peg-2.1");
+    game.phase = "pegging";
+    game.pone = game.human;
+    game.dealer = game.ai;
+    game.turn = 0;
+    game.human.hand = cardsFromString("5d 6c");
+    game.ai.hand = cardsFromString("4d");
+    game.human.table = [];
+    game.ai.table = [];
+    game.crib = cardsFromString("2d 3c Jh Qh");
+    game.turnCard = cardsFromString("As")[0];
+    game.plays = cardsFromString("10c");
+    game.playOwners = ["ai"];
+    game.count = 10;
+
+    const play = (game as any).choosePlay(game.human);
+
+    expect(["5d", "6c"]).toContain(play.ascii);
+    expect(game.count + play.value).toBeLessThanOrEqual(31);
   });
 });
