@@ -1,0 +1,9 @@
+[submodule "references/dacarlin-cribbage"]
+	path = references/dacarlin-cribbage
+	url = https://github.com/dacarlin/cribbage.git
+[submodule "references/DubThink-cribbageksi"]
+	path = references/DubThink-cribbageksi
+	url = https://github.com/DubThink/cribbageksi.git
+[submodule "references/wroberts-cribbage"]
+	path = references/wroberts-cribbage
+	url = https://github.com/wroberts/cribbage.git
