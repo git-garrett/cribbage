@@ -510,6 +510,12 @@ button:disabled {
   font-size: 15px;
 }
 
+.analytics-baseline-note {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .analytics-total.human strong {
   color: var(--human);
 }

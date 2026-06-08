@@ -99,6 +99,7 @@ type ScoringReview = NonNullable<GameState["scoring"]> & { rawCards: Card[] };
 
 export type AnalyticsRole = "dealer" | "pone";
 export type AnalyticsScoreCategory = "pegging" | "hand" | "crib";
+export type AnalyticsGameResult = "regular" | "skunk" | "double-skunk";
 export type AnalyticsEvent =
   | {
       id: string;
@@ -108,6 +109,8 @@ export type AnalyticsEvent =
       gameId: string;
       opponent: Opponent;
       winner?: PlayerKey;
+      loser?: PlayerKey;
+      result?: AnalyticsGameResult;
       finalScores?: Record<PlayerKey, number>;
     }
   | {
@@ -120,7 +123,23 @@ export type AnalyticsEvent =
       dealer: PlayerKey;
       pone: PlayerKey;
       turnCard?: string;
+      dealtHands?: Record<PlayerKey, string[]>;
+      crib?: string[];
+      tables?: Record<PlayerKey, string[]>;
       scores: Record<PlayerKey, number>;
+    }
+  | {
+      id: string;
+      at: string;
+      type: "discard";
+      gameId: string;
+      handNumber: number;
+      player: PlayerKey;
+      role: AnalyticsRole;
+      cards: string[];
+      cribOwner: PlayerKey;
+      cribAfterDiscard: string[];
+      remainingHand: string[];
     }
   | {
       id: string;
@@ -133,6 +152,8 @@ export type AnalyticsEvent =
       role?: AnalyticsRole;
       card?: string;
       count: number;
+      points?: number;
+      scores?: Record<PlayerKey, number>;
       message: string;
     }
   | {
@@ -147,6 +168,9 @@ export type AnalyticsEvent =
       points: number;
       reason: string;
       totalScore: number;
+      scores: Record<PlayerKey, number>;
+      cards: string[];
+      turnCard?: string;
       card?: string;
       count?: number;
     };
@@ -480,6 +504,11 @@ export class CribbageGame {
       handNumber: this.handNumber,
       dealer: this.dealer.key,
       pone: this.pone.key,
+      turnCard: this.cardLabel(this.turnCard),
+      dealtHands: {
+        human: this.cardLabels(this.human.hand),
+        ai: this.cardLabels(this.ai.hand),
+      },
       scores: { human: this.human.score, ai: this.ai.score },
     });
     if (this.dealer === this.ai) this.aiDiscard();
@@ -537,6 +566,7 @@ export class CribbageGame {
     const discards = this.selectedCards(sortedCards(this.human.hand), ids, 2);
     removeCards(this.human.hand, discards);
     this.crib.push(...discards);
+    this.recordDiscard(this.human, discards);
     this.logEvent("User discarded two cards to the crib.");
     if (this.dealer === this.human) {
       this.phase = "ai_discarding";
@@ -580,6 +610,35 @@ export class CribbageGame {
     this.advanceUntilHuman();
   }
 
+  autoPlayToEnd(maxHands = 200): void {
+    let guard = 0;
+    while (this.phase !== "game_over") {
+      guard += 1;
+      if (guard > maxHands * 16) throw new Error("Autoplay exceeded expected game length.");
+      try {
+        if (this.phase === "discard") {
+          this.autoDiscardHuman();
+        } else if (this.phase === "ai_discarding") {
+          this.finishDiscard();
+        } else if (this.phase === "pegging") {
+          this.autoPegging();
+        } else if (
+          this.phase === "pegging_complete" ||
+          this.phase === "score_pone" ||
+          this.phase === "score_dealer" ||
+          this.phase === "score_crib"
+        ) {
+          this.continueScoring();
+        } else {
+          throw new Error(`Cannot autoplay phase: ${this.phase}`);
+        }
+      } catch (error) {
+        if (error instanceof WinGame) return;
+        throw error;
+      }
+    }
+  }
+
   continueScoring(): void {
     this.beginInteraction();
     if (this.phase === "pegging_complete") this.startScoring();
@@ -593,6 +652,11 @@ export class CribbageGame {
         dealer: this.dealer.key,
         pone: this.pone.key,
         turnCard: this.cardLabel(this.turnCard),
+        crib: this.cardLabels(this.dealer.crib),
+        tables: {
+          human: this.cardLabels(this.human.table),
+          ai: this.cardLabels(this.ai.table),
+        },
         scores: { human: this.human.score, ai: this.ai.score },
       });
       this.scoringReview = null;
@@ -645,7 +709,24 @@ export class CribbageGame {
     const discards = this.chooseDiscards(this.ai, this.dealer === this.ai);
     removeCards(this.ai.hand, discards);
     this.crib.push(...discards);
+    this.recordDiscard(this.ai, discards);
     this.logEvent("AI discarded two cards to the crib.");
+  }
+
+  private autoDiscardHuman(): void {
+    this.beginInteraction();
+    if (this.phase !== "discard") throw new Error("It is not discard time.");
+    const discards = this.chooseDiscards(this.human, this.dealer === this.human);
+    removeCards(this.human.hand, discards);
+    this.crib.push(...discards);
+    this.recordDiscard(this.human, discards);
+    this.logEvent("User discarded two cards to the crib.");
+    if (this.dealer === this.human) {
+      this.phase = "ai_discarding";
+      this.logEvent("Waiting for AI to discard.");
+      return;
+    }
+    this.beginPegging();
   }
 
   private chooseDiscards(player: PlayerState, myCrib: boolean): Card[] {
@@ -709,6 +790,22 @@ export class CribbageGame {
     }
   }
 
+  private autoPegging(): void {
+    while (this.phase === "pegging") {
+      if (this.dealer.hand.length + this.pone.hand.length === 0) {
+        this.finishPegging();
+        this.phase = "pegging_complete";
+        return;
+      }
+      const player = this.currentPlayer();
+      if (this.legalCards(player).length === 0) {
+        this.sayGo(player);
+        continue;
+      }
+      this.playCard(player, this.choosePlay(player));
+    }
+  }
+
   private finishPegging(): void {
     if (this.lastPlayer && this.count !== 0) {
       this.recordScore(this.lastPlayer, "pegging", 1, "last card", undefined, this.count);
@@ -741,6 +838,12 @@ export class CribbageGame {
     this.count += card.value;
     this.lastPlayer = player;
     const points = scoreCount(this.plays);
+    const scoreAfterPlay = points
+      ? {
+          human: this.human.score + (player === this.human ? points : 0),
+          ai: this.ai.score + (player === this.ai ? points : 0),
+        }
+      : { human: this.human.score, ai: this.ai.score };
     this.recordAnalytics({
       type: "pegging",
       action: "play",
@@ -749,6 +852,8 @@ export class CribbageGame {
       role: this.roleFor(player),
       card: this.cardLabel(card),
       count: this.count,
+      points,
+      scores: scoreAfterPlay,
       message: `${this.name(player)} played ${this.cardLabel(card)}: ${this.count}`,
     });
     if (points) this.recordScore(player, "pegging", points, "count", card, this.count);
@@ -769,6 +874,7 @@ export class CribbageGame {
         action: "reset",
         handNumber: this.handNumber,
         count: 0,
+        scores: { human: this.human.score, ai: this.ai.score },
         message: "Count hit 31 and resets.",
       });
       this.logEvent("Count hit 31 and resets.");
@@ -796,6 +902,7 @@ export class CribbageGame {
         action: "reset",
         handNumber: this.handNumber,
         count: 0,
+        scores: { human: this.human.score, ai: this.ai.score },
         message: "Count resets to 0.",
       });
       this.logEvent("Count resets to 0.");
@@ -809,6 +916,7 @@ export class CribbageGame {
         player: player.key,
         role: this.roleFor(player),
         count: this.count,
+        scores: { human: this.human.score, ai: this.ai.score },
         message: `${this.name(player)} says go.`,
       });
       this.logEvent(`${this.name(player)} says go.`);
@@ -891,6 +999,11 @@ export class CribbageGame {
         dealer: this.dealer.key,
         pone: this.pone.key,
         turnCard: this.cardLabel(this.turnCard),
+        crib: this.cardLabels(this.dealer.crib),
+        tables: {
+          human: this.cardLabels(this.human.table),
+          ai: this.cardLabels(this.ai.table),
+        },
         scores: { human: this.human.score, ai: this.ai.score },
       });
       this.recordAnalytics({
@@ -898,6 +1011,8 @@ export class CribbageGame {
         action: "end",
         opponent: this.opponent,
         winner: player.key,
+        loser: player === this.human ? "ai" : "human",
+        result: this.gameResultFor(player),
         finalScores: { human: this.human.score, ai: this.ai.score },
       });
       this.logEvent(message);
@@ -923,8 +1038,40 @@ export class CribbageGame {
       points,
       reason,
       totalScore: Math.min(player.score + points, 121),
+      scores: {
+        human: this.human.score + (player === this.human ? points : 0),
+        ai: this.ai.score + (player === this.ai ? points : 0),
+      },
+      cards: category === "crib"
+        ? this.cardLabels(this.dealer.crib)
+        : category === "hand"
+          ? this.cardLabels(player.table)
+          : this.cardLabels(this.plays),
+      turnCard: category === "hand" || category === "crib" || reason === "his heels"
+        ? this.cardLabel(this.turnCard)
+        : undefined,
       card: card ? this.cardLabel(card) : undefined,
       count,
+    });
+  }
+
+  private gameResultFor(winner: PlayerState): AnalyticsGameResult {
+    const loser = winner === this.human ? this.ai : this.human;
+    if (loser.score <= 60) return "double-skunk";
+    if (loser.score <= 90) return "skunk";
+    return "regular";
+  }
+
+  private recordDiscard(player: PlayerState, cards: Card[]): void {
+    this.recordAnalytics({
+      type: "discard",
+      handNumber: this.handNumber,
+      player: player.key,
+      role: this.roleFor(player),
+      cards: this.cardLabels(cards),
+      cribOwner: this.dealer.key,
+      cribAfterDiscard: this.cardLabels(this.crib),
+      remainingHand: this.cardLabels(player.hand),
     });
   }
 
@@ -969,6 +1116,10 @@ export class CribbageGame {
 
   private cardLabel(card: Card): string {
     return card.ascii;
+  }
+
+  private cardLabels(cards: Card[]): string[] {
+    return cards.map((card) => this.cardLabel(card));
   }
 
   private serializeCard(card: Card, index: number | null = null, owner?: PlayerKey): SerializedCard {

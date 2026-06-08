@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "generatedAt": "2026-06-07T22:45:34.863Z",
+  "games": 1000,
+  "opponent": "random",
+  "source": "ai-vs-ai-baseline",
+  "aiTotals": {
+    "wins": 1000,
+    "losses": 1000,
+    "skunks": 130,
+    "skunked": 130,
+    "doubleSkunks": 2,
+    "doubleSkunked": 2,
+    "peggingDealer": 34689,
+    "peggingPone": 20060,
+    "handDealer": 57635,
+    "handPone": 58829,
+    "crib": 56144
+  }
+}

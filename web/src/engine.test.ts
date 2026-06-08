@@ -198,4 +198,116 @@ describe("game state", () => {
       points: scoreHand(game.human.table, game.turnCard),
     });
   });
+
+  test("records enough analytics detail to reconstruct a hand", () => {
+    const game = new CribbageGame("random");
+    game.deal = 0;
+    game.firstDeal = 0;
+    game.startHand();
+    game.human.hand = cardsFromString("Ad 2c 3h 4s 9d 10c");
+    game.ai.hand = cardsFromString("5d 6c 7h 8s Jd Qc");
+    game.turnCard = cardsFromString("Ks")[0];
+    game.analyticsEvents = [];
+    game.analyticsCounter = 0;
+    game.startHand();
+    game.human.hand = cardsFromString("Ad 2c 3h 4s 9d 10c");
+    game.ai.hand = cardsFromString("5d 6c 7h 8s Jd Qc");
+    game.turnCard = cardsFromString("Ks")[0];
+    game.analyticsEvents = [];
+
+    // Re-record a deterministic hand-start event after overriding the deal.
+    (game as any).recordAnalytics({
+      type: "hand",
+      action: "start",
+      handNumber: game.handNumber,
+      dealer: game.dealer.key,
+      pone: game.pone.key,
+      turnCard: game.turnCard.ascii,
+      dealtHands: {
+        human: game.human.hand.map((card) => card.ascii),
+        ai: game.ai.hand.map((card) => card.ascii),
+      },
+      scores: { human: game.human.score, ai: game.ai.score },
+    });
+
+    game.discard(cardsFromString("9d 10c").map((card) => card.id));
+    game.finishDiscard();
+    game.phase = "pegging_complete";
+    game.human.table = cardsFromString("Ad 2c 3h 4s");
+    game.ai.table = cardsFromString("5d 6c 7h 8s");
+    game.ai.crib = [...game.crib];
+    game.continueScoring();
+    game.continueScoring();
+    game.continueScoring();
+    game.continueScoring();
+
+    const events = game.state().analyticsEvents;
+    const handStart = events.find((event) => event.type === "hand" && event.action === "start");
+    const userDiscard = events.find((event) => event.type === "discard" && event.player === "human");
+    const handScore = events.find(
+      (event) => event.type === "score" && event.category === "hand" && event.player === "human",
+    );
+    const handEnd = [...events].reverse().find((event) => event.type === "hand" && event.action === "end");
+
+    expect(handStart).toMatchObject({
+      turnCard: "Ks",
+      dealtHands: {
+        human: ["Ad", "2c", "3h", "4s", "9d", "10c"],
+        ai: ["5d", "6c", "7h", "8s", "Jd", "Qc"],
+      },
+    });
+    expect(userDiscard).toMatchObject({
+      cards: ["9d", "10c"],
+      cribOwner: "human",
+      cribAfterDiscard: ["9d", "10c"],
+      remainingHand: ["Ad", "2c", "3h", "4s"],
+    });
+    expect(handScore).toMatchObject({
+      cards: ["Ad", "2c", "3h", "4s"],
+      turnCard: "Ks",
+      scores: { human: expect.any(Number), ai: expect.any(Number) },
+    });
+    expect(handEnd).toMatchObject({
+      crib: expect.arrayContaining(["9d", "10c"]),
+      tables: {
+        human: ["Ad", "2c", "3h", "4s"],
+        ai: ["5d", "6c", "7h", "8s"],
+      },
+    });
+  });
+
+  test("records game outcome totals including skunks", () => {
+    const game = new CribbageGame("random");
+    game.human.score = 119;
+    game.ai.score = 60;
+    game.analyticsEvents = [];
+
+    expect(() => (game as any).peg(game.human, 2)).toThrow();
+
+    const gameEnd = game.state().analyticsEvents.find(
+      (event) => event.type === "game" && event.action === "end",
+    );
+    expect(gameEnd).toMatchObject({
+      winner: "human",
+      loser: "ai",
+      result: "double-skunk",
+      finalScores: { human: 121, ai: 60 },
+    });
+  });
+
+  test("autoplays AI versus AI games to completion", () => {
+    const game = new CribbageGame("random");
+
+    game.autoPlayToEnd();
+
+    const gameEnd = game.state().analyticsEvents.find(
+      (event) => event.type === "game" && event.action === "end",
+    );
+    expect(game.phase).toBe("game_over");
+    expect(gameEnd).toMatchObject({
+      winner: expect.stringMatching(/human|ai/),
+      loser: expect.stringMatching(/human|ai/),
+      finalScores: expect.objectContaining({ human: expect.any(Number), ai: expect.any(Number) }),
+    });
+  });
 });

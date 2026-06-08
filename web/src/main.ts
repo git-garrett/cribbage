@@ -9,6 +9,7 @@ import {
   type PlayerKey,
   WinGame,
 } from "./engine";
+import aiBaseline from "./ai-baseline.json";
 
 const state: {
   game: GameState | null;
@@ -75,6 +76,21 @@ const ANALYTICS_KEY = "strong-cribbage.analytics.v1";
 interface AnalyticsStore {
   version: 1;
   events: AnalyticsEvent[];
+}
+
+interface AnalyticsTotals {
+  wins: number;
+  losses: number;
+  skunks: number;
+  skunked: number;
+  doubleSkunks: number;
+  doubleSkunked: number;
+  peggingDealer: number;
+  peggingPone: number;
+  handDealer: number;
+  handPone: number;
+  crib: number;
+  baselineGames?: number;
 }
 
 function loadSavedGame(): CribbageGame {
@@ -679,14 +695,14 @@ function renderAnalytics(): void {
   const startedHands = handEvents.filter((event) => event.action === "start").length;
   els.analyticsSummary.textContent = `${completedGames} completed game${completedGames === 1 ? "" : "s"}; ${startedHands} hand${startedHands === 1 ? "" : "s"} logged.`;
 
-  renderAnalyticsTotals(scoreEvents);
+  renderAnalyticsTotals(scoreEvents, gameEvents);
   renderAnalyticsRows(
     els.analyticsGames,
     [...gameEvents].reverse().slice(0, 40).map((event) =>
       event.action === "start"
         ? [`Game started`, `Opponent: ${event.opponent}`, shortDate(event.at)]
         : [
-            `${playerName(event.winner)} won`,
+            `${playerName(event.winner)} won${event.result && event.result !== "regular" ? ` by ${event.result}` : ""}`,
             `Final ${event.finalScores?.human ?? 0}-${event.finalScores?.ai ?? 0}`,
             shortDate(event.at),
           ],
@@ -718,17 +734,45 @@ function renderAnalytics(): void {
   );
 }
 
-function renderAnalyticsTotals(scoreEvents: Extract<AnalyticsEvent, { type: "score" }>[]): void {
+function renderAnalyticsTotals(
+  scoreEvents: Extract<AnalyticsEvent, { type: "score" }>[],
+  gameEvents: Extract<AnalyticsEvent, { type: "game" }>[],
+): void {
   const totals = emptyAnalyticsTotals();
   for (const event of scoreEvents) {
     totals[event.player][scoreKey(event.category, event.role)] += event.points;
   }
+  for (const event of gameEvents) {
+    if (event.action !== "end" || !event.winner) continue;
+    const loser = event.loser ?? (event.winner === "human" ? "ai" : "human");
+    const result = event.result ?? gameResultFromScores(event.winner, event.finalScores);
+    totals[event.winner].wins += 1;
+    totals[loser].losses += 1;
+    if (result === "skunk" || result === "double-skunk") {
+      totals[event.winner].skunks += 1;
+      totals[loser].skunked += 1;
+    }
+    if (result === "double-skunk") {
+      totals[event.winner].doubleSkunks += 1;
+      totals[loser].doubleSkunked += 1;
+    }
+  }
+  addAiBaselineTotals(totals.ai);
   els.analyticsTotals.innerHTML = "";
   for (const player of ["human", "ai"] as const) {
     const card = document.createElement("div");
     card.className = `analytics-total ${player}`;
     card.innerHTML = `
       <strong>${playerName(player)}</strong>
+      ${player === "ai" && totals.ai.baselineGames
+        ? `<span class="analytics-baseline-note">Includes AI baseline: ${totals.ai.baselineGames} games</span>`
+        : ""}
+      <span>Wins: ${totals[player].wins}</span>
+      <span>Losses: ${totals[player].losses}</span>
+      <span>Skunks: ${totals[player].skunks}</span>
+      <span>Skunked: ${totals[player].skunked}</span>
+      <span>Double skunks: ${totals[player].doubleSkunks}</span>
+      <span>Double skunked: ${totals[player].doubleSkunked}</span>
       <span>Peg dealer: ${totals[player].peggingDealer}</span>
       <span>Peg pone: ${totals[player].peggingPone}</span>
       <span>Hand dealer: ${totals[player].handDealer}</span>
@@ -760,14 +804,61 @@ function renderAnalyticsRows(container: HTMLElement, rows: string[][]): void {
   }
 }
 
-function emptyAnalyticsTotals(): Record<PlayerKey, Record<string, number>> {
+function emptyAnalyticsTotals(): Record<PlayerKey, AnalyticsTotals> {
   return {
-    human: { peggingDealer: 0, peggingPone: 0, handDealer: 0, handPone: 0, crib: 0 },
-    ai: { peggingDealer: 0, peggingPone: 0, handDealer: 0, handPone: 0, crib: 0 },
+    human: {
+      wins: 0,
+      losses: 0,
+      skunks: 0,
+      skunked: 0,
+      doubleSkunks: 0,
+      doubleSkunked: 0,
+      peggingDealer: 0,
+      peggingPone: 0,
+      handDealer: 0,
+      handPone: 0,
+      crib: 0,
+    },
+    ai: {
+      wins: 0,
+      losses: 0,
+      skunks: 0,
+      skunked: 0,
+      doubleSkunks: 0,
+      doubleSkunked: 0,
+      peggingDealer: 0,
+      peggingPone: 0,
+      handDealer: 0,
+      handPone: 0,
+      crib: 0,
+    },
   };
 }
 
-function scoreKey(category: AnalyticsScoreCategory, role: AnalyticsRole): string {
+function addAiBaselineTotals(aiTotals: AnalyticsTotals): void {
+  if (aiBaseline.version !== 1 || !aiBaseline.aiTotals) return;
+  for (const key of Object.keys(aiTotals) as Array<keyof AnalyticsTotals>) {
+    if (key === "baselineGames") continue;
+    aiTotals[key] += Number(aiBaseline.aiTotals[key] ?? 0);
+  }
+  aiTotals.baselineGames = Number(aiBaseline.games ?? 0);
+}
+
+function gameResultFromScores(
+  winner: PlayerKey,
+  scores: Record<PlayerKey, number> | undefined,
+): "regular" | "skunk" | "double-skunk" {
+  const loser = winner === "human" ? "ai" : "human";
+  const loserScore = scores?.[loser] ?? 121;
+  if (loserScore <= 60) return "double-skunk";
+  if (loserScore <= 90) return "skunk";
+  return "regular";
+}
+
+function scoreKey(
+  category: AnalyticsScoreCategory,
+  role: AnalyticsRole,
+): "peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib" {
   if (category === "crib") return "crib";
   return `${category}${role === "dealer" ? "Dealer" : "Pone"}`;
 }
