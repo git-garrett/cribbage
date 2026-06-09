@@ -873,26 +873,31 @@ export class CribbageGame {
   private chooseDiscards(player: PlayerState, myCrib: boolean): Card[] {
     const deck = fullDeck().filter((card) => !player.hand.some((held) => held.id === card.id));
     const engine = this.playerEngines[player.key];
-    const pegTableDiscard = choosePegTableDiscard(player.hand, myCrib ? "dealer" : "pone", engine);
-    if (pegTableDiscard) {
-      this.pegTableLeads[player.key] = pegTableDiscard.bestLead;
-      return pegTableDiscard.cards;
-    }
     this.pegTableLeads[player.key] = null;
+    const role = myCrib ? "dealer" : "pone";
 
     let bestScore = Number.NEGATIVE_INFINITY;
     let bestDiscard = player.hand.slice(0, 2);
+    let bestLead: number | null = null;
 
     for (const discard of combinations(player.hand, 2, 2)) {
       const keep = player.hand.filter((card) => !discard.includes(card));
       const handScore = mean(deck.map((cut) => scoreHand(keep, cut)));
-      const cribScore = expectedCribScore(discard, deck, myCrib, engine);
-      const total = myCrib ? handScore + cribScore : handScore - cribScore;
+      const cribScore = expectedCribScore(
+        discard,
+        deck,
+        myCrib,
+        usesPegTableDiscard(engine) ? "schell-table-1.0" : engine,
+      );
+      const pegging = pegTableEv(player.hand, discard, role, engine);
+      const total = (myCrib ? handScore + cribScore : handScore - cribScore) + pegging.netPeggingEv;
       if (total > bestScore) {
         bestScore = total;
         bestDiscard = discard;
+        bestLead = pegging.bestLead;
       }
     }
+    this.pegTableLeads[player.key] = bestLead;
     return bestDiscard;
   }
 
@@ -1405,8 +1410,13 @@ type PegSimulationState = {
   perspective: PlayerKey;
 };
 type WeightedScore = { total: number; weight: number };
-type PegTablePolicyEntry = string | { discard: string; bestLead?: number | null };
-type PegTableDiscard = { cards: Card[]; bestLead: number | null };
+type PegTableEvTuple = [number, number, number | null];
+type PegTableEv = {
+  myPeggingEv: number;
+  opponentPeggingEv: number;
+  netPeggingEv: number;
+  bestLead: number | null;
+};
 
 const pegCardCache = Array.from({ length: 13 }, (_, rank) => new Card(rank));
 
@@ -1418,19 +1428,35 @@ function usesPegTableDiscard(engine: Opponent): boolean {
   return engine.includes("-peg_table-");
 }
 
-function choosePegTableDiscard(hand: Card[], role: "dealer" | "pone", engine: Opponent): PegTableDiscard | null {
-  if (!usesPegTableDiscard(engine)) return null;
+function pegTableEv(
+  hand: Card[],
+  discard: Card[],
+  role: "dealer" | "pone",
+  engine: Opponent,
+): PegTableEv {
+  if (!usesPegTableDiscard(engine)) return {
+    myPeggingEv: 0,
+    opponentPeggingEv: 0,
+    netPeggingEv: 0,
+    bestLead: null,
+  };
   const handRanks = rankCountsForCards(hand);
-  const entry = (pegTablePolicy.bestDiscards as Record<string, PegTablePolicyEntry | undefined>)[
-    `${handRanks.join("")}:${role}`
+  const discardRanks = rankCountsForCards(discard);
+  const entry = ((pegTablePolicy.pegEvs as unknown) as Record<string, PegTableEvTuple | undefined>)[
+    `${handRanks.join("")}:${discardRanks.join("")}:${role}`
   ];
-  if (!entry) return null;
-  const discardRanks = typeof entry === "string" ? entry : entry.discard;
-  const cards = cardsForRankDiscard(hand, parseRankCounts(discardRanks));
-  if (!cards) return null;
+  if (!entry) return {
+    myPeggingEv: 0,
+    opponentPeggingEv: 0,
+    netPeggingEv: 0,
+    bestLead: null,
+  };
+  const [myPeggingEv, opponentPeggingEv, bestLead] = entry;
   return {
-    cards,
-    bestLead: typeof entry === "string" ? null : entry.bestLead ?? null,
+    myPeggingEv,
+    opponentPeggingEv,
+    netPeggingEv: myPeggingEv - opponentPeggingEv,
+    bestLead,
   };
 }
 
@@ -1457,23 +1483,6 @@ function rankCountsForCards(cards: Card[]): RankCounts {
   const ranks = emptyRankCounts();
   for (const card of cards) ranks[card.rank] += 1;
   return ranks;
-}
-
-function parseRankCounts(value: string): RankCounts {
-  return value.split("").map((digit) => Number.parseInt(digit, 10));
-}
-
-function cardsForRankDiscard(hand: Card[], discardRanks: RankCounts): Card[] | null {
-  const discard: Card[] = [];
-  const remainingRanks = [...discardRanks];
-  for (const card of sortedCards(hand)) {
-    if (remainingRanks[card.rank] > 0) {
-      discard.push(card);
-      remainingRanks[card.rank] -= 1;
-    }
-  }
-  if (discard.length !== 2 || remainingRanks.some((count) => count !== 0)) return null;
-  return discard;
 }
 
 function otherPlayerKey(player: PlayerKey): PlayerKey {
