@@ -289,12 +289,20 @@ function renderBoard(
       const wrap = hole.closest<HTMLElement>(".hole-wrap");
       if (!wrap) continue;
       hole.classList.remove("peg", "back-peg", "front-peg");
-      wrap.classList.remove("expected-human", "expected-ai", "ringed", "ring-short", "ring-long");
+      wrap.classList.remove(
+        "expected-human",
+        "expected-ai",
+        "expected-ahead",
+        "expected-behind",
+        "ringed",
+        "ring-short",
+        "ring-long",
+      );
       wrap.removeAttribute("title");
       applyRingMarker(wrap, Number(hole.dataset.position), player, firstDealerPlayer);
       const projection = projectedPositions.get(hole.dataset.position || "");
       if (projection) {
-        wrap.classList.add(player === "human" ? "expected-human" : "expected-ai");
+        wrap.classList.add(paceStatus(Number(hole.dataset.position), parHolesFor(player, firstDealerPlayer)[completedHands - 1 + projection.hand]));
         wrap.title = `${player === "human" ? "User" : "AI"} expected after hand ${projection.hand}: ${projection.score.toFixed(1)}`;
       }
       if (String(positions[0]) === hole.dataset.position) hole.classList.add("peg", "back-peg");
@@ -344,6 +352,7 @@ function renderPaceLines(
         player,
         lineSide(lineIndex),
         completedHands,
+        paceStatus(Number(pegPositions[player]?.[1]), parHoles[currentParIndex]),
       );
       lineIndex += 1;
     }
@@ -358,6 +367,7 @@ function renderPaceLines(
           player,
           lineSide(lineIndex),
           completedHands + projection.hand,
+          paceStatus(Number(hole), parHole),
         );
         lineIndex += 1;
       }
@@ -370,6 +380,13 @@ function lineSide(index: number): "outside" | "inside" {
 }
 
 type LinePoint = { x: number; y: number };
+type PaceStatus = "expected-ahead" | "expected-behind";
+
+function paceStatus(position: number, parPosition: number | undefined): PaceStatus {
+  return Number.isFinite(position) && parPosition !== undefined && position >= parPosition
+    ? "expected-ahead"
+    : "expected-behind";
+}
 
 function addPaceLine(
   svg: SVGSVGElement,
@@ -379,6 +396,7 @@ function addPaceLine(
   player: "human" | "ai",
   side: "outside" | "inside",
   label: number,
+  status: PaceStatus,
 ): void {
   if (fromPosition === undefined || toPosition === undefined) return;
   const start = holeLinePoint(track, fromPosition, side);
@@ -398,8 +416,8 @@ function addPaceLine(
   const labelCenter = pointAtPolylineDistance(points, totalLength / 2);
   const gapStart = Math.max(0, totalLength / 2 - labelGap / 2);
   const gapEnd = Math.min(totalLength, totalLength / 2 + labelGap / 2);
-  appendPacePath(svg, player, subPolyline(points, 0, gapStart));
-  appendPacePath(svg, player, subPolyline(points, gapEnd, totalLength));
+  appendPacePath(svg, status, subPolyline(points, 0, gapStart));
+  appendPacePath(svg, status, subPolyline(points, gapEnd, totalLength));
 
   const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
   text.classList.add("pace-label", `pace-label-${player}`);
@@ -410,11 +428,11 @@ function addPaceLine(
   svg.append(text);
 }
 
-function appendPacePath(svg: SVGSVGElement, player: "human" | "ai", points: LinePoint[]): void {
+function appendPacePath(svg: SVGSVGElement, status: PaceStatus, points: LinePoint[]): void {
   if (points.length < 2) return;
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
   path.setAttribute("d", pathData(points));
-  path.classList.add("pace-line", `pace-${player}`);
+  path.classList.add("pace-line", status);
   svg.append(path);
 }
 

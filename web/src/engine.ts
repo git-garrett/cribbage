@@ -934,8 +934,8 @@ export class CribbageGame {
       return this.chooseExhaustivePegPlay(player, legal);
     }
     return legal.reduce((best, card) => {
-      const bestKey = [scoreCount([...this.plays, best]), -best.value, -best.runVal];
-      const cardKey = [scoreCount([...this.plays, card]), -card.value, -card.runVal];
+      const bestKey = [scoreCount([...this.plays, best]), best.runVal];
+      const cardKey = [scoreCount([...this.plays, card]), card.runVal];
       return compareTuple(cardKey, bestKey) > 0 ? card : best;
     });
   }
@@ -977,12 +977,11 @@ export class CribbageGame {
       }
 
       const averageScore = totalWeight ? weightedTotal / totalWeight : immediateScore;
-      const key = [averageScore, scoreCount([...this.plays, card]), -card.value, -card.runVal];
+      const key = [averageScore, scoreCount([...this.plays, card]), card.runVal];
       const bestKey = [
         bestScore,
         scoreCount([...this.plays, bestCard]),
-        -bestCard.value,
-        -bestCard.runVal,
+        bestCard.runVal,
       ];
       if (compareTuple(key, bestKey) > 0) {
         bestScore = averageScore;

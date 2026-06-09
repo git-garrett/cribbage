@@ -338,4 +338,40 @@ describe("game state", () => {
     expect(["5d", "6c"]).toContain(play.ascii);
     expect(game.count + play.value).toBeLessThanOrEqual(31);
   });
+
+  test("simple peg tiebreaker favors higher rank", () => {
+    const game = new CribbageGame("schell-table-1.0");
+    game.phase = "pegging";
+    game.pone = game.human;
+    game.dealer = game.ai;
+    game.turn = 0;
+    game.human.hand = cardsFromString("10d Qc Ks");
+    game.ai.hand = [];
+    game.plays = [];
+    game.count = 0;
+
+    const play = (game as any).choosePlay(game.human);
+
+    expect(play.ascii).toBe("Ks");
+  });
+
+  test("exhaustive peg tiebreaker favors higher rank", () => {
+    const game = new CribbageGame("expert-peg-2.2");
+    game.phase = "pegging";
+    game.pone = game.human;
+    game.dealer = game.ai;
+    game.turn = 0;
+    game.human.hand = cardsFromString("Qc Ks");
+    game.ai.hand = [];
+    game.human.table = [];
+    game.ai.table = [];
+    game.crib = cardsFromString("2d 3c 4h 5s");
+    game.turnCard = cardsFromString("As")[0];
+    game.plays = [];
+    game.count = 0;
+
+    const play = (game as any).choosePlay(game.human);
+
+    expect(play.ascii).toBe("Ks");
+  });
 });

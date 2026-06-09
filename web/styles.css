@@ -300,12 +300,12 @@ button:disabled {
   stroke-opacity: 0.62;
 }
 
-.pace-human {
-  stroke: var(--human);
+.pace-line.expected-ahead {
+  stroke: #12813c;
 }
 
-.pace-ai {
-  stroke: var(--ai);
+.pace-line.expected-behind {
+  stroke: #b42318;
 }
 
 .pace-label {
@@ -370,8 +370,8 @@ button:disabled {
   --ring-color: #ffffff;
 }
 
-.hole-wrap.expected-human::after,
-.hole-wrap.expected-ai::after {
+.hole-wrap.expected-ahead::after,
+.hole-wrap.expected-behind::after {
   content: "";
   position: absolute;
   top: 2px;
@@ -385,12 +385,12 @@ button:disabled {
   transform: translate(-50%, -50%);
 }
 
-.hole-wrap.expected-human {
-  --expected-color: var(--human);
+.hole-wrap.expected-ahead {
+  --expected-color: #12813c;
 }
 
-.hole-wrap.expected-ai {
-  --expected-color: var(--ai);
+.hole-wrap.expected-behind {
+  --expected-color: #b42318;
 }
 
 .lane.human .hole.peg {
@@ -954,8 +954,8 @@ button.card {
     height: 6px;
   }
 
-  .hole-wrap.expected-human::after,
-  .hole-wrap.expected-ai::after {
+  .hole-wrap.expected-ahead::after,
+  .hole-wrap.expected-behind::after {
     top: 1.5px;
     width: 4.5px;
     height: 4.5px;
