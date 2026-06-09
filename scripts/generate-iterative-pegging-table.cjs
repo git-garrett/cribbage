@@ -97,13 +97,17 @@ async function main() {
     const iteration = numberArg(9, priorPolicyPath ? 1 : 0);
     const iterationCount = Math.max(1, numberArg(10, 1));
     const rows = enumerateTableRows();
-    const selectedRows = count > 0 ? rows.slice(start, start + count) : rows.slice(start);
     fs.mkdirSync(outDir, { recursive: true });
     const statusPath = path.join(outDir, "status.json");
     let activePriorPolicyPath = priorPolicyPath;
     let activePriorPolicy = priorPolicyPath ? readPolicy(priorPolicyPath) : null;
     for (let offset = 0; offset < iterationCount; offset += 1) {
       const activeIteration = iteration + offset;
+      const activeStart = offset === 0 ? start : 0;
+      const activeRows = count > 0 && offset === 0
+        ? rows.slice(activeStart, activeStart + count)
+        : rows.slice(activeStart);
+      const appendOutput = offset === 0 && activeStart > 0;
       const outputPath = path.join(outDir, `iteration-${activeIteration}.rows.jsonl`);
       const policyPath = path.join(outDir, `iteration-${activeIteration}.policy.json`);
       const summaryPath = path.join(outDir, `iteration-${activeIteration}.summary.json`);
@@ -121,19 +125,24 @@ async function main() {
         policyPath,
         summaryPath,
         priorPolicyPath: activePriorPolicyPath || null,
-        completedRows: 0,
-        totalRows: selectedRows.length,
+        completedRows: activeStart,
+        totalRows: rows.length,
+        remainingRows: activeRows.length,
         fullRows: rows.length,
-        start,
+        start: activeStart,
         workerCount,
         memoWindowRows,
+        appendOutput,
       });
       const result = await runRows({
-        rows: selectedRows,
+        rows: activeRows,
         workerCount,
         memoWindowRows,
         writeOutput: true,
         outputPath,
+        appendOutput,
+        completedOffset: activeStart,
+        totalRows: rows.length,
         priorPolicy: activePriorPolicy,
         statusPath,
         statusContext: {
@@ -148,9 +157,10 @@ async function main() {
           summaryPath,
           priorPolicyPath: activePriorPolicyPath || null,
           fullRows: rows.length,
-          start,
+          start: activeStart,
           workerCount,
           memoWindowRows,
+          appendOutput,
         },
       });
       writeStatus(statusPath, {
@@ -167,12 +177,14 @@ async function main() {
         policyPath,
         summaryPath,
         priorPolicyPath: activePriorPolicyPath || null,
-        completedRows: selectedRows.length,
-        totalRows: selectedRows.length,
+        completedRows: activeStart + activeRows.length,
+        totalRows: rows.length,
+        remainingRows: activeRows.length,
         fullRows: rows.length,
-        start,
+        start: activeStart,
         workerCount,
         memoWindowRows,
+        appendOutput,
         ...result,
       });
       const policy = derivePolicy(outputPath, activePriorPolicy);
@@ -192,8 +204,10 @@ async function main() {
         summaryPath,
         priorPolicyPath: activePriorPolicyPath || null,
         fullRows: rows.length,
-        start,
-        rows: selectedRows.length,
+        start: activeStart,
+        rows: activeRows.length,
+        totalRows: rows.length,
+        appendOutput,
         workerCount,
         memoWindowRows,
         iterationCount,
@@ -215,12 +229,14 @@ async function main() {
         policyPath,
         summaryPath,
         priorPolicyPath: activePriorPolicyPath || null,
-        completedRows: selectedRows.length,
-        totalRows: selectedRows.length,
+        completedRows: activeStart + activeRows.length,
+        totalRows: rows.length,
+        remainingRows: activeRows.length,
         fullRows: rows.length,
-        start,
+        start: activeStart,
         workerCount,
         memoWindowRows,
+        appendOutput,
         policyStats: policy.stats,
         ...result,
       });
@@ -256,6 +272,9 @@ async function runRows({
   memoWindowRows,
   writeOutput,
   outputPath,
+  appendOutput = false,
+  completedOffset = 0,
+  totalRows = rows.length,
   priorPolicy = null,
   statusPath = "",
   statusContext = {},
@@ -268,7 +287,7 @@ async function runRows({
   let aggregatedKeepsTotal = 0;
   let maxWorkerHeapMb = 0;
   let maxWorkerMemoEntries = 0;
-  const output = writeOutput ? fs.createWriteStream(outputPath, { flags: "w" }) : null;
+  const output = writeOutput ? fs.createWriteStream(outputPath, { flags: appendOutput ? "a" : "w" }) : null;
   const chunks = splitRows(rows, workerCount);
 
   await Promise.all(chunks.map((chunk, workerIndex) => new Promise((resolve, reject) => {
@@ -309,9 +328,10 @@ async function runRows({
               phase: "generating-rows",
               updatedAt: new Date().toISOString(),
               ...statusContext,
-              completedRows: completed,
-              totalRows: rows.length,
-              progressPercent: rows.length ? (completed / rows.length) * 100 : 100,
+              completedRows: completedOffset + completed,
+              totalRows,
+              remainingRows: rows.length,
+              progressPercent: totalRows ? ((completedOffset + completed) / totalRows) * 100 : 100,
               elapsedSeconds,
               rowsPerSecond,
               estimatedRemainingSeconds,
@@ -359,14 +379,24 @@ async function runRows({
 
 function runWorker({ rows, memoWindowRows, priorPolicy }) {
   let stateMemo = new Map();
-  const opponentSixMemo = new Map();
-  const opponentKeepDistributionMemo = new Map();
-  const discardMemo = new Map();
-  const handScoreMemo = new Map();
+  let opponentSixMemo = new Map();
+  let opponentKeepDistributionMemo = new Map();
+  let discardMemo = new Map();
+  let handScoreMemo = new Map();
   const policy = priorPolicy ? inflatePolicy(priorPolicy) : null;
+  let currentSourceHandKey = "";
 
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
+    const sourceHandKey = row.hand.join("");
+    if (sourceHandKey !== currentSourceHandKey) {
+      currentSourceHandKey = sourceHandKey;
+      stateMemo = new Map();
+      opponentSixMemo = new Map();
+      opponentKeepDistributionMemo = new Map();
+      discardMemo = new Map();
+      handScoreMemo = new Map();
+    }
     const result = peggingEvForRow(row, {
       stateMemo,
       opponentSixMemo,
