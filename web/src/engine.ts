@@ -332,6 +332,7 @@ export interface GameSnapshot {
   log: string[];
   result: string[];
   pegPositions: Record<PlayerKey, [number | string, number | string]>;
+  pegTableLeads?: Record<PlayerKey, number | null>;
 }
 
 export function cardFromString(input: string): Card {
@@ -488,6 +489,10 @@ export class CribbageGame {
     human: ["start-back", "start-front"],
     ai: ["start-back", "start-front"],
   };
+  pegTableLeads: Record<PlayerKey, number | null> = {
+    human: null,
+    ai: null,
+  };
 
   constructor(opponent: StoredOpponent = DEFAULT_OPPONENT, humanEngine: StoredOpponent = opponent) {
     this.opponent = normalizeOpponent(opponent);
@@ -560,6 +565,10 @@ export class CribbageGame {
       human: [...snapshot.pegPositions.human],
       ai: [...snapshot.pegPositions.ai],
     };
+    game.pegTableLeads = {
+      human: snapshot.pegTableLeads?.human ?? null,
+      ai: snapshot.pegTableLeads?.ai ?? null,
+    };
     return game;
   }
 
@@ -603,6 +612,7 @@ export class CribbageGame {
         human: [...this.pegPositions.human],
         ai: [...this.pegPositions.ai],
       },
+      pegTableLeads: { ...this.pegTableLeads },
     };
   }
 
@@ -626,6 +636,7 @@ export class CribbageGame {
     this.turn = 0;
     this.goPlayer = null;
     this.lastPlayer = null;
+    this.pegTableLeads = { human: null, ai: null };
     this.scoringReview = null;
     this.phase = "discard";
     this.recordAnalytics({
@@ -863,7 +874,11 @@ export class CribbageGame {
     const deck = fullDeck().filter((card) => !player.hand.some((held) => held.id === card.id));
     const engine = this.playerEngines[player.key];
     const pegTableDiscard = choosePegTableDiscard(player.hand, myCrib ? "dealer" : "pone", engine);
-    if (pegTableDiscard) return pegTableDiscard;
+    if (pegTableDiscard) {
+      this.pegTableLeads[player.key] = pegTableDiscard.bestLead;
+      return pegTableDiscard.cards;
+    }
+    this.pegTableLeads[player.key] = null;
 
     let bestScore = Number.NEGATIVE_INFINITY;
     let bestDiscard = player.hand.slice(0, 2);
@@ -949,6 +964,13 @@ export class CribbageGame {
 
   private choosePlay(player: PlayerState): Card {
     const legal = this.legalCards(player);
+    const pegTableLead = choosePegTableLead(player.hand, legal, this.pegTableLeads[player.key], {
+      engine: this.playerEngines[player.key],
+      isPone: player === this.pone,
+      count: this.count,
+      plays: this.plays,
+    });
+    if (pegTableLead) return pegTableLead;
     if (usesExhaustivePegging(this.playerEngines[player.key])) {
       return this.chooseExhaustivePegPlay(player, legal);
     }
@@ -1383,6 +1405,8 @@ type PegSimulationState = {
   perspective: PlayerKey;
 };
 type WeightedScore = { total: number; weight: number };
+type PegTablePolicyEntry = string | { discard: string; bestLead?: number | null };
+type PegTableDiscard = { cards: Card[]; bestLead: number | null };
 
 const pegCardCache = Array.from({ length: 13 }, (_, rank) => new Card(rank));
 
@@ -1394,14 +1418,39 @@ function usesPegTableDiscard(engine: Opponent): boolean {
   return engine.includes("-peg_table-");
 }
 
-function choosePegTableDiscard(hand: Card[], role: "dealer" | "pone", engine: Opponent): Card[] | null {
+function choosePegTableDiscard(hand: Card[], role: "dealer" | "pone", engine: Opponent): PegTableDiscard | null {
   if (!usesPegTableDiscard(engine)) return null;
   const handRanks = rankCountsForCards(hand);
-  const discardRanks = (pegTablePolicy.bestDiscards as Record<string, string | undefined>)[
+  const entry = (pegTablePolicy.bestDiscards as Record<string, PegTablePolicyEntry | undefined>)[
     `${handRanks.join("")}:${role}`
   ];
-  if (!discardRanks) return null;
-  return cardsForRankDiscard(hand, parseRankCounts(discardRanks));
+  if (!entry) return null;
+  const discardRanks = typeof entry === "string" ? entry : entry.discard;
+  const cards = cardsForRankDiscard(hand, parseRankCounts(discardRanks));
+  if (!cards) return null;
+  return {
+    cards,
+    bestLead: typeof entry === "string" ? null : entry.bestLead ?? null,
+  };
+}
+
+function choosePegTableLead(
+  hand: Card[],
+  legal: Card[],
+  bestLead: number | null,
+  context: { engine: Opponent; isPone: boolean; count: number; plays: Card[] },
+): Card | null {
+  if (
+    bestLead === null ||
+    !usesPegTableDiscard(context.engine) ||
+    !context.isPone ||
+    context.count !== 0 ||
+    context.plays.length !== 0 ||
+    hand.length !== 4
+  ) {
+    return null;
+  }
+  return legal.find((card) => card.rank === bestLead) ?? null;
 }
 
 function rankCountsForCards(cards: Card[]): RankCounts {

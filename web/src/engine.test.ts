@@ -383,4 +383,22 @@ describe("game state", () => {
 
     expect(discards.map((card: any) => card.ascii).sort()).toEqual(["2d", "As"]);
   });
+
+  test("peg table variants use generated best pone lead", () => {
+    const game = new CribbageGame("expert-peg_table-2.3");
+    game.phase = "pegging";
+    game.pone = game.human;
+    game.dealer = game.ai;
+    game.turn = 0;
+    game.human.hand = cardsFromString("As 2d 3c 4h 5s 6d");
+    const discards = (game as any).chooseDiscards(game.human, false);
+    game.human.hand = game.human.hand.filter((card: any) => !discards.includes(card));
+    game.ai.hand = cardsFromString("7d 8c 9h 10s");
+    game.plays = [];
+    game.count = 0;
+
+    const play = (game as any).choosePlay(game.human);
+
+    expect(play.ascii).toBe("3c");
+  });
 });
