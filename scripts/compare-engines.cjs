@@ -32,27 +32,36 @@ engineModule._compile(compiled, enginePath);
 const { CribbageGame } = engineModule.exports;
 
 const engines = {
-  expert: "expert-peg-2.2",
+  expert: "expert-peg_table-2.3",
   expert20: "expert-2.0-ras-tables",
+  expertPegTable23: "expert-peg_table-2.3",
+  expertPegTable22: "expert-peg_table-2.2",
   expertPeg21: "expert-peg-2.1",
+  expertPegTable13: "expert-peg_table-1.3",
   expert11: "expert-1.1",
   expertPeg12: "expert-peg-1.2",
   ras: "ras-table-1.0",
   rasPeg: "ras-table-peg-1.1",
+  rasPegTable: "ras-table-peg_table-1.2",
   schell: "schell-table-1.0",
   schellPeg: "schell-table-peg-1.1",
+  schellPegTable: "schell-table-peg_table-1.2",
 };
 
 const labels = {
-  [engines.expert]: "Expert Peg 2.2",
+  [engines.expertPegTable23]: "Expert Peg Table 2.3",
+  [engines.expertPegTable22]: "Expert Peg Table 2.2",
   [engines.expert20]: "Expert 2.0 Ras Tables",
   [engines.expertPeg21]: "Expert Peg 2.1",
+  [engines.expertPegTable13]: "Expert Peg Table 1.3",
   [engines.expert11]: "Expert 1.1",
   [engines.expertPeg12]: "Expert Peg 1.2",
   [engines.ras]: "Ras Table 1.0",
   [engines.rasPeg]: "Ras Table Peg 1.1",
+  [engines.rasPegTable]: "Ras Table Peg Table 1.2",
   [engines.schell]: "Schell Table 1.0",
   [engines.schellPeg]: "Schell Table Peg 1.1",
+  [engines.schellPegTable]: "Schell Table Peg Table 1.2",
 };
 
 const threeWayMatchups = [

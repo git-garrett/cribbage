@@ -1,16 +1,23 @@
+import pegTablePolicy from "./peg-table-policy.json";
+
 export type PlayerKey = "human" | "ai";
 export type Opponent =
   | "expert-1.1"
   | "expert-peg-1.2"
+  | "expert-peg_table-1.3"
   | "expert-2.0-ras-tables"
   | "expert-peg-2.1"
+  | "expert-peg_table-2.2"
   | "expert-peg-2.2"
+  | "expert-peg_table-2.3"
   | "ras-table-1.0"
   | "ras-table-peg-1.1"
+  | "ras-table-peg_table-1.2"
   | "schell-table-peg-1.1"
+  | "schell-table-peg_table-1.2"
   | "schell-table-1.0";
 type StoredOpponent = Opponent | "expert";
-export const DEFAULT_OPPONENT: Opponent = "expert-peg-2.2";
+export const DEFAULT_OPPONENT: Opponent = "expert-peg_table-2.3";
 export type Phase =
   | "discard"
   | "ai_discarding"
@@ -30,13 +37,18 @@ const RUN_VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
 const ENGINE_LABELS: Record<Opponent, string> = {
   "expert-1.1": "Expert 1.1",
   "expert-peg-1.2": "Expert Peg 1.2",
+  "expert-peg_table-1.3": "Expert Peg Table 1.3",
   "expert-2.0-ras-tables": "Expert 2.0 Ras Tables",
   "expert-peg-2.1": "Expert Peg 2.1",
+  "expert-peg_table-2.2": "Expert Peg Table 2.2",
   "expert-peg-2.2": "Expert Peg 2.2",
+  "expert-peg_table-2.3": "Expert Peg Table 2.3",
   "ras-table-1.0": "Ras Table 1.0",
   "ras-table-peg-1.1": "Ras Table Peg 1.1",
+  "ras-table-peg_table-1.2": "Ras Table Peg Table 1.2",
   "schell-table-1.0": "Schell Table 1.0",
   "schell-table-peg-1.1": "Schell Table Peg 1.1",
+  "schell-table-peg_table-1.2": "Schell Table Peg Table 1.2",
 };
 type DiscardTableEngine = Exclude<Opponent, "expert-1.1" | "expert-peg-1.2">;
 type CribTable = { own: number[][]; opponent: number[][] };
@@ -108,9 +120,13 @@ const DISCARD_TABLES: Record<string, CribTable> = {
 };
 DISCARD_TABLES["expert-2.0-ras-tables"] = DISCARD_TABLES["ras-table-1.0"];
 DISCARD_TABLES["expert-peg-2.1"] = DISCARD_TABLES["ras-table-1.0"];
+DISCARD_TABLES["expert-peg_table-2.2"] = DISCARD_TABLES["ras-table-1.0"];
 DISCARD_TABLES["expert-peg-2.2"] = DISCARD_TABLES["schell-table-1.0"];
+DISCARD_TABLES["expert-peg_table-2.3"] = DISCARD_TABLES["schell-table-1.0"];
 DISCARD_TABLES["ras-table-peg-1.1"] = DISCARD_TABLES["ras-table-1.0"];
+DISCARD_TABLES["ras-table-peg_table-1.2"] = DISCARD_TABLES["ras-table-1.0"];
 DISCARD_TABLES["schell-table-peg-1.1"] = DISCARD_TABLES["schell-table-1.0"];
+DISCARD_TABLES["schell-table-peg_table-1.2"] = DISCARD_TABLES["schell-table-1.0"];
 
 export class WinGame extends Error {}
 
@@ -846,6 +862,9 @@ export class CribbageGame {
   private chooseDiscards(player: PlayerState, myCrib: boolean): Card[] {
     const deck = fullDeck().filter((card) => !player.hand.some((held) => held.id === card.id));
     const engine = this.playerEngines[player.key];
+    const pegTableDiscard = choosePegTableDiscard(player.hand, myCrib ? "dealer" : "pone", engine);
+    if (pegTableDiscard) return pegTableDiscard;
+
     let bestScore = Number.NEGATIVE_INFINITY;
     let bestDiscard = player.hand.slice(0, 2);
 
@@ -1368,7 +1387,44 @@ type WeightedScore = { total: number; weight: number };
 const pegCardCache = Array.from({ length: 13 }, (_, rank) => new Card(rank));
 
 function usesExhaustivePegging(engine: Opponent): boolean {
-  return engine.includes("-peg-");
+  return engine.includes("-peg-") || engine.includes("-peg_table-");
+}
+
+function usesPegTableDiscard(engine: Opponent): boolean {
+  return engine.includes("-peg_table-");
+}
+
+function choosePegTableDiscard(hand: Card[], role: "dealer" | "pone", engine: Opponent): Card[] | null {
+  if (!usesPegTableDiscard(engine)) return null;
+  const handRanks = rankCountsForCards(hand);
+  const discardRanks = (pegTablePolicy.bestDiscards as Record<string, string | undefined>)[
+    `${handRanks.join("")}:${role}`
+  ];
+  if (!discardRanks) return null;
+  return cardsForRankDiscard(hand, parseRankCounts(discardRanks));
+}
+
+function rankCountsForCards(cards: Card[]): RankCounts {
+  const ranks = emptyRankCounts();
+  for (const card of cards) ranks[card.rank] += 1;
+  return ranks;
+}
+
+function parseRankCounts(value: string): RankCounts {
+  return value.split("").map((digit) => Number.parseInt(digit, 10));
+}
+
+function cardsForRankDiscard(hand: Card[], discardRanks: RankCounts): Card[] | null {
+  const discard: Card[] = [];
+  const remainingRanks = [...discardRanks];
+  for (const card of sortedCards(hand)) {
+    if (remainingRanks[card.rank] > 0) {
+      discard.push(card);
+      remainingRanks[card.rank] -= 1;
+    }
+  }
+  if (discard.length !== 2 || remainingRanks.some((count) => count !== 0)) return null;
+  return discard;
 }
 
 function otherPlayerKey(player: PlayerKey): PlayerKey {

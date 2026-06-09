@@ -40,9 +40,9 @@ describe("scoring", () => {
 });
 
 describe("game state", () => {
-  test("defaults to the latest expert peg engine", () => {
-    expect(DEFAULT_OPPONENT).toBe("expert-peg-2.2");
-    expect(new CribbageGame().opponent).toBe("expert-peg-2.2");
+  test("defaults to the latest expert peg table engine", () => {
+    expect(DEFAULT_OPPONENT).toBe("expert-peg_table-2.3");
+    expect(new CribbageGame().opponent).toBe("expert-peg_table-2.3");
   });
 
   test("keeps first dealer stable while current dealer alternates", () => {
@@ -356,7 +356,7 @@ describe("game state", () => {
   });
 
   test("exhaustive peg tiebreaker favors higher rank", () => {
-    const game = new CribbageGame("expert-peg-2.2");
+    const game = new CribbageGame("expert-peg_table-2.3");
     game.phase = "pegging";
     game.pone = game.human;
     game.dealer = game.ai;
@@ -373,5 +373,14 @@ describe("game state", () => {
     const play = (game as any).choosePlay(game.human);
 
     expect(play.ascii).toBe("Ks");
+  });
+
+  test("peg table variants use generated discard policy", () => {
+    const game = new CribbageGame("expert-peg_table-2.3");
+    game.human.hand = cardsFromString("As 2d 3c 4h 5s 6d");
+
+    const discards = (game as any).chooseDiscards(game.human, false);
+
+    expect(discards.map((card: any) => card.ascii).sort()).toEqual(["2d", "As"]);
   });
 });

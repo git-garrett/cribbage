@@ -806,7 +806,9 @@ function renderAnalyticsTotals(
 ): void {
   const humanTotals = emptyAnalyticsTotals();
   const aiAllTotals = emptyAnalyticsTotals();
+  const aiHumanTotals = emptyAnalyticsTotals();
   const aiByModel = new Map<Opponent, AnalyticsTotals>();
+  const aiHumanByModel = new Map<Opponent, AnalyticsTotals>();
   const gameEngines = engineByGame(gameEvents);
   const opportunities = new Map<AnalyticsTotals, Record<ScoreKey, Set<string>>>();
   const ensureOpportunities = (totals: AnalyticsTotals): Record<ScoreKey, Set<string>> => {
@@ -823,6 +825,13 @@ function renderAnalyticsTotals(
     aiByModel.set(engine, next);
     return next;
   };
+  const modelHumanTotals = (engine: Opponent): AnalyticsTotals => {
+    const existing = aiHumanByModel.get(engine);
+    if (existing) return existing;
+    const next = emptyAnalyticsTotals();
+    aiHumanByModel.set(engine, next);
+    return next;
+  };
 
   for (const event of scoreEvents) {
     const key = scoreKey(event.category, event.role);
@@ -833,10 +842,15 @@ function renderAnalyticsTotals(
     } else {
       const engine = gameEngines.get(event.gameId) ?? DEFAULT_OPPONENT;
       const perModel = modelTotals(engine);
+      const perHumanModel = modelHumanTotals(engine);
       aiAllTotals[key] += event.points;
+      aiHumanTotals[key] += event.points;
       perModel[key] += event.points;
+      perHumanModel[key] += event.points;
       ensureOpportunities(aiAllTotals)[key].add(handKey);
+      ensureOpportunities(aiHumanTotals)[key].add(handKey);
       ensureOpportunities(perModel)[key].add(handKey);
+      ensureOpportunities(perHumanModel)[key].add(handKey);
     }
   }
   for (const event of gameEvents) {
@@ -845,40 +859,95 @@ function renderAnalyticsTotals(
     const result = event.result ?? gameResultFromScores(event.winner, event.finalScores);
     humanTotals.games += 1;
     aiAllTotals.games += 1;
+    aiHumanTotals.games += 1;
     const engine = gameEngines.get(event.gameId) ?? normalizeAnalyticsEngine(event.opponent);
     const perModel = modelTotals(engine);
+    const perHumanModel = modelHumanTotals(engine);
     perModel.games += 1;
+    perHumanModel.games += 1;
     const winnerTotals = event.winner === "human" ? humanTotals : aiAllTotals;
     const loserTotals = loser === "human" ? humanTotals : aiAllTotals;
     winnerTotals.wins += 1;
     loserTotals.losses += 1;
-    if (event.winner === "ai") perModel.wins += 1;
-    else perModel.losses += 1;
+    if (event.winner === "ai") {
+      aiHumanTotals.wins += 1;
+      perModel.wins += 1;
+      perHumanModel.wins += 1;
+    } else {
+      aiHumanTotals.losses += 1;
+      perModel.losses += 1;
+      perHumanModel.losses += 1;
+    }
     if (result === "skunk" || result === "double-skunk") {
       winnerTotals.skunks += 1;
       loserTotals.skunked += 1;
-      if (event.winner === "ai") perModel.skunks += 1;
-      else perModel.skunked += 1;
+      if (event.winner === "ai") {
+        aiHumanTotals.skunks += 1;
+        perModel.skunks += 1;
+        perHumanModel.skunks += 1;
+      } else {
+        aiHumanTotals.skunked += 1;
+        perModel.skunked += 1;
+        perHumanModel.skunked += 1;
+      }
     }
     if (result === "double-skunk") {
       winnerTotals.doubleSkunks += 1;
       loserTotals.doubleSkunked += 1;
-      if (event.winner === "ai") perModel.doubleSkunks += 1;
-      else perModel.doubleSkunked += 1;
+      if (event.winner === "ai") {
+        aiHumanTotals.doubleSkunks += 1;
+        perModel.doubleSkunks += 1;
+        perHumanModel.doubleSkunks += 1;
+      } else {
+        aiHumanTotals.doubleSkunked += 1;
+        perModel.doubleSkunked += 1;
+        perHumanModel.doubleSkunked += 1;
+      }
     }
   }
   applyOpportunityCounts(humanTotals, ensureOpportunities(humanTotals));
   applyOpportunityCounts(aiAllTotals, ensureOpportunities(aiAllTotals));
+  applyOpportunityCounts(aiHumanTotals, ensureOpportunities(aiHumanTotals));
   for (const totals of aiByModel.values()) applyOpportunityCounts(totals, ensureOpportunities(totals));
+  for (const totals of aiHumanByModel.values()) applyOpportunityCounts(totals, ensureOpportunities(totals));
   addAiBaselineTotals(aiAllTotals, aiByModel);
   els.analyticsTotals.innerHTML = "";
-  els.analyticsTotals.append(
-    analyticsTotalCard("User", humanTotals, "human"),
-    analyticsTotalCard("All AI", aiAllTotals, "ai"),
-  );
-  for (const [engine, totals] of [...aiByModel.entries()].sort((a, b) => engineName(a[0]).localeCompare(engineName(b[0])))) {
-    els.analyticsTotals.append(analyticsTotalCard(engineName(engine), totals, "ai"));
+  els.analyticsTotals.append(analyticsTotalCard("User", humanTotals, "human"));
+  els.analyticsTotals.append(analyticsTotalCard("All AI", aiAllTotals, "ai"));
+  els.analyticsTotals.append(analyticsTotalCard("All AI vs User", aiHumanTotals, "ai"));
+  for (const engine of sortedAnalyticsEngines(aiByModel, aiHumanByModel)) {
+    const totals = aiByModel.get(engine);
+    const humanOnlyTotals = aiHumanByModel.get(engine) ?? emptyAnalyticsTotals();
+    if (totals) els.analyticsTotals.append(analyticsTotalCard(engineName(engine), totals, "ai"));
+    els.analyticsTotals.append(analyticsTotalCard(`${engineName(engine)} vs User`, humanOnlyTotals, "ai"));
   }
+}
+
+function sortedAnalyticsEngines(
+  aiByModel: Map<Opponent, AnalyticsTotals>,
+  aiHumanByModel: Map<Opponent, AnalyticsTotals>,
+): Opponent[] {
+  const engines = new Set<Opponent>([...aiByModel.keys(), ...aiHumanByModel.keys()]);
+  return [...engines].sort((a, b) => analyticsEngineSortKey(a) - analyticsEngineSortKey(b));
+}
+
+function analyticsEngineSortKey(engine: Opponent): number {
+  return [
+    "expert-peg_table-2.3",
+    "expert-peg-2.2",
+    "expert-peg_table-2.2",
+    "expert-peg-2.1",
+    "expert-2.0-ras-tables",
+    "expert-peg_table-1.3",
+    "expert-peg-1.2",
+    "expert-1.1",
+    "schell-table-peg_table-1.2",
+    "schell-table-peg-1.1",
+    "schell-table-1.0",
+    "ras-table-peg_table-1.2",
+    "ras-table-peg-1.1",
+    "ras-table-1.0",
+  ].indexOf(engine);
 }
 
 function renderAnalyticsRows(container: HTMLElement, rows: string[][]): void {
@@ -1093,13 +1162,18 @@ function playerName(player: PlayerKey | undefined): string {
 function engineName(engine: string | undefined): string {
   if (engine === "expert" || engine === "expert-1.1") return "Expert 1.1";
   if (engine === "expert-peg-1.2") return "Expert Peg 1.2";
+  if (engine === "expert-peg_table-1.3") return "Expert Peg Table 1.3";
   if (engine === "expert-2.0-ras-tables") return "Expert 2.0 Ras Tables";
   if (engine === "expert-peg-2.1") return "Expert Peg 2.1";
+  if (engine === "expert-peg_table-2.2") return "Expert Peg Table 2.2";
   if (engine === "expert-peg-2.2") return "Expert Peg 2.2";
+  if (engine === "expert-peg_table-2.3") return "Expert Peg Table 2.3";
   if (engine === "ras-table-1.0") return "Ras Table 1.0";
   if (engine === "ras-table-peg-1.1") return "Ras Table Peg 1.1";
+  if (engine === "ras-table-peg_table-1.2") return "Ras Table Peg Table 1.2";
   if (engine === "schell-table-1.0") return "Schell Table 1.0";
   if (engine === "schell-table-peg-1.1") return "Schell Table Peg 1.1";
+  if (engine === "schell-table-peg_table-1.2") return "Schell Table Peg Table 1.2";
   return engine || "-";
 }
 
@@ -1108,12 +1182,17 @@ function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
   if (
     engine === "expert-1.1" ||
     engine === "expert-peg-1.2" ||
+    engine === "expert-peg_table-1.3" ||
     engine === "expert-2.0-ras-tables" ||
     engine === "expert-peg-2.1" ||
+    engine === "expert-peg_table-2.2" ||
     engine === "expert-peg-2.2" ||
+    engine === "expert-peg_table-2.3" ||
     engine === "ras-table-1.0" ||
     engine === "ras-table-peg-1.1" ||
+    engine === "ras-table-peg_table-1.2" ||
     engine === "schell-table-peg-1.1" ||
+    engine === "schell-table-peg_table-1.2" ||
     engine === "schell-table-1.0"
   ) {
     return engine;
