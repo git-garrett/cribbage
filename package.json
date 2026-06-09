@@ -9,7 +9,10 @@
     "compare:engines:parallel": "node scripts/compare-engines-parallel.cjs 300",
     "benchmark:large-mixed": "node scripts/run-large-mixed-benchmark.cjs",
     "calibrate:pegging-table": "node --max-old-space-size=4096 scripts/calibrate-pegging-table.cjs 100 997 10",
-    "simulate:ai-baseline": "node scripts/simulate-ai-baseline.cjs 1000 expert-peg-2.1",
+    "benchmark:iterative-pegging-table": "node --max-old-space-size=8192 scripts/generate-iterative-pegging-table.cjs benchmark 96 8,10,12 3",
+    "generate:iterative-pegging-table": "node --max-old-space-size=8192 scripts/generate-iterative-pegging-table.cjs generate benchmarks/pegging-table 12 3",
+    "generate:iterative-pegging-table:2": "node --max-old-space-size=8192 scripts/generate-iterative-pegging-table.cjs generate benchmarks/pegging-table 12 3 0 0 none 0 2",
+    "simulate:ai-baseline": "node scripts/simulate-ai-baseline.cjs 1000 expert-peg-2.2",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

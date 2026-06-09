@@ -4,12 +4,13 @@ const Module = require("node:module");
 const ts = require("typescript");
 
 const gameCount = Number.parseInt(process.argv[2] || "1000", 10);
-const defaultOpponent = "expert-peg-2.1";
+const defaultOpponent = "expert-peg-2.2";
 const validOpponents = new Set([
   "expert-1.1",
   "expert-peg-1.2",
   "expert-2.0-ras-tables",
   "expert-peg-2.1",
+  "expert-peg-2.2",
   "ras-table-1.0",
   "ras-table-peg-1.1",
   "schell-table-1.0",

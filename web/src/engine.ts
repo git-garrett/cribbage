@@ -4,12 +4,13 @@ export type Opponent =
   | "expert-peg-1.2"
   | "expert-2.0-ras-tables"
   | "expert-peg-2.1"
+  | "expert-peg-2.2"
   | "ras-table-1.0"
   | "ras-table-peg-1.1"
   | "schell-table-peg-1.1"
   | "schell-table-1.0";
 type StoredOpponent = Opponent | "expert";
-export const DEFAULT_OPPONENT: Opponent = "expert-peg-2.1";
+export const DEFAULT_OPPONENT: Opponent = "expert-peg-2.2";
 export type Phase =
   | "discard"
   | "ai_discarding"
@@ -31,6 +32,7 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "expert-peg-1.2": "Expert Peg 1.2",
   "expert-2.0-ras-tables": "Expert 2.0 Ras Tables",
   "expert-peg-2.1": "Expert Peg 2.1",
+  "expert-peg-2.2": "Expert Peg 2.2",
   "ras-table-1.0": "Ras Table 1.0",
   "ras-table-peg-1.1": "Ras Table Peg 1.1",
   "schell-table-1.0": "Schell Table 1.0",
@@ -106,6 +108,7 @@ const DISCARD_TABLES: Record<string, CribTable> = {
 };
 DISCARD_TABLES["expert-2.0-ras-tables"] = DISCARD_TABLES["ras-table-1.0"];
 DISCARD_TABLES["expert-peg-2.1"] = DISCARD_TABLES["ras-table-1.0"];
+DISCARD_TABLES["expert-peg-2.2"] = DISCARD_TABLES["schell-table-1.0"];
 DISCARD_TABLES["ras-table-peg-1.1"] = DISCARD_TABLES["ras-table-1.0"];
 DISCARD_TABLES["schell-table-peg-1.1"] = DISCARD_TABLES["schell-table-1.0"];
 

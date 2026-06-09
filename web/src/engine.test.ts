@@ -41,8 +41,8 @@ describe("scoring", () => {
 
 describe("game state", () => {
   test("defaults to the latest expert peg engine", () => {
-    expect(DEFAULT_OPPONENT).toBe("expert-peg-2.1");
-    expect(new CribbageGame().opponent).toBe("expert-peg-2.1");
+    expect(DEFAULT_OPPONENT).toBe("expert-peg-2.2");
+    expect(new CribbageGame().opponent).toBe("expert-peg-2.2");
   });
 
   test("keeps first dealer stable while current dealer alternates", () => {

@@ -1,6 +1,7 @@
 table.txt
 table2.txt
 log.txt
+.DS_Store
 build
 *.so
 *.c

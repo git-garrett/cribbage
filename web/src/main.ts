@@ -1077,6 +1077,7 @@ function engineName(engine: string | undefined): string {
   if (engine === "expert-peg-1.2") return "Expert Peg 1.2";
   if (engine === "expert-2.0-ras-tables") return "Expert 2.0 Ras Tables";
   if (engine === "expert-peg-2.1") return "Expert Peg 2.1";
+  if (engine === "expert-peg-2.2") return "Expert Peg 2.2";
   if (engine === "ras-table-1.0") return "Ras Table 1.0";
   if (engine === "ras-table-peg-1.1") return "Ras Table Peg 1.1";
   if (engine === "schell-table-1.0") return "Schell Table 1.0";
@@ -1091,6 +1092,7 @@ function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
     engine === "expert-peg-1.2" ||
     engine === "expert-2.0-ras-tables" ||
     engine === "expert-peg-2.1" ||
+    engine === "expert-peg-2.2" ||
     engine === "ras-table-1.0" ||
     engine === "ras-table-peg-1.1" ||
     engine === "schell-table-peg-1.1" ||
