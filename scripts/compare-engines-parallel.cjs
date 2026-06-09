@@ -9,14 +9,9 @@ const root = path.resolve(__dirname, "..");
 const enginePath = path.join(root, "web/src/engine.ts");
 
 const engines = {
-  expert: "expert-peg_table-2.3",
-  expert20: "expert-2.0-ras-tables",
-  expertPegTable23: "expert-peg_table-2.3",
-  expertPegTable22: "expert-peg_table-2.2",
-  expertPeg21: "expert-peg-2.1",
-  expertPegTable13: "expert-peg_table-1.3",
-  expert11: "expert-1.1",
-  expertPeg12: "expert-peg-1.2",
+  expert: "schell-table-peg_table-1.2",
+  original: "original-1.1",
+  originalPeg: "original_exhaustive_peg-1.2",
   ras: "ras-table-1.0",
   rasPeg: "ras-table-peg-1.1",
   rasPegTable: "ras-table-peg_table-1.2",
@@ -26,13 +21,8 @@ const engines = {
 };
 
 const labels = {
-  [engines.expertPegTable23]: "Expert Peg Table 2.3",
-  [engines.expertPegTable22]: "Expert Peg Table 2.2",
-  [engines.expert20]: "Expert 2.0 Ras Tables",
-  [engines.expertPeg21]: "Expert Peg 2.1",
-  [engines.expertPegTable13]: "Expert Peg Table 1.3",
-  [engines.expert11]: "Expert 1.1",
-  [engines.expertPeg12]: "Expert Peg 1.2",
+  [engines.original]: "Original 1.1",
+  [engines.originalPeg]: "Original Exhaustive Peg 1.2",
   [engines.ras]: "Ras Table 1.0",
   [engines.rasPeg]: "Ras Table Peg 1.1",
   [engines.rasPegTable]: "Ras Table Peg Table 1.2",
@@ -48,19 +38,18 @@ const matchupModes = {
     [engines.schell, engines.expert],
   ],
   "three-way-expert-1.1": [
-    [engines.ras, engines.expert11],
+    [engines.ras, engines.original],
     [engines.ras, engines.schell],
-    [engines.schell, engines.expert11],
+    [engines.schell, engines.original],
   ],
   "peg-variants": [
-    [engines.expertPeg21, engines.expert],
-    [engines.expert20, engines.expertPeg21],
-    [engines.expert11, engines.expertPeg12],
+    [engines.schellPeg, engines.expert],
     [engines.ras, engines.rasPeg],
+    [engines.original, engines.originalPeg],
     [engines.schell, engines.schellPeg],
   ],
-  "ras-v-expert-1.1": [[engines.ras, engines.expert11]],
-  "schell-v-expert-1.1": [[engines.schell, engines.expert11]],
+  "ras-v-expert-1.1": [[engines.ras, engines.original]],
+  "schell-v-expert-1.1": [[engines.schell, engines.original]],
   "ras-v-schell": [[engines.ras, engines.schell]],
 };
 

@@ -2,22 +2,30 @@ import pegTablePolicy from "./peg-table-policy.json";
 
 export type PlayerKey = "human" | "ai";
 export type Opponent =
-  | "expert-1.1"
-  | "expert-peg-1.2"
-  | "expert-peg_table-1.3"
-  | "expert-2.0-ras-tables"
-  | "expert-peg-2.1"
-  | "expert-peg_table-2.2"
-  | "expert-peg-2.2"
-  | "expert-peg_table-2.3"
+  | "original-1.1"
+  | "original_exhaustive_peg-1.2"
   | "ras-table-1.0"
   | "ras-table-peg-1.1"
   | "ras-table-peg_table-1.2"
   | "schell-table-peg-1.1"
   | "schell-table-peg_table-1.2"
   | "schell-table-1.0";
-type StoredOpponent = Opponent | "expert";
-export const DEFAULT_OPPONENT: Opponent = "expert-peg_table-2.3";
+type LegacyOpponent =
+  | "expert"
+  | "expert-1.1"
+  | "expert-peg-1.2"
+  | "expert_ras-table-1.0"
+  | "expert_ras-table-peg-1.1"
+  | "expert_schell-table-peg-1.1"
+  | "expert_schell-table-peg_table-1.2"
+  | "expert-peg_table-1.3"
+  | "expert-2.0-ras-tables"
+  | "expert-peg-2.1"
+  | "expert-peg_table-2.2"
+  | "expert-peg-2.2"
+  | "expert-peg_table-2.3";
+type StoredOpponent = Opponent | LegacyOpponent;
+export const DEFAULT_OPPONENT: Opponent = "schell-table-peg_table-1.2";
 export type Phase =
   | "discard"
   | "ai_discarding"
@@ -35,14 +43,8 @@ const SUIT_SYMBOLS = ["♦", "♣", "♥", "♠"];
 const VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10];
 const RUN_VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
 const ENGINE_LABELS: Record<Opponent, string> = {
-  "expert-1.1": "Expert 1.1",
-  "expert-peg-1.2": "Expert Peg 1.2",
-  "expert-peg_table-1.3": "Expert Peg Table 1.3",
-  "expert-2.0-ras-tables": "Expert 2.0 Ras Tables",
-  "expert-peg-2.1": "Expert Peg 2.1",
-  "expert-peg_table-2.2": "Expert Peg Table 2.2",
-  "expert-peg-2.2": "Expert Peg 2.2",
-  "expert-peg_table-2.3": "Expert Peg Table 2.3",
+  "original-1.1": "Original 1.1",
+  "original_exhaustive_peg-1.2": "Original Exhaustive Peg 1.2",
   "ras-table-1.0": "Ras Table 1.0",
   "ras-table-peg-1.1": "Ras Table Peg 1.1",
   "ras-table-peg_table-1.2": "Ras Table Peg Table 1.2",
@@ -50,7 +52,7 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "schell-table-peg-1.1": "Schell Table Peg 1.1",
   "schell-table-peg_table-1.2": "Schell Table Peg Table 1.2",
 };
-type DiscardTableEngine = Exclude<Opponent, "expert-1.1" | "expert-peg-1.2">;
+type DiscardTableEngine = Exclude<Opponent, "original-1.1" | "original_exhaustive_peg-1.2">;
 type CribTable = { own: number[][]; opponent: number[][] };
 const DISCARD_TABLES: Record<string, CribTable> = {
   "ras-table-1.0": {
@@ -118,11 +120,6 @@ const DISCARD_TABLES: Record<string, CribTable> = {
     ],
   },
 };
-DISCARD_TABLES["expert-2.0-ras-tables"] = DISCARD_TABLES["ras-table-1.0"];
-DISCARD_TABLES["expert-peg-2.1"] = DISCARD_TABLES["ras-table-1.0"];
-DISCARD_TABLES["expert-peg_table-2.2"] = DISCARD_TABLES["ras-table-1.0"];
-DISCARD_TABLES["expert-peg-2.2"] = DISCARD_TABLES["schell-table-1.0"];
-DISCARD_TABLES["expert-peg_table-2.3"] = DISCARD_TABLES["schell-table-1.0"];
 DISCARD_TABLES["ras-table-peg-1.1"] = DISCARD_TABLES["ras-table-1.0"];
 DISCARD_TABLES["ras-table-peg_table-1.2"] = DISCARD_TABLES["ras-table-1.0"];
 DISCARD_TABLES["schell-table-peg-1.1"] = DISCARD_TABLES["schell-table-1.0"];
@@ -887,7 +884,7 @@ export class CribbageGame {
         discard,
         deck,
         myCrib,
-        usesPegTableDiscard(engine) ? "schell-table-1.0" : engine,
+        engine,
       );
       const pegging = pegTableEv(player.hand, discard, role, engine);
       const total = (myCrib ? handScore + cribScore : handScore - cribScore) + pegging.netPeggingEv;
@@ -1421,7 +1418,9 @@ type PegTableEv = {
 const pegCardCache = Array.from({ length: 13 }, (_, rank) => new Card(rank));
 
 function usesExhaustivePegging(engine: Opponent): boolean {
-  return engine.includes("-peg-") || engine.includes("-peg_table-");
+  return engine === "original_exhaustive_peg-1.2" ||
+    engine.includes("-peg-") ||
+    engine.includes("-peg_table-");
 }
 
 function usesPegTableDiscard(engine: Opponent): boolean {
@@ -1686,5 +1685,16 @@ function createAnalyticsId(prefix: string): string {
 
 function normalizeOpponent(opponent: StoredOpponent): Opponent {
   if (opponent === "expert") return DEFAULT_OPPONENT;
+  if (opponent === "expert-1.1") return "original-1.1";
+  if (opponent === "expert-peg-1.2") return "original_exhaustive_peg-1.2";
+  if (opponent === "expert-2.0-ras-tables" || opponent === "expert_ras-table-1.0") return "ras-table-1.0";
+  if (opponent === "expert-peg-2.1" || opponent === "expert_ras-table-peg-1.1") return "ras-table-peg-1.1";
+  if (opponent === "expert-peg_table-2.2") return "ras-table-peg_table-1.2";
+  if (opponent === "expert-peg-2.2" || opponent === "expert_schell-table-peg-1.1") return "schell-table-peg-1.1";
+  if (
+    opponent === "expert-peg_table-1.3" ||
+    opponent === "expert-peg_table-2.3" ||
+    opponent === "expert_schell-table-peg_table-1.2"
+  ) return "schell-table-peg_table-1.2";
   return opponent;
 }

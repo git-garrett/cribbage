@@ -41,8 +41,8 @@ describe("scoring", () => {
 
 describe("game state", () => {
   test("defaults to the latest expert peg table engine", () => {
-    expect(DEFAULT_OPPONENT).toBe("expert-peg_table-2.3");
-    expect(new CribbageGame().opponent).toBe("expert-peg_table-2.3");
+    expect(DEFAULT_OPPONENT).toBe("schell-table-peg_table-1.2");
+    expect(new CribbageGame().opponent).toBe("schell-table-peg_table-1.2");
   });
 
   test("keeps first dealer stable while current dealer alternates", () => {
@@ -302,7 +302,7 @@ describe("game state", () => {
   });
 
   test("autoplays AI versus AI games to completion", () => {
-    const game = new CribbageGame("expert-2.0-ras-tables");
+    const game = new CribbageGame("ras-table-1.0");
 
     game.autoPlayToEnd();
 
@@ -318,7 +318,7 @@ describe("game state", () => {
   });
 
   test("exhaustive peg variants choose legal plays", () => {
-    const game = new CribbageGame("expert-peg-2.1");
+    const game = new CribbageGame("ras-table-peg-1.1");
     game.phase = "pegging";
     game.pone = game.human;
     game.dealer = game.ai;
@@ -356,7 +356,7 @@ describe("game state", () => {
   });
 
   test("exhaustive peg tiebreaker favors higher rank", () => {
-    const game = new CribbageGame("expert-peg_table-2.3");
+    const game = new CribbageGame("schell-table-peg_table-1.2");
     game.phase = "pegging";
     game.pone = game.human;
     game.dealer = game.ai;
@@ -376,7 +376,7 @@ describe("game state", () => {
   });
 
   test("peg table variants use generated discard policy", () => {
-    const game = new CribbageGame("expert-peg_table-2.3");
+    const game = new CribbageGame("schell-table-peg_table-1.2");
     game.human.hand = cardsFromString("As 2d 3c 4h 5s 6d");
 
     const discards = (game as any).chooseDiscards(game.human, false);
@@ -385,7 +385,7 @@ describe("game state", () => {
   });
 
   test("peg table variants use generated best pone lead", () => {
-    const game = new CribbageGame("expert-peg_table-2.3");
+    const game = new CribbageGame("schell-table-peg_table-1.2");
     game.phase = "pegging";
     game.pone = game.human;
     game.dealer = game.ai;

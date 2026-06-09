@@ -933,20 +933,14 @@ function sortedAnalyticsEngines(
 
 function analyticsEngineSortKey(engine: Opponent): number {
   return [
-    "expert-peg_table-2.3",
-    "expert-peg-2.2",
-    "expert-peg_table-2.2",
-    "expert-peg-2.1",
-    "expert-2.0-ras-tables",
-    "expert-peg_table-1.3",
-    "expert-peg-1.2",
-    "expert-1.1",
     "schell-table-peg_table-1.2",
-    "schell-table-peg-1.1",
-    "schell-table-1.0",
     "ras-table-peg_table-1.2",
+    "schell-table-peg-1.1",
     "ras-table-peg-1.1",
+    "schell-table-1.0",
     "ras-table-1.0",
+    "original_exhaustive_peg-1.2",
+    "original-1.1",
   ].indexOf(engine);
 }
 
@@ -1117,11 +1111,11 @@ function analyticsTotalCard(label: string, totals: AnalyticsTotals, kind: "human
 function benchmarkLabel(source: string | undefined, games: number | undefined): string {
   if (source === "ras-v-schell-1000") return "1,000 Ras vs Schell";
   if (source === "three-way-ai-vs-ai-900") return "900 three-way AI vs AI";
-  if (source === "three-way-expert-1.1-900") return "900 three-way with Expert 1.1";
-  if (source === "ras-v-expert-1.1-1000-large") return "1,000 Ras vs Expert 1.1";
+  if (source === "three-way-expert-1.1-900") return "900 three-way with Original 1.1";
+  if (source === "ras-v-expert-1.1-1000-large") return "1,000 Ras vs Original 1.1";
   if (source === "ras-v-schell-100000-large") return "100,000 Ras vs Schell";
-  if (source === "schell-v-expert-1.1-1000-large") return "1,000 Schell vs Expert 1.1";
-  if (source === "ai-vs-ai-baseline") return `${games ?? 0} Expert 1.1 AI baseline`;
+  if (source === "schell-v-expert-1.1-1000-large") return "1,000 Schell vs Original 1.1";
+  if (source === "ai-vs-ai-baseline") return `${games ?? 0} Original 1.1 AI baseline`;
   return source || "AI baseline";
 }
 
@@ -1160,14 +1154,19 @@ function playerName(player: PlayerKey | undefined): string {
 }
 
 function engineName(engine: string | undefined): string {
-  if (engine === "expert" || engine === "expert-1.1") return "Expert 1.1";
-  if (engine === "expert-peg-1.2") return "Expert Peg 1.2";
-  if (engine === "expert-peg_table-1.3") return "Expert Peg Table 1.3";
-  if (engine === "expert-2.0-ras-tables") return "Expert 2.0 Ras Tables";
-  if (engine === "expert-peg-2.1") return "Expert Peg 2.1";
-  if (engine === "expert-peg_table-2.2") return "Expert Peg Table 2.2";
-  if (engine === "expert-peg-2.2") return "Expert Peg 2.2";
-  if (engine === "expert-peg_table-2.3") return "Expert Peg Table 2.3";
+  if (engine === "expert" || engine === "expert-1.1" || engine === "original-1.1") return "Original 1.1";
+  if (engine === "expert-peg-1.2" || engine === "original_exhaustive_peg-1.2") return "Original Exhaustive Peg 1.2";
+  if (engine === "expert_ras-table-1.0" || engine === "expert-2.0-ras-tables") return "Ras Table 1.0";
+  if (engine === "expert_ras-table-peg-1.1" || engine === "expert-peg-2.1") return "Ras Table Peg 1.1";
+  if (engine === "expert_schell-table-peg-1.1" || engine === "expert-peg-2.2") return "Schell Table Peg 1.1";
+  if (
+    engine === "expert_schell-table-peg_table-1.2" ||
+    engine === "expert-peg_table-1.3" ||
+    engine === "expert-peg_table-2.3"
+  ) {
+    return "Schell Table Peg Table 1.2";
+  }
+  if (engine === "expert-peg_table-2.2") return "Ras Table Peg Table 1.2";
   if (engine === "ras-table-1.0") return "Ras Table 1.0";
   if (engine === "ras-table-peg-1.1") return "Ras Table Peg 1.1";
   if (engine === "ras-table-peg_table-1.2") return "Ras Table Peg Table 1.2";
@@ -1178,16 +1177,22 @@ function engineName(engine: string | undefined): string {
 }
 
 function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
-  if (engine === "expert") return "expert-1.1";
+  if (engine === "expert" || engine === "expert-1.1") return "original-1.1";
+  if (engine === "expert-peg-1.2") return "original_exhaustive_peg-1.2";
+  if (engine === "expert-2.0-ras-tables" || engine === "expert_ras-table-1.0") return "ras-table-1.0";
+  if (engine === "expert-peg-2.1" || engine === "expert_ras-table-peg-1.1") return "ras-table-peg-1.1";
+  if (engine === "expert-peg_table-2.2") return "ras-table-peg_table-1.2";
+  if (engine === "expert-peg-2.2" || engine === "expert_schell-table-peg-1.1") return "schell-table-peg-1.1";
   if (
-    engine === "expert-1.1" ||
-    engine === "expert-peg-1.2" ||
     engine === "expert-peg_table-1.3" ||
-    engine === "expert-2.0-ras-tables" ||
-    engine === "expert-peg-2.1" ||
-    engine === "expert-peg_table-2.2" ||
-    engine === "expert-peg-2.2" ||
     engine === "expert-peg_table-2.3" ||
+    engine === "expert_schell-table-peg_table-1.2"
+  ) {
+    return "schell-table-peg_table-1.2";
+  }
+  if (
+    engine === "original-1.1" ||
+    engine === "original_exhaustive_peg-1.2" ||
     engine === "ras-table-1.0" ||
     engine === "ras-table-peg-1.1" ||
     engine === "ras-table-peg_table-1.2" ||
