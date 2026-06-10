@@ -930,7 +930,8 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   section.append(title, model);
 
   const mistakes = decisionMistakes(events, end.gameId);
-  section.append(decisionEvSummary(decisionEvTotals(mistakes)));
+  const totals = decisionEvTotals(mistakes);
+  section.append(decisionEvSummary(totals), decisionOutcomeImpact(totals, end));
 
   if (!mistakes.length) {
     const empty = document.createElement("div");
@@ -1021,7 +1022,27 @@ function decisionEvSummary(totals: DecisionEvTotals): HTMLElement {
 }
 
 function formatEv(value: number): string {
-  return value.toFixed(2);
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
+}
+
+function decisionOutcomeImpact(totals: DecisionEvTotals, end: GameEndEvent): HTMLElement {
+  const impact = document.createElement("p");
+  impact.className = "decision-outcome-impact";
+  const scores = end.finalScores;
+  if (!scores || !end.winner) {
+    impact.textContent = `Outcome impact unavailable; total error EV ${formatEv(totals.total)}.`;
+    return impact;
+  }
+  const loser = end.loser ?? (end.winner === "human" ? "ai" : "human");
+  const margin = Math.abs(scores.human - scores.ai);
+  if (end.winner === "ai") {
+    impact.textContent = totals.total >= margin
+      ? `Expected outcome impact: yes. Total user error EV ${formatEv(totals.total)} met or exceeded the ${margin}-point loss margin.`
+      : `Expected outcome impact: no. Total user error EV ${formatEv(totals.total)} was short of the ${margin}-point loss margin.`;
+    return impact;
+  }
+  impact.textContent = `Expected outcome impact: no. User won by ${scores.human - scores[loser]} despite total error EV ${formatEv(totals.total)}.`;
+  return impact;
 }
 
 function decisionContext(event: DecisionReviewEvent, events: AnalyticsEvent[]): HTMLElement {
@@ -1035,6 +1056,11 @@ function decisionContext(event: DecisionReviewEvent, events: AnalyticsEvent[]): 
       ? event.scoresBefore
       : handStart?.scores;
   if (score) rows.push(["Score", `User ${score.human}, AI ${score.ai}`]);
+  const firstDealer = firstDealerForGame(events, event.gameId);
+  if (score && firstDealer) {
+    rows.push(["User par", parStatusText("human", score.human, firstDealer, event.handNumber)]);
+    rows.push(["AI par", parStatusText("ai", score.ai, firstDealer, event.handNumber)]);
+  }
   rows.push(["Hand", String(event.handNumber)]);
   if (handStart) {
     rows.push(["Dealer", playerName(handStart.dealer)]);
@@ -1058,9 +1084,9 @@ function decisionContext(event: DecisionReviewEvent, events: AnalyticsEvent[]): 
     rows.push(["You played", event.review.selected.join(" ")]);
     rows.push(["Model preferred", event.review.recommended.join(" ")]);
   }
-  rows.push(["Selected EV", event.review.selectedEv.toFixed(2)]);
-  rows.push(["Recommended EV", event.review.recommendedEv.toFixed(2)]);
-  rows.push(["Model gain", event.review.delta.toFixed(2)]);
+  rows.push(["Selected EV", formatEv(event.review.selectedEv)]);
+  rows.push(["Recommended EV", formatEv(event.review.recommendedEv)]);
+  rows.push(["Model gain", formatEv(event.review.delta)]);
 
   for (const [label, value] of rows) {
     const term = document.createElement("strong");
@@ -1086,6 +1112,29 @@ function gameStartFor(events: AnalyticsEvent[], gameId: string): Extract<Analyti
   );
 }
 
+function firstDealerForGame(events: AnalyticsEvent[], gameId: string): "human" | "ai" | undefined {
+  const firstHand = handStartFor(events, gameId, 1);
+  return firstHand?.dealer;
+}
+
+function parStatusText(
+  player: "human" | "ai",
+  score: number,
+  firstDealerPlayer: "human" | "ai",
+  handNumber: number,
+): string {
+  const parHoles = parHolesFor(player, firstDealerPlayer);
+  const completedHands = Math.max(0, handNumber - 1);
+  const parIndex = Math.min(Math.max(completedHands - 1, 0), parHoles.length - 1);
+  const parHole = parHoles[parIndex] ?? parHoles[0];
+  const delta = score - parHole;
+  return `${formatSignedInteger(delta)} Par ${parHole}`;
+}
+
+function formatSignedInteger(value: number): string {
+  return `${value >= 0 ? "+" : ""}${value}`;
+}
+
 function cardValueFromLabel(label: string | undefined): number {
   if (!label) return 0;
   const rank = label.slice(0, -1);
@@ -1096,7 +1145,7 @@ function cardValueFromLabel(label: string | undefined): number {
 
 function decisionReviewText(event: DecisionReviewEvent): string {
   const review = event.review;
-  const delta = review.delta > 0 ? `; model gain ${review.delta.toFixed(2)}` : "";
+  const delta = review.delta !== 0 ? `; model gain ${formatEv(review.delta)}` : "";
   if (event.type === "discard") {
     return `You discarded ${review.selected.join(" ")}; model preferred ${review.recommended.join(" ")}${delta}.`;
   }

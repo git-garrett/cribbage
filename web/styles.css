@@ -685,6 +685,12 @@ button:disabled {
   font-weight: 800;
 }
 
+.decision-outcome-impact {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .decision-review-list {
   display: grid;
   gap: 6px;
@@ -796,6 +802,10 @@ button:disabled {
 
 .game-log-detail .decision-ev-summary em {
   color: var(--ink);
+}
+
+.game-log-detail .decision-outcome-impact {
+  color: var(--muted);
 }
 
 .game-log-detail .decision-review-item span,
