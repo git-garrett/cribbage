@@ -521,6 +521,260 @@
           }
         }
       }
+    },
+    {
+      "source": "four-model-ai-vs-ai-6000",
+      "generatedAt": "2026-06-10T02:54:38.468Z",
+      "games": 6000,
+      "gamesPerMatchup": 1000,
+      "matchups": [
+        "Schell Table Peg Table 4.0 vs Ras Table Peg Table 4.0",
+        "Schell Table Peg Table 4.0 vs Schell Table Peg 3.0",
+        "Schell Table Peg Table 4.0 vs Schell Table 2.0",
+        "Ras Table Peg Table 4.0 vs Schell Table Peg 3.0",
+        "Ras Table Peg Table 4.0 vs Schell Table 2.0",
+        "Schell Table Peg 3.0 vs Schell Table 2.0"
+      ],
+      "models": {
+        "schell_table-peg_table-4.0": {
+          "games": 3000,
+          "aiTotals": {
+            "wins": 1586,
+            "losses": 1414,
+            "skunks": 0,
+            "skunked": 0,
+            "doubleSkunks": 0,
+            "doubleSkunked": 0,
+            "peggingDealer": 0,
+            "peggingPone": 0,
+            "handDealer": 0,
+            "handPone": 0,
+            "crib": 0
+          },
+          "opportunities": {
+            "peggingDealer": 0,
+            "peggingPone": 0,
+            "handDealer": 0,
+            "handPone": 0,
+            "crib": 0
+          },
+          "averages": {},
+          "scoreAverages": {
+            "avgScore": 113.43833333333333,
+            "avgOpponentScore": 111.911,
+            "avgMargin": 1.5273333333333334
+          }
+        },
+        "ras_table-peg_table-4.0": {
+          "games": 3000,
+          "aiTotals": {
+            "wins": 1568,
+            "losses": 1432,
+            "skunks": 0,
+            "skunked": 0,
+            "doubleSkunks": 0,
+            "doubleSkunked": 0,
+            "peggingDealer": 0,
+            "peggingPone": 0,
+            "handDealer": 0,
+            "handPone": 0,
+            "crib": 0
+          },
+          "opportunities": {
+            "peggingDealer": 0,
+            "peggingPone": 0,
+            "handDealer": 0,
+            "handPone": 0,
+            "crib": 0
+          },
+          "averages": {},
+          "scoreAverages": {
+            "avgScore": 113.24933333333334,
+            "avgOpponentScore": 112.01366666666667,
+            "avgMargin": 1.2356666666666667
+          }
+        },
+        "schell_table-peg-3.0": {
+          "games": 3000,
+          "aiTotals": {
+            "wins": 1525,
+            "losses": 1475,
+            "skunks": 0,
+            "skunked": 0,
+            "doubleSkunks": 0,
+            "doubleSkunked": 0,
+            "peggingDealer": 0,
+            "peggingPone": 0,
+            "handDealer": 0,
+            "handPone": 0,
+            "crib": 0
+          },
+          "opportunities": {
+            "peggingDealer": 0,
+            "peggingPone": 0,
+            "handDealer": 0,
+            "handPone": 0,
+            "crib": 0
+          },
+          "averages": {},
+          "scoreAverages": {
+            "avgScore": 113.00066666666666,
+            "avgOpponentScore": 112.57133333333333,
+            "avgMargin": 0.42933333333333334
+          }
+        },
+        "schell_table-2.0": {
+          "games": 3000,
+          "aiTotals": {
+            "wins": 1321,
+            "losses": 1679,
+            "skunks": 0,
+            "skunked": 0,
+            "doubleSkunks": 0,
+            "doubleSkunked": 0,
+            "peggingDealer": 0,
+            "peggingPone": 0,
+            "handDealer": 0,
+            "handPone": 0,
+            "crib": 0
+          },
+          "opportunities": {
+            "peggingDealer": 0,
+            "peggingPone": 0,
+            "handDealer": 0,
+            "handPone": 0,
+            "crib": 0
+          },
+          "averages": {},
+          "scoreAverages": {
+            "avgScore": 110.92133333333334,
+            "avgOpponentScore": 114.11366666666666,
+            "avgMargin": -3.1923333333333335
+          }
+        }
+      },
+      "matchupResults": [
+        {
+          "matchup": "Schell Table Peg Table 4.0 vs Ras Table Peg Table 4.0",
+          "games": 1000,
+          "schell_table-peg_table-4.0": {
+            "wins": 514,
+            "losses": 486,
+            "winPct": 0.514,
+            "avgScore": 113.196,
+            "avgOpponentScore": 112.333,
+            "avgMargin": 0.863
+          },
+          "ras_table-peg_table-4.0": {
+            "wins": 486,
+            "losses": 514,
+            "winPct": 0.486,
+            "avgScore": 112.333,
+            "avgOpponentScore": 113.196,
+            "avgMargin": -0.863
+          }
+        },
+        {
+          "matchup": "Schell Table Peg Table 4.0 vs Schell Table Peg 3.0",
+          "games": 1000,
+          "schell_table-peg_table-4.0": {
+            "wins": 516,
+            "losses": 484,
+            "winPct": 0.516,
+            "avgScore": 113.186,
+            "avgOpponentScore": 112.406,
+            "avgMargin": 0.78
+          },
+          "schell_table-peg-3.0": {
+            "wins": 484,
+            "losses": 516,
+            "winPct": 0.484,
+            "avgScore": 112.406,
+            "avgOpponentScore": 113.186,
+            "avgMargin": -0.78
+          }
+        },
+        {
+          "matchup": "Schell Table Peg Table 4.0 vs Schell Table 2.0",
+          "games": 1000,
+          "schell_table-peg_table-4.0": {
+            "wins": 556,
+            "losses": 444,
+            "winPct": 0.556,
+            "avgScore": 113.933,
+            "avgOpponentScore": 110.994,
+            "avgMargin": 2.939
+          },
+          "schell_table-2.0": {
+            "wins": 444,
+            "losses": 556,
+            "winPct": 0.444,
+            "avgScore": 110.994,
+            "avgOpponentScore": 113.933,
+            "avgMargin": -2.939
+          }
+        },
+        {
+          "matchup": "Ras Table Peg Table 4.0 vs Schell Table Peg 3.0",
+          "games": 1000,
+          "ras_table-peg_table-4.0": {
+            "wins": 519,
+            "losses": 481,
+            "winPct": 0.519,
+            "avgScore": 113.282,
+            "avgOpponentScore": 112.321,
+            "avgMargin": 0.961
+          },
+          "schell_table-peg-3.0": {
+            "wins": 481,
+            "losses": 519,
+            "winPct": 0.481,
+            "avgScore": 112.321,
+            "avgOpponentScore": 113.282,
+            "avgMargin": -0.961
+          }
+        },
+        {
+          "matchup": "Ras Table Peg Table 4.0 vs Schell Table 2.0",
+          "games": 1000,
+          "ras_table-peg_table-4.0": {
+            "wins": 563,
+            "losses": 437,
+            "winPct": 0.563,
+            "avgScore": 114.133,
+            "avgOpponentScore": 110.524,
+            "avgMargin": 3.609
+          },
+          "schell_table-2.0": {
+            "wins": 437,
+            "losses": 563,
+            "winPct": 0.437,
+            "avgScore": 110.524,
+            "avgOpponentScore": 114.133,
+            "avgMargin": -3.609
+          }
+        },
+        {
+          "matchup": "Schell Table Peg 3.0 vs Schell Table 2.0",
+          "games": 1000,
+          "schell_table-peg-3.0": {
+            "wins": 560,
+            "losses": 440,
+            "winPct": 0.56,
+            "avgScore": 114.275,
+            "avgOpponentScore": 111.246,
+            "avgMargin": 3.029
+          },
+          "schell_table-2.0": {
+            "wins": 440,
+            "losses": 560,
+            "winPct": 0.44,
+            "avgScore": 111.246,
+            "avgOpponentScore": 114.275,
+            "avgMargin": -3.029
+          }
+        }
+      ]
     }
   ]
 }

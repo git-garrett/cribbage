@@ -1296,6 +1296,7 @@ function benchmarkLabel(source: string | undefined, games: number | undefined): 
   if (source === "ras-v-expert-1.1-1000-large") return "1,000 Ras vs Original 1.1";
   if (source === "ras-v-schell-100000-large") return "100,000 Ras vs Schell";
   if (source === "schell-v-expert-1.1-1000-large") return "1,000 Schell vs Original 1.1";
+  if (source === "four-model-ai-vs-ai-6000") return "6,000 four-model AI vs AI";
   if (source === "ai-vs-ai-baseline") return `${games ?? 0} Original 1.1 AI baseline`;
   return source || "AI baseline";
 }
