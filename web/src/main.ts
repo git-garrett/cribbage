@@ -797,7 +797,7 @@ function renderGameOver(game: GameState): void {
     return;
   }
   els.gameOverTitle.textContent = `${playerName(end.winner ?? "human")} won!`;
-  if (dismissed) renderSingleGameReport(game, end);
+  renderSingleGameReport(game, end);
 }
 
 function renderSingleGameReport(game: GameState, end: GameEndEvent): void {
