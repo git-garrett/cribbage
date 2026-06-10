@@ -65,6 +65,11 @@ function appendLog(message) {
   fs.appendFileSync(logPath, `${new Date().toISOString()} ${message}\n`);
 }
 
+function expectedCompletionAt(updatedAt, estimatedRemainingSeconds) {
+  if (!Number.isFinite(estimatedRemainingSeconds)) return null;
+  return new Date(Date.parse(updatedAt) + estimatedRemainingSeconds * 1000).toISOString();
+}
+
 function childStatus(job) {
   const childStatusPath = path.join(outDir, job.id, "status.json");
   if (!fs.existsSync(childStatusPath)) return null;
@@ -149,6 +154,7 @@ function writeStatus() {
   state.gamesPerSecond = elapsedSeconds > 0 ? state.completedGames / elapsedSeconds : 0;
   const remaining = Math.max(0, state.totalGames - state.completedGames);
   state.estimatedRemainingSeconds = state.gamesPerSecond > 0 ? remaining / state.gamesPerSecond : null;
+  state.expectedCompletionAt = expectedCompletionAt(state.updatedAt, state.estimatedRemainingSeconds);
   writeJson(statusPath, state);
 }
 

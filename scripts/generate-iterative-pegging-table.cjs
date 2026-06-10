@@ -323,10 +323,11 @@ async function runRows({
           const remainingRows = rows.length - completed;
           const estimatedRemainingSeconds = rowsPerSecond ? remainingRows / rowsPerSecond : null;
           if (statusPath) {
+            const updatedAt = new Date().toISOString();
             writeStatus(statusPath, {
               status: "running",
               phase: "generating-rows",
-              updatedAt: new Date().toISOString(),
+              updatedAt,
               ...statusContext,
               completedRows: completedOffset + completed,
               totalRows,
@@ -335,7 +336,7 @@ async function runRows({
               elapsedSeconds,
               rowsPerSecond,
               estimatedRemainingSeconds,
-              eta: estimatedRemainingSeconds === null ? null : formatDuration(estimatedRemainingSeconds),
+              expectedCompletionAt: expectedCompletionAt(updatedAt, estimatedRemainingSeconds),
               maxWorkerHeapMb,
               maxWorkerMemoEntries,
               averageMyPeggingEv: completed ? myPeggingEvTotal / completed : 0,
@@ -1024,6 +1025,11 @@ function writeStatus(statusPath, status) {
   const tmpPath = `${statusPath}.tmp`;
   fs.writeFileSync(tmpPath, `${JSON.stringify(status, null, 2)}\n`);
   fs.renameSync(tmpPath, statusPath);
+}
+
+function expectedCompletionAt(updatedAt, estimatedRemainingSeconds) {
+  if (!Number.isFinite(estimatedRemainingSeconds)) return null;
+  return new Date(Date.parse(updatedAt) + estimatedRemainingSeconds * 1000).toISOString();
 }
 
 function formatDuration(seconds) {

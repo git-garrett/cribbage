@@ -350,6 +350,11 @@ function gitCommit() {
   }
 }
 
+function expectedCompletionAt(updatedAt, estimatedRemainingSeconds) {
+  if (!Number.isFinite(estimatedRemainingSeconds)) return null;
+  return new Date(Date.parse(updatedAt) + estimatedRemainingSeconds * 1000).toISOString();
+}
+
 function runWorker(leftEngine, rightEngine, gameCount, workerIndex, oldMb, progressEvery = 0, onProgress = () => {}) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(__filename, {
@@ -498,9 +503,11 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
     const visibleCompletedGames = Math.min(job.games, currentCompletedGames + activeCompletedGames);
     const gamesPerSecond = elapsedSeconds > 0 ? Math.max(0, visibleCompletedGames) / elapsedSeconds : 0;
     const remainingGames = Math.max(0, job.games - visibleCompletedGames);
+    const updatedAt = new Date().toISOString();
+    const estimatedRemainingSeconds = gamesPerSecond > 0 ? remainingGames / gamesPerSecond : null;
     writeJson(statusPath, {
       status: "running",
-      updatedAt: new Date().toISOString(),
+      updatedAt,
       command: currentCommand(),
       gitCommit: gitCommit(),
       outDir,
@@ -517,7 +524,8 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
       totalGames: job.games,
       progressPercent: job.games ? (visibleCompletedGames / job.games) * 100 : 100,
       gamesPerSecond,
-      estimatedRemainingSeconds: gamesPerSecond > 0 ? remainingGames / gamesPerSecond : null,
+      estimatedRemainingSeconds,
+      expectedCompletionAt: expectedCompletionAt(updatedAt, estimatedRemainingSeconds),
     });
   };
 
