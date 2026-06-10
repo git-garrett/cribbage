@@ -86,9 +86,13 @@ const els = {
   resultInline: document.querySelector("#result-inline") as HTMLElement,
   scoringResult: document.querySelector("#scoring-result") as HTMLElement,
   humanScore: document.querySelector("#human-score") as HTMLElement,
+  humanPace: document.querySelector("#human-pace") as HTMLElement,
+  humanFinal: document.querySelector("#human-final") as HTMLElement,
   humanDealer: document.querySelector("#human-dealer") as HTMLElement,
   scoreCut: document.querySelector("#score-cut") as HTMLElement,
   aiScore: document.querySelector("#ai-score") as HTMLElement,
+  aiPace: document.querySelector("#ai-pace") as HTMLElement,
+  aiFinal: document.querySelector("#ai-final") as HTMLElement,
   aiDealer: document.querySelector("#ai-dealer") as HTMLElement,
   dealer: document.querySelector("#dealer") as HTMLElement,
   turn: document.querySelector("#turn") as HTMLElement,
@@ -534,7 +538,7 @@ function uTurnLineX(track: HTMLElement): number {
 }
 
 function completedHandCount(phase: GameState["phase"], handNumber: number): number {
-  if (["pegging_complete", "score_pone", "score_dealer", "score_crib"].includes(phase)) {
+  if (["pegging_complete", "score_pone", "score_dealer", "score_crib", "game_over"].includes(phase)) {
     return handNumber;
   }
   return Math.max(0, handNumber - 1);
@@ -597,6 +601,64 @@ function projectedPlayerCourse(
     });
   }
   return result;
+}
+
+function dealerForHand(firstDealerPlayer: "human" | "ai", handNumber: number): "human" | "ai" {
+  const oddHand = handNumber % 2 === 1;
+  return oddHand ? firstDealerPlayer : firstDealerPlayer === "human" ? "ai" : "human";
+}
+
+function renderScorePace(game: GameState): void {
+  const firstDealerPlayer = game.firstDealer === "User" ? "human" : "ai";
+  const completedHands = completedHandCount(game.phase, game.handNumber);
+  const finalHand = finalProjectedHand(game.scores, firstDealerPlayer, completedHands);
+  for (const player of ["human", "ai"] as const) {
+    const parHoles = parHolesFor(player, firstDealerPlayer);
+    const parIndex = Math.min(Math.max(completedHands - 1, 0), parHoles.length - 1);
+    const parHole = parHoles[parIndex] ?? parHoles[0];
+    const score = game.scores[player];
+    const delta = score - parHole;
+    const pace = player === "human" ? els.humanPace : els.aiPace;
+    const final = player === "human" ? els.humanFinal : els.aiFinal;
+    pace.classList.toggle("ahead", delta >= 0);
+    pace.classList.toggle("behind", delta < 0);
+    pace.textContent = `${delta >= 0 ? "+" : ""}${delta} Par ${parHole}`;
+
+    const projected = projectedScoreAtHand(player, score, firstDealerPlayer, completedHands, finalHand);
+    const finalDealer = dealerForHand(firstDealerPlayer, finalHand);
+    const countFirst = player !== finalDealer;
+    const wins = projected >= 121;
+    final.textContent = `${countFirst ? "🏹 " : ""}${Math.round(projected)} on final${wins ? " ★" : ""}`;
+    final.classList.toggle("expected-win", wins);
+  }
+}
+
+function finalProjectedHand(
+  scores: GameState["scores"],
+  firstDealerPlayer: "human" | "ai",
+  completedHands: number,
+): number {
+  const nextHand = Math.max(1, completedHands + 1);
+  const winningHands = (["human", "ai"] as const)
+    .flatMap((player) => projectedPlayerCourse(player, scores[player], firstDealerPlayer, completedHands))
+    .filter((projection) => projection.score >= 121)
+    .map((projection) => completedHands + projection.hand);
+  return Math.min(...winningHands, nextHand + 12);
+}
+
+function projectedScoreAtHand(
+  player: "human" | "ai",
+  score: number,
+  firstDealerPlayer: "human" | "ai",
+  completedHands: number,
+  targetHand: number,
+): number {
+  const parHoles = parHolesFor(player, firstDealerPlayer);
+  const currentParIndex = Math.max(0, completedHands - 1);
+  const currentPar = parHoles[currentParIndex] ?? 0;
+  const offset = score - currentPar;
+  const targetPar = parHoles[Math.max(0, targetHand - 1)] ?? 121;
+  return Math.min(121, Math.max(1, targetPar + offset));
 }
 
 async function api(path: string, body: Record<string, unknown> | null = null): Promise<GameState> {
@@ -1456,13 +1518,14 @@ function render(game: GameState | null): void {
   if (state.analyticsOpen) renderAnalytics();
   els.humanScore.textContent = String(game.scores.human);
   els.aiScore.textContent = String(game.scores.ai);
+  renderScorePace(game);
   els.humanDealer.hidden = game.dealer !== "User";
   els.aiDealer.hidden = game.dealer !== "AI";
   els.dealer.textContent = game.dealer;
   els.turn.textContent = game.turn || "-";
   els.count.textContent = String(game.count);
   renderCutCard(game.turnCard);
-  renderScoring(game.scoring);
+  renderScoring(game.phase === "game_over" ? null : game.scoring);
   renderResult(game);
   renderGameOver(game);
   renderBoard(game.scores, game.pegPositions, game.firstDealer, game.phase, game.handNumber);
@@ -1489,7 +1552,7 @@ function render(game: GameState | null): void {
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
   els.play.disabled = !(game.phase === "pegging" && game.turn === "User" && selectedPlayableCard(game));
   els.go.disabled = !game.canGo;
-  els.continueScoring.disabled = !game.scoring;
+  els.continueScoring.disabled = game.phase === "game_over" || !game.scoring;
   els.continuePegging.hidden = game.phase !== "pegging_complete";
   if (state.pending) {
     els.discard.disabled = true;

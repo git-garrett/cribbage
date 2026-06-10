@@ -217,7 +217,7 @@ button:disabled {
 
 .score {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   justify-items: center;
   min-width: 64px;
 }
@@ -268,6 +268,40 @@ button:disabled {
 
 .score.ai strong {
   color: var(--ai);
+}
+
+.score-pace,
+.score-final {
+  display: block;
+  max-width: 96px;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.05;
+}
+
+.score-pace {
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.score-pace.ahead {
+  color: #12813c;
+}
+
+.score-pace.behind {
+  color: #b42318;
+}
+
+.score-final {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.score-final.expected-win {
+  color: #a66f00;
 }
 
 .score-cut {
