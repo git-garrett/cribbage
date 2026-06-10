@@ -266,6 +266,9 @@ export type AnalyticsEvent =
       cribOwner: PlayerKey;
       cribAfterDiscard: string[];
       remainingHand: string[];
+      handBeforeDiscard?: string[];
+      scores?: Record<PlayerKey, number>;
+      dealer?: PlayerKey;
       review?: AnalyticsDecisionReview;
     }
   | {
@@ -278,6 +281,12 @@ export type AnalyticsEvent =
       player?: PlayerKey;
       role?: AnalyticsRole;
       card?: string;
+      hand?: string[];
+      playedCards?: string[];
+      completedPlayGroups?: string[][];
+      cutCard?: string;
+      countBefore?: number;
+      scoresBefore?: Record<PlayerKey, number>;
       count: number;
       points?: number;
       scores?: Record<PlayerKey, number>;
@@ -1034,6 +1043,11 @@ export class CribbageGame {
 
   private playCard(player: PlayerState, card: Card, reviewDecision = false): void {
     const review = reviewDecision && player === this.human ? this.reviewPegPlay(player, card) : undefined;
+    const handBeforePlay = this.cardLabels(player.hand);
+    const playedCardsBefore = this.cardLabels(this.plays);
+    const completedPlayGroupsBefore = this.completedPlays.map((group) => this.cardLabels(group));
+    const countBefore = this.count;
+    const scoresBefore = { human: this.human.score, ai: this.ai.score };
     player.table.push(card);
     removeCards(player.hand, [card]);
     this.plays.push(card);
@@ -1054,6 +1068,12 @@ export class CribbageGame {
       player: player.key,
       role: this.roleFor(player),
       card: this.cardLabel(card),
+      hand: handBeforePlay,
+      playedCards: playedCardsBefore,
+      completedPlayGroups: completedPlayGroupsBefore,
+      cutCard: this.cardLabel(this.turnCard),
+      countBefore,
+      scoresBefore,
       count: this.count,
       points,
       scores: scoreAfterPlay,
@@ -1284,6 +1304,9 @@ export class CribbageGame {
       cribOwner: this.dealer.key,
       cribAfterDiscard: this.cardLabels(this.crib),
       remainingHand: this.cardLabels(player.hand),
+      handBeforeDiscard: this.cardLabels(handBeforeDiscard),
+      scores: { human: this.human.score, ai: this.ai.score },
+      dealer: this.dealer.key,
       review,
     });
   }

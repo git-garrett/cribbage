@@ -543,7 +543,8 @@ button:disabled {
   border-color: var(--felt-dark);
 }
 
-.analytics-page {
+.analytics-page,
+.game-log-page {
   display: grid;
   gap: 14px;
   padding: 16px;
@@ -552,12 +553,15 @@ button:disabled {
   background: var(--surface);
 }
 
-.analytics-page[hidden] {
+.analytics-page[hidden],
+.game-log-page[hidden] {
   display: none;
 }
 
 .app[data-view="analytics"] .scoreboard,
-.app[data-view="analytics"] .table {
+.app[data-view="analytics"] .table,
+.app[data-view="game-log"] .scoreboard,
+.app[data-view="game-log"] .table {
   display: none;
 }
 
@@ -662,16 +666,102 @@ button:disabled {
 .decision-review-empty {
   display: grid;
   gap: 3px;
+  width: 100%;
   padding: 8px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.07);
+  color: inherit;
   font-size: 13px;
+  text-align: left;
 }
 
 .decision-review-item span,
 .decision-review-empty {
   color: rgba(255, 255, 255, 0.88);
+}
+
+.decision-context {
+  display: grid;
+  grid-template-columns: minmax(86px, 0.45fr) minmax(0, 1fr);
+  gap: 5px 10px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.12);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+}
+
+.decision-context[hidden] {
+  display: none;
+}
+
+.decision-context strong {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.game-log-filter {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.game-log-layout {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.72fr) minmax(0, 1.28fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.game-log-list,
+.game-log-detail {
+  display: grid;
+  gap: 8px;
+}
+
+.game-log-list {
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.game-log-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-row);
+  color: var(--ink);
+  text-align: left;
+}
+
+.game-log-item.selected {
+  border-color: var(--human);
+}
+
+.game-log-item span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.game-log-detail .decision-review-item span,
+.game-log-detail .decision-review-empty {
+  color: var(--muted);
+}
+
+.game-log-detail .decision-context {
+  border-color: var(--line);
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+
+.game-log-detail .decision-context strong {
+  color: var(--muted);
 }
 
 .game-over-alert {
@@ -1184,6 +1274,20 @@ button.card {
   .analytics-page {
     padding: 12px;
     border-radius: 7px;
+  }
+
+  .game-log-page {
+    padding: 12px;
+    border-radius: 7px;
+  }
+
+  .game-log-layout,
+  .decision-context {
+    grid-template-columns: 1fr;
+  }
+
+  .game-log-list {
+    max-height: 280px;
   }
 
   .analytics-header {

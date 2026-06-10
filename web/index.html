@@ -32,6 +32,7 @@
             </select>
           </label>
           <button id="analytics-open" type="button">Analytics</button>
+          <button id="game-log-open" type="button">Game log</button>
           <button id="new-game" type="button">New game</button>
           <div class="app-version">Version <span id="app-version">-</span></div>
         </div>
@@ -127,6 +128,26 @@
         <div class="analytics-section">
           <h3>Pegging</h3>
           <div id="analytics-pegging" class="analytics-list"></div>
+        </div>
+      </section>
+
+      <section id="game-log-page" class="game-log-page" aria-label="Game log" hidden>
+        <div class="analytics-header">
+          <div>
+            <h2>Game log</h2>
+            <p id="game-log-summary">No completed games yet.</p>
+          </div>
+          <button id="game-log-close" type="button">Done</button>
+        </div>
+        <label class="game-log-filter">
+          Opponent
+          <select id="game-log-opponent">
+            <option value="">All opponents</option>
+          </select>
+        </label>
+        <div class="game-log-layout">
+          <div id="game-log-list" class="game-log-list"></div>
+          <div id="game-log-detail" class="game-log-detail"></div>
         </div>
       </section>
     </main>

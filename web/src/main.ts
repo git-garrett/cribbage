@@ -57,6 +57,8 @@ const state: {
   pending: boolean;
   resultOverride: string[] | null;
   analyticsOpen: boolean;
+  gameLogOpen: boolean;
+  selectedLogGameId: string | null;
   dismissedGameOverId: string | null;
 } = {
   game: null,
@@ -64,6 +66,8 @@ const state: {
   pending: false,
   resultOverride: null,
   analyticsOpen: false,
+  gameLogOpen: false,
+  selectedLogGameId: null,
   dismissedGameOverId: null,
 };
 
@@ -82,6 +86,13 @@ const els = {
   analyticsHands: document.querySelector("#analytics-hands") as HTMLElement,
   analyticsScores: document.querySelector("#analytics-scores") as HTMLElement,
   analyticsPegging: document.querySelector("#analytics-pegging") as HTMLElement,
+  gameLogOpen: document.querySelector("#game-log-open") as HTMLButtonElement,
+  gameLogClose: document.querySelector("#game-log-close") as HTMLButtonElement,
+  gameLogPage: document.querySelector("#game-log-page") as HTMLElement,
+  gameLogSummary: document.querySelector("#game-log-summary") as HTMLElement,
+  gameLogOpponent: document.querySelector("#game-log-opponent") as HTMLSelectElement,
+  gameLogList: document.querySelector("#game-log-list") as HTMLElement,
+  gameLogDetail: document.querySelector("#game-log-detail") as HTMLElement,
   result: document.querySelector("#result") as HTMLElement,
   resultInline: document.querySelector("#result-inline") as HTMLElement,
   scoringResult: document.querySelector("#scoring-result") as HTMLElement,
@@ -158,6 +169,12 @@ type ScoreEvent = Extract<AnalyticsEvent, { type: "score" }>;
 type DiscardEvent = Extract<AnalyticsEvent, { type: "discard" }>;
 type PeggingEvent = Extract<AnalyticsEvent, { type: "pegging" }>;
 type DecisionReviewEvent = (DiscardEvent | PeggingEvent) & { review: AnalyticsDecisionReview };
+interface GameLogRecord {
+  gameId: string;
+  start?: Extract<AnalyticsEvent, { type: "game" }>;
+  end: GameEndEvent;
+  opponent: Opponent;
+}
 
 function loadSavedGame(): CribbageGame {
   const saved = localStorage.getItem(SAVE_KEY);
@@ -865,25 +882,37 @@ function renderGameOver(game: GameState): void {
 }
 
 function renderSingleGameReport(game: GameState, end: GameEndEvent): void {
-  const scoreEvents = game.analyticsEvents.filter(
+  els.singleGameReport.innerHTML = "";
+  renderGameReportInto(els.singleGameReport, game.analyticsEvents, end, "Game report", game.scores);
+}
+
+function renderGameReportInto(
+  container: HTMLElement,
+  events: AnalyticsEvent[],
+  end: GameEndEvent,
+  titleText = "Game report",
+  fallbackScores: GameState["scores"] = { human: 0, ai: 0 },
+): void {
+  const scoreEvents = events.filter(
     (event): event is ScoreEvent => event.type === "score" && event.gameId === end.gameId,
   );
   const report = singleGameTotals(scoreEvents, end);
-  els.singleGameReport.innerHTML = "";
+  container.innerHTML = "";
   const title = document.createElement("h2");
-  title.textContent = "Game report";
+  title.textContent = titleText;
   const summary = document.createElement("p");
-  const finalScores = end.finalScores ?? game.scores;
+  const start = gameStartFor(events, end.gameId);
+  const finalScores = end.finalScores ?? fallbackScores;
   const result = end.result && end.result !== "regular" ? `, ${end.result}` : "";
-  summary.textContent = `${playerName(end.winner ?? "human")} won ${finalScores.human}-${finalScores.ai}${result}.`;
+  summary.textContent = `${shortDate(end.at)} vs ${engineName(start?.opponent ?? DEFAULT_OPPONENT)}. ${playerName(end.winner ?? "human")} won ${finalScores.human}-${finalScores.ai}${result}.`;
   const cards = document.createElement("div");
   cards.className = "single-game-report-cards";
   cards.append(analyticsTotalCard("User", report.human, "human"));
   cards.append(analyticsTotalCard("AI", report.ai, "ai"));
-  els.singleGameReport.append(title, summary, cards, singleGameDecisionReview(game, end));
+  container.append(title, summary, cards, singleGameDecisionReview(events, end));
 }
 
-function singleGameDecisionReview(game: GameState, end: GameEndEvent): HTMLElement {
+function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): HTMLElement {
   const section = document.createElement("section");
   section.className = "decision-review";
   const title = document.createElement("h3");
@@ -892,7 +921,7 @@ function singleGameDecisionReview(game: GameState, end: GameEndEvent): HTMLEleme
   model.textContent = `Compared with ${engineName(DEFAULT_OPPONENT)}.`;
   section.append(title, model);
 
-  const mistakes = game.analyticsEvents
+  const mistakes = events
     .filter((event): event is DecisionReviewEvent => {
       if (
         event.gameId !== end.gameId ||
@@ -916,7 +945,8 @@ function singleGameDecisionReview(game: GameState, end: GameEndEvent): HTMLEleme
   const list = document.createElement("div");
   list.className = "decision-review-list";
   for (const event of mistakes) {
-    const item = document.createElement("div");
+    const item = document.createElement("button");
+    item.type = "button";
     item.className = "decision-review-item";
     const label = document.createElement("strong");
     label.textContent = event.type === "discard"
@@ -925,10 +955,86 @@ function singleGameDecisionReview(game: GameState, end: GameEndEvent): HTMLEleme
     const detail = document.createElement("span");
     detail.textContent = decisionReviewText(event);
     item.append(label, detail);
+    const context = decisionContext(event, events);
+    context.hidden = true;
+    item.addEventListener("click", () => {
+      context.hidden = !context.hidden;
+    });
     list.append(item);
+    list.append(context);
   }
   section.append(list);
   return section;
+}
+
+function decisionContext(event: DecisionReviewEvent, events: AnalyticsEvent[]): HTMLElement {
+  const detail = document.createElement("div");
+  detail.className = "decision-context";
+  const rows: Array<[string, string]> = [];
+  const handStart = handStartFor(events, event.gameId, event.handNumber);
+  const score = "scores" in event && event.scores
+    ? event.scores
+    : event.type === "pegging" && event.scoresBefore
+      ? event.scoresBefore
+      : handStart?.scores;
+  if (score) rows.push(["Score", `User ${score.human}, AI ${score.ai}`]);
+  rows.push(["Hand", String(event.handNumber)]);
+  if (handStart) {
+    rows.push(["Dealer", playerName(handStart.dealer)]);
+    rows.push(["Pone", playerName(handStart.pone)]);
+    if (handStart.turnCard) rows.push(["Cut", event.type === "discard" ? "Not yet shown" : handStart.turnCard]);
+  }
+  if (event.type === "discard") {
+    rows.push(["Your hand", (event.handBeforeDiscard ?? [...event.remainingHand, ...event.cards]).join(" ")]);
+    rows.push(["You discarded", event.review.selected.join(" ")]);
+    rows.push(["Model preferred", event.review.recommended.join(" ")]);
+    rows.push(["Kept", event.remainingHand.join(" ")]);
+    rows.push(["Crib after discard", event.cribAfterDiscard.join(" ") || "None"]);
+  } else {
+    if (event.cutCard) rows.push(["Cut", event.cutCard]);
+    if (event.hand?.length) rows.push(["Your hand", event.hand.join(" ")]);
+    if (event.completedPlayGroups?.length) {
+      rows.push(["Prior counts", event.completedPlayGroups.map((group) => group.join(" ")).join(" / ")]);
+    }
+    rows.push(["Current count before play", String(event.countBefore ?? Math.max(0, event.count - cardValueFromLabel(event.card)))]);
+    rows.push(["Already played", event.playedCards?.join(" ") || "None"]);
+    rows.push(["You played", event.review.selected.join(" ")]);
+    rows.push(["Model preferred", event.review.recommended.join(" ")]);
+  }
+  rows.push(["Selected EV", event.review.selectedEv.toFixed(2)]);
+  rows.push(["Recommended EV", event.review.recommendedEv.toFixed(2)]);
+  rows.push(["Model gain", event.review.delta.toFixed(2)]);
+
+  for (const [label, value] of rows) {
+    const term = document.createElement("strong");
+    term.textContent = label;
+    const desc = document.createElement("span");
+    desc.textContent = value;
+    detail.append(term, desc);
+  }
+  return detail;
+}
+
+function handStartFor(events: AnalyticsEvent[], gameId: string, handNumber: number): Extract<AnalyticsEvent, { type: "hand" }> | undefined {
+  return events.find(
+    (event): event is Extract<AnalyticsEvent, { type: "hand" }> =>
+      event.type === "hand" && event.action === "start" && event.gameId === gameId && event.handNumber === handNumber,
+  );
+}
+
+function gameStartFor(events: AnalyticsEvent[], gameId: string): Extract<AnalyticsEvent, { type: "game" }> | undefined {
+  return events.find(
+    (event): event is Extract<AnalyticsEvent, { type: "game" }> =>
+      event.type === "game" && event.action === "start" && event.gameId === gameId,
+  );
+}
+
+function cardValueFromLabel(label: string | undefined): number {
+  if (!label) return 0;
+  const rank = label.slice(0, -1);
+  if (rank === "A") return 1;
+  if (["J", "Q", "K"].includes(rank)) return 10;
+  return Number.parseInt(rank, 10) || 0;
 }
 
 function decisionReviewText(event: DecisionReviewEvent): string {
@@ -1041,6 +1147,99 @@ function renderAnalytics(): void {
       event.message,
     ]),
   );
+}
+
+function renderGameLog(): void {
+  const events = loadAnalytics().events;
+  const games = gameLogRecords(events);
+  syncGameLogFilter(games);
+  const selectedOpponent = els.gameLogOpponent.value;
+  const filtered = selectedOpponent
+    ? games.filter((game) => game.opponent === selectedOpponent)
+    : games;
+  if (!state.selectedLogGameId || !filtered.some((game) => game.gameId === state.selectedLogGameId)) {
+    state.selectedLogGameId = filtered[0]?.gameId ?? null;
+  }
+
+  els.gameLogSummary.textContent = `${filtered.length} completed game${filtered.length === 1 ? "" : "s"}${selectedOpponent ? ` vs ${engineName(selectedOpponent as Opponent)}` : ""}.`;
+  els.gameLogList.innerHTML = "";
+  if (!filtered.length) {
+    const empty = document.createElement("p");
+    empty.className = "analytics-empty";
+    empty.textContent = "No completed games match this filter.";
+    els.gameLogList.append(empty);
+    els.gameLogDetail.innerHTML = "";
+    return;
+  }
+
+  for (const game of filtered) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "game-log-item";
+    button.classList.toggle("selected", game.gameId === state.selectedLogGameId);
+    const result = game.end.finalScores
+      ? `${game.end.finalScores.human}-${game.end.finalScores.ai}`
+      : "Final score unavailable";
+    button.innerHTML = "";
+    const title = document.createElement("strong");
+    title.textContent = `${shortDate(game.end.at)} · ${engineName(game.opponent)}`;
+    const meta = document.createElement("span");
+    meta.textContent = `${playerName(game.end.winner)} won ${result}${game.end.result && game.end.result !== "regular" ? ` (${game.end.result})` : ""}`;
+    button.append(title, meta);
+    button.addEventListener("click", () => {
+      state.selectedLogGameId = game.gameId;
+      renderGameLog();
+    });
+    els.gameLogList.append(button);
+  }
+
+  const selected = filtered.find((game) => game.gameId === state.selectedLogGameId) ?? filtered[0];
+  if (selected) {
+    renderGameReportInto(
+      els.gameLogDetail,
+      events,
+      selected.end,
+      "Logged game report",
+      selected.end.finalScores ?? { human: 0, ai: 0 },
+    );
+  }
+}
+
+function gameLogRecords(events: AnalyticsEvent[]): GameLogRecord[] {
+  const starts = new Map<string, Extract<AnalyticsEvent, { type: "game" }>>();
+  const records: GameLogRecord[] = [];
+  for (const event of events) {
+    if (event.type !== "game") continue;
+    if (event.action === "start") starts.set(event.gameId, event);
+    if (event.action === "end") {
+      const start = starts.get(event.gameId);
+      records.push({
+        gameId: event.gameId,
+        start,
+        end: event as GameEndEvent,
+        opponent: normalizeAnalyticsEngine(start?.opponent ?? event.opponent),
+      });
+    }
+  }
+  return records.sort((a, b) => b.end.at.localeCompare(a.end.at));
+}
+
+function syncGameLogFilter(games: GameLogRecord[]): void {
+  const selected = els.gameLogOpponent.value;
+  const opponents = [...new Set(games.map((game) => game.opponent))]
+    .sort((a, b) => analyticsEngineSortKey(a) - analyticsEngineSortKey(b));
+  els.gameLogOpponent.innerHTML = "";
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "All opponents";
+  els.gameLogOpponent.append(all);
+  for (const opponent of opponents) {
+    const option = document.createElement("option");
+    option.value = opponent;
+    option.textContent = engineName(opponent);
+    els.gameLogOpponent.append(option);
+  }
+  els.gameLogOpponent.value = opponents.includes(selected as Opponent) ? selected : "";
 }
 
 function renderAnalyticsTotals(
@@ -1512,10 +1711,12 @@ function render(game: GameState | null): void {
   syncAnalytics(game.analyticsEvents);
   state.game = game;
   els.app.dataset.phase = game.phase;
-  els.app.dataset.view = state.analyticsOpen ? "analytics" : "game";
+  els.app.dataset.view = state.analyticsOpen ? "analytics" : state.gameLogOpen ? "game-log" : "game";
   els.app.dataset.inlineResult = shouldInlineResult(game) ? "true" : "false";
   els.analyticsPage.hidden = !state.analyticsOpen;
+  els.gameLogPage.hidden = !state.gameLogOpen;
   if (state.analyticsOpen) renderAnalytics();
+  if (state.gameLogOpen) renderGameLog();
   els.humanScore.textContent = String(game.scores.human);
   els.aiScore.textContent = String(game.scores.ai);
   renderScorePace(game);
@@ -1576,6 +1777,7 @@ els.menuToggle.addEventListener("click", () => {
 
 els.analyticsOpen.addEventListener("click", () => {
   state.analyticsOpen = true;
+  state.gameLogOpen = false;
   els.settingsPanel.hidden = true;
   els.menuToggle.setAttribute("aria-expanded", "false");
   render(state.game);
@@ -1584,6 +1786,24 @@ els.analyticsOpen.addEventListener("click", () => {
 els.analyticsClose.addEventListener("click", () => {
   state.analyticsOpen = false;
   render(state.game);
+});
+
+els.gameLogOpen.addEventListener("click", () => {
+  state.gameLogOpen = true;
+  state.analyticsOpen = false;
+  els.settingsPanel.hidden = true;
+  els.menuToggle.setAttribute("aria-expanded", "false");
+  render(state.game);
+});
+
+els.gameLogClose.addEventListener("click", () => {
+  state.gameLogOpen = false;
+  render(state.game);
+});
+
+els.gameLogOpponent.addEventListener("change", () => {
+  state.selectedLogGameId = null;
+  renderGameLog();
 });
 
 els.gameOverClose.addEventListener("click", () => {
