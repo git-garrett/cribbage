@@ -657,6 +657,34 @@ button:disabled {
   font-size: 14px;
 }
 
+.decision-ev-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+}
+
+.decision-ev-summary span {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.decision-ev-summary strong {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.decision-ev-summary em {
+  color: rgba(255, 255, 255, 0.95);
+  font-style: normal;
+  font-weight: 800;
+}
+
 .decision-review-list {
   display: grid;
   gap: 6px;
@@ -747,6 +775,27 @@ button:disabled {
 .game-log-item span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.game-log-item .game-log-ev {
+  font-weight: 750;
+}
+
+.game-log-item .game-log-ev.has-errors {
+  color: #b42318;
+}
+
+.game-log-detail .decision-ev-summary {
+  border-color: var(--line);
+  background: var(--surface-soft);
+}
+
+.game-log-detail .decision-ev-summary strong {
+  color: var(--muted);
+}
+
+.game-log-detail .decision-ev-summary em {
+  color: var(--ink);
 }
 
 .game-log-detail .decision-review-item span,
@@ -1282,7 +1331,8 @@ button.card {
   }
 
   .game-log-layout,
-  .decision-context {
+  .decision-context,
+  .decision-ev-summary {
     grid-template-columns: 1fr;
   }
 

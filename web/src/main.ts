@@ -175,6 +175,14 @@ interface GameLogRecord {
   end: GameEndEvent;
   opponent: Opponent;
 }
+interface DecisionEvTotals {
+  total: number;
+  discard: number;
+  pegging: number;
+  dealer: number;
+  pone: number;
+  count: number;
+}
 
 function loadSavedGame(): CribbageGame {
   const saved = localStorage.getItem(SAVE_KEY);
@@ -921,18 +929,8 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   model.textContent = `Compared with ${engineName(DEFAULT_OPPONENT)}.`;
   section.append(title, model);
 
-  const mistakes = events
-    .filter((event): event is DecisionReviewEvent => {
-      if (
-        event.gameId !== end.gameId ||
-        !((event.type === "discard" && event.player === "human") ||
-          (event.type === "pegging" && event.action === "play" && event.player === "human")) ||
-        !event.review
-      ) {
-        return false;
-      }
-      return !sameCards(event.review.selected, event.review.recommended);
-    });
+  const mistakes = decisionMistakes(events, end.gameId);
+  section.append(decisionEvSummary(decisionEvTotals(mistakes)));
 
   if (!mistakes.length) {
     const empty = document.createElement("div");
@@ -965,6 +963,65 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   }
   section.append(list);
   return section;
+}
+
+function decisionMistakes(events: AnalyticsEvent[], gameId: string): DecisionReviewEvent[] {
+  return events.filter((event): event is DecisionReviewEvent => {
+    if (
+      event.gameId !== gameId ||
+      !((event.type === "discard" && event.player === "human") ||
+        (event.type === "pegging" && event.action === "play" && event.player === "human")) ||
+      !event.review
+    ) {
+      return false;
+    }
+    return !sameCards(event.review.selected, event.review.recommended);
+  });
+}
+
+function decisionEvTotals(events: DecisionReviewEvent[]): DecisionEvTotals {
+  const totals: DecisionEvTotals = {
+    total: 0,
+    discard: 0,
+    pegging: 0,
+    dealer: 0,
+    pone: 0,
+    count: events.length,
+  };
+  for (const event of events) {
+    const delta = Math.max(0, event.review.delta);
+    totals.total += delta;
+    if (event.type === "discard") totals.discard += delta;
+    if (event.type === "pegging") totals.pegging += delta;
+    if (event.role === "dealer") totals.dealer += delta;
+    if (event.role === "pone") totals.pone += delta;
+  }
+  return totals;
+}
+
+function decisionEvSummary(totals: DecisionEvTotals): HTMLElement {
+  const summary = document.createElement("div");
+  summary.className = "decision-ev-summary";
+  for (const [label, value] of [
+    ["Total EV", totals.total],
+    ["Pegging", totals.pegging],
+    ["Discard", totals.discard],
+    ["Dealer", totals.dealer],
+    ["Pone", totals.pone],
+  ] as const) {
+    const item = document.createElement("span");
+    const name = document.createElement("strong");
+    name.textContent = label;
+    const amount = document.createElement("em");
+    amount.textContent = formatEv(value);
+    item.append(name, amount);
+    summary.append(item);
+  }
+  return summary;
+}
+
+function formatEv(value: number): string {
+  return value.toFixed(2);
 }
 
 function decisionContext(event: DecisionReviewEvent, events: AnalyticsEvent[]): HTMLElement {
@@ -1185,7 +1242,11 @@ function renderGameLog(): void {
     title.textContent = `${shortDate(game.end.at)} · ${engineName(game.opponent)}`;
     const meta = document.createElement("span");
     meta.textContent = `${playerName(game.end.winner)} won ${result}${game.end.result && game.end.result !== "regular" ? ` (${game.end.result})` : ""}`;
-    button.append(title, meta);
+    const ev = document.createElement("span");
+    const totals = decisionEvTotals(decisionMistakes(events, game.gameId));
+    ev.textContent = `${formatEv(totals.total)} error EV (${totals.count})`;
+    ev.className = totals.total > 0 ? "game-log-ev has-errors" : "game-log-ev";
+    button.append(title, meta, ev);
     button.addEventListener("click", () => {
       state.selectedLogGameId = game.gameId;
       renderGameLog();
