@@ -178,6 +178,13 @@ h2 {
   font-size: 13px;
 }
 
+.app-version {
+  padding-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
 button,
 select {
   min-height: 38px;

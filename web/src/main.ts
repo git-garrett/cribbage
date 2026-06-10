@@ -72,6 +72,7 @@ const els = {
   board: document.querySelector("#board") as HTMLElement,
   menuToggle: document.querySelector("#menu-toggle") as HTMLButtonElement,
   settingsPanel: document.querySelector("#settings-panel") as HTMLElement,
+  appVersion: document.querySelector("#app-version") as HTMLElement,
   analyticsOpen: document.querySelector("#analytics-open") as HTMLButtonElement,
   analyticsClose: document.querySelector("#analytics-close") as HTMLButtonElement,
   analyticsPage: document.querySelector("#analytics-page") as HTMLElement,
@@ -172,6 +173,7 @@ function saveGame(): void {
 }
 
 let localGame = loadSavedGame();
+els.appVersion.textContent = __APP_VERSION__;
 saveGame();
 
 function loadAnalytics(): AnalyticsStore {
@@ -829,13 +831,17 @@ function singleGameDecisionReview(game: GameState, end: GameEndEvent): HTMLEleme
   section.append(title, model);
 
   const mistakes = game.analyticsEvents
-    .filter((event): event is DecisionReviewEvent =>
-      event.gameId === end.gameId &&
-      ((event.type === "discard" && event.player === "human") ||
-        (event.type === "pegging" && event.action === "play" && event.player === "human")) &&
-      Boolean(event.review) &&
-      !sameCards(event.review.selected, event.review.recommended)
-    );
+    .filter((event): event is DecisionReviewEvent => {
+      if (
+        event.gameId !== end.gameId ||
+        !((event.type === "discard" && event.player === "human") ||
+          (event.type === "pegging" && event.action === "play" && event.player === "human")) ||
+        !event.review
+      ) {
+        return false;
+      }
+      return !sameCards(event.review.selected, event.review.recommended);
+    });
 
   if (!mistakes.length) {
     const empty = document.createElement("div");
