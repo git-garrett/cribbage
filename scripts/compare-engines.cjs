@@ -32,26 +32,26 @@ engineModule._compile(compiled, enginePath);
 const { CribbageGame } = engineModule.exports;
 
 const engines = {
-  expert: "schell-table-peg_table-1.2",
+  expert: "schell_table-peg_table-4.0",
   original: "original-1.1",
   originalPeg: "original_exhaustive_peg-1.2",
-  ras: "ras-table-1.0",
-  rasPeg: "ras-table-peg-1.1",
-  rasPegTable: "ras-table-peg_table-1.2",
-  schell: "schell-table-1.0",
-  schellPeg: "schell-table-peg-1.1",
-  schellPegTable: "schell-table-peg_table-1.2",
+  ras: "ras_table-2.0",
+  rasPeg: "ras_table-peg-3.0",
+  rasPegTable: "ras_table-peg_table-4.0",
+  schell: "schell_table-2.0",
+  schellPeg: "schell_table-peg-3.0",
+  schellPegTable: "schell_table-peg_table-4.0",
 };
 
 const labels = {
   [engines.original]: "Original 1.1",
   [engines.originalPeg]: "Original Exhaustive Peg 1.2",
-  [engines.ras]: "Ras Table 1.0",
-  [engines.rasPeg]: "Ras Table Peg 1.1",
-  [engines.rasPegTable]: "Ras Table Peg Table 1.2",
-  [engines.schell]: "Schell Table 1.0",
-  [engines.schellPeg]: "Schell Table Peg 1.1",
-  [engines.schellPegTable]: "Schell Table Peg Table 1.2",
+  [engines.ras]: "Ras Table 2.0",
+  [engines.rasPeg]: "Ras Table Peg 3.0",
+  [engines.rasPegTable]: "Ras Table Peg Table 4.0",
+  [engines.schell]: "Schell Table 2.0",
+  [engines.schellPeg]: "Schell Table Peg 3.0",
+  [engines.schellPegTable]: "Schell Table Peg Table 4.0",
 };
 
 const threeWayMatchups = [

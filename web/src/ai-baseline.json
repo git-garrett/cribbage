@@ -38,10 +38,10 @@
       "games": 1000,
       "gamesPerMatchup": 1000,
       "matchups": [
-        "Ras Table 1.0 vs Schell Table 1.0"
+        "Ras Table 2.0 vs Schell Table 2.0"
       ],
       "models": {
-        "ras-table-1.0": {
+        "ras_table-2.0": {
           "games": 1000,
           "aiTotals": {
             "wins": 516,
@@ -71,7 +71,7 @@
             "crib": 5.248976248976249
           }
         },
-        "schell-table-1.0": {
+        "schell_table-2.0": {
           "games": 1000,
           "aiTotals": {
             "wins": 484,
@@ -109,9 +109,9 @@
       "games": 900,
       "gamesPerMatchup": 300,
       "matchups": [
-        "Ras Table 1.0 vs Expert 2.0 Ras Tables",
-        "Ras Table 1.0 vs Schell Table 1.0",
-        "Schell Table 1.0 vs Expert 2.0 Ras Tables"
+        "Ras Table 2.0 vs Expert 2.0 Ras Tables",
+        "Ras Table 2.0 vs Schell Table 2.0",
+        "Schell Table 2.0 vs Expert 2.0 Ras Tables"
       ],
       "models": {
         "expert-2.0-ras-tables": {
@@ -144,7 +144,7 @@
             "crib": 5.173501577287066
           }
         },
-        "ras-table-1.0": {
+        "ras_table-2.0": {
           "games": 600,
           "aiTotals": {
             "wins": 282,
@@ -174,7 +174,7 @@
             "crib": 5.150317892824705
           }
         },
-        "schell-table-1.0": {
+        "schell_table-2.0": {
           "games": 600,
           "aiTotals": {
             "wins": 312,
@@ -212,9 +212,9 @@
       "games": 900,
       "gamesPerMatchup": 300,
       "matchups": [
-        "Ras Table 1.0 vs Expert 1.1",
-        "Ras Table 1.0 vs Schell Table 1.0",
-        "Schell Table 1.0 vs Expert 1.1"
+        "Ras Table 2.0 vs Expert 1.1",
+        "Ras Table 2.0 vs Schell Table 2.0",
+        "Schell Table 2.0 vs Expert 1.1"
       ],
       "models": {
         "expert-1.1": {
@@ -247,7 +247,7 @@
             "crib": 5.151996370235935
           }
         },
-        "ras-table-1.0": {
+        "ras_table-2.0": {
           "games": 600,
           "aiTotals": {
             "wins": 290,
@@ -277,7 +277,7 @@
             "crib": 5.096570397111913
           }
         },
-        "schell-table-1.0": {
+        "schell_table-2.0": {
           "games": 600,
           "aiTotals": {
             "wins": 301,
@@ -315,7 +315,7 @@
       "games": 1000,
       "gamesPerMatchup": 1000,
       "matchups": [
-        "Ras Table 1.0 vs Expert 1.1"
+        "Ras Table 2.0 vs Expert 1.1"
       ],
       "models": {
         "expert-1.1": {
@@ -348,7 +348,7 @@
             "crib": 5.180070403466017
           }
         },
-        "ras-table-1.0": {
+        "ras_table-2.0": {
           "games": 1000,
           "aiTotals": {
             "wins": 492,
@@ -386,10 +386,10 @@
       "games": 100000,
       "gamesPerMatchup": 100000,
       "matchups": [
-        "Ras Table 1.0 vs Schell Table 1.0"
+        "Ras Table 2.0 vs Schell Table 2.0"
       ],
       "models": {
-        "ras-table-1.0": {
+        "ras_table-2.0": {
           "games": 100000,
           "aiTotals": {
             "wins": 49883,
@@ -419,7 +419,7 @@
             "crib": 5.185933381780318
           }
         },
-        "schell-table-1.0": {
+        "schell_table-2.0": {
           "games": 100000,
           "aiTotals": {
             "wins": 50117,
@@ -457,7 +457,7 @@
       "games": 1000,
       "gamesPerMatchup": 1000,
       "matchups": [
-        "Schell Table 1.0 vs Expert 1.1"
+        "Schell Table 2.0 vs Expert 1.1"
       ],
       "models": {
         "expert-1.1": {
@@ -490,7 +490,7 @@
             "crib": 5.200327958458595
           }
         },
-        "schell-table-1.0": {
+        "schell_table-2.0": {
           "games": 1000,
           "aiTotals": {
             "wins": 540,

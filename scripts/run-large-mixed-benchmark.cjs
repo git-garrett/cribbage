@@ -11,7 +11,7 @@ const runId = `large-mixed-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 const jobs = [
   {
     id: "ras-v-expert-1.1-1000",
-    label: "Ras Table 1.0 vs Expert 1.1",
+    label: "Ras Table 2.0 vs Expert 1.1",
     games: 1000,
     mode: "ras-v-expert-1.1",
     workers: 8,
@@ -19,7 +19,7 @@ const jobs = [
   },
   {
     id: "ras-v-schell-100000",
-    label: "Ras Table 1.0 vs Schell Table 1.0",
+    label: "Ras Table 2.0 vs Schell Table 2.0",
     games: 100000,
     mode: "ras-v-schell",
     workers: 6,
@@ -27,7 +27,7 @@ const jobs = [
   },
   {
     id: "schell-v-expert-1.1-1000",
-    label: "Schell Table 1.0 vs Expert 1.1",
+    label: "Schell Table 2.0 vs Expert 1.1",
     games: 1000,
     mode: "schell-v-expert-1.1",
     workers: 8,

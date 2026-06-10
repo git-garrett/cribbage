@@ -12,7 +12,7 @@
     "benchmark:iterative-pegging-table": "node --max-old-space-size=8192 scripts/generate-iterative-pegging-table.cjs benchmark 96 8,10,12 3",
     "generate:iterative-pegging-table": "node --max-old-space-size=8192 scripts/generate-iterative-pegging-table.cjs generate benchmarks/pegging-table 12 3",
     "generate:iterative-pegging-table:2": "node --max-old-space-size=8192 scripts/generate-iterative-pegging-table.cjs generate benchmarks/pegging-table 12 3 0 0 none 0 2",
-    "simulate:ai-baseline": "node scripts/simulate-ai-baseline.cjs 1000 schell-table-peg_table-1.2",
+    "simulate:ai-baseline": "node scripts/simulate-ai-baseline.cjs 1000 schell_table-peg_table-4.0",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

@@ -1047,12 +1047,12 @@ function sortedAnalyticsEngines(
 
 function analyticsEngineSortKey(engine: Opponent): number {
   return [
-    "schell-table-peg_table-1.2",
-    "ras-table-peg_table-1.2",
-    "schell-table-peg-1.1",
-    "ras-table-peg-1.1",
-    "schell-table-1.0",
-    "ras-table-1.0",
+    "schell_table-peg_table-4.0",
+    "ras_table-peg_table-4.0",
+    "schell_table-peg-3.0",
+    "ras_table-peg-3.0",
+    "schell_table-2.0",
+    "ras_table-2.0",
     "original_exhaustive_peg-1.2",
     "original-1.1",
   ].indexOf(engine);
@@ -1270,49 +1270,86 @@ function playerName(player: PlayerKey | undefined): string {
 function engineName(engine: string | undefined): string {
   if (engine === "expert" || engine === "expert-1.1" || engine === "original-1.1") return "Original 1.1";
   if (engine === "expert-peg-1.2" || engine === "original_exhaustive_peg-1.2") return "Original Exhaustive Peg 1.2";
-  if (engine === "expert_ras-table-1.0" || engine === "expert-2.0-ras-tables") return "Ras Table 1.0";
-  if (engine === "expert_ras-table-peg-1.1" || engine === "expert-peg-2.1") return "Ras Table Peg 1.1";
-  if (engine === "expert_schell-table-peg-1.1" || engine === "expert-peg-2.2") return "Schell Table Peg 1.1";
   if (
+    engine === "ras-table-1.0" ||
+    engine === "expert_ras-table-1.0" ||
+    engine === "expert_ras_table-2.0" ||
+    engine === "expert-2.0-ras-tables"
+  ) return "Ras Table 2.0";
+  if (
+    engine === "ras-table-peg-1.1" ||
+    engine === "expert_ras-table-peg-1.1" ||
+    engine === "expert_ras_table-peg-3.0" ||
+    engine === "expert-peg-2.1"
+  ) return "Ras Table Peg 3.0";
+  if (
+    engine === "schell-table-peg-1.1" ||
+    engine === "expert_schell-table-peg-1.1" ||
+    engine === "expert_schell_table-peg-3.0" ||
+    engine === "expert-peg-2.2"
+  ) return "Schell Table Peg 3.0";
+  if (
+    engine === "schell-table-peg_table-1.2" ||
     engine === "expert_schell-table-peg_table-1.2" ||
+    engine === "expert_schell_table-peg_table-4.0" ||
     engine === "expert-peg_table-1.3" ||
     engine === "expert-peg_table-2.3"
   ) {
-    return "Schell Table Peg Table 1.2";
+    return "Schell Table Peg Table 4.0";
   }
-  if (engine === "expert-peg_table-2.2") return "Ras Table Peg Table 1.2";
-  if (engine === "ras-table-1.0") return "Ras Table 1.0";
-  if (engine === "ras-table-peg-1.1") return "Ras Table Peg 1.1";
-  if (engine === "ras-table-peg_table-1.2") return "Ras Table Peg Table 1.2";
-  if (engine === "schell-table-1.0") return "Schell Table 1.0";
-  if (engine === "schell-table-peg-1.1") return "Schell Table Peg 1.1";
-  if (engine === "schell-table-peg_table-1.2") return "Schell Table Peg Table 1.2";
+  if (engine === "ras-table-peg_table-1.2" || engine === "expert-peg_table-2.2") return "Ras Table Peg Table 4.0";
+  if (engine === "ras_table-2.0") return "Ras Table 2.0";
+  if (engine === "ras_table-peg-3.0") return "Ras Table Peg 3.0";
+  if (engine === "ras_table-peg_table-4.0") return "Ras Table Peg Table 4.0";
+  if (engine === "schell-table-1.0") return "Schell Table 2.0";
+  if (engine === "schell_table-2.0") return "Schell Table 2.0";
+  if (engine === "schell_table-peg-3.0") return "Schell Table Peg 3.0";
+  if (engine === "schell_table-peg_table-4.0") return "Schell Table Peg Table 4.0";
   return engine || "-";
 }
 
 function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
+  if (engine === "ras-table-1.0") return "ras_table-2.0";
+  if (engine === "ras-table-peg-1.1") return "ras_table-peg-3.0";
+  if (engine === "ras-table-peg_table-1.2") return "ras_table-peg_table-4.0";
+  if (engine === "schell-table-1.0") return "schell_table-2.0";
+  if (engine === "schell-table-peg-1.1") return "schell_table-peg-3.0";
+  if (engine === "schell-table-peg_table-1.2") return "schell_table-peg_table-4.0";
   if (engine === "expert" || engine === "expert-1.1") return "original-1.1";
   if (engine === "expert-peg-1.2") return "original_exhaustive_peg-1.2";
-  if (engine === "expert-2.0-ras-tables" || engine === "expert_ras-table-1.0") return "ras-table-1.0";
-  if (engine === "expert-peg-2.1" || engine === "expert_ras-table-peg-1.1") return "ras-table-peg-1.1";
-  if (engine === "expert-peg_table-2.2") return "ras-table-peg_table-1.2";
-  if (engine === "expert-peg-2.2" || engine === "expert_schell-table-peg-1.1") return "schell-table-peg-1.1";
+  if (
+    engine === "expert-2.0-ras-tables" ||
+    engine === "expert_ras-table-1.0" ||
+    engine === "expert_ras_table-2.0"
+  ) return "ras_table-2.0";
+  if (
+    engine === "expert-peg-2.1" ||
+    engine === "expert_ras-table-peg-1.1" ||
+    engine === "expert_ras_table-peg-3.0"
+  ) return "ras_table-peg-3.0";
+  if (engine === "expert-peg_table-2.2") return "ras_table-peg_table-4.0";
+  if (
+    engine === "expert-peg-2.2" ||
+    engine === "expert_schell-table-peg-1.1" ||
+    engine === "expert_schell_table-peg-3.0"
+  ) return "schell_table-peg-3.0";
   if (
     engine === "expert-peg_table-1.3" ||
     engine === "expert-peg_table-2.3" ||
-    engine === "expert_schell-table-peg_table-1.2"
+    engine === "expert_schell-table-peg_table-1.2" ||
+    engine === "expert_schell_table-peg_table-4.0"
   ) {
-    return "schell-table-peg_table-1.2";
+    return "schell_table-peg_table-4.0";
   }
   if (
     engine === "original-1.1" ||
     engine === "original_exhaustive_peg-1.2" ||
-    engine === "ras-table-1.0" ||
-    engine === "ras-table-peg-1.1" ||
-    engine === "ras-table-peg_table-1.2" ||
-    engine === "schell-table-peg-1.1" ||
-    engine === "schell-table-peg_table-1.2" ||
-    engine === "schell-table-1.0"
+    engine === "ras_table-2.0" ||
+    engine === "ras_table-peg-3.0" ||
+    engine === "ras_table-peg_table-4.0" ||
+    engine === "schell_table-peg-3.0" ||
+    engine === "schell_table-peg_table-4.0" ||
+    engine === "schell_table-2.0"
   ) {
     return engine;
   }

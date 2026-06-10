@@ -4,16 +4,16 @@ const Module = require("node:module");
 const ts = require("typescript");
 
 const gameCount = Number.parseInt(process.argv[2] || "1000", 10);
-const defaultOpponent = "schell-table-peg_table-1.2";
+const defaultOpponent = "schell_table-peg_table-4.0";
 const validOpponents = new Set([
   "original-1.1",
   "original_exhaustive_peg-1.2",
-  "ras-table-1.0",
-  "ras-table-peg-1.1",
-  "ras-table-peg_table-1.2",
-  "schell-table-1.0",
-  "schell-table-peg-1.1",
-  "schell-table-peg_table-1.2",
+  "ras_table-2.0",
+  "ras_table-peg-3.0",
+  "ras_table-peg_table-4.0",
+  "schell_table-2.0",
+  "schell_table-peg-3.0",
+  "schell_table-peg_table-4.0",
 ]);
 const opponent = process.argv[3] || defaultOpponent;
 const root = path.resolve(__dirname, "..");

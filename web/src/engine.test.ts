@@ -41,8 +41,8 @@ describe("scoring", () => {
 
 describe("game state", () => {
   test("defaults to the latest expert peg table engine", () => {
-    expect(DEFAULT_OPPONENT).toBe("schell-table-peg_table-1.2");
-    expect(new CribbageGame().opponent).toBe("schell-table-peg_table-1.2");
+    expect(DEFAULT_OPPONENT).toBe("schell_table-peg_table-4.0");
+    expect(new CribbageGame().opponent).toBe("schell_table-peg_table-4.0");
   });
 
   test("keeps first dealer stable while current dealer alternates", () => {
@@ -302,7 +302,7 @@ describe("game state", () => {
   });
 
   test("autoplays AI versus AI games to completion", () => {
-    const game = new CribbageGame("ras-table-1.0");
+    const game = new CribbageGame("ras_table-2.0");
 
     game.autoPlayToEnd();
 
@@ -318,7 +318,7 @@ describe("game state", () => {
   });
 
   test("exhaustive peg variants choose legal plays", () => {
-    const game = new CribbageGame("ras-table-peg-1.1");
+    const game = new CribbageGame("ras_table-peg-3.0");
     game.phase = "pegging";
     game.pone = game.human;
     game.dealer = game.ai;
@@ -340,7 +340,7 @@ describe("game state", () => {
   });
 
   test("simple peg tiebreaker favors higher rank", () => {
-    const game = new CribbageGame("schell-table-1.0");
+    const game = new CribbageGame("schell_table-2.0");
     game.phase = "pegging";
     game.pone = game.human;
     game.dealer = game.ai;
@@ -356,7 +356,7 @@ describe("game state", () => {
   });
 
   test("exhaustive peg tiebreaker favors higher rank", () => {
-    const game = new CribbageGame("schell-table-peg_table-1.2");
+    const game = new CribbageGame("schell_table-peg_table-4.0");
     game.phase = "pegging";
     game.pone = game.human;
     game.dealer = game.ai;
@@ -376,7 +376,7 @@ describe("game state", () => {
   });
 
   test("peg table variants use generated discard policy", () => {
-    const game = new CribbageGame("schell-table-peg_table-1.2");
+    const game = new CribbageGame("schell_table-peg_table-4.0");
     game.human.hand = cardsFromString("As 2d 3c 4h 5s 6d");
 
     const discards = (game as any).chooseDiscards(game.human, false);
@@ -385,7 +385,7 @@ describe("game state", () => {
   });
 
   test("peg table variants use generated best pone lead", () => {
-    const game = new CribbageGame("schell-table-peg_table-1.2");
+    const game = new CribbageGame("schell_table-peg_table-4.0");
     game.phase = "pegging";
     game.pone = game.human;
     game.dealer = game.ai;

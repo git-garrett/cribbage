@@ -4,13 +4,19 @@ export type PlayerKey = "human" | "ai";
 export type Opponent =
   | "original-1.1"
   | "original_exhaustive_peg-1.2"
+  | "ras_table-2.0"
+  | "ras_table-peg-3.0"
+  | "ras_table-peg_table-4.0"
+  | "schell_table-peg-3.0"
+  | "schell_table-peg_table-4.0"
+  | "schell_table-2.0";
+type LegacyOpponent =
   | "ras-table-1.0"
   | "ras-table-peg-1.1"
   | "ras-table-peg_table-1.2"
+  | "schell-table-1.0"
   | "schell-table-peg-1.1"
   | "schell-table-peg_table-1.2"
-  | "schell-table-1.0";
-type LegacyOpponent =
   | "expert"
   | "expert-1.1"
   | "expert-peg-1.2"
@@ -18,6 +24,10 @@ type LegacyOpponent =
   | "expert_ras-table-peg-1.1"
   | "expert_schell-table-peg-1.1"
   | "expert_schell-table-peg_table-1.2"
+  | "expert_ras_table-2.0"
+  | "expert_ras_table-peg-3.0"
+  | "expert_schell_table-peg-3.0"
+  | "expert_schell_table-peg_table-4.0"
   | "expert-peg_table-1.3"
   | "expert-2.0-ras-tables"
   | "expert-peg-2.1"
@@ -25,7 +35,7 @@ type LegacyOpponent =
   | "expert-peg-2.2"
   | "expert-peg_table-2.3";
 type StoredOpponent = Opponent | LegacyOpponent;
-export const DEFAULT_OPPONENT: Opponent = "schell-table-peg_table-1.2";
+export const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-4.0";
 export type Phase =
   | "discard"
   | "ai_discarding"
@@ -45,17 +55,17 @@ const RUN_VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
 const ENGINE_LABELS: Record<Opponent, string> = {
   "original-1.1": "Original 1.1",
   "original_exhaustive_peg-1.2": "Original Exhaustive Peg 1.2",
-  "ras-table-1.0": "Ras Table 1.0",
-  "ras-table-peg-1.1": "Ras Table Peg 1.1",
-  "ras-table-peg_table-1.2": "Ras Table Peg Table 1.2",
-  "schell-table-1.0": "Schell Table 1.0",
-  "schell-table-peg-1.1": "Schell Table Peg 1.1",
-  "schell-table-peg_table-1.2": "Schell Table Peg Table 1.2",
+  "ras_table-2.0": "Ras Table 2.0",
+  "ras_table-peg-3.0": "Ras Table Peg 3.0",
+  "ras_table-peg_table-4.0": "Ras Table Peg Table 4.0",
+  "schell_table-2.0": "Schell Table 2.0",
+  "schell_table-peg-3.0": "Schell Table Peg 3.0",
+  "schell_table-peg_table-4.0": "Schell Table Peg Table 4.0",
 };
 type DiscardTableEngine = Exclude<Opponent, "original-1.1" | "original_exhaustive_peg-1.2">;
 type CribTable = { own: number[][]; opponent: number[][] };
 const DISCARD_TABLES: Record<string, CribTable> = {
-  "ras-table-1.0": {
+  "ras_table-2.0": {
     own: [
       [5.51, 4.35, 4.69, 5.42, 5.38, 3.98, 4.05, 3.77, 3.49, 3.51, 3.57, 3.50, 3.36],
       [4.35, 5.82, 7.14, 4.64, 5.54, 4.15, 3.78, 3.82, 3.91, 3.71, 4.05, 3.86, 3.57],
@@ -87,7 +97,7 @@ const DISCARD_TABLES: Record<string, CribTable> = {
       [4.33, 4.45, 4.43, 4.36, 7.12, 4.07, 4.24, 4.15, 3.93, 3.84, 4.62, 4.51, 5.59],
     ],
   },
-  "schell-table-1.0": {
+  "schell_table-2.0": {
     own: [
       [5.38, 4.23, 4.52, 5.43, 5.45, 3.85, 3.85, 3.80, 3.40, 3.42, 3.65, 3.42, 3.41],
       [4.23, 5.72, 7.00, 4.52, 5.45, 3.93, 3.81, 3.66, 3.71, 3.55, 3.84, 3.58, 3.52],
@@ -120,10 +130,10 @@ const DISCARD_TABLES: Record<string, CribTable> = {
     ],
   },
 };
-DISCARD_TABLES["ras-table-peg-1.1"] = DISCARD_TABLES["ras-table-1.0"];
-DISCARD_TABLES["ras-table-peg_table-1.2"] = DISCARD_TABLES["ras-table-1.0"];
-DISCARD_TABLES["schell-table-peg-1.1"] = DISCARD_TABLES["schell-table-1.0"];
-DISCARD_TABLES["schell-table-peg_table-1.2"] = DISCARD_TABLES["schell-table-1.0"];
+DISCARD_TABLES["ras_table-peg-3.0"] = DISCARD_TABLES["ras_table-2.0"];
+DISCARD_TABLES["ras_table-peg_table-4.0"] = DISCARD_TABLES["ras_table-2.0"];
+DISCARD_TABLES["schell_table-peg-3.0"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-4.0"] = DISCARD_TABLES["schell_table-2.0"];
 
 export class WinGame extends Error {}
 
@@ -1684,17 +1694,36 @@ function createAnalyticsId(prefix: string): string {
 }
 
 function normalizeOpponent(opponent: StoredOpponent): Opponent {
+  if (opponent === "ras-table-1.0") return "ras_table-2.0";
+  if (opponent === "ras-table-peg-1.1") return "ras_table-peg-3.0";
+  if (opponent === "ras-table-peg_table-1.2") return "ras_table-peg_table-4.0";
+  if (opponent === "schell-table-1.0") return "schell_table-2.0";
+  if (opponent === "schell-table-peg-1.1") return "schell_table-peg-3.0";
+  if (opponent === "schell-table-peg_table-1.2") return "schell_table-peg_table-4.0";
   if (opponent === "expert") return DEFAULT_OPPONENT;
   if (opponent === "expert-1.1") return "original-1.1";
   if (opponent === "expert-peg-1.2") return "original_exhaustive_peg-1.2";
-  if (opponent === "expert-2.0-ras-tables" || opponent === "expert_ras-table-1.0") return "ras-table-1.0";
-  if (opponent === "expert-peg-2.1" || opponent === "expert_ras-table-peg-1.1") return "ras-table-peg-1.1";
-  if (opponent === "expert-peg_table-2.2") return "ras-table-peg_table-1.2";
-  if (opponent === "expert-peg-2.2" || opponent === "expert_schell-table-peg-1.1") return "schell-table-peg-1.1";
+  if (
+    opponent === "expert-2.0-ras-tables" ||
+    opponent === "expert_ras-table-1.0" ||
+    opponent === "expert_ras_table-2.0"
+  ) return "ras_table-2.0";
+  if (
+    opponent === "expert-peg-2.1" ||
+    opponent === "expert_ras-table-peg-1.1" ||
+    opponent === "expert_ras_table-peg-3.0"
+  ) return "ras_table-peg-3.0";
+  if (opponent === "expert-peg_table-2.2") return "ras_table-peg_table-4.0";
+  if (
+    opponent === "expert-peg-2.2" ||
+    opponent === "expert_schell-table-peg-1.1" ||
+    opponent === "expert_schell_table-peg-3.0"
+  ) return "schell_table-peg-3.0";
   if (
     opponent === "expert-peg_table-1.3" ||
     opponent === "expert-peg_table-2.3" ||
-    opponent === "expert_schell-table-peg_table-1.2"
-  ) return "schell-table-peg_table-1.2";
+    opponent === "expert_schell-table-peg_table-1.2" ||
+    opponent === "expert_schell_table-peg_table-4.0"
+  ) return "schell_table-peg_table-4.0";
   return opponent;
 }

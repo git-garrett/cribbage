@@ -8,7 +8,14 @@ const ts = require("typescript");
 const root = path.resolve(__dirname, "..");
 const enginePath = path.join(root, "web/src/engine.ts");
 
-const models = [
+const currentModels = [
+  "schell_table-peg_table-4.0",
+  "ras_table-peg_table-4.0",
+  "schell_table-peg-3.0",
+  "schell_table-2.0",
+];
+
+const legacyModels = [
   "schell-table-peg_table-1.2",
   "ras-table-peg_table-1.2",
   "schell-table-peg-1.1",
@@ -16,17 +23,39 @@ const models = [
 ];
 
 const labels = {
+  "schell_table-peg_table-4.0": "Schell Table Peg Table 4.0",
+  "ras_table-peg_table-4.0": "Ras Table Peg Table 4.0",
+  "schell_table-peg-3.0": "Schell Table Peg 3.0",
+  "schell_table-2.0": "Schell Table 2.0",
   "schell-table-peg_table-1.2": "Schell Table Peg Table 1.2",
   "ras-table-peg_table-1.2": "Ras Table Peg Table 1.2",
   "schell-table-peg-1.1": "Schell Table Peg 1.1",
   "schell-table-1.0": "Schell Table 1.0",
 };
 
-const matchups = [];
-for (let left = 0; left < models.length; left += 1) {
-  for (let right = left + 1; right < models.length; right += 1) {
-    matchups.push([models[left], models[right]]);
+function buildMatchups(models) {
+  const matchups = [];
+  for (let left = 0; left < models.length; left += 1) {
+    for (let right = left + 1; right < models.length; right += 1) {
+      matchups.push([models[left], models[right]]);
+    }
   }
+  return matchups;
+}
+
+function modelsForOutDir(outDir) {
+  try {
+    const statusPath = path.join(outDir, "status.json");
+    if (fs.existsSync(statusPath) && fs.readFileSync(statusPath, "utf8").includes("schell-table")) {
+      return legacyModels;
+    }
+    if (fs.existsSync(outDir) && fs.readdirSync(outDir).some((file) => file.includes("schell-table"))) {
+      return legacyModels;
+    }
+  } catch {
+    return currentModels;
+  }
+  return currentModels;
 }
 
 function emptyStats() {
@@ -391,6 +420,8 @@ async function main() {
   const statusPath = path.join(outDir, "status.json");
   const summaryPath = path.join(outDir, "summary.json");
   fs.mkdirSync(outDir, { recursive: true });
+  const models = modelsForOutDir(outDir);
+  const matchups = buildMatchups(models);
 
   const jobs = [];
   for (const [leftEngine, rightEngine] of matchups) {
