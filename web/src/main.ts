@@ -56,12 +56,14 @@ const state: {
   pending: boolean;
   resultOverride: string[] | null;
   analyticsOpen: boolean;
+  dismissedGameOverId: string | null;
 } = {
   game: null,
   selected: new Set(),
   pending: false,
   resultOverride: null,
   analyticsOpen: false,
+  dismissedGameOverId: null,
 };
 
 const els = {
@@ -79,6 +81,7 @@ const els = {
   analyticsScores: document.querySelector("#analytics-scores") as HTMLElement,
   analyticsPegging: document.querySelector("#analytics-pegging") as HTMLElement,
   result: document.querySelector("#result") as HTMLElement,
+  resultInline: document.querySelector("#result-inline") as HTMLElement,
   scoringResult: document.querySelector("#scoring-result") as HTMLElement,
   humanScore: document.querySelector("#human-score") as HTMLElement,
   humanDealer: document.querySelector("#human-dealer") as HTMLElement,
@@ -106,6 +109,10 @@ const els = {
   scoringPoints: document.querySelector("#scoring-points") as HTMLElement,
   continueScoring: document.querySelector("#continue-scoring") as HTMLButtonElement,
   continuePegging: document.querySelector("#continue-pegging") as HTMLButtonElement,
+  gameOverAlert: document.querySelector("#game-over-alert") as HTMLElement,
+  gameOverTitle: document.querySelector("#game-over-title") as HTMLElement,
+  gameOverClose: document.querySelector("#game-over-close") as HTMLButtonElement,
+  singleGameReport: document.querySelector("#single-game-report") as HTMLElement,
 };
 
 const SHARED_PAR_HOLES = [17, 33, 43, 59, 69, 85, 95];
@@ -140,6 +147,8 @@ interface AnalyticsTotals {
 }
 
 type ScoreKey = "peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib";
+type GameEndEvent = Extract<AnalyticsEvent, { type: "game" }> & { action: "end" };
+type ScoreEvent = Extract<AnalyticsEvent, { type: "score" }>;
 
 function loadSavedGame(): CribbageGame {
   const saved = localStorage.getItem(SAVE_KEY);
@@ -728,18 +737,123 @@ function renderScoring(scoring: GameState["scoring"]): void {
 }
 
 function renderResult(game: GameState): void {
+  if (game.phase === "game_over") {
+    els.result.innerHTML = "";
+    els.resultInline.innerHTML = "";
+    els.scoringResult.innerHTML = "";
+    return;
+  }
   const lines = (state.resultOverride ?? (game.result.length ? game.result : [game.message])).filter(
     (line) => line !== "User turn.",
   );
-  const target = game.scoring ? els.scoringResult : els.result;
-  const other = game.scoring ? els.result : els.scoringResult;
-  other.innerHTML = "";
+  const inline = shouldInlineResult(game);
+  const target = game.scoring ? els.scoringResult : inline ? els.resultInline : els.result;
+  for (const other of [els.result, els.resultInline, els.scoringResult]) {
+    if (other !== target) other.innerHTML = "";
+  }
   target.innerHTML = "";
   for (const line of [...lines].reverse().filter(Boolean)) {
     const item = document.createElement("div");
     item.textContent = line;
     target.append(item);
   }
+}
+
+function shouldInlineResult(game: GameState): boolean {
+  return (
+    !game.scoring &&
+    game.humanHand.length <= 2 &&
+    game.phase !== "discard" &&
+    game.phase !== "ai_discarding" &&
+    game.phase !== "score_pone" &&
+    game.phase !== "score_dealer" &&
+    game.phase !== "score_crib"
+  );
+}
+
+function latestGameEnd(game: GameState): GameEndEvent | undefined {
+  return [...game.analyticsEvents]
+    .reverse()
+    .find((event): event is GameEndEvent => event.type === "game" && event.action === "end");
+}
+
+function renderGameOver(game: GameState): void {
+  const end = latestGameEnd(game);
+  const gameId = end?.gameId ?? null;
+  const dismissed = Boolean(gameId && state.dismissedGameOverId === gameId);
+  els.gameOverAlert.hidden = game.phase !== "game_over" || dismissed;
+  els.singleGameReport.hidden = game.phase !== "game_over" || !dismissed;
+  if (game.phase !== "game_over") {
+    els.singleGameReport.innerHTML = "";
+    return;
+  }
+  if (!end) {
+    els.gameOverTitle.textContent = "Game over!";
+    els.singleGameReport.innerHTML = "";
+    return;
+  }
+  els.gameOverTitle.textContent = `${playerName(end.winner ?? "human")} won!`;
+  if (dismissed) renderSingleGameReport(game, end);
+}
+
+function renderSingleGameReport(game: GameState, end: GameEndEvent): void {
+  const scoreEvents = game.analyticsEvents.filter(
+    (event): event is ScoreEvent => event.type === "score" && event.gameId === end.gameId,
+  );
+  const report = singleGameTotals(scoreEvents, end);
+  els.singleGameReport.innerHTML = "";
+  const title = document.createElement("h2");
+  title.textContent = "Game report";
+  const summary = document.createElement("p");
+  const finalScores = end.finalScores ?? game.scores;
+  const result = end.result && end.result !== "regular" ? `, ${end.result}` : "";
+  summary.textContent = `${playerName(end.winner ?? "human")} won ${finalScores.human}-${finalScores.ai}${result}.`;
+  const cards = document.createElement("div");
+  cards.className = "single-game-report-cards";
+  cards.append(analyticsTotalCard("User", report.human, "human"));
+  cards.append(analyticsTotalCard("AI", report.ai, "ai"));
+  els.singleGameReport.append(title, summary, cards);
+}
+
+function singleGameTotals(scoreEvents: ScoreEvent[], end: GameEndEvent): { human: AnalyticsTotals; ai: AnalyticsTotals } {
+  const human = emptyAnalyticsTotals();
+  const ai = emptyAnalyticsTotals();
+  const opportunities = {
+    human: emptyOpportunitySets(),
+    ai: emptyOpportunitySets(),
+  };
+  for (const event of scoreEvents) {
+    const totals = event.player === "human" ? human : ai;
+    const sets = event.player === "human" ? opportunities.human : opportunities.ai;
+    const key = scoreKey(event.category, event.role);
+    totals[key] += event.points;
+    sets[key].add(`${event.gameId}:${event.handNumber}`);
+  }
+  human.games = 1;
+  ai.games = 1;
+  if (end.winner === "human") {
+    human.wins = 1;
+    ai.losses = 1;
+  } else {
+    ai.wins = 1;
+    human.losses = 1;
+  }
+  const loser = end.loser ?? (end.winner === "human" ? "ai" : "human");
+  if (end.result === "skunk" || end.result === "double-skunk") {
+    const winnerTotals = end.winner === "human" ? human : ai;
+    const loserTotals = loser === "human" ? human : ai;
+    winnerTotals.skunks = 1;
+    loserTotals.skunked = 1;
+  }
+  if (end.result === "double-skunk") {
+    const winnerTotals = end.winner === "human" ? human : ai;
+    const loserTotals = loser === "human" ? human : ai;
+    winnerTotals.doubleSkunks = 1;
+    loserTotals.doubleSkunked = 1;
+  }
+  applyOpportunityCounts(human, opportunities.human);
+  applyOpportunityCounts(ai, opportunities.ai);
+  return { human, ai };
 }
 
 function renderAnalytics(): void {
@@ -1232,6 +1346,7 @@ function render(game: GameState | null): void {
   state.game = game;
   els.app.dataset.phase = game.phase;
   els.app.dataset.view = state.analyticsOpen ? "analytics" : "game";
+  els.app.dataset.inlineResult = shouldInlineResult(game) ? "true" : "false";
   els.analyticsPage.hidden = !state.analyticsOpen;
   if (state.analyticsOpen) renderAnalytics();
   els.humanScore.textContent = String(game.scores.human);
@@ -1244,6 +1359,7 @@ function render(game: GameState | null): void {
   renderCutCard(game.turnCard);
   renderScoring(game.scoring);
   renderResult(game);
+  renderGameOver(game);
   renderBoard(game.scores, game.pegPositions, game.firstDealer, game.phase, game.handNumber);
   els.playAreaTitle.textContent = playAreaTitle(game);
   els.userHandTitle.textContent = game.phase === "pegging" ? "Select card to play" : "User hand";
@@ -1299,6 +1415,12 @@ els.analyticsOpen.addEventListener("click", () => {
 
 els.analyticsClose.addEventListener("click", () => {
   state.analyticsOpen = false;
+  render(state.game);
+});
+
+els.gameOverClose.addEventListener("click", () => {
+  const end = state.game ? latestGameEnd(state.game) : null;
+  state.dismissedGameOverId = end?.gameId ?? null;
   render(state.game);
 });
 
@@ -1391,6 +1513,7 @@ els.newGame.addEventListener("click", async () => {
   render(state.game);
   try {
     state.resultOverride = null;
+    state.dismissedGameOverId = null;
     const next = await api("/api/new", { opponent: els.opponent.value });
     els.settingsPanel.hidden = true;
     els.menuToggle.setAttribute("aria-expanded", "false");

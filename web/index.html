@@ -79,13 +79,23 @@
         </div>
         <div class="user-panel">
           <h2 id="user-hand-title">User hand</h2>
-          <div id="human-hand" class="cards"></div>
+          <div class="user-hand-layout">
+            <div id="human-hand" class="cards"></div>
+            <div id="result-inline" class="result result-inline" aria-live="polite"></div>
+          </div>
           <div class="actions">
             <button id="discard" type="button" disabled>Discard selected</button>
             <button id="play" type="button" disabled>Play selected</button>
             <button id="go" type="button" disabled>Go</button>
           </div>
         </div>
+        <div id="game-over-alert" class="game-over-alert" role="alertdialog" aria-modal="true" aria-labelledby="game-over-title" hidden>
+          <div class="game-over-alert-box">
+            <h2 id="game-over-title">Game over</h2>
+            <button id="game-over-close" type="button">View report</button>
+          </div>
+        </div>
+        <div id="single-game-report" class="single-game-report" hidden></div>
       </section>
 
       <section id="analytics-page" class="analytics-page" aria-label="Analytics" hidden>

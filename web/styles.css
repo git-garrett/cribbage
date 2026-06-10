@@ -574,6 +574,73 @@ button:disabled {
   color: var(--ai);
 }
 
+.single-game-report {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.single-game-report[hidden] {
+  display: none;
+}
+
+.single-game-report h2 {
+  margin: 0;
+}
+
+.single-game-report p {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 14px;
+}
+
+.single-game-report-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.game-over-alert {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(11, 18, 15, 0.62);
+}
+
+.game-over-alert[hidden] {
+  display: none;
+}
+
+.game-over-alert-box {
+  display: grid;
+  gap: 18px;
+  justify-items: center;
+  width: min(340px, 100%);
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--settings-shadow);
+}
+
+.game-over-alert-box h2 {
+  margin: 0;
+  font-size: 34px;
+  line-height: 1;
+  text-align: center;
+}
+
+.game-over-alert-box button {
+  width: auto;
+  min-width: 140px;
+}
+
 .analytics-section {
   display: grid;
   gap: 8px;
@@ -756,6 +823,33 @@ button:disabled {
 .user-panel {
   display: grid;
   gap: 8px;
+}
+
+.user-hand-layout {
+  display: grid;
+  gap: 8px;
+}
+
+.result-inline {
+  display: none;
+}
+
+.app[data-inline-result="true"] .user-hand-layout {
+  grid-template-columns: max-content minmax(124px, 1fr);
+  align-items: start;
+  column-gap: 12px;
+}
+
+.app[data-inline-result="true"] #human-hand {
+  flex-wrap: nowrap;
+  min-height: 104px;
+}
+
+.app[data-inline-result="true"] .result-inline {
+  display: grid;
+  align-self: stretch;
+  min-height: 0;
+  padding-top: 2px;
 }
 
 .cards {
@@ -1033,6 +1127,10 @@ button.card {
     grid-template-columns: 1fr;
   }
 
+  .single-game-report-cards {
+    grid-template-columns: 1fr;
+  }
+
   .analytics-row {
     grid-template-columns: 1fr;
     gap: 3px;
@@ -1057,6 +1155,15 @@ button.card {
   .cards {
     gap: 8px;
     min-height: 96px;
+  }
+
+  .app[data-inline-result="true"] .user-hand-layout {
+    grid-template-columns: max-content minmax(104px, 1fr);
+    column-gap: 10px;
+  }
+
+  .app[data-inline-result="true"] #human-hand {
+    min-height: 88px;
   }
 
   .card {
@@ -1195,13 +1302,15 @@ button.card {
 
 .app[data-phase="score_pone"] .user-panel,
 .app[data-phase="score_dealer"] .user-panel,
-.app[data-phase="score_crib"] .user-panel {
+.app[data-phase="score_crib"] .user-panel,
+.app[data-phase="game_over"] .user-panel {
   display: none;
 }
 
 .app[data-phase="score_pone"] .played,
 .app[data-phase="score_dealer"] .played,
-.app[data-phase="score_crib"] .played {
+.app[data-phase="score_crib"] .played,
+.app[data-phase="game_over"] .played {
   display: none;
 }
 
