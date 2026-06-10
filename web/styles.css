@@ -602,6 +602,37 @@ button:disabled {
   gap: 10px;
 }
 
+.decision-review {
+  display: grid;
+  gap: 8px;
+}
+
+.decision-review h3 {
+  margin: 4px 0 0;
+  font-size: 14px;
+}
+
+.decision-review-list {
+  display: grid;
+  gap: 6px;
+}
+
+.decision-review-item,
+.decision-review-empty {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 13px;
+}
+
+.decision-review-item span,
+.decision-review-empty {
+  color: rgba(255, 255, 255, 0.88);
+}
+
 .game-over-alert {
   position: fixed;
   inset: 0;

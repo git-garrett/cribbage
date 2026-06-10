@@ -1,6 +1,7 @@
 import {
   CribbageGame,
   DEFAULT_OPPONENT,
+  type AnalyticsDecisionReview,
   type AnalyticsEvent,
   type AnalyticsScoreCategory,
   type AnalyticsRole,
@@ -149,6 +150,9 @@ interface AnalyticsTotals {
 type ScoreKey = "peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib";
 type GameEndEvent = Extract<AnalyticsEvent, { type: "game" }> & { action: "end" };
 type ScoreEvent = Extract<AnalyticsEvent, { type: "score" }>;
+type DiscardEvent = Extract<AnalyticsEvent, { type: "discard" }>;
+type PeggingEvent = Extract<AnalyticsEvent, { type: "pegging" }>;
+type DecisionReviewEvent = (DiscardEvent | PeggingEvent) & { review: AnalyticsDecisionReview };
 
 function loadSavedGame(): CribbageGame {
   const saved = localStorage.getItem(SAVE_KEY);
@@ -812,7 +816,64 @@ function renderSingleGameReport(game: GameState, end: GameEndEvent): void {
   cards.className = "single-game-report-cards";
   cards.append(analyticsTotalCard("User", report.human, "human"));
   cards.append(analyticsTotalCard("AI", report.ai, "ai"));
-  els.singleGameReport.append(title, summary, cards);
+  els.singleGameReport.append(title, summary, cards, singleGameDecisionReview(game, end));
+}
+
+function singleGameDecisionReview(game: GameState, end: GameEndEvent): HTMLElement {
+  const section = document.createElement("section");
+  section.className = "decision-review";
+  const title = document.createElement("h3");
+  title.textContent = "Decision review";
+  const model = document.createElement("p");
+  model.textContent = `Compared with ${engineName(DEFAULT_OPPONENT)}.`;
+  section.append(title, model);
+
+  const mistakes = game.analyticsEvents
+    .filter((event): event is DecisionReviewEvent =>
+      event.gameId === end.gameId &&
+      ((event.type === "discard" && event.player === "human") ||
+        (event.type === "pegging" && event.action === "play" && event.player === "human")) &&
+      Boolean(event.review) &&
+      !sameCards(event.review.selected, event.review.recommended)
+    );
+
+  if (!mistakes.length) {
+    const empty = document.createElement("div");
+    empty.className = "decision-review-empty";
+    empty.textContent = "No user discards or peg plays were flagged by the model.";
+    section.append(empty);
+    return section;
+  }
+
+  const list = document.createElement("div");
+  list.className = "decision-review-list";
+  for (const event of mistakes) {
+    const item = document.createElement("div");
+    item.className = "decision-review-item";
+    const label = document.createElement("strong");
+    label.textContent = event.type === "discard"
+      ? `Hand ${event.handNumber} discard`
+      : `Hand ${event.handNumber} peg`;
+    const detail = document.createElement("span");
+    detail.textContent = decisionReviewText(event);
+    item.append(label, detail);
+    list.append(item);
+  }
+  section.append(list);
+  return section;
+}
+
+function decisionReviewText(event: DecisionReviewEvent): string {
+  const review = event.review;
+  const delta = review.delta > 0 ? `; model gain ${review.delta.toFixed(2)}` : "";
+  if (event.type === "discard") {
+    return `You discarded ${review.selected.join(" ")}; model preferred ${review.recommended.join(" ")}${delta}.`;
+  }
+  return `You played ${review.selected.join(" ")}; model preferred ${review.recommended.join(" ")}${delta}.`;
+}
+
+function sameCards(left: string[], right: string[]): boolean {
+  return [...left].sort().join("|") === [...right].sort().join("|");
 }
 
 function singleGameTotals(scoreEvents: ScoreEvent[], end: GameEndEvent): { human: AnalyticsTotals; ai: AnalyticsTotals } {

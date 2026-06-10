@@ -401,4 +401,61 @@ describe("game state", () => {
 
     expect(play.ascii).toBe("3c");
   });
+
+  test("records discard review against the current best model", () => {
+    const game = new CribbageGame("schell_table-peg_table-4.0");
+    game.phase = "discard";
+    game.dealer = game.ai;
+    game.pone = game.human;
+    game.crib = [];
+    game.human.hand = cardsFromString("As 2d 3c 4h 5s 6d");
+    game.ai.hand = cardsFromString("7d 8c 9h 10s Jd Qc");
+
+    game.discard(cardsFromString("5s 6d").map((card) => card.id));
+
+    const discard = game.state().analyticsEvents.find(
+      (event) => event.type === "discard" && event.player === "human",
+    );
+    expect(discard).toMatchObject({
+      cards: ["5s", "6d"],
+      review: {
+        model: DEFAULT_OPPONENT,
+        selected: ["5s", "6d"],
+        recommended: ["As", "2d"],
+        delta: expect.any(Number),
+      },
+    });
+    expect((discard as any).review.delta).toBeGreaterThan(0);
+  });
+
+  test("records pegging review against the current best model", () => {
+    const game = new CribbageGame("schell_table-peg_table-4.0");
+    game.phase = "pegging";
+    game.pone = game.human;
+    game.dealer = game.ai;
+    game.turn = 0;
+    game.human.hand = cardsFromString("5d 10c");
+    game.ai.hand = cardsFromString("Kh");
+    game.human.table = [];
+    game.ai.table = [];
+    game.crib = cardsFromString("2d 3c 4h 9s");
+    game.turnCard = cardsFromString("As")[0];
+    game.plays = cardsFromString("10d");
+    game.playOwners = ["ai"];
+    game.count = 10;
+
+    game.play(cardsFromString("10c")[0].id);
+
+    const pegging = game.state().analyticsEvents.find(
+      (event) => event.type === "pegging" && event.action === "play" && event.player === "human",
+    );
+    expect(pegging).toMatchObject({
+      card: "10c",
+      review: {
+        model: DEFAULT_OPPONENT,
+        selected: ["10c"],
+        recommended: ["5d"],
+      },
+    });
+  });
 });
