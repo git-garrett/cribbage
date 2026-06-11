@@ -56,7 +56,9 @@ function readPrevious(statusPath) {
   const cachePath = cachePathFor(statusPath);
   if (!fs.existsSync(cachePath)) return null;
   try {
-    return readJson(cachePath);
+    const previous = readJson(cachePath);
+    if (Array.isArray(previous.samples)) return previous;
+    return { ...previous, samples: [previous].filter((sample) => sample.recordedAt) };
   } catch {
     return null;
   }
@@ -64,7 +66,12 @@ function readPrevious(statusPath) {
 
 function writePrevious(statusPath, snapshot) {
   fs.mkdirSync(cacheDir, { recursive: true });
-  fs.writeFileSync(cachePathFor(statusPath), `${JSON.stringify(snapshot, null, 2)}\n`);
+  const previous = readPrevious(statusPath);
+  const samples = [...(previous?.samples ?? []), snapshot]
+    .filter((sample) => sample.recordedAt)
+    .filter((sample) => Date.parse(snapshot.recordedAt) - Date.parse(sample.recordedAt) <= 24 * 60 * 60 * 1000)
+    .slice(-200);
+  fs.writeFileSync(cachePathFor(statusPath), `${JSON.stringify({ ...snapshot, samples }, null, 2)}\n`);
 }
 
 function isTerminalStatus(status) {
@@ -108,11 +115,56 @@ function defaultStatusPaths() {
   ].filter(Boolean);
 }
 
+function completedCount(status) {
+  if (Number.isFinite(status.completedGames)) return status.completedGames;
+  if (Number.isFinite(status.completedRows)) return status.completedRows;
+  return null;
+}
+
+function totalCount(status) {
+  if (Number.isFinite(status.totalGames)) return status.totalGames;
+  if (Number.isFinite(status.totalRows)) return status.totalRows;
+  return null;
+}
+
+function rateUnit(status) {
+  if (status.completedGames !== undefined || status.gamesPerSecond !== undefined) return "games/sec";
+  if (status.completedRows !== undefined || status.rowsPerSecond !== undefined) return "rows/sec";
+  return "units/sec";
+}
+
+function recentRate(previous, currentStatus, recordedAt) {
+  const currentCompleted = completedCount(currentStatus);
+  const total = totalCount(currentStatus);
+  if (!Number.isFinite(currentCompleted) || !Number.isFinite(total)) return null;
+  const currentRecordedMs = Date.parse(recordedAt);
+  const samples = [...(previous?.samples ?? [])]
+    .filter((sample) => Number.isFinite(sample.completed) && Number.isFinite(Date.parse(sample.recordedAt)))
+    .filter((sample) => currentRecordedMs > Date.parse(sample.recordedAt))
+    .sort((a, b) => Date.parse(b.recordedAt) - Date.parse(a.recordedAt));
+  const baseline = samples.find((sample) => currentRecordedMs - Date.parse(sample.recordedAt) >= 60 * 1000) ?? samples[0];
+  if (!baseline) return null;
+  const elapsedSeconds = (currentRecordedMs - Date.parse(baseline.recordedAt)) / 1000;
+  const delta = currentCompleted - baseline.completed;
+  if (elapsedSeconds <= 0 || delta < 0) return null;
+  const rate = delta / elapsedSeconds;
+  const remaining = Math.max(0, total - currentCompleted);
+  return {
+    rate,
+    delta,
+    elapsedSeconds,
+    expectedCompletionAt: rate > 0 ? isoFromEstimate(recordedAt, remaining / rate) : null,
+  };
+}
+
 function describe(statusPath) {
   const status = readJson(statusPath);
   const expectedCompletionAt = status.expectedCompletionAt || isoFromEstimate(status.updatedAt, status.estimatedRemainingSeconds);
   const previous = readPrevious(statusPath);
   const trend = trendLabel(previous?.expectedCompletionAt, expectedCompletionAt);
+  const recordedAt = new Date().toISOString();
+  const recent = recentRate(previous, status, recordedAt);
+  const recentTrend = trendLabel(previous?.recentExpectedCompletionAt, recent?.expectedCompletionAt);
   const name = status.runId || path.basename(path.dirname(statusPath));
   const progress = Number.isFinite(status.progressPercent) ? `${status.progressPercent.toFixed(2)}%` : "unknown progress";
   const completed = status.completedGames !== undefined && status.totalGames !== undefined
@@ -128,9 +180,12 @@ function describe(statusPath) {
 
   writePrevious(statusPath, {
     statusPath: path.relative(root, statusPath),
-    recordedAt: new Date().toISOString(),
+    recordedAt,
     updatedAt: status.updatedAt || null,
     expectedCompletionAt,
+    recentExpectedCompletionAt: recent?.expectedCompletionAt || null,
+    completed: completedCount(status),
+    total: totalCount(status),
   });
 
   return {
@@ -143,6 +198,9 @@ function describe(statusPath) {
     updatedAt: status.updatedAt || null,
     expectedCompletionAt,
     trend,
+    recent,
+    recentTrend,
+    unit: rateUnit(status),
     path: path.relative(root, statusPath),
   };
 }
@@ -155,8 +213,14 @@ if (!statusPaths.length) {
 
 for (const item of statusPaths.map(describe)) {
   console.log(`${item.name}: ${item.status}${item.phase ? ` (${item.phase})` : ""}`);
-  console.log(`  Progress: ${item.progress}${item.completed ? `, ${item.completed}` : ""}${item.rate ? `, ${item.rate}` : ""}`);
-  console.log(`  Expected completion: ${formatLocal(item.expectedCompletionAt)} (${item.trend})`);
+  console.log(`  Progress: ${item.progress}${item.completed ? `, ${item.completed}` : ""}${item.rate ? `, lifetime average ${item.rate}` : ""}`);
+  console.log(`  Lifetime-average expected completion: ${formatLocal(item.expectedCompletionAt)} (${item.trend})`);
+  if (item.recent) {
+    console.log(
+      `  Recent rate: ${item.recent.rate.toFixed(3)} ${item.unit} over ${formatDelta(item.recent.elapsedSeconds)} ` +
+        `(${item.recent.delta} completed); recent expected completion: ${formatLocal(item.recent.expectedCompletionAt)} (${item.recentTrend})`,
+    );
+  }
   console.log(`  Updated: ${formatLocal(item.updatedAt)}`);
   console.log(`  Status file: ${item.path}`);
 }
