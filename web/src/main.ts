@@ -58,7 +58,9 @@ const state: {
   resultOverride: string[] | null;
   analyticsOpen: boolean;
   gameLogOpen: boolean;
+  decisionReviewOpen: boolean;
   selectedLogGameId: string | null;
+  snapshotEventId: string | null;
   dismissedGameOverId: string | null;
 } = {
   game: null,
@@ -67,7 +69,9 @@ const state: {
   resultOverride: null,
   analyticsOpen: false,
   gameLogOpen: false,
+  decisionReviewOpen: false,
   selectedLogGameId: null,
+  snapshotEventId: null,
   dismissedGameOverId: null,
 };
 
@@ -92,7 +96,14 @@ const els = {
   gameLogSummary: document.querySelector("#game-log-summary") as HTMLElement,
   gameLogOpponent: document.querySelector("#game-log-opponent") as HTMLSelectElement,
   gameLogList: document.querySelector("#game-log-list") as HTMLElement,
-  gameLogDetail: document.querySelector("#game-log-detail") as HTMLElement,
+  decisionReviewPage: document.querySelector("#decision-review-page") as HTMLElement,
+  decisionReviewClose: document.querySelector("#decision-review-close") as HTMLButtonElement,
+  decisionReviewSummary: document.querySelector("#decision-review-summary") as HTMLElement,
+  decisionReviewContent: document.querySelector("#decision-review-content") as HTMLElement,
+  decisionSnapshot: document.querySelector("#decision-snapshot") as HTMLElement,
+  decisionSnapshotClose: document.querySelector("#decision-snapshot-close") as HTMLButtonElement,
+  decisionSnapshotTitle: document.querySelector("#decision-snapshot-title") as HTMLElement,
+  decisionSnapshotTable: document.querySelector("#decision-snapshot-table") as HTMLElement,
   result: document.querySelector("#result") as HTMLElement,
   resultInline: document.querySelector("#result-inline") as HTMLElement,
   scoringResult: document.querySelector("#scoring-result") as HTMLElement,
@@ -944,21 +955,33 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   const list = document.createElement("div");
   list.className = "decision-review-list";
   for (const event of mistakes) {
-    const item = document.createElement("button");
-    item.type = "button";
+    const item = document.createElement("div");
     item.className = "decision-review-item";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "decision-review-toggle";
     const label = document.createElement("strong");
     label.textContent = event.type === "discard"
       ? `Hand ${event.handNumber} discard`
       : `Hand ${event.handNumber} peg`;
     const detail = document.createElement("span");
     detail.textContent = decisionReviewText(event);
-    item.append(label, detail);
+    toggle.append(label, detail);
+    const camera = document.createElement("button");
+    camera.type = "button";
+    camera.className = "decision-camera";
+    camera.textContent = "Camera";
+    camera.setAttribute("aria-label", `Show table for hand ${event.handNumber} ${event.type} error`);
     const context = decisionContext(event, events);
     context.hidden = true;
-    item.addEventListener("click", () => {
+    toggle.addEventListener("click", () => {
       context.hidden = !context.hidden;
     });
+    camera.addEventListener("click", () => {
+      state.snapshotEventId = event.id;
+      renderDecisionSnapshot(events);
+    });
+    item.append(toggle, camera);
     list.append(item);
     list.append(context);
   }
@@ -1096,6 +1119,214 @@ function decisionContext(event: DecisionReviewEvent, events: AnalyticsEvent[]): 
     detail.append(term, desc);
   }
   return detail;
+}
+
+function renderDecisionSnapshot(events: AnalyticsEvent[]): void {
+  const event = events.find((candidate): candidate is DecisionReviewEvent =>
+    candidate.id === state.snapshotEventId &&
+    ((candidate.type === "discard" && candidate.player === "human") ||
+      (candidate.type === "pegging" && candidate.action === "play" && candidate.player === "human")) &&
+    Boolean(candidate.review),
+  );
+  if (!event) {
+    closeDecisionSnapshot();
+    return;
+  }
+  els.decisionSnapshot.hidden = false;
+  els.decisionSnapshotTitle.textContent = event.type === "discard"
+    ? `Hand ${event.handNumber} discard`
+    : `Hand ${event.handNumber} peg`;
+  els.decisionSnapshotTable.innerHTML = "";
+  els.decisionSnapshotTable.append(decisionSnapshotTable(event, events));
+}
+
+function closeDecisionSnapshot(): void {
+  state.snapshotEventId = null;
+  els.decisionSnapshot.hidden = true;
+  els.decisionSnapshotTable.innerHTML = "";
+}
+
+function decisionSnapshotTable(event: DecisionReviewEvent, events: AnalyticsEvent[]): HTMLElement {
+  const handStart = handStartFor(events, event.gameId, event.handNumber);
+  const score = "scores" in event && event.scores
+    ? event.scores
+    : event.type === "pegging" && event.scoresBefore
+      ? event.scoresBefore
+      : handStart?.scores ?? { human: 0, ai: 0 };
+  const dealer = handStart?.dealer ?? (event.role === "dealer" ? "human" : "ai");
+  const firstDealer = firstDealerForGame(events, event.gameId);
+  const root = document.createElement("div");
+  root.className = "snapshot-table-view";
+  root.append(snapshotScoreboard(score, dealer, event, firstDealer));
+
+  const table = document.createElement("div");
+  table.className = "table snapshot-table-surface";
+
+  const status = document.createElement("div");
+  status.className = "status";
+  status.append(
+    snapshotStatus("Dealer", playerName(dealer)),
+    snapshotStatus("Turn", "User"),
+    snapshotStatus("Count", event.type === "pegging" ? String(event.countBefore ?? 0) : "0"),
+  );
+  table.append(status);
+
+  if (event.type === "discard") {
+    table.append(
+      snapshotDiscardSection(
+        event.cribOwner === "human" ? "Select two cards to discard to your crib" : "Select two cards to discard to AI's crib",
+        event.handBeforeDiscard ?? [...event.remainingHand, ...event.cards],
+      ),
+      snapshotActions(["Discard selected"]),
+    );
+  } else {
+    table.append(
+      snapshotPlayedSection(event),
+      snapshotCardSection("Select card to play", event.hand ?? [], "cards"),
+      snapshotActions(["Play selected", "Go"]),
+    );
+  }
+  root.append(table);
+  return root;
+}
+
+function snapshotScoreboard(
+  scores: Record<PlayerKey, number>,
+  dealer: PlayerKey,
+  event: DecisionReviewEvent,
+  firstDealer: PlayerKey | undefined,
+): HTMLElement {
+  const board = document.createElement("div");
+  board.className = "scoreboard snapshot-scoreboard";
+  for (const player of ["human", "ai"] as const) {
+    const score = document.createElement("div");
+    score.className = `score${player === "ai" ? " ai" : ""}`;
+    const label = document.createElement("span");
+    label.className = "score-label";
+    const name = document.createElement("span");
+    name.className = "player-name";
+    name.textContent = playerName(player);
+    if (dealer === player) {
+      const badge = document.createElement("span");
+      badge.className = "dealer-button";
+      badge.textContent = "Crib";
+      name.append(" ", badge);
+    }
+    label.append(name);
+    const value = document.createElement("strong");
+    value.textContent = String(scores[player]);
+    const pace = document.createElement("span");
+    pace.className = "score-pace";
+    pace.textContent = firstDealer ? parStatusText(player, scores[player], firstDealer, event.handNumber) : "";
+    score.append(label, value, pace);
+    board.append(score);
+  }
+  const cut = document.createElement("div");
+  cut.className = "score-cut";
+  const cutLabel = document.createElement("span");
+  cutLabel.textContent = "Cut";
+  const cutCard = document.createElement("span");
+  cutCard.className = "cut-card";
+  const cutValue = event.type === "pegging" ? event.cutCard : undefined;
+  if (cutValue) cutCard.append(cardElement(cardFromLabel(cutValue, 900)));
+  else cutCard.hidden = true;
+  cut.append(cutLabel, cutCard);
+  board.insertBefore(cut, board.children[1] ?? null);
+  return board;
+}
+
+function snapshotStatus(label: string, value: string): HTMLElement {
+  const item = document.createElement("span");
+  const strong = document.createElement("strong");
+  strong.textContent = value;
+  item.append(`${label}: `, strong);
+  return item;
+}
+
+function snapshotPlayedSection(event: DecisionReviewEvent): HTMLElement {
+  const section = document.createElement("div");
+  section.className = "played snapshot-played";
+  const title = document.createElement("h2");
+  title.textContent = "Current count";
+  const plays = document.createElement("div");
+  plays.className = "snapshot-plays";
+  const active = document.createElement("div");
+  active.className = "cards played-active pegging-row";
+  for (const card of event.type === "pegging" ? event.playedCards ?? [] : []) {
+    active.append(cardElement(cardFromLabel(card, active.childElementCount)));
+  }
+  plays.append(active);
+  if (event.type === "pegging") {
+    for (const group of [...(event.completedPlayGroups ?? [])].reverse()) {
+      const archived = document.createElement("div");
+      archived.className = "cards played-archive pegging-row";
+      for (const card of group) archived.append(cardElement(cardFromLabel(card, archived.childElementCount)));
+      plays.append(archived);
+    }
+  }
+  const result = document.createElement("div");
+  result.className = "result";
+  result.textContent = `Count ${event.type === "pegging" ? event.countBefore ?? 0 : 0}`;
+  section.append(title, plays, result);
+  return section;
+}
+
+function snapshotDiscardSection(titleText: string, labels: string[]): HTMLElement {
+  const section = document.createElement("div");
+  section.className = "played snapshot-discard";
+  const title = document.createElement("h2");
+  title.textContent = titleText;
+  const cards = document.createElement("div");
+  cards.className = "cards";
+  labels.forEach((label, index) => cards.append(cardElement(cardFromLabel(label, index + 100), { disabled: true })));
+  section.append(title, cards);
+  return section;
+}
+
+function snapshotCardSection(titleText: string, labels: string[], className: string): HTMLElement {
+  const panel = document.createElement("div");
+  panel.className = "user-panel snapshot-user-panel";
+  const title = document.createElement("h2");
+  title.textContent = titleText;
+  const cards = document.createElement("div");
+  cards.className = className;
+  labels.forEach((label, index) => cards.append(cardElement(cardFromLabel(label, index), { disabled: true })));
+  panel.append(title, cards);
+  return panel;
+}
+
+function snapshotActions(labels: string[]): HTMLElement {
+  const actions = document.createElement("div");
+  actions.className = "actions snapshot-actions";
+  for (const label of labels) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.disabled = true;
+    button.textContent = label;
+    actions.append(button);
+  }
+  return actions;
+}
+
+function cardFromLabel(label: string, index: number): GameState["humanHand"][number] {
+  const suitKey = label.slice(-1);
+  const rank = label.slice(0, -1);
+  const suitMap: Record<string, { suit: string; symbol: string }> = {
+    d: { suit: "diamonds", symbol: "♦" },
+    c: { suit: "clubs", symbol: "♣" },
+    h: { suit: "hearts", symbol: "♥" },
+    s: { suit: "spades", symbol: "♠" },
+  };
+  const suit = suitMap[suitKey] ?? { suit: "spades", symbol: suitKey };
+  return {
+    index,
+    id: 10000 + index,
+    rank,
+    suit: suit.suit,
+    symbol: suit.symbol,
+    value: cardValueFromLabel(label),
+    label,
+  };
 }
 
 function handStartFor(events: AnalyticsEvent[], gameId: string, handNumber: number): Extract<AnalyticsEvent, { type: "hand" }> | undefined {
@@ -1274,7 +1505,6 @@ function renderGameLog(): void {
     empty.className = "analytics-empty";
     empty.textContent = "No completed games match this filter.";
     els.gameLogList.append(empty);
-    els.gameLogDetail.innerHTML = "";
     return;
   }
 
@@ -1298,21 +1528,35 @@ function renderGameLog(): void {
     button.append(title, meta, ev);
     button.addEventListener("click", () => {
       state.selectedLogGameId = game.gameId;
-      renderGameLog();
+      state.gameLogOpen = false;
+      state.decisionReviewOpen = true;
+      render(state.game);
     });
     els.gameLogList.append(button);
   }
+}
 
-  const selected = filtered.find((game) => game.gameId === state.selectedLogGameId) ?? filtered[0];
-  if (selected) {
-    renderGameReportInto(
-      els.gameLogDetail,
-      events,
-      selected.end,
-      "Logged game report",
-      selected.end.finalScores ?? { human: 0, ai: 0 },
-    );
+function renderDecisionReviewPage(): void {
+  const events = loadAnalytics().events;
+  const games = gameLogRecords(events);
+  const selected = games.find((game) => game.gameId === state.selectedLogGameId) ?? games[0];
+  els.decisionReviewContent.innerHTML = "";
+  if (!selected) {
+    els.decisionReviewSummary.textContent = "No completed games yet.";
+    const empty = document.createElement("p");
+    empty.className = "analytics-empty";
+    empty.textContent = "Open the game log after completing a game.";
+    els.decisionReviewContent.append(empty);
+    return;
   }
+  els.decisionReviewSummary.textContent = `${shortDate(selected.end.at)} vs ${engineName(selected.opponent)}.`;
+  renderGameReportInto(
+    els.decisionReviewContent,
+    events,
+    selected.end,
+    "Logged game report",
+    selected.end.finalScores ?? { human: 0, ai: 0 },
+  );
 }
 
 function gameLogRecords(events: AnalyticsEvent[]): GameLogRecord[] {
@@ -1821,12 +2065,20 @@ function render(game: GameState | null): void {
   syncAnalytics(game.analyticsEvents);
   state.game = game;
   els.app.dataset.phase = game.phase;
-  els.app.dataset.view = state.analyticsOpen ? "analytics" : state.gameLogOpen ? "game-log" : "game";
+  els.app.dataset.view = state.analyticsOpen
+    ? "analytics"
+    : state.gameLogOpen
+      ? "game-log"
+      : state.decisionReviewOpen
+        ? "decision-review"
+        : "game";
   els.app.dataset.inlineResult = shouldInlineResult(game) ? "true" : "false";
   els.analyticsPage.hidden = !state.analyticsOpen;
   els.gameLogPage.hidden = !state.gameLogOpen;
+  els.decisionReviewPage.hidden = !state.decisionReviewOpen;
   if (state.analyticsOpen) renderAnalytics();
   if (state.gameLogOpen) renderGameLog();
+  if (state.decisionReviewOpen) renderDecisionReviewPage();
   els.humanScore.textContent = String(game.scores.human);
   els.aiScore.textContent = String(game.scores.ai);
   renderScorePace(game);
@@ -1886,8 +2138,10 @@ els.menuToggle.addEventListener("click", () => {
 });
 
 els.analyticsOpen.addEventListener("click", () => {
+  closeDecisionSnapshot();
   state.analyticsOpen = true;
   state.gameLogOpen = false;
+  state.decisionReviewOpen = false;
   els.settingsPanel.hidden = true;
   els.menuToggle.setAttribute("aria-expanded", "false");
   render(state.game);
@@ -1899,8 +2153,10 @@ els.analyticsClose.addEventListener("click", () => {
 });
 
 els.gameLogOpen.addEventListener("click", () => {
+  closeDecisionSnapshot();
   state.gameLogOpen = true;
   state.analyticsOpen = false;
+  state.decisionReviewOpen = false;
   els.settingsPanel.hidden = true;
   els.menuToggle.setAttribute("aria-expanded", "false");
   render(state.game);
@@ -1909,6 +2165,17 @@ els.gameLogOpen.addEventListener("click", () => {
 els.gameLogClose.addEventListener("click", () => {
   state.gameLogOpen = false;
   render(state.game);
+});
+
+els.decisionReviewClose.addEventListener("click", () => {
+  closeDecisionSnapshot();
+  state.decisionReviewOpen = false;
+  state.gameLogOpen = true;
+  render(state.game);
+});
+
+els.decisionSnapshotClose.addEventListener("click", () => {
+  closeDecisionSnapshot();
 });
 
 els.gameLogOpponent.addEventListener("change", () => {

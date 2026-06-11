@@ -40,7 +40,7 @@
 
       <section class="scoreboard">
         <div class="score">
-          <span class="score-label">User <span id="human-dealer" class="dealer-button" hidden>Dealer</span></span>
+          <span class="score-label"><span class="player-name">User <span id="human-dealer" class="dealer-button" hidden>Crib</span></span></span>
           <strong id="human-score">0</strong>
           <span id="human-pace" class="score-pace"></span>
           <span id="human-final" class="score-final"></span>
@@ -50,7 +50,7 @@
           <span id="turn-card" class="cut-card"></span>
         </div>
         <div class="score ai">
-          <span class="score-label">AI <span id="ai-dealer" class="dealer-button" hidden>Dealer</span></span>
+          <span class="score-label"><span class="player-name">AI <span id="ai-dealer" class="dealer-button" hidden>Crib</span></span></span>
           <strong id="ai-score">0</strong>
           <span id="ai-pace" class="score-pace"></span>
           <span id="ai-final" class="score-final"></span>
@@ -147,9 +147,29 @@
         </label>
         <div class="game-log-layout">
           <div id="game-log-list" class="game-log-list"></div>
-          <div id="game-log-detail" class="game-log-detail"></div>
         </div>
       </section>
+
+      <section id="decision-review-page" class="decision-review-page" aria-label="Decision review" hidden>
+        <div class="analytics-header">
+          <div>
+            <h2>Decision review</h2>
+            <p id="decision-review-summary">Select a game from the game log.</p>
+          </div>
+          <button id="decision-review-close" type="button">Back</button>
+        </div>
+        <div id="decision-review-content" class="decision-review-content"></div>
+      </section>
+
+      <div id="decision-snapshot" class="decision-snapshot" role="dialog" aria-modal="true" aria-labelledby="decision-snapshot-title" hidden>
+        <div class="decision-snapshot-shell">
+          <div class="snapshot-header">
+            <h2 id="decision-snapshot-title">Decision moment</h2>
+            <button id="decision-snapshot-close" class="snapshot-close" type="button" aria-label="Close">Close</button>
+          </div>
+          <div id="decision-snapshot-table" class="snapshot-table"></div>
+        </div>
+      </div>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
