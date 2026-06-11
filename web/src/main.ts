@@ -675,9 +675,8 @@ function renderScorePace(game: GameState): void {
       final.classList.remove("expected-win");
       continue;
     }
-    const countFirst = player === outProjection.pone;
     const wins = player === outProjection.player;
-    final.textContent = `${countFirst ? "🏹 " : ""}${Math.round(outProjection.beforeScores[player])} before ${outProjection.label}${wins ? " ★" : ""}`;
+    final.textContent = `${Math.round(outProjection.beforeScores[player])} before ${outProjection.label}${wins ? " ★" : ""}`;
     final.classList.toggle("expected-win", wins);
   }
 }
@@ -1071,7 +1070,7 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
     const camera = document.createElement("button");
     camera.type = "button";
     camera.className = "decision-camera";
-    camera.textContent = "Camera";
+    camera.textContent = "📷";
     camera.setAttribute("aria-label", `Show table for hand ${event.handNumber} ${event.type} error`);
     const context = decisionContext(event, events);
     context.hidden = true;
@@ -1279,13 +1278,11 @@ function decisionSnapshotTable(event: DecisionReviewEvent, events: AnalyticsEven
         event.cribOwner === "human" ? "Select two cards to discard to your crib" : "Select two cards to discard to AI's crib",
         event.handBeforeDiscard ?? [...event.remainingHand, ...event.cards],
       ),
-      snapshotActions(["Discard selected"]),
     );
   } else {
     table.append(
       snapshotPlayedSection(event),
       snapshotCardSection("Select card to play", event.hand ?? [], "cards"),
-      snapshotActions(["Play selected", "Go"]),
     );
   }
   root.append(table);
@@ -1395,19 +1392,6 @@ function snapshotCardSection(titleText: string, labels: string[], className: str
   labels.forEach((label, index) => cards.append(cardElement(cardFromLabel(label, index), { disabled: true })));
   panel.append(title, cards);
   return panel;
-}
-
-function snapshotActions(labels: string[]): HTMLElement {
-  const actions = document.createElement("div");
-  actions.className = "actions snapshot-actions";
-  for (const label of labels) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.disabled = true;
-    button.textContent = label;
-    actions.append(button);
-  }
-  return actions;
 }
 
 function cardFromLabel(label: string, index: number): GameState["humanHand"][number] {

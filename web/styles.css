@@ -746,10 +746,12 @@ button:disabled {
 }
 
 .decision-camera {
-  min-height: 30px;
-  width: auto;
-  padding: 0 8px;
-  font-size: 11px;
+  display: inline-grid;
+  place-items: center;
+  min-height: 32px;
+  width: 36px;
+  padding: 0;
+  font-size: 15px;
   font-weight: 800;
 }
 
@@ -902,7 +904,13 @@ button:disabled {
 }
 
 .snapshot-close {
-  width: auto;
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+  font-size: 20px;
+  font-weight: 800;
 }
 
 .snapshot-table-view {
@@ -919,6 +927,7 @@ button:disabled {
 }
 
 .snapshot-played {
+  display: grid !important;
   min-height: 0;
 }
 
@@ -928,16 +937,12 @@ button:disabled {
 }
 
 .snapshot-user-panel {
-  display: grid;
+  display: grid !important;
   gap: 8px;
 }
 
-.snapshot-actions {
-  position: static;
-  margin: 0;
-  padding: 0;
-  background: transparent;
-  border: 0;
+.snapshot-discard {
+  display: grid !important;
 }
 
 .game-over-alert {
