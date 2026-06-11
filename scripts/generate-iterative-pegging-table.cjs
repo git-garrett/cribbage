@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const readline = require("node:readline");
 const { execFileSync } = require("node:child_process");
 const { performance } = require("node:perf_hooks");
 const { Worker, isMainThread, parentPort, workerData } = require("node:worker_threads");
@@ -114,7 +115,7 @@ async function main() {
       const policyPath = path.join(outDir, `iteration-${activeIteration}.policy.json`);
       const summaryPath = path.join(outDir, `iteration-${activeIteration}.summary.json`);
       const collectHistograms = shouldCollectHistograms(offset, iterationCount);
-      validateOutputTarget(outputPath, appendOutput, activeStart);
+      await validateOutputTarget(outputPath, appendOutput, activeStart);
       writeStatus(statusPath, {
         status: "running",
         phase: "generating-rows",
@@ -171,7 +172,7 @@ async function main() {
         },
       });
       const expectedWrittenRows = appendOutput ? activeStart + activeRows.length : activeRows.length;
-      const validation = validateRowsFile(outputPath, expectedWrittenRows, rows);
+      const validation = await validateRowsFile(outputPath, expectedWrittenRows, rows);
       writeStatus(statusPath, {
         status: "running",
         phase: "deriving-policy",
@@ -188,7 +189,7 @@ async function main() {
         priorPolicyPath: activePriorPolicyPath || null,
         completedRows: activeStart + activeRows.length,
         totalRows: rows.length,
-        remainingRows: activeRows.length,
+        remainingRows: 0,
         fullRows: rows.length,
         start: activeStart,
         workerCount,
@@ -198,7 +199,7 @@ async function main() {
         validation,
         ...result,
       });
-      const policy = derivePolicy(outputPath, activePriorPolicy);
+      const policy = await derivePolicy(outputPath, activePriorPolicy);
       fs.writeFileSync(policyPath, `${JSON.stringify(policy, null, 2)}\n`);
       const summary = {
         version: 1,
@@ -244,7 +245,7 @@ async function main() {
         priorPolicyPath: activePriorPolicyPath || null,
         completedRows: activeStart + activeRows.length,
         totalRows: rows.length,
-        remainingRows: activeRows.length,
+        remainingRows: 0,
         fullRows: rows.length,
         start: activeStart,
         workerCount,
@@ -268,7 +269,7 @@ async function main() {
     if (!rowsPath || !outputPath) {
       throw new Error("Usage: node scripts/generate-iterative-pegging-table.cjs derive-policy <rows.jsonl> [policy.json]");
     }
-    const policy = derivePolicy(rowsPath);
+    const policy = await derivePolicy(rowsPath);
     fs.writeFileSync(outputPath, `${JSON.stringify(policy, null, 2)}\n`);
     console.log(JSON.stringify({
       rowsPath,
@@ -348,7 +349,7 @@ async function runRows({
               ...statusContext,
               completedRows: completedOffset + completed,
               totalRows,
-              remainingRows: rows.length,
+              remainingRows,
               progressPercent: totalRows ? ((completedOffset + completed) / totalRows) * 100 : 100,
               elapsedSeconds,
               rowsPerSecond,
@@ -593,10 +594,9 @@ function chooseBestDiscard(hand, role, caches) {
   return best;
 }
 
-function derivePolicy(rowsPath, priorPolicy = null) {
+async function derivePolicy(rowsPath, priorPolicy = null) {
   const bestDiscards = {};
-  const lines = fs.readFileSync(rowsPath, "utf8").split(/\n/).filter(Boolean);
-  for (const line of lines) {
+  for await (const line of readJsonlLines(rowsPath)) {
     const row = JSON.parse(line);
     const hand = parseRanks(row.hand);
     const discard = parseRanks(row.discard);
@@ -1176,9 +1176,9 @@ function shouldCollectHistograms(offset, iterationCount) {
   return offset === iterationCount - 1;
 }
 
-function validateOutputTarget(outputPath, appendOutput, expectedExistingRows) {
+async function validateOutputTarget(outputPath, appendOutput, expectedExistingRows) {
   if (appendOutput) {
-    const existingRows = countJsonlRows(outputPath);
+    const existingRows = await countJsonlRows(outputPath);
     if (existingRows !== expectedExistingRows) {
       throw new Error(
         `Refusing unsafe resume for ${outputPath}: expected ${expectedExistingRows} existing rows, found ${existingRows}.`,
@@ -1191,12 +1191,11 @@ function validateOutputTarget(outputPath, appendOutput, expectedExistingRows) {
   }
 }
 
-function validateRowsFile(rowsPath, expectedRows, expectedSourceRows) {
+async function validateRowsFile(rowsPath, expectedRows, expectedSourceRows) {
   const rowKeys = new Set();
   const handRoleKeys = new Set();
   let rows = 0;
-  for (const line of fs.readFileSync(rowsPath, "utf8").split(/\n/)) {
-    if (!line) continue;
+  for await (const line of readJsonlLines(rowsPath)) {
     rows += 1;
     const row = JSON.parse(line);
     if (!row.key || !row.hand || !row.discard || !row.role) throw new Error(`Invalid row ${rows} in ${rowsPath}`);
@@ -1227,9 +1226,24 @@ function coverageForRows(rows) {
   return { uniqueHandRoleKeys: handRoleKeys.size };
 }
 
-function countJsonlRows(filePath) {
+async function countJsonlRows(filePath) {
   if (!fs.existsSync(filePath)) return 0;
-  return fs.readFileSync(filePath, "utf8").split(/\n/).filter(Boolean).length;
+  let rows = 0;
+  for await (const _line of readJsonlLines(filePath)) rows += 1;
+  return rows;
+}
+
+async function* readJsonlLines(filePath) {
+  const input = fs.createReadStream(filePath, { encoding: "utf8" });
+  const lines = readline.createInterface({ input, crlfDelay: Infinity });
+  try {
+    for await (const line of lines) {
+      if (line) yield line;
+    }
+  } finally {
+    lines.close();
+    input.destroy();
+  }
 }
 
 function expectedCompletionAt(updatedAt, estimatedRemainingSeconds) {
