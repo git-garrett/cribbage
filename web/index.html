@@ -40,7 +40,7 @@
 
       <section class="scoreboard">
         <div class="score">
-          <span class="score-label"><span class="player-name">User <span id="human-dealer" class="dealer-button" hidden>Crib</span></span></span>
+          <span class="score-label"><span class="player-name"><span id="human-dealer" class="dealer-button" hidden>Crib</span> User</span></span>
           <strong id="human-score">0</strong>
           <span id="human-pace" class="score-pace"></span>
           <span id="human-final" class="score-final"></span>
@@ -65,8 +65,8 @@
         </div>
         <div class="status">
           <span>Dealer: <strong id="dealer">-</strong></span>
+          <span class="status-count">Count: <strong id="count">0</strong></span>
           <span>Turn: <strong id="turn">-</strong></span>
-          <span>Count: <strong id="count">0</strong></span>
         </div>
         <div class="played">
           <h2 id="play-area-title">Current count</h2>
@@ -113,19 +113,19 @@
           <button id="analytics-close" type="button">Done</button>
         </div>
         <div id="analytics-totals" class="analytics-totals"></div>
-        <div class="analytics-section">
+        <div class="analytics-section" hidden>
           <h3>Games</h3>
           <div id="analytics-games" class="analytics-list"></div>
         </div>
-        <div class="analytics-section">
+        <div class="analytics-section" hidden>
           <h3>Hands</h3>
           <div id="analytics-hands" class="analytics-list"></div>
         </div>
-        <div class="analytics-section">
+        <div class="analytics-section" hidden>
           <h3>Scoring</h3>
           <div id="analytics-scores" class="analytics-list"></div>
         </div>
-        <div class="analytics-section">
+        <div class="analytics-section" hidden>
           <h3>Pegging</h3>
           <div id="analytics-pegging" class="analytics-list"></div>
         </div>

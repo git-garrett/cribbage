@@ -594,9 +594,16 @@ function completedHandCount(phase: GameState["phase"], handNumber: number): numb
 }
 
 function parHolesFor(player: "human" | "ai", firstDealerPlayer: "human" | "ai"): number[] {
-  return player === firstDealerPlayer
-    ? [7, ...SHARED_PAR_HOLES, 111, 121]
-    : [...SHARED_PAR_HOLES, 111, 121];
+  const holes: number[] = [player === firstDealerPlayer ? 7 : 17];
+  let par = holes[0];
+  for (let hand = 1; hand <= 16 && par < 121; hand += 1) {
+    par += roleForHand(player, firstDealerPlayer, hand) === "dealer"
+      ? GRANULAR_PARS.dealer.total
+      : GRANULAR_PARS.pone.total;
+    holes.push(Math.min(121, Math.max(1, Math.round(par))));
+  }
+  if (holes[holes.length - 1] !== 121) holes.push(121);
+  return [...new Set(holes)];
 }
 
 function projectedCourse(
@@ -676,7 +683,7 @@ function renderScorePace(game: GameState): void {
       continue;
     }
     const wins = player === outProjection.player;
-    final.textContent = `${Math.round(outProjection.beforeScores[player])} before ${outProjection.label}${wins ? " ★" : ""}`;
+    final.textContent = `${Math.round(outProjection.beforeScores[player])} before ${relativeOutLabel(player, outProjection)}${wins ? " ★" : ""}`;
     final.classList.toggle("expected-win", wins);
   }
 }
@@ -690,6 +697,7 @@ interface OutProjection {
   player: "human" | "ai";
   beforeScores: Record<"human" | "ai", number>;
   label: string;
+  component: ParComponent;
   pone: "human" | "ai";
 }
 
@@ -713,7 +721,7 @@ function cumulativeParThroughHand(
   firstDealerPlayer: "human" | "ai",
   handNumber: number,
 ): number {
-  let par = 0;
+  let par = parHolesFor(player, firstDealerPlayer)[0] ?? 0;
   for (let hand = 1; hand <= handNumber; hand += 1) {
     par += roleForHand(player, firstDealerPlayer, hand) === "dealer"
       ? GRANULAR_PARS.dealer.total
@@ -780,8 +788,18 @@ function projectedOutMoment(
       handNumber += 1;
       componentIndex = 0;
     }
-    const beforeScores = { ...projected };
     const component = componentForHand(firstDealerPlayer, handNumber, componentIndex);
+    const alreadyOut = (["human", "ai"] as const).find((player) => projected[player] >= 121);
+    if (alreadyOut) {
+      return {
+        player: alreadyOut,
+        beforeScores: { ...projected },
+        label: component.label,
+        component: component.component,
+        pone: component.pone,
+      };
+    }
+    const beforeScores = { ...projected };
     currentPar[component.player] += component.amount;
     projected[component.player] = Math.min(121, currentPar[component.player] + offsets[component.player]);
     if (projected[component.player] >= 121) {
@@ -789,12 +807,22 @@ function projectedOutMoment(
         player: component.player,
         beforeScores,
         label: component.label,
+        component: component.component,
         pone: component.pone,
       };
     }
     componentIndex += 1;
   }
   return null;
+}
+
+function relativeOutLabel(viewer: "human" | "ai", projection: OutProjection): string {
+  const kind = projection.component === "crib"
+    ? "crib"
+    : projection.component === "poneHand" || projection.component === "dealerHand"
+      ? "hand"
+      : "peg";
+  return `${viewer === projection.player ? "own" : "opponent"} ${kind}`;
 }
 
 async function api(path: string, body: Record<string, unknown> | null = null): Promise<GameState> {
@@ -944,7 +972,6 @@ function renderResult(game: GameState): void {
   if (game.phase === "game_over") {
     els.result.innerHTML = "";
     els.resultInline.innerHTML = "";
-    els.scoringResult.innerHTML = "";
     return;
   }
   const lines = (state.resultOverride ?? (game.result.length ? game.result : [game.message])).filter(
@@ -964,15 +991,8 @@ function renderResult(game: GameState): void {
 }
 
 function shouldInlineResult(game: GameState): boolean {
-  return (
-    !game.scoring &&
-    game.humanHand.length <= 2 &&
-    game.phase !== "discard" &&
-    game.phase !== "ai_discarding" &&
-    game.phase !== "score_pone" &&
-    game.phase !== "score_dealer" &&
-    game.phase !== "score_crib"
-  );
+  void game;
+  return false;
 }
 
 function latestGameEnd(game: GameState): GameEndEvent | undefined {
@@ -1026,8 +1046,8 @@ function renderGameReportInto(
   summary.textContent = `${shortDate(end.at)} vs ${engineName(start?.opponent ?? DEFAULT_OPPONENT)}. ${playerName(end.winner ?? "human")} won ${finalScores.human}-${finalScores.ai}${result}.`;
   const cards = document.createElement("div");
   cards.className = "single-game-report-cards";
-  cards.append(analyticsTotalCard("User", report.human, "human"));
-  cards.append(analyticsTotalCard("AI", report.ai, "ai"));
+  cards.append(analyticsTotalCard("User", report.human, "human", { showGames: false }));
+  cards.append(analyticsTotalCard("AI", report.ai, "ai", { showGames: false }));
   container.append(title, summary, cards, singleGameDecisionReview(events, end));
 }
 
@@ -1042,7 +1062,7 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
 
   const mistakes = decisionMistakes(events, end.gameId);
   const totals = decisionEvTotals(mistakes);
-  section.append(decisionEvSummary(totals), decisionOutcomeImpact(totals, end));
+  section.append(decisionEvSummary(totals), decisionOutcomeImpact(totals, end, events));
 
   if (!mistakes.length) {
     const empty = document.createElement("div");
@@ -1070,7 +1090,6 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
     const camera = document.createElement("button");
     camera.type = "button";
     camera.className = "decision-camera";
-    camera.textContent = "📷";
     camera.setAttribute("aria-label", `Show table for hand ${event.handNumber} ${event.type} error`);
     const context = decisionContext(event, events);
     context.hidden = true;
@@ -1148,7 +1167,7 @@ function formatEv(value: number): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
 }
 
-function decisionOutcomeImpact(totals: DecisionEvTotals, end: GameEndEvent): HTMLElement {
+function decisionOutcomeImpact(totals: DecisionEvTotals, end: GameEndEvent, events: AnalyticsEvent[]): HTMLElement {
   const impact = document.createElement("p");
   impact.className = "decision-outcome-impact";
   const scores = end.finalScores;
@@ -1157,15 +1176,35 @@ function decisionOutcomeImpact(totals: DecisionEvTotals, end: GameEndEvent): HTM
     return impact;
   }
   const loser = end.loser ?? (end.winner === "human" ? "ai" : "human");
-  const margin = Math.abs(scores.human - scores.ai);
-  if (end.winner === "ai") {
-    impact.textContent = totals.total >= margin
-      ? `Expected outcome impact: yes. Total user error EV ${formatEv(totals.total)} met or exceeded the ${margin}-point loss margin.`
-      : `Expected outcome impact: no. Total user error EV ${formatEv(totals.total)} was short of the ${margin}-point loss margin.`;
+  if (end.winner !== "ai") {
+    impact.textContent = `Expected outcome impact: no. User won by ${scores.human - scores[loser]} despite total error EV ${formatEv(totals.total)}.`;
     return impact;
   }
-  impact.textContent = `Expected outcome impact: no. User won by ${scores.human - scores[loser]} despite total error EV ${formatEv(totals.total)}.`;
+  const finalOut = finalOutScoreEvent(events, end);
+  if (!finalOut) {
+    impact.textContent = `Expected outcome impact unavailable; total user error EV ${formatEv(totals.total)} but the final out play was not logged.`;
+    return impact;
+  }
+  const winnerPreOut = finalOut.totalScore - finalOut.points;
+  const winnerAdjustedOut = winnerPreOut + Math.max(0, finalOut.points - totals.total);
+  const loserAdjustedFinal = scores.human + totals.total;
+  const stopsWinner = winnerAdjustedOut < 121;
+  const letsUserOut = loserAdjustedFinal >= 121;
+  impact.textContent = stopsWinner && letsUserOut
+    ? `Expected outcome impact: likely yes. Correcting ${formatEv(totals.total)} EV projects AI short of going out on the final ${scoreLabel(finalOut.category, finalOut.role).toLowerCase()} and puts User at ${loserAdjustedFinal.toFixed(1)}.`
+    : `Expected outcome impact: likely no. Correcting ${formatEv(totals.total)} EV ${stopsWinner ? "projects AI short on the final out play" : "does not project AI short on the final out play"}, and User projects to ${loserAdjustedFinal.toFixed(1)}.`;
   return impact;
+}
+
+function finalOutScoreEvent(events: AnalyticsEvent[], end: GameEndEvent): ScoreEvent | undefined {
+  return [...events]
+    .reverse()
+    .find((event): event is ScoreEvent =>
+      event.type === "score" &&
+      event.gameId === end.gameId &&
+      event.player === end.winner &&
+      event.totalScore >= 121,
+    );
 }
 
 function decisionContext(event: DecisionReviewEvent, events: AnalyticsEvent[]): HTMLElement {
@@ -1267,8 +1306,8 @@ function decisionSnapshotTable(event: DecisionReviewEvent, events: AnalyticsEven
   status.className = "status";
   status.append(
     snapshotStatus("Dealer", playerName(dealer)),
-    snapshotStatus("Turn", "User"),
     snapshotStatus("Count", event.type === "pegging" ? String(event.countBefore ?? 0) : "0"),
+    snapshotStatus("Turn", "User"),
   );
   table.append(status);
 
@@ -1304,12 +1343,14 @@ function snapshotScoreboard(
     label.className = "score-label";
     const name = document.createElement("span");
     name.className = "player-name";
-    name.textContent = playerName(player);
     if (dealer === player) {
       const badge = document.createElement("span");
       badge.className = "dealer-button";
       badge.textContent = "Crib";
-      name.append(" ", badge);
+      if (player === "human") name.append(badge, " ", playerName(player));
+      else name.append(playerName(player), " ", badge);
+    } else {
+      name.textContent = playerName(player);
     }
     label.append(name);
     const value = document.createElement("strong");
@@ -1336,6 +1377,7 @@ function snapshotScoreboard(
 
 function snapshotStatus(label: string, value: string): HTMLElement {
   const item = document.createElement("span");
+  if (label === "Count") item.className = "status-count";
   const strong = document.createElement("strong");
   strong.textContent = value;
   item.append(`${label}: `, strong);
@@ -1345,8 +1387,6 @@ function snapshotStatus(label: string, value: string): HTMLElement {
 function snapshotPlayedSection(event: DecisionReviewEvent): HTMLElement {
   const section = document.createElement("div");
   section.className = "played snapshot-played";
-  const title = document.createElement("h2");
-  title.textContent = "Current count";
   const plays = document.createElement("div");
   plays.className = "snapshot-plays";
   const active = document.createElement("div");
@@ -1366,7 +1406,7 @@ function snapshotPlayedSection(event: DecisionReviewEvent): HTMLElement {
   const result = document.createElement("div");
   result.className = "result";
   result.textContent = `Count ${event.type === "pegging" ? event.countBefore ?? 0 : 0}`;
-  section.append(title, plays, result);
+  section.append(plays, result);
   return section;
 }
 
@@ -1694,6 +1734,7 @@ function renderAnalyticsTotals(
   const humanTotals = emptyAnalyticsTotals();
   const aiAllTotals = emptyAnalyticsTotals();
   const aiHumanTotals = emptyAnalyticsTotals();
+  const humanByModel = new Map<Opponent, AnalyticsTotals>();
   const aiByModel = new Map<Opponent, AnalyticsTotals>();
   const aiHumanByModel = new Map<Opponent, AnalyticsTotals>();
   const gameEngines = engineByGame(gameEvents);
@@ -1712,6 +1753,13 @@ function renderAnalyticsTotals(
     aiByModel.set(engine, next);
     return next;
   };
+  const userModelTotals = (engine: Opponent): AnalyticsTotals => {
+    const existing = humanByModel.get(engine);
+    if (existing) return existing;
+    const next = emptyAnalyticsTotals();
+    humanByModel.set(engine, next);
+    return next;
+  };
   const modelHumanTotals = (engine: Opponent): AnalyticsTotals => {
     const existing = aiHumanByModel.get(engine);
     if (existing) return existing;
@@ -1724,8 +1772,12 @@ function renderAnalyticsTotals(
     const key = scoreKey(event.category, event.role);
     const handKey = `${event.gameId}:${event.handNumber}`;
     if (event.player === "human") {
+      const engine = gameEngines.get(event.gameId) ?? DEFAULT_OPPONENT;
+      const perUserModel = userModelTotals(engine);
       humanTotals[key] += event.points;
+      perUserModel[key] += event.points;
       ensureOpportunities(humanTotals)[key].add(handKey);
+      ensureOpportunities(perUserModel)[key].add(handKey);
     } else {
       const engine = gameEngines.get(event.gameId) ?? DEFAULT_OPPONENT;
       const perModel = modelTotals(engine);
@@ -1750,8 +1802,10 @@ function renderAnalyticsTotals(
     const engine = gameEngines.get(event.gameId) ?? normalizeAnalyticsEngine(event.opponent);
     const perModel = modelTotals(engine);
     const perHumanModel = modelHumanTotals(engine);
+    const perUserModel = userModelTotals(engine);
     perModel.games += 1;
     perHumanModel.games += 1;
+    perUserModel.games += 1;
     const winnerTotals = event.winner === "human" ? humanTotals : aiAllTotals;
     const loserTotals = loser === "human" ? humanTotals : aiAllTotals;
     winnerTotals.wins += 1;
@@ -1760,10 +1814,12 @@ function renderAnalyticsTotals(
       aiHumanTotals.wins += 1;
       perModel.wins += 1;
       perHumanModel.wins += 1;
+      perUserModel.losses += 1;
     } else {
       aiHumanTotals.losses += 1;
       perModel.losses += 1;
       perHumanModel.losses += 1;
+      perUserModel.wins += 1;
     }
     if (result === "skunk" || result === "double-skunk") {
       winnerTotals.skunks += 1;
@@ -1772,10 +1828,12 @@ function renderAnalyticsTotals(
         aiHumanTotals.skunks += 1;
         perModel.skunks += 1;
         perHumanModel.skunks += 1;
+        perUserModel.skunked += 1;
       } else {
         aiHumanTotals.skunked += 1;
         perModel.skunked += 1;
         perHumanModel.skunked += 1;
+        perUserModel.skunks += 1;
       }
     }
     if (result === "double-skunk") {
@@ -1785,36 +1843,42 @@ function renderAnalyticsTotals(
         aiHumanTotals.doubleSkunks += 1;
         perModel.doubleSkunks += 1;
         perHumanModel.doubleSkunks += 1;
+        perUserModel.doubleSkunked += 1;
       } else {
         aiHumanTotals.doubleSkunked += 1;
         perModel.doubleSkunked += 1;
         perHumanModel.doubleSkunked += 1;
+        perUserModel.doubleSkunks += 1;
       }
     }
   }
   applyOpportunityCounts(humanTotals, ensureOpportunities(humanTotals));
   applyOpportunityCounts(aiAllTotals, ensureOpportunities(aiAllTotals));
   applyOpportunityCounts(aiHumanTotals, ensureOpportunities(aiHumanTotals));
+  for (const totals of humanByModel.values()) applyOpportunityCounts(totals, ensureOpportunities(totals));
   for (const totals of aiByModel.values()) applyOpportunityCounts(totals, ensureOpportunities(totals));
   for (const totals of aiHumanByModel.values()) applyOpportunityCounts(totals, ensureOpportunities(totals));
   addAiBaselineTotals(aiAllTotals, aiByModel);
   els.analyticsTotals.innerHTML = "";
   els.analyticsTotals.append(analyticsTotalCard("User", humanTotals, "human"));
+  els.analyticsTotals.append(analyticsTotalCard("User vs All AI", humanTotals, "human"));
+  for (const engine of sortedAnalyticsEngines(aiByModel, aiHumanByModel, humanByModel)) {
+    const userTotals = humanByModel.get(engine) ?? emptyAnalyticsTotals();
+    els.analyticsTotals.append(analyticsTotalCard(`User vs ${engineName(engine)}`, userTotals, "human"));
+  }
   els.analyticsTotals.append(analyticsTotalCard("All AI", aiAllTotals, "ai"));
-  els.analyticsTotals.append(analyticsTotalCard("All AI vs User", aiHumanTotals, "ai"));
-  for (const engine of sortedAnalyticsEngines(aiByModel, aiHumanByModel)) {
+  for (const engine of sortedAnalyticsEngines(aiByModel, aiHumanByModel, humanByModel)) {
     const totals = aiByModel.get(engine);
-    const humanOnlyTotals = aiHumanByModel.get(engine) ?? emptyAnalyticsTotals();
     if (totals) els.analyticsTotals.append(analyticsTotalCard(engineName(engine), totals, "ai"));
-    els.analyticsTotals.append(analyticsTotalCard(`${engineName(engine)} vs User`, humanOnlyTotals, "ai"));
   }
 }
 
 function sortedAnalyticsEngines(
   aiByModel: Map<Opponent, AnalyticsTotals>,
   aiHumanByModel: Map<Opponent, AnalyticsTotals>,
+  humanByModel: Map<Opponent, AnalyticsTotals> = new Map(),
 ): Opponent[] {
-  const engines = new Set<Opponent>([...aiByModel.keys(), ...aiHumanByModel.keys()]);
+  const engines = new Set<Opponent>([...aiByModel.keys(), ...aiHumanByModel.keys(), ...humanByModel.keys()]);
   return [...engines].sort((a, b) => analyticsEngineSortKey(a) - analyticsEngineSortKey(b));
 }
 
@@ -1970,28 +2034,45 @@ function addBaselineStats(
   if (sourceLabel) totals.baselineSources = [...new Set([...(totals.baselineSources ?? []), sourceLabel])];
 }
 
-function analyticsTotalCard(label: string, totals: AnalyticsTotals, kind: "human" | "ai"): HTMLElement {
+function analyticsTotalCard(
+  label: string,
+  totals: AnalyticsTotals,
+  kind: "human" | "ai",
+  options: { showGames?: boolean } = {},
+): HTMLElement {
   const card = document.createElement("div");
   card.className = `analytics-total ${kind}`;
   const benchmarkNote = totals.baselineGames
     ? `Includes benchmarks: ${(totals.baselineSources ?? ["AI baseline"]).join("; ")} (${totals.baselineGames} model-games)`
     : "";
-  card.innerHTML = `
-    <strong>${label}</strong>
-    ${kind === "ai" && benchmarkNote ? `<span class="analytics-baseline-note">${benchmarkNote}</span>` : ""}
-    <span>Games: ${totals.games}</span>
-    <span>Wins: ${totals.wins}</span>
-    <span>Losses: ${totals.losses}</span>
-    <span>Skunks: ${totals.skunks}</span>
-    <span>Skunked: ${totals.skunked}</span>
-    <span>Double skunks: ${totals.doubleSkunks}</span>
-    <span>Double skunked: ${totals.doubleSkunked}</span>
-    <span>Avg peg as dealer: ${averageLabel(totals.peggingDealer, totals.peggingDealerHands)}</span>
-    <span>Avg peg as pone: ${averageLabel(totals.peggingPone, totals.peggingPoneHands)}</span>
-    <span>Avg hand as dealer: ${averageLabel(totals.handDealer, totals.handDealerHands)}</span>
-    <span>Avg hand as pone: ${averageLabel(totals.handPone, totals.handPoneHands)}</span>
-    <span>Avg crib: ${averageLabel(totals.crib, totals.cribHands)}</span>
-  `;
+  const title = document.createElement("strong");
+  title.textContent = label;
+  card.append(title);
+  if (kind === "ai" && benchmarkNote) {
+    const note = document.createElement("span");
+    note.className = "analytics-baseline-note";
+    note.textContent = benchmarkNote;
+    card.append(note);
+  }
+  const add = (text: string, className = ""): void => {
+    const span = document.createElement("span");
+    if (className) span.className = className;
+    span.textContent = text;
+    card.append(span);
+  };
+  if (options.showGames !== false) add(`Games: ${totals.games}`, "analytics-total-wide");
+  add(`Wins: ${totals.wins}`);
+  add(`Losses: ${totals.losses}`);
+  add(`Avg peg as dealer: ${averageLabel(totals.peggingDealer, totals.peggingDealerHands)}`);
+  add(`Avg peg as pone: ${averageLabel(totals.peggingPone, totals.peggingPoneHands)}`);
+  add(`Avg hand as dealer: ${averageLabel(totals.handDealer, totals.handDealerHands)}`);
+  add(`Avg hand as pone: ${averageLabel(totals.handPone, totals.handPoneHands)}`);
+  add(`Avg crib: ${averageLabel(totals.crib, totals.cribHands)}`);
+  add("", "analytics-total-blank");
+  add(`Skunks: ${totals.skunks}`);
+  add(`Skunked: ${totals.skunked}`);
+  add(`Double skunks: ${totals.doubleSkunks}`);
+  add(`Double skunked: ${totals.doubleSkunked}`);
   return card;
 }
 
@@ -2146,9 +2227,9 @@ function playAreaTitle(game: GameState): string {
       : "Select two cards to discard to AI's crib";
   }
   if (game.phase === "ai_discarding") return "Waiting for AI to discard";
-  if (game.phase === "pegging") return "Current count";
+  if (game.phase === "pegging") return "";
   if (game.phase === "pegging_complete") return "Pegging complete";
-  return "Current count";
+  return "";
 }
 
 function render(game: GameState | null): void {
@@ -2179,11 +2260,13 @@ function render(game: GameState | null): void {
   els.turn.textContent = game.turn || "-";
   els.count.textContent = String(game.count);
   renderCutCard(game.turnCard);
-  renderScoring(game.phase === "game_over" ? null : game.scoring);
+  renderScoring(game.scoring);
   renderResult(game);
   renderGameOver(game);
   renderBoard(game.scores, game.pegPositions, game.firstDealer, game.phase, game.handNumber);
-  els.playAreaTitle.textContent = playAreaTitle(game);
+  const playTitle = playAreaTitle(game);
+  els.playAreaTitle.textContent = playTitle;
+  els.playAreaTitle.hidden = !playTitle;
   els.userHandTitle.textContent = game.phase === "pegging" ? "Select card to play" : "User hand";
   if (game.phase === "discard") {
     renderCards(els.plays, game.humanHand, { clickable: true });
@@ -2200,12 +2283,14 @@ function render(game: GameState | null): void {
   els.aiStrip.hidden = game.aiHandCount === 0;
   for (let i = 0; i < game.aiHandCount; i += 1) els.aiHand.append(cardBack());
 
-  els.discard.hidden = game.phase !== "discard";
-  els.play.hidden = !(game.phase === "pegging" && game.turn === "User");
-  els.go.hidden = !(game.phase === "pegging" && game.turn === "User" && game.canGo);
+  const gameActive = game.phase !== "game_over";
+  els.discard.hidden = !gameActive || game.phase !== "discard";
+  els.play.hidden = !gameActive || !(game.phase === "pegging" && game.turn === "User");
+  els.go.hidden = !gameActive || !(game.phase === "pegging" && game.turn === "User" && game.canGo);
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
   els.play.disabled = !(game.phase === "pegging" && game.turn === "User" && selectedPlayableCard(game));
   els.go.disabled = !game.canGo;
+  els.continueScoring.hidden = game.phase === "game_over";
   els.continueScoring.disabled = game.phase === "game_over" || !game.scoring;
   els.continuePegging.hidden = game.phase !== "pegging_complete";
   if (state.pending) {

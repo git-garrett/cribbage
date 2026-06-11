@@ -614,6 +614,14 @@ button:disabled {
   font-size: 15px;
 }
 
+.analytics-total-wide {
+  grid-column: 1 / -1;
+}
+
+.analytics-total-blank {
+  visibility: hidden;
+}
+
 .analytics-baseline-note {
   grid-column: 1 / -1;
   color: var(--muted);
@@ -746,13 +754,29 @@ button:disabled {
 }
 
 .decision-camera {
+  position: relative;
   display: inline-grid;
   place-items: center;
   min-height: 32px;
   width: 36px;
   padding: 0;
-  font-size: 15px;
-  font-weight: 800;
+}
+
+.decision-camera::before {
+  content: "";
+  width: 17px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-radius: 2px;
+}
+
+.decision-camera::after {
+  content: "";
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
 }
 
 .decision-review-toggle span,
@@ -952,7 +976,7 @@ button:disabled {
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(11, 18, 15, 0.62);
+  background: rgba(11, 18, 15, 0.34);
 }
 
 .game-over-alert[hidden] {
@@ -987,6 +1011,10 @@ button:disabled {
 .analytics-section {
   display: grid;
   gap: 8px;
+}
+
+.analytics-section[hidden] {
+  display: none;
 }
 
 .analytics-list {
@@ -1024,6 +1052,15 @@ button:disabled {
 
 .status strong {
   color: #fff;
+}
+
+.status-count {
+  font-weight: 800;
+}
+
+.status-count strong {
+  font-size: 19px;
+  font-weight: 900;
 }
 
 .played {
@@ -1667,8 +1704,7 @@ button.card {
 
 .app[data-phase="score_pone"] .played,
 .app[data-phase="score_dealer"] .played,
-.app[data-phase="score_crib"] .played,
-.app[data-phase="game_over"] .played {
+.app[data-phase="score_crib"] .played {
   display: none;
 }
 
