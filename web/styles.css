@@ -279,11 +279,9 @@ button:disabled {
 .score-pace,
 .score-final {
   display: block;
-  max-width: 96px;
+  max-width: 132px;
   overflow: hidden;
   text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   line-height: 1.05;
 }
 
@@ -304,6 +302,7 @@ button:disabled {
   color: var(--muted);
   font-size: 10px;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .score-final.expected-win {

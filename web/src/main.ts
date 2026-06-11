@@ -144,6 +144,19 @@ const els = {
 };
 
 const SHARED_PAR_HOLES = [17, 33, 43, 59, 69, 85, 95];
+const GRANULAR_PARS = {
+  pone: {
+    pegging: 2.0,
+    hand: 8.1,
+    total: 10.1,
+  },
+  dealer: {
+    pegging: 3.5,
+    hand: 8.0,
+    crib: 4.7,
+    total: 16.2,
+  },
+} as const;
 const SAVE_KEY = "strong-cribbage.game.v1";
 const ANALYTICS_KEY = "strong-cribbage.analytics.v1";
 
@@ -646,12 +659,10 @@ function dealerForHand(firstDealerPlayer: "human" | "ai", handNumber: number): "
 
 function renderScorePace(game: GameState): void {
   const firstDealerPlayer = game.firstDealer === "User" ? "human" : "ai";
-  const completedHands = completedHandCount(game.phase, game.handNumber);
-  const finalHand = finalProjectedHand(game.scores, firstDealerPlayer, completedHands);
+  const parState = granularParState(game, firstDealerPlayer);
+  const outProjection = projectedOutMoment(game, firstDealerPlayer, parState);
   for (const player of ["human", "ai"] as const) {
-    const parHoles = parHolesFor(player, firstDealerPlayer);
-    const parIndex = Math.min(Math.max(completedHands - 1, 0), parHoles.length - 1);
-    const parHole = parHoles[parIndex] ?? parHoles[0];
+    const parHole = Math.round(parState.par[player]);
     const score = game.scores[player];
     const delta = score - parHole;
     const pace = player === "human" ? els.humanPace : els.aiPace;
@@ -659,42 +670,132 @@ function renderScorePace(game: GameState): void {
     pace.classList.toggle("ahead", delta >= 0);
     pace.classList.toggle("behind", delta < 0);
     pace.textContent = `${delta >= 0 ? "+" : ""}${delta} Par ${parHole}`;
-
-    const projected = projectedScoreAtHand(player, score, firstDealerPlayer, completedHands, finalHand);
-    const finalDealer = dealerForHand(firstDealerPlayer, finalHand);
-    const countFirst = player !== finalDealer;
-    const wins = projected >= 121;
-    final.textContent = `${countFirst ? "🏹 " : ""}${Math.round(projected)} on final${wins ? " ★" : ""}`;
+    if (!outProjection) {
+      final.textContent = "";
+      final.classList.remove("expected-win");
+      continue;
+    }
+    const countFirst = player === outProjection.pone;
+    const wins = player === outProjection.player;
+    final.textContent = `${countFirst ? "🏹 " : ""}${Math.round(outProjection.beforeScores[player])} before ${outProjection.label}${wins ? " ★" : ""}`;
     final.classList.toggle("expected-win", wins);
   }
 }
 
-function finalProjectedHand(
-  scores: GameState["scores"],
-  firstDealerPlayer: "human" | "ai",
-  completedHands: number,
-): number {
-  const nextHand = Math.max(1, completedHands + 1);
-  const winningHands = (["human", "ai"] as const)
-    .flatMap((player) => projectedPlayerCourse(player, scores[player], firstDealerPlayer, completedHands))
-    .filter((projection) => projection.score >= 121)
-    .map((projection) => completedHands + projection.hand);
-  return Math.min(...winningHands, nextHand + 12);
+interface GranularParState {
+  par: Record<"human" | "ai", number>;
+  next: number;
 }
 
-function projectedScoreAtHand(
+interface OutProjection {
+  player: "human" | "ai";
+  beforeScores: Record<"human" | "ai", number>;
+  label: string;
+  pone: "human" | "ai";
+}
+
+type ParComponent = "ponePeg" | "dealerPeg" | "poneHand" | "dealerHand" | "crib";
+
+function granularParState(game: GameState, firstDealerPlayer: "human" | "ai"): GranularParState {
+  const completedFullHands = Math.max(0, game.handNumber - 1);
+  const par = {
+    human: cumulativeParThroughHand("human", firstDealerPlayer, completedFullHands),
+    ai: cumulativeParThroughHand("ai", firstDealerPlayer, completedFullHands),
+  };
+  const completedCurrent = completedComponentsForPhase(game.phase);
+  for (let index = 0; index < completedCurrent; index += 1) {
+    applyParComponent(par, componentForHand(firstDealerPlayer, game.handNumber, index));
+  }
+  return { par, next: completedCurrent };
+}
+
+function cumulativeParThroughHand(
   player: "human" | "ai",
-  score: number,
   firstDealerPlayer: "human" | "ai",
-  completedHands: number,
-  targetHand: number,
+  handNumber: number,
 ): number {
-  const parHoles = parHolesFor(player, firstDealerPlayer);
-  const currentParIndex = Math.max(0, completedHands - 1);
-  const currentPar = parHoles[currentParIndex] ?? 0;
-  const offset = score - currentPar;
-  const targetPar = parHoles[Math.max(0, targetHand - 1)] ?? 121;
-  return Math.min(121, Math.max(1, targetPar + offset));
+  let par = 0;
+  for (let hand = 1; hand <= handNumber; hand += 1) {
+    par += roleForHand(player, firstDealerPlayer, hand) === "dealer"
+      ? GRANULAR_PARS.dealer.total
+      : GRANULAR_PARS.pone.total;
+  }
+  return par;
+}
+
+function completedComponentsForPhase(phase: GameState["phase"]): number {
+  if (phase === "discard" || phase === "ai_discarding") return 0;
+  if (phase === "pegging" || phase === "pegging_complete") return 2;
+  if (phase === "score_pone") return 3;
+  if (phase === "score_dealer") return 4;
+  return 5;
+}
+
+function roleForHand(
+  player: "human" | "ai",
+  firstDealerPlayer: "human" | "ai",
+  handNumber: number,
+): "dealer" | "pone" {
+  return player === dealerForHand(firstDealerPlayer, handNumber) ? "dealer" : "pone";
+}
+
+function componentForHand(
+  firstDealerPlayer: "human" | "ai",
+  handNumber: number,
+  index: number,
+): { player: "human" | "ai"; component: ParComponent; amount: number; label: string; pone: "human" | "ai" } {
+  const dealer = dealerForHand(firstDealerPlayer, handNumber);
+  const pone = dealer === "human" ? "ai" : "human";
+  const components: Array<{ player: "human" | "ai"; component: ParComponent; amount: number; label: string; pone: "human" | "ai" }> = [
+    { player: pone, component: "ponePeg", amount: GRANULAR_PARS.pone.pegging, label: "pone peg", pone },
+    { player: dealer, component: "dealerPeg", amount: GRANULAR_PARS.dealer.pegging, label: "dealer peg", pone },
+    { player: pone, component: "poneHand", amount: GRANULAR_PARS.pone.hand, label: "pone hand", pone },
+    { player: dealer, component: "dealerHand", amount: GRANULAR_PARS.dealer.hand, label: "dealer hand", pone },
+    { player: dealer, component: "crib", amount: GRANULAR_PARS.dealer.crib, label: "crib", pone },
+  ];
+  return components[index] ?? components[components.length - 1];
+}
+
+function applyParComponent(
+  par: Record<"human" | "ai", number>,
+  component: { player: "human" | "ai"; amount: number },
+): void {
+  par[component.player] += component.amount;
+}
+
+function projectedOutMoment(
+  game: GameState,
+  firstDealerPlayer: "human" | "ai",
+  parState: GranularParState,
+): OutProjection | null {
+  let handNumber = game.handNumber;
+  let componentIndex = parState.next;
+  const projected = { ...game.scores };
+  const currentPar = { ...parState.par };
+  const offsets = {
+    human: game.scores.human - currentPar.human,
+    ai: game.scores.ai - currentPar.ai,
+  };
+  for (let guard = 0; guard < 80; guard += 1) {
+    if (componentIndex >= 5) {
+      handNumber += 1;
+      componentIndex = 0;
+    }
+    const beforeScores = { ...projected };
+    const component = componentForHand(firstDealerPlayer, handNumber, componentIndex);
+    currentPar[component.player] += component.amount;
+    projected[component.player] = Math.min(121, currentPar[component.player] + offsets[component.player]);
+    if (projected[component.player] >= 121) {
+      return {
+        player: component.player,
+        beforeScores,
+        label: component.label,
+        pone: component.pone,
+      };
+    }
+    componentIndex += 1;
+  }
+  return null;
 }
 
 async function api(path: string, body: Record<string, unknown> | null = null): Promise<GameState> {
@@ -1081,8 +1182,9 @@ function decisionContext(event: DecisionReviewEvent, events: AnalyticsEvent[]): 
   if (score) rows.push(["Score", `User ${score.human}, AI ${score.ai}`]);
   const firstDealer = firstDealerForGame(events, event.gameId);
   if (score && firstDealer) {
-    rows.push(["User par", parStatusText("human", score.human, firstDealer, event.handNumber)]);
-    rows.push(["AI par", parStatusText("ai", score.ai, firstDealer, event.handNumber)]);
+    const components = event.type === "pegging" ? 2 : 0;
+    rows.push(["User par", parStatusText("human", score.human, firstDealer, event.handNumber, components)]);
+    rows.push(["AI par", parStatusText("ai", score.ai, firstDealer, event.handNumber, components)]);
   }
   rows.push(["Hand", String(event.handNumber)]);
   if (handStart) {
@@ -1217,7 +1319,7 @@ function snapshotScoreboard(
     value.textContent = String(scores[player]);
     const pace = document.createElement("span");
     pace.className = "score-pace";
-    pace.textContent = firstDealer ? parStatusText(player, scores[player], firstDealer, event.handNumber) : "";
+    pace.textContent = firstDealer ? parStatusText(player, scores[player], firstDealer, event.handNumber, event.type === "pegging" ? 2 : 0) : "";
     score.append(label, value, pace);
     board.append(score);
   }
@@ -1353,11 +1455,16 @@ function parStatusText(
   score: number,
   firstDealerPlayer: "human" | "ai",
   handNumber: number,
+  currentHandComponents = 0,
 ): string {
-  const parHoles = parHolesFor(player, firstDealerPlayer);
-  const completedHands = Math.max(0, handNumber - 1);
-  const parIndex = Math.min(Math.max(completedHands - 1, 0), parHoles.length - 1);
-  const parHole = parHoles[parIndex] ?? parHoles[0];
+  const par = {
+    human: cumulativeParThroughHand("human", firstDealerPlayer, Math.max(0, handNumber - 1)),
+    ai: cumulativeParThroughHand("ai", firstDealerPlayer, Math.max(0, handNumber - 1)),
+  };
+  for (let index = 0; index < currentHandComponents; index += 1) {
+    applyParComponent(par, componentForHand(firstDealerPlayer, handNumber, index));
+  }
+  const parHole = Math.round(par[player]);
   const delta = score - parHole;
   return `${formatSignedInteger(delta)} Par ${parHole}`;
 }
