@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "runId": "top-three-10k-2026-06-10T08-36-55-215Z",
+  "status": "complete",
+  "pid": 39346,
+  "command": "/usr/local/bin/node /Users/garrett/Dev/cribbage/scripts/run-top-three-10k-benchmark.cjs benchmarks/ai-smoke/top-three-10k-full-analytics-20260610-restart 10000 25 10",
+  "gitCommit": "8a9ed5461f78a36e51fda4dc3f2f48d0a16db1df",
+  "outDir": "/Users/garrett/Dev/cribbage/benchmarks/ai-smoke/top-three-10k-full-analytics-20260610-restart",
+  "gamesPerMatchup": 10000,
+  "totalGames": 30000,
+  "batchGames": 25,
+  "progressEvery": 10,
+  "startedAt": "2026-06-10T08:36:55.303Z",
+  "updatedAt": "2026-06-11T05:02:56.015Z",
+  "completedAt": "2026-06-11T05:02:56.014Z",
+  "jobs": [
+    {
+      "id": "schell-pt-vs-ras-pt",
+      "models": [
+        "schell_table-peg_table-4.0",
+        "ras_table-peg_table-4.0"
+      ],
+      "label": "Schell Peg Table 4.0 vs Ras Peg Table 4.0",
+      "workers": 4,
+      "oldMb": 768,
+      "status": "complete",
+      "outDir": "/Users/garrett/Dev/cribbage/benchmarks/ai-smoke/top-three-10k-full-analytics-20260610-restart/schell-pt-vs-ras-pt",
+      "logPath": "/Users/garrett/Dev/cribbage/benchmarks/ai-smoke/top-three-10k-full-analytics-20260610-restart/schell-pt-vs-ras-pt.log",
+      "startedAt": "2026-06-10T08:36:55.305Z",
+      "pid": 39350,
+      "childStatus": {
+        "status": "complete",
+        "savedGames": 10000,
+        "completedGames": 10000,
+        "totalGames": 10000,
+        "progressPercent": 100,
+        "gamesPerSecond": 0,
+        "estimatedRemainingSeconds": null,
+        "updatedAt": "2026-06-10T11:54:56.225Z"
+      },
+      "completedAt": "2026-06-10T11:54:56.225Z"
+    },
+    {
+      "id": "schell-pt-vs-schell-peg",
+      "models": [
+        "schell_table-peg_table-4.0",
+        "schell_table-peg-3.0"
+      ],
+      "label": "Schell Peg Table 4.0 vs Schell Peg 3.0",
+      "workers": 6,
+      "oldMb": 384,
+      "status": "complete",
+      "outDir": "/Users/garrett/Dev/cribbage/benchmarks/ai-smoke/top-three-10k-full-analytics-20260610-restart/schell-pt-vs-schell-peg",
+      "logPath": "/Users/garrett/Dev/cribbage/benchmarks/ai-smoke/top-three-10k-full-analytics-20260610-restart/schell-pt-vs-schell-peg.log",
+      "startedAt": "2026-06-10T11:54:56.230Z",
+      "pid": 17560,
+      "childStatus": {
+        "status": "complete",
+        "savedGames": 10000,
+        "completedGames": 10000,
+        "totalGames": 10000,
+        "progressPercent": 100,
+        "gamesPerSecond": 0,
+        "estimatedRemainingSeconds": null,
+        "updatedAt": "2026-06-10T17:50:24.732Z"
+      },
+      "completedAt": "2026-06-10T17:50:24.732Z"
+    },
+    {
+      "id": "ras-pt-vs-schell-peg",
+      "models": [
+        "ras_table-peg_table-4.0",
+        "schell_table-peg-3.0"
+      ],
+      "label": "Ras Peg Table 4.0 vs Schell Peg 3.0",
+      "workers": 4,
+      "oldMb": 384,
+      "status": "complete",
+      "outDir": "/Users/garrett/Dev/cribbage/benchmarks/ai-smoke/top-three-10k-full-analytics-20260610-restart/ras-pt-vs-schell-peg",
+      "logPath": "/Users/garrett/Dev/cribbage/benchmarks/ai-smoke/top-three-10k-full-analytics-20260610-restart/ras-pt-vs-schell-peg.log",
+      "startedAt": "2026-06-10T17:50:24.734Z",
+      "pid": 53982,
+      "childStatus": {
+        "status": "complete",
+        "savedGames": 10000,
+        "completedGames": 10000,
+        "totalGames": 10000,
+        "progressPercent": 100,
+        "gamesPerSecond": 0,
+        "estimatedRemainingSeconds": null,
+        "updatedAt": "2026-06-11T05:02:55.997Z"
+      },
+      "completedAt": "2026-06-11T05:02:55.997Z"
+    }
+  ],
+  "savedGames": 30000,
+  "completedGames": 30000,
+  "progressPercent": 100,
+  "elapsedSeconds": 73560.712,
+  "gamesPerSecond": 0.4078263951550659,
+  "estimatedRemainingSeconds": 0
+}

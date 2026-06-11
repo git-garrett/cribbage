@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, "..");
 const cacheDir = path.join(root, ".background", "status-history");
 const args = process.argv.slice(2);
 const trendThresholdSeconds = Number.parseInt(process.env.STATUS_TREND_THRESHOLD_SECONDS || "300", 10);
+const staleThresholdSeconds = Number.parseInt(process.env.STATUS_STALE_THRESHOLD_SECONDS || "3600", 10);
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -66,6 +67,15 @@ function writePrevious(statusPath, snapshot) {
   fs.writeFileSync(cachePathFor(statusPath), `${JSON.stringify(snapshot, null, 2)}\n`);
 }
 
+function isTerminalStatus(status) {
+  return ["complete", "completed", "done", "failed"].includes(String(status?.status || "").toLowerCase());
+}
+
+function isStaleStatus(status) {
+  if (!status?.updatedAt || !Number.isFinite(staleThresholdSeconds) || staleThresholdSeconds <= 0) return false;
+  return Date.now() - Date.parse(status.updatedAt) > staleThresholdSeconds * 1000;
+}
+
 function newestStatusUnder(dir) {
   if (!fs.existsSync(dir)) return null;
   let newest = null;
@@ -77,6 +87,12 @@ function newestStatusUnder(dir) {
       if (entry.isDirectory()) {
         if (!entry.name.endsWith(".batches")) stack.push(fullPath);
       } else if (entry.name === "status.json") {
+        try {
+          const status = readJson(fullPath);
+          if (isTerminalStatus(status) || isStaleStatus(status)) continue;
+        } catch {
+          continue;
+        }
         const mtimeMs = fs.statSync(fullPath).mtimeMs;
         if (!newest || mtimeMs > newest.mtimeMs) newest = { path: fullPath, mtimeMs };
       }

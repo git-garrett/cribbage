@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "promotedAt": "2026-06-11T18:58:25.525Z",
+  "source": "benchmarks/ai-smoke/top-three-10k-full-analytics-20260610-restart",
+  "destination": "artifact-archive/ai-smoke/top-three-10k-full-analytics-20260610-restart",
+  "type": "ai-smoke",
+  "name": "top-three-10k-full-analytics-20260610-restart",
+  "includeRaw": false,
+  "gitCommit": "30416ea93077dde30914a1692f21f63193b9ded6",
+  "copiedFiles": [
+    "ras-pt-vs-schell-peg/status.json",
+    "ras-pt-vs-schell-peg/summary.json",
+    "schell-pt-vs-ras-pt/status.json",
+    "schell-pt-vs-ras-pt/summary.json",
+    "schell-pt-vs-schell-peg/status.json",
+    "schell-pt-vs-schell-peg/summary.json",
+    "status.json",
+    "summary.json"
+  ],
+  "skippedFileCount": 8
+}
