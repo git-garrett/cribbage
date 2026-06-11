@@ -60,6 +60,7 @@ async function main() {
     const memoWindowRows = numberArg(5, 3);
     const rows = sampleDeterministic(enumerateTableRows(), sampleRows, 997);
     const fullRows = enumerateTableRows().length;
+    const collectHistograms = process.env.PEG_TABLE_COLLECT_HISTOGRAMS === "1";
     const results = [];
     for (const workerCount of workerCounts) {
       const result = await runRows({
@@ -67,6 +68,7 @@ async function main() {
         workerCount,
         memoWindowRows,
         writeOutput: false,
+        collectHistograms,
       });
       results.push({
         workerCount,
@@ -82,7 +84,7 @@ async function main() {
         averageAggregatedKeeps: result.averageAggregatedKeeps,
       });
     }
-    console.log(JSON.stringify({ mode, memoWindowRows, results }, null, 2));
+    console.log(JSON.stringify({ mode, memoWindowRows, collectHistograms, results }, null, 2));
     return;
   }
 
@@ -111,6 +113,8 @@ async function main() {
       const outputPath = path.join(outDir, `iteration-${activeIteration}.rows.jsonl`);
       const policyPath = path.join(outDir, `iteration-${activeIteration}.policy.json`);
       const summaryPath = path.join(outDir, `iteration-${activeIteration}.summary.json`);
+      const collectHistograms = shouldCollectHistograms(offset, iterationCount);
+      validateOutputTarget(outputPath, appendOutput, activeStart);
       writeStatus(statusPath, {
         status: "running",
         phase: "generating-rows",
@@ -133,6 +137,7 @@ async function main() {
         workerCount,
         memoWindowRows,
         appendOutput,
+        collectHistograms,
       });
       const result = await runRows({
         rows: activeRows,
@@ -144,6 +149,7 @@ async function main() {
         completedOffset: activeStart,
         totalRows: rows.length,
         priorPolicy: activePriorPolicy,
+        collectHistograms,
         statusPath,
         statusContext: {
           command: exactCommand(),
@@ -161,8 +167,11 @@ async function main() {
           workerCount,
           memoWindowRows,
           appendOutput,
+          collectHistograms,
         },
       });
+      const expectedWrittenRows = appendOutput ? activeStart + activeRows.length : activeRows.length;
+      const validation = validateRowsFile(outputPath, expectedWrittenRows, rows);
       writeStatus(statusPath, {
         status: "running",
         phase: "deriving-policy",
@@ -185,6 +194,8 @@ async function main() {
         workerCount,
         memoWindowRows,
         appendOutput,
+        collectHistograms,
+        validation,
         ...result,
       });
       const policy = derivePolicy(outputPath, activePriorPolicy);
@@ -208,9 +219,11 @@ async function main() {
         rows: activeRows.length,
         totalRows: rows.length,
         appendOutput,
+        collectHistograms,
         workerCount,
         memoWindowRows,
         iterationCount,
+        validation,
         policyStats: policy.stats,
         ...result,
       };
@@ -237,6 +250,8 @@ async function main() {
         workerCount,
         memoWindowRows,
         appendOutput,
+        collectHistograms,
+        validation,
         policyStats: policy.stats,
         ...result,
       });
@@ -278,6 +293,7 @@ async function runRows({
   priorPolicy = null,
   statusPath = "",
   statusContext = {},
+  collectHistograms = false,
 }) {
   const startedAt = performance.now();
   let completed = 0;
@@ -301,6 +317,7 @@ async function runRows({
         workerIndex,
         memoWindowRows,
         priorPolicy,
+        collectHistograms,
       },
       resourceLimits: {
         maxOldGenerationSizeMb: Number.parseInt(process.env.PEG_TABLE_WORKER_OLD_MB || "2048", 10),
@@ -378,7 +395,7 @@ async function runRows({
   };
 }
 
-function runWorker({ rows, memoWindowRows, priorPolicy }) {
+function runWorker({ rows, memoWindowRows, priorPolicy, collectHistograms }) {
   let stateMemo = new Map();
   let opponentSixMemo = new Map();
   let opponentKeepDistributionMemo = new Map();
@@ -405,6 +422,7 @@ function runWorker({ rows, memoWindowRows, priorPolicy }) {
       discardMemo,
       handScoreMemo,
       priorPolicy: policy,
+      collectHistograms,
     });
     parentPort.postMessage({
       type: "row",
@@ -428,6 +446,7 @@ function peggingEvForRow(row, caches) {
   let myTotal = 0;
   let opponentTotal = 0;
   let weight = 0;
+  const jointHist = caches.collectHistograms ? new Map() : null;
   const rowPlayer = row.role === "dealer" ? 1 : 0;
 
   for (const opponent of keepDistribution.values()) {
@@ -441,18 +460,26 @@ function peggingEvForRow(row, caches) {
       current: 0,
       goPlayer: -1,
       lastPlayer: -1,
-    }, caches.stateMemo);
+    }, caches.stateMemo, caches.collectHistograms);
     const myPoints = pegging.points[rowPlayer];
     const opponentPoints = pegging.points[1 - rowPlayer];
     myTotal += myPoints * opponent.weight;
     opponentTotal += opponentPoints * opponent.weight;
     weight += pegging.weight * opponent.weight;
+    if (jointHist && pegging.hist) {
+      for (const [key, count] of pegging.hist) {
+        const [leftPoints, rightPoints] = parseHistKey(key);
+        const my = rowPlayer === 0 ? leftPoints : rightPoints;
+        const opponentScore = rowPlayer === 0 ? rightPoints : leftPoints;
+        addHist(jointHist, histKey(my, opponentScore), count * opponent.weight);
+      }
+    }
   }
 
   const myPeggingEv = weight ? myTotal / weight : 0;
   const opponentPeggingEv = weight ? opponentTotal / weight : 0;
   const leadOptions = row.role === "pone" ? leadOptionsForPone(row, keepDistribution, caches) : null;
-  return {
+  const result = {
     key: rowKey(row.hand, row.discard, row.role),
     hand: row.hand.join(""),
     discard: row.discard.join(""),
@@ -466,6 +493,13 @@ function peggingEvForRow(row, caches) {
     opponentSixHands: opponentSixHands.length,
     aggregatedKeeps: keepDistribution.size,
   };
+  if (jointHist) {
+    result.pegJointHist = compactJointHist(jointHist);
+    result.pegNetHist = compactNetHist(jointHist);
+    result.pegStats = peggingStats(jointHist, weight);
+    result.rankHandScoreHist = rankHandScoreHist(row.keep, row.hand);
+  }
+  return result;
 }
 
 function aggregateOpponentKeeps(opponentSixHands, row, caches) {
@@ -495,6 +529,7 @@ function leadOptionsForPone(row, keepDistribution, caches) {
     let myTotal = 0;
     let opponentTotal = 0;
     let weight = 0;
+    const jointHist = caches.collectHistograms ? new Map() : null;
     for (const opponent of keepDistribution.values()) {
       const pegging = simulatePegging({
         hands: [ownAfterLead, opponent.ranks],
@@ -503,19 +538,28 @@ function leadOptionsForPone(row, keepDistribution, caches) {
         current: 1,
         goPlayer: -1,
         lastPlayer: 0,
-      }, caches.stateMemo);
+      }, caches.stateMemo, caches.collectHistograms);
       myTotal += pegging.points[0] * opponent.weight;
       opponentTotal += pegging.points[1] * opponent.weight;
       weight += pegging.weight * opponent.weight;
+      if (jointHist && pegging.hist) {
+        for (const [key, count] of pegging.hist) addHist(jointHist, key, count * opponent.weight);
+      }
     }
     const myPeggingEv = weight ? myTotal / weight : 0;
     const opponentPeggingEv = weight ? opponentTotal / weight : 0;
-    options.push({
+    const option = {
       rank: lead,
       myPeggingEv,
       opponentPeggingEv,
       netPeggingEv: myPeggingEv - opponentPeggingEv,
-    });
+    };
+    if (jointHist) {
+      option.pegJointHist = compactJointHist(jointHist);
+      option.pegNetHist = compactNetHist(jointHist);
+      option.pegStats = peggingStats(jointHist, weight);
+    }
+    options.push(option);
   }
   return options.sort((a, b) => compareLeadCandidate(b, a));
 }
@@ -667,6 +711,18 @@ function expectedRankHandScore(keep, sixHand, memo) {
   return result;
 }
 
+function rankHandScoreHist(keep, sixHand) {
+  const available = Array.from({ length: 13 }, (_, rank) => 4 - sixHand[rank]);
+  const hist = new Map();
+  for (let cut = 0; cut < 13; cut += 1) {
+    if (available[cut] <= 0) continue;
+    addHist(hist, String(scoreRankHand(keep, cut)), available[cut]);
+  }
+  return [...hist.entries()]
+    .map(([score, count]) => [Number.parseInt(score, 10), count])
+    .sort((a, b) => a[0] - b[0]);
+}
+
 function scoreRankHand(hand, cutRank) {
   const ranks = [...expandRanks(hand), cutRank];
   return scoreFifteens(ranks) + scoreSets(ranks) + scoreRuns(ranks);
@@ -718,7 +774,7 @@ function cribTableValue(discard, myCrib) {
   return (myCrib ? SCHELL_OWN : SCHELL_OPPONENT)[ranks[0]][ranks[1]];
 }
 
-function simulatePegging(state, memo) {
+function simulatePegging(state, memo, collectHistograms = false) {
   const key = stateKey(state);
   const cached = memo.get(key);
   if (cached) return cached;
@@ -727,7 +783,9 @@ function simulatePegging(state, memo) {
   if (remaining === 0) {
     const points = [0, 0];
     if (state.lastPlayer !== -1 && state.count !== 0) points[state.lastPlayer] += 1;
-    const terminal = { points, weight: 1 };
+    const terminal = collectHistograms
+      ? { points, weight: 1, hist: new Map([[histKey(points[0], points[1]), 1]]) }
+      : { points, weight: 1 };
     memo.set(key, terminal);
     return terminal;
   }
@@ -742,12 +800,14 @@ function simulatePegging(state, memo) {
         current: 1 - state.current,
         goPlayer: -1,
         lastPlayer: -1,
-      }, memo);
+      }, memo, collectHistograms);
       const points = future.points.slice();
+      let hist = future.hist;
       if (state.lastPlayer !== -1 && state.count !== 31) {
         points[state.lastPlayer] += future.weight;
+        if (hist) hist = shiftHist(hist, state.lastPlayer, 1);
       }
-      const result = { points, weight: future.weight };
+      const result = hist ? { points, weight: future.weight, hist } : { points, weight: future.weight };
       memo.set(key, result);
       return result;
     }
@@ -755,13 +815,14 @@ function simulatePegging(state, memo) {
       ...state,
       current: 1 - state.current,
       goPlayer: state.current,
-    }, memo);
+    }, memo, collectHistograms);
     memo.set(key, result);
     return result;
   }
 
   const totals = [0, 0];
   let weight = 0;
+  const hist = collectHistograms ? new Map() : null;
   for (const rank of legal) {
     const branchWeight = state.hands[state.current][rank];
     const hands = [state.hands[0].slice(), state.hands[1].slice()];
@@ -787,16 +848,98 @@ function simulatePegging(state, memo) {
           current: 1 - state.current,
           goPlayer: -1,
           lastPlayer: state.current,
-        }, memo);
+        }, memo, collectHistograms);
     totals[0] += branchWeight * future.points[0];
     totals[1] += branchWeight * future.points[1];
     totals[state.current] += branchWeight * points * future.weight;
     weight += branchWeight * future.weight;
+    if (hist && future.hist) {
+      const shifted = points ? shiftHist(future.hist, state.current, points) : future.hist;
+      addWeightedHist(hist, shifted, branchWeight);
+    }
   }
 
-  const result = { points: totals, weight };
+  const result = hist ? { points: totals, weight, hist } : { points: totals, weight };
   memo.set(key, result);
   return result;
+}
+
+function histKey(leftPoints, rightPoints) {
+  return `${leftPoints},${rightPoints}`;
+}
+
+function parseHistKey(key) {
+  return key.split(",").map((value) => Number.parseInt(value, 10));
+}
+
+function addHist(hist, key, value) {
+  hist.set(key, (hist.get(key) || 0) + value);
+}
+
+function addWeightedHist(target, source, weight) {
+  for (const [key, count] of source) addHist(target, key, count * weight);
+}
+
+function shiftHist(source, player, points) {
+  const result = new Map();
+  for (const [key, count] of source) {
+    const [left, right] = parseHistKey(key);
+    addHist(result, histKey(player === 0 ? left + points : left, player === 1 ? right + points : right), count);
+  }
+  return result;
+}
+
+function compactJointHist(hist) {
+  return [...hist.entries()]
+    .map(([key, count]) => {
+      const [my, opponent] = parseHistKey(key);
+      return [my, opponent, count];
+    })
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+}
+
+function compactNetHist(hist) {
+  const net = new Map();
+  for (const [key, count] of hist) {
+    const [my, opponent] = parseHistKey(key);
+    addHist(net, String(my - opponent), count);
+  }
+  return [...net.entries()]
+    .map(([value, count]) => [Number.parseInt(value, 10), count])
+    .sort((a, b) => a[0] - b[0]);
+}
+
+function peggingStats(hist, totalWeight) {
+  let myMin = Number.POSITIVE_INFINITY;
+  let myMax = Number.NEGATIVE_INFINITY;
+  let opponentMin = Number.POSITIVE_INFINITY;
+  let opponentMax = Number.NEGATIVE_INFINITY;
+  let netMin = Number.POSITIVE_INFINITY;
+  let netMax = Number.NEGATIVE_INFINITY;
+  let netTotal = 0;
+  let netSquareTotal = 0;
+  for (const [key, count] of hist) {
+    const [my, opponent] = parseHistKey(key);
+    const net = my - opponent;
+    myMin = Math.min(myMin, my);
+    myMax = Math.max(myMax, my);
+    opponentMin = Math.min(opponentMin, opponent);
+    opponentMax = Math.max(opponentMax, opponent);
+    netMin = Math.min(netMin, net);
+    netMax = Math.max(netMax, net);
+    netTotal += net * count;
+    netSquareTotal += net * net * count;
+  }
+  const netMean = totalWeight ? netTotal / totalWeight : 0;
+  return {
+    myMin,
+    myMax,
+    opponentMin,
+    opponentMax,
+    netMin,
+    netMax,
+    netVariance: totalWeight ? (netSquareTotal / totalWeight) - netMean * netMean : 0,
+  };
 }
 
 function scoreCountRanks(plays) {
@@ -1025,6 +1168,68 @@ function writeStatus(statusPath, status) {
   const tmpPath = `${statusPath}.tmp`;
   fs.writeFileSync(tmpPath, `${JSON.stringify(status, null, 2)}\n`);
   fs.renameSync(tmpPath, statusPath);
+}
+
+function shouldCollectHistograms(offset, iterationCount) {
+  if (process.env.PEG_TABLE_COLLECT_HISTOGRAMS === "0") return false;
+  if (process.env.PEG_TABLE_COLLECT_HISTOGRAMS === "1") return true;
+  return offset === iterationCount - 1;
+}
+
+function validateOutputTarget(outputPath, appendOutput, expectedExistingRows) {
+  if (appendOutput) {
+    const existingRows = countJsonlRows(outputPath);
+    if (existingRows !== expectedExistingRows) {
+      throw new Error(
+        `Refusing unsafe resume for ${outputPath}: expected ${expectedExistingRows} existing rows, found ${existingRows}.`,
+      );
+    }
+    return;
+  }
+  if (fs.existsSync(outputPath) && process.env.PEG_TABLE_OVERWRITE !== "1") {
+    throw new Error(`Refusing to overwrite existing rows file: ${outputPath}. Set PEG_TABLE_OVERWRITE=1 if intentional.`);
+  }
+}
+
+function validateRowsFile(rowsPath, expectedRows, expectedSourceRows) {
+  const rowKeys = new Set();
+  const handRoleKeys = new Set();
+  let rows = 0;
+  for (const line of fs.readFileSync(rowsPath, "utf8").split(/\n/)) {
+    if (!line) continue;
+    rows += 1;
+    const row = JSON.parse(line);
+    if (!row.key || !row.hand || !row.discard || !row.role) throw new Error(`Invalid row ${rows} in ${rowsPath}`);
+    if (rowKeys.has(row.key)) throw new Error(`Duplicate row key in ${rowsPath}: ${row.key}`);
+    rowKeys.add(row.key);
+    handRoleKeys.add(`${row.hand}:${row.role}`);
+  }
+  const expectedCoverage = coverageForRows(expectedSourceRows);
+  const validation = {
+    rows,
+    expectedRows,
+    uniqueRowKeys: rowKeys.size,
+    uniqueHandRoleKeys: handRoleKeys.size,
+    expectedUniqueHandRoleKeys: expectedCoverage.uniqueHandRoleKeys,
+  };
+  if (rows !== expectedRows) throw new Error(`Expected ${expectedRows} rows in ${rowsPath}, found ${rows}`);
+  if (rows === expectedSourceRows.length && handRoleKeys.size !== expectedCoverage.uniqueHandRoleKeys) {
+    throw new Error(
+      `Expected ${expectedCoverage.uniqueHandRoleKeys} unique hand/role keys in ${rowsPath}, found ${handRoleKeys.size}.`,
+    );
+  }
+  return validation;
+}
+
+function coverageForRows(rows) {
+  const handRoleKeys = new Set();
+  for (const row of rows) handRoleKeys.add(`${row.hand.join("")}:${row.role}`);
+  return { uniqueHandRoleKeys: handRoleKeys.size };
+}
+
+function countJsonlRows(filePath) {
+  if (!fs.existsSync(filePath)) return 0;
+  return fs.readFileSync(filePath, "utf8").split(/\n/).filter(Boolean).length;
 }
 
 function expectedCompletionAt(updatedAt, estimatedRemainingSeconds) {
