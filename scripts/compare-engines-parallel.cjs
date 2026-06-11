@@ -24,11 +24,11 @@ const labels = {
   [engines.original]: "Original 1.1",
   [engines.originalPeg]: "Original Exhaustive Peg 1.2",
   [engines.ras]: "Ras Table 2.0",
-  [engines.rasPeg]: "Ras Table Peg 3.0",
-  [engines.rasPegTable]: "Ras Table Peg Table 4.0",
+  [engines.rasPeg]: "Ras Table + Peg 3.0",
+  [engines.rasPegTable]: "Ras Table + Peg Table 4.0",
   [engines.schell]: "Schell Table 2.0",
-  [engines.schellPeg]: "Schell Table Peg 3.0",
-  [engines.schellPegTable]: "Schell Table Peg Table 4.0",
+  [engines.schellPeg]: "Schell Table + Peg 3.0",
+  [engines.schellPegTable]: "Schell Table + Peg Table 4.0",
 };
 
 const matchupModes = {

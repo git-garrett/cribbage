@@ -2137,13 +2137,13 @@ function engineName(engine: string | undefined): string {
     engine === "expert_ras-table-peg-1.1" ||
     engine === "expert_ras_table-peg-3.0" ||
     engine === "expert-peg-2.1"
-  ) return "Ras Table Peg 3.0";
+  ) return "Ras Table + Peg 3.0";
   if (
     engine === "schell-table-peg-1.1" ||
     engine === "expert_schell-table-peg-1.1" ||
     engine === "expert_schell_table-peg-3.0" ||
     engine === "expert-peg-2.2"
-  ) return "Schell Table Peg 3.0";
+  ) return "Schell Table + Peg 3.0";
   if (
     engine === "schell-table-peg_table-1.2" ||
     engine === "expert_schell-table-peg_table-1.2" ||
@@ -2151,16 +2151,16 @@ function engineName(engine: string | undefined): string {
     engine === "expert-peg_table-1.3" ||
     engine === "expert-peg_table-2.3"
   ) {
-    return "Schell Table Peg Table 4.0";
+    return "Schell Table + Peg Table 4.0";
   }
-  if (engine === "ras-table-peg_table-1.2" || engine === "expert-peg_table-2.2") return "Ras Table Peg Table 4.0";
+  if (engine === "ras-table-peg_table-1.2" || engine === "expert-peg_table-2.2") return "Ras Table + Peg Table 4.0";
   if (engine === "ras_table-2.0") return "Ras Table 2.0";
-  if (engine === "ras_table-peg-3.0") return "Ras Table Peg 3.0";
-  if (engine === "ras_table-peg_table-4.0") return "Ras Table Peg Table 4.0";
+  if (engine === "ras_table-peg-3.0") return "Ras Table + Peg 3.0";
+  if (engine === "ras_table-peg_table-4.0") return "Ras Table + Peg Table 4.0";
   if (engine === "schell-table-1.0") return "Schell Table 2.0";
   if (engine === "schell_table-2.0") return "Schell Table 2.0";
-  if (engine === "schell_table-peg-3.0") return "Schell Table Peg 3.0";
-  if (engine === "schell_table-peg_table-4.0") return "Schell Table Peg Table 4.0";
+  if (engine === "schell_table-peg-3.0") return "Schell Table + Peg 3.0";
+  if (engine === "schell_table-peg_table-4.0") return "Schell Table + Peg Table 4.0";
   return engine || "-";
 }
 

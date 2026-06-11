@@ -56,11 +56,11 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "original-1.1": "Original 1.1",
   "original_exhaustive_peg-1.2": "Original Exhaustive Peg 1.2",
   "ras_table-2.0": "Ras Table 2.0",
-  "ras_table-peg-3.0": "Ras Table Peg 3.0",
-  "ras_table-peg_table-4.0": "Ras Table Peg Table 4.0",
+  "ras_table-peg-3.0": "Ras Table + Peg 3.0",
+  "ras_table-peg_table-4.0": "Ras Table + Peg Table 4.0",
   "schell_table-2.0": "Schell Table 2.0",
-  "schell_table-peg-3.0": "Schell Table Peg 3.0",
-  "schell_table-peg_table-4.0": "Schell Table Peg Table 4.0",
+  "schell_table-peg-3.0": "Schell Table + Peg 3.0",
+  "schell_table-peg_table-4.0": "Schell Table + Peg Table 4.0",
 };
 type DiscardTableEngine = Exclude<Opponent, "original-1.1" | "original_exhaustive_peg-1.2">;
 type CribTable = { own: number[][]; opponent: number[][] };

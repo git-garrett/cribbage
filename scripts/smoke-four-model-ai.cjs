@@ -23,13 +23,13 @@ const legacyModels = [
 ];
 
 const labels = {
-  "schell_table-peg_table-4.0": "Schell Table Peg Table 4.0",
-  "ras_table-peg_table-4.0": "Ras Table Peg Table 4.0",
-  "schell_table-peg-3.0": "Schell Table Peg 3.0",
+  "schell_table-peg_table-4.0": "Schell Table + Peg Table 4.0",
+  "ras_table-peg_table-4.0": "Ras Table + Peg Table 4.0",
+  "schell_table-peg-3.0": "Schell Table + Peg 3.0",
   "schell_table-2.0": "Schell Table 2.0",
-  "schell-table-peg_table-1.2": "Schell Table Peg Table 1.2",
-  "ras-table-peg_table-1.2": "Ras Table Peg Table 1.2",
-  "schell-table-peg-1.1": "Schell Table Peg 1.1",
+  "schell-table-peg_table-1.2": "Schell Table + Peg Table 1.2",
+  "ras-table-peg_table-1.2": "Ras Table + Peg Table 1.2",
+  "schell-table-peg-1.1": "Schell Table + Peg 1.1",
   "schell-table-1.0": "Schell Table 1.0",
 };
 

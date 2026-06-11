@@ -528,12 +528,12 @@
       "games": 6000,
       "gamesPerMatchup": 1000,
       "matchups": [
-        "Schell Table Peg Table 4.0 vs Ras Table Peg Table 4.0",
-        "Schell Table Peg Table 4.0 vs Schell Table Peg 3.0",
-        "Schell Table Peg Table 4.0 vs Schell Table 2.0",
-        "Ras Table Peg Table 4.0 vs Schell Table Peg 3.0",
-        "Ras Table Peg Table 4.0 vs Schell Table 2.0",
-        "Schell Table Peg 3.0 vs Schell Table 2.0"
+        "Schell Table + Peg Table 4.0 vs Ras Table + Peg Table 4.0",
+        "Schell Table + Peg Table 4.0 vs Schell Table + Peg 3.0",
+        "Schell Table + Peg Table 4.0 vs Schell Table 2.0",
+        "Ras Table + Peg Table 4.0 vs Schell Table + Peg 3.0",
+        "Ras Table + Peg Table 4.0 vs Schell Table 2.0",
+        "Schell Table + Peg 3.0 vs Schell Table 2.0"
       ],
       "models": {
         "schell_table-peg_table-4.0": {
@@ -655,7 +655,7 @@
       },
       "matchupResults": [
         {
-          "matchup": "Schell Table Peg Table 4.0 vs Ras Table Peg Table 4.0",
+          "matchup": "Schell Table + Peg Table 4.0 vs Ras Table + Peg Table 4.0",
           "games": 1000,
           "schell_table-peg_table-4.0": {
             "wins": 514,
@@ -675,7 +675,7 @@
           }
         },
         {
-          "matchup": "Schell Table Peg Table 4.0 vs Schell Table Peg 3.0",
+          "matchup": "Schell Table + Peg Table 4.0 vs Schell Table + Peg 3.0",
           "games": 1000,
           "schell_table-peg_table-4.0": {
             "wins": 516,
@@ -695,7 +695,7 @@
           }
         },
         {
-          "matchup": "Schell Table Peg Table 4.0 vs Schell Table 2.0",
+          "matchup": "Schell Table + Peg Table 4.0 vs Schell Table 2.0",
           "games": 1000,
           "schell_table-peg_table-4.0": {
             "wins": 556,
@@ -715,7 +715,7 @@
           }
         },
         {
-          "matchup": "Ras Table Peg Table 4.0 vs Schell Table Peg 3.0",
+          "matchup": "Ras Table + Peg Table 4.0 vs Schell Table + Peg 3.0",
           "games": 1000,
           "ras_table-peg_table-4.0": {
             "wins": 519,
@@ -735,7 +735,7 @@
           }
         },
         {
-          "matchup": "Ras Table Peg Table 4.0 vs Schell Table 2.0",
+          "matchup": "Ras Table + Peg Table 4.0 vs Schell Table 2.0",
           "games": 1000,
           "ras_table-peg_table-4.0": {
             "wins": 563,
@@ -755,7 +755,7 @@
           }
         },
         {
-          "matchup": "Schell Table Peg 3.0 vs Schell Table 2.0",
+          "matchup": "Schell Table + Peg 3.0 vs Schell Table 2.0",
           "games": 1000,
           "schell_table-peg-3.0": {
             "wins": 560,
@@ -782,9 +782,9 @@
       "games": 30000,
       "gamesPerMatchup": 10000,
       "matchups": [
-        "Schell Peg Table 4.0 vs Ras Peg Table 4.0",
-        "Schell Peg Table 4.0 vs Schell Peg 3.0",
-        "Ras Peg Table 4.0 vs Schell Peg 3.0"
+        "Schell Table + Peg Table 4.0 vs Ras Table + Peg Table 4.0",
+        "Schell Table + Peg Table 4.0 vs Schell Table + Peg 3.0",
+        "Ras Table + Peg Table 4.0 vs Schell Table + Peg 3.0"
       ],
       "models": {
         "schell_table-peg_table-4.0": {
@@ -880,7 +880,7 @@
       },
       "matchupResults": [
         {
-          "matchup": "Schell Table Peg Table 4.0 vs Ras Table Peg Table 4.0",
+          "matchup": "Schell Table + Peg Table 4.0 vs Ras Table + Peg Table 4.0",
           "games": 10000,
           "schell_table-peg_table-4.0": {
             "wins": 4990,
@@ -900,7 +900,7 @@
           }
         },
         {
-          "matchup": "Schell Table Peg Table 4.0 vs Schell Table Peg 3.0",
+          "matchup": "Schell Table + Peg Table 4.0 vs Schell Table + Peg 3.0",
           "games": 10000,
           "schell_table-peg_table-4.0": {
             "wins": 5045,
@@ -920,7 +920,7 @@
           }
         },
         {
-          "matchup": "Ras Table Peg Table 4.0 vs Schell Table Peg 3.0",
+          "matchup": "Ras Table + Peg Table 4.0 vs Schell Table + Peg 3.0",
           "games": 10000,
           "ras_table-peg_table-4.0": {
             "wins": 4990,
