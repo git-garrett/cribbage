@@ -1,8 +1,16 @@
 #!/bin/sh
 set -eu
 
+PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH
+
 if [ "${SKIP_VERSION_BUMP:-}" = "1" ]; then
   exit 0
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "pre-commit: node is required but was not found on PATH." >&2
+  exit 1
 fi
 
 node scripts/bump-version.cjs

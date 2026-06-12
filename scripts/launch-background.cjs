@@ -15,6 +15,11 @@ if (!runName || separatorIndex < 0 || separatorIndex === process.argv.length - 1
 
 const command = process.argv[separatorIndex + 1];
 const args = process.argv.slice(separatorIndex + 2);
+const childPath = [
+  "/opt/homebrew/bin",
+  "/usr/local/bin",
+  process.env.PATH || "",
+].filter(Boolean).join(":");
 const runSlug = runName.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "background-run";
 const runDir = path.join(root, ".background", runSlug);
 const logPath = path.join(runDir, "output.log");
@@ -26,7 +31,7 @@ const child = spawn(command, args, {
   cwd: root,
   detached: true,
   stdio: ["ignore", out, out],
-  env: process.env,
+  env: { ...process.env, PATH: childPath },
 });
 
 child.unref();
