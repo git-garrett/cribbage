@@ -1,5 +1,3 @@
-import pegTablePolicy5 from "./peg-table-policy-5.0.json";
-
 export type PlayerKey = "human" | "ai";
 export type Opponent =
   | "original-1.1"
@@ -1543,18 +1541,18 @@ type PegTableEv = {
 type PegTablePolicy = { pegEvs: Record<string, PegTableEvTuple | undefined> };
 
 const pegCardCache = Array.from({ length: 13 }, (_, rank) => new Card(rank));
-const defaultPegTablePolicy = pegTablePolicy5 as PegTablePolicy;
-const PEG_TABLE_POLICIES: Partial<Record<Opponent, PegTablePolicy>> = {
-  "schell_table-peg_table-5.0": defaultPegTablePolicy,
-  "schell_table-peg_table-7.0": defaultPegTablePolicy,
-};
+const PEG_TABLE_POLICIES: Partial<Record<Opponent, PegTablePolicy>> = {};
 const PEG_TABLE_POLICY_LOADERS: Partial<Record<Opponent, () => Promise<PegTablePolicy>>> = {
   "schell_table-peg_table-4.0": () =>
     import("./peg-table-policy.json").then((module) => module.default as PegTablePolicy),
   "ras_table-peg_table-4.0": () =>
     import("./peg-table-policy.json").then((module) => module.default as PegTablePolicy),
+  "schell_table-peg_table-5.0": () =>
+    import("./peg-table-policy-5.0.json").then((module) => module.default as PegTablePolicy),
   "schell_table-peg_table-6.0": () =>
     import("./peg-table-policy-6.0.json").then((module) => module.default as PegTablePolicy),
+  "schell_table-peg_table-7.0": () =>
+    import("./peg-table-policy-5.0.json").then((module) => module.default as PegTablePolicy),
 };
 
 export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
@@ -1565,9 +1563,21 @@ export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
 export async function loadOpponentResources(opponent: StoredOpponent): Promise<void> {
   const engine = normalizeOpponent(opponent);
   if (PEG_TABLE_POLICIES[engine]) return;
+  const sharedPegTablePolicy = sharedPegTablePolicyEngine(engine);
+  if (sharedPegTablePolicy && PEG_TABLE_POLICIES[sharedPegTablePolicy]) {
+    PEG_TABLE_POLICIES[engine] = PEG_TABLE_POLICIES[sharedPegTablePolicy];
+    return;
+  }
   const loader = PEG_TABLE_POLICY_LOADERS[engine];
   if (!loader) return;
   PEG_TABLE_POLICIES[engine] = await loader();
+  if (sharedPegTablePolicy) PEG_TABLE_POLICIES[sharedPegTablePolicy] = PEG_TABLE_POLICIES[engine];
+}
+
+function sharedPegTablePolicyEngine(engine: Opponent): Opponent | null {
+  if (engine === "schell_table-peg_table-5.0") return "schell_table-peg_table-7.0";
+  if (engine === "schell_table-peg_table-7.0") return "schell_table-peg_table-5.0";
+  return null;
 }
 
 function usesExhaustivePegging(engine: Opponent): boolean {
@@ -1598,7 +1608,13 @@ function pegTableEv(
   };
   const handRanks = rankCountsForCards(hand);
   const discardRanks = rankCountsForCards(discard);
-  const policy = PEG_TABLE_POLICIES[engine] ?? defaultPegTablePolicy;
+  const policy = PEG_TABLE_POLICIES[engine];
+  if (!policy) return {
+    myPeggingEv: 0,
+    opponentPeggingEv: 0,
+    netPeggingEv: 0,
+    bestLead: null,
+  };
   const entry = policy.pegEvs[
     `${handRanks.join("")}:${discardRanks.join("")}:${role}`
   ];

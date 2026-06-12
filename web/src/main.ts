@@ -2795,8 +2795,9 @@ async function finishDiscardInBackground(): Promise<void> {
 
 buildBoard();
 api("/api/state")
-  .then((game) => {
+  .then(async (game) => {
     render(game);
+    await ensureOpponentResources(game.opponent);
     if (game.phase === "ai_discarding") finishDiscardInBackground();
   })
   .catch((error) => {
