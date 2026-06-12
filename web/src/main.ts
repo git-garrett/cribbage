@@ -1,6 +1,7 @@
 import {
   CribbageGame,
   DEFAULT_OPPONENT,
+  hasLoadedOpponentResources,
   loadOpponentResources,
   type AnalyticsDecisionReview,
   type AnalyticsEvent,
@@ -64,6 +65,7 @@ const state: {
   snapshotEventId: string | null;
   dismissedGameOverId: string | null;
   aiThinking: boolean;
+  modelLoading: boolean;
 } = {
   game: null,
   selected: new Set(),
@@ -76,6 +78,7 @@ const state: {
   snapshotEventId: null,
   dismissedGameOverId: null,
   aiThinking: false,
+  modelLoading: false,
 };
 
 const els = {
@@ -850,60 +853,73 @@ function relativeOutLabel(viewer: "human" | "ai", projection: OutProjection): st
   return `${viewer === projection.player ? "own" : "opponent"} ${kind}`;
 }
 
+async function ensureOpponentResources(opponent: Opponent): Promise<void> {
+  if (hasLoadedOpponentResources(opponent)) return;
+  state.modelLoading = true;
+  render(state.game);
+  await waitForPaint();
+  try {
+    await loadOpponentResources(opponent);
+  } finally {
+    state.modelLoading = false;
+    render(state.game);
+  }
+}
+
 async function api(path: string, body: Record<string, unknown> | null = null): Promise<GameState> {
   try {
     if (path === "/api/state") return localGame.state();
     if (path === "/api/new") {
       const opponent = (body?.opponent as Opponent) || DEFAULT_OPPONENT;
-      await loadOpponentResources(opponent);
+      await ensureOpponentResources(opponent);
       localGame = new CribbageGame(opponent);
       saveGame();
       return localGame.state();
     }
     if (path === "/api/discard") {
-      await loadOpponentResources(localGame.opponent);
+      await ensureOpponentResources(localGame.opponent);
       localGame.discard((body?.ids as number[]) || []);
       saveGame();
       return localGame.state();
     }
     if (path === "/api/finish-discard") {
-      await loadOpponentResources(localGame.opponent);
+      await ensureOpponentResources(localGame.opponent);
       localGame.finishDiscard();
       saveGame();
       return localGame.state();
     }
     if (path === "/api/play") {
-      await loadOpponentResources(localGame.opponent);
+      await ensureOpponentResources(localGame.opponent);
       localGame.play(body?.id as number);
       saveGame();
       return localGame.state();
     }
     if (path === "/api/play-human") {
-      await loadOpponentResources(localGame.opponent);
+      await ensureOpponentResources(localGame.opponent);
       localGame.playHumanPeggingCard(body?.id as number);
       saveGame();
       return localGame.state();
     }
     if (path === "/api/go") {
-      await loadOpponentResources(localGame.opponent);
+      await ensureOpponentResources(localGame.opponent);
       localGame.go();
       saveGame();
       return localGame.state();
     }
     if (path === "/api/go-human") {
-      await loadOpponentResources(localGame.opponent);
+      await ensureOpponentResources(localGame.opponent);
       localGame.humanPeggingGo();
       saveGame();
       return localGame.state();
     }
     if (path === "/api/advance-pegging") {
-      await loadOpponentResources(localGame.opponent);
+      await ensureOpponentResources(localGame.opponent);
       localGame.advancePeggingToHuman();
       saveGame();
       return localGame.state();
     }
     if (path === "/api/continue-scoring") {
-      await loadOpponentResources(localGame.opponent);
+      await ensureOpponentResources(localGame.opponent);
       localGame.continueScoring();
       saveGame();
       return localGame.state();
@@ -2426,7 +2442,8 @@ function render(game: GameState | null): void {
   els.dealer.textContent = game.dealer;
   els.turn.textContent = game.turn || "-";
   els.count.textContent = String(game.count);
-  els.modelThinking.hidden = !state.aiThinking;
+  els.modelThinking.hidden = !state.aiThinking && !state.modelLoading;
+  els.modelThinking.textContent = state.modelLoading ? "Loading model..." : "AI thinking...";
   renderCutCard(game.turnCard);
   renderScoring(game.scoring);
   renderResult(game);
