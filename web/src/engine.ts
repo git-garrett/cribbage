@@ -1552,7 +1552,7 @@ const PEG_TABLE_POLICY_LOADERS: Partial<Record<Opponent, () => Promise<PegTableP
   "schell_table-peg_table-6.0": () =>
     import("./peg-table-policy-6.0.json").then((module) => module.default as PegTablePolicy),
   "schell_table-peg_table-7.0": () =>
-    import("./peg-table-policy-5.0.json").then((module) => module.default as PegTablePolicy),
+    import("./peg-table-policy-6.0.json").then((module) => module.default as PegTablePolicy),
 };
 
 export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
@@ -1575,8 +1575,8 @@ export async function loadOpponentResources(opponent: StoredOpponent): Promise<v
 }
 
 function sharedPegTablePolicyEngine(engine: Opponent): Opponent | null {
-  if (engine === "schell_table-peg_table-5.0") return "schell_table-peg_table-7.0";
-  if (engine === "schell_table-peg_table-7.0") return "schell_table-peg_table-5.0";
+  if (engine === "schell_table-peg_table-6.0") return "schell_table-peg_table-7.0";
+  if (engine === "schell_table-peg_table-7.0") return "schell_table-peg_table-6.0";
   return null;
 }
 
