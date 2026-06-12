@@ -1716,6 +1716,11 @@ function choose(n: number, k: number): number {
   return result;
 }
 
+const CRIB_FLUSH_UNKNOWN_CARDS = 46;
+const CRIB_FLUSH_BONUS_BY_SUIT_COUNT = Array.from({ length: 7 }, (_, suitCount) =>
+  5 * (choose(13 - suitCount, 3) / choose(CRIB_FLUSH_UNKNOWN_CARDS, 3))
+);
+
 function simulatePegging(state: PegSimulationState): WeightedScore {
   const memo = new Map<string, WeightedScore>();
   return simulatePeggingFuture(state, memo);
@@ -1838,12 +1843,13 @@ function expectedCribScore(
   deck: Card[],
   myCrib: boolean,
   engine: Opponent,
+  cribFlushBonusBySuit: number[] | null,
 ): number {
   const table = DISCARD_TABLES[engine as DiscardTableEngine];
   if (table) {
     const ranks = discard.map((card) => card.rank).sort((a, b) => a - b);
     const baseScore = (myCrib ? table.own : table.opponent)[ranks[0]][ranks[1]];
-    return baseScore + (usesCribFlushAdjustment(engine) ? expectedCribFlushBonus(discard, deck) : 0);
+    return baseScore + (usesCribFlushAdjustment(engine) ? expectedCribFlushBonus(discard, cribFlushBonusBySuit) : 0);
   }
   let cribTotal = 0;
   let cribCount = 0;
@@ -1854,12 +1860,15 @@ function expectedCribScore(
   return cribTotal / cribCount;
 }
 
-function expectedCribFlushBonus(discard: Card[], deck: Card[]): number {
+function cribFlushBonusesBySuit(hand: Card[]): number[] {
+  const suitCounts = Array.from({ length: 4 }, () => 0);
+  for (const card of hand) suitCounts[card.suit] += 1;
+  return suitCounts.map((count) => CRIB_FLUSH_BONUS_BY_SUIT_COUNT[count] ?? 0);
+}
+
+function expectedCribFlushBonus(discard: Card[], cribFlushBonusBySuit: number[] | null): number {
   if (discard.length !== 2 || discard[0].suit !== discard[1].suit) return 0;
-  const sameSuitRemaining = deck.filter((card) => card.suit === discard[0].suit).length;
-  const totalUnknownTriples = choose(deck.length, 3);
-  if (totalUnknownTriples === 0) return 0;
-  return 5 * (choose(sameSuitRemaining, 3) / totalUnknownTriples);
+  return cribFlushBonusBySuit?.[discard[0].suit] ?? 0;
 }
 
 function analyzeDiscardChoice(
@@ -1886,11 +1895,12 @@ function analyzeDiscardChoice(
   let selectedComponents: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>> = {};
   let recommendedComponents: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>> = {};
   const selectedKey = cardSetKey(selected);
+  const cribFlushBonusBySuit = usesCribFlushAdjustment(engine) ? cribFlushBonusesBySuit(hand) : null;
 
   for (const discard of combinations(hand, 2, 2)) {
     const keep = hand.filter((card) => !discard.includes(card));
     const handScore = mean(deck.map((cut) => scoreHand(keep, cut)));
-    const cribScore = expectedCribScore(discard, deck, myCrib, engine);
+    const cribScore = expectedCribScore(discard, deck, myCrib, engine, cribFlushBonusBySuit);
     const pegging = pegTableEv(hand, discard, role, engine);
     const total = (myCrib ? handScore + cribScore : handScore - cribScore) + pegging.netPeggingEv;
     const components: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>> = {
