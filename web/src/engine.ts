@@ -1,4 +1,4 @@
-import pegTablePolicy4 from "./peg-table-policy.json";
+import pegTablePolicy5 from "./peg-table-policy-5.0.json";
 
 export type PlayerKey = "human" | "ai";
 export type Opponent =
@@ -37,7 +37,7 @@ type LegacyOpponent =
   | "expert-peg-2.2"
   | "expert-peg_table-2.3";
 type StoredOpponent = Opponent | LegacyOpponent;
-export const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-4.0";
+export const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-5.0";
 export type Phase =
   | "discard"
   | "ai_discarding"
@@ -1540,14 +1540,15 @@ type PegTableEv = {
 type PegTablePolicy = { pegEvs: Record<string, PegTableEvTuple | undefined> };
 
 const pegCardCache = Array.from({ length: 13 }, (_, rank) => new Card(rank));
-const defaultPegTablePolicy = pegTablePolicy4 as PegTablePolicy;
+const defaultPegTablePolicy = pegTablePolicy5 as PegTablePolicy;
 const PEG_TABLE_POLICIES: Partial<Record<Opponent, PegTablePolicy>> = {
-  "schell_table-peg_table-4.0": defaultPegTablePolicy,
-  "ras_table-peg_table-4.0": defaultPegTablePolicy,
+  "schell_table-peg_table-5.0": defaultPegTablePolicy,
 };
 const PEG_TABLE_POLICY_LOADERS: Partial<Record<Opponent, () => Promise<PegTablePolicy>>> = {
-  "schell_table-peg_table-5.0": () =>
-    import("./peg-table-policy-5.0.json").then((module) => module.default as PegTablePolicy),
+  "schell_table-peg_table-4.0": () =>
+    import("./peg-table-policy.json").then((module) => module.default as PegTablePolicy),
+  "ras_table-peg_table-4.0": () =>
+    import("./peg-table-policy.json").then((module) => module.default as PegTablePolicy),
   "schell_table-peg_table-6.0": () =>
     import("./peg-table-policy-6.0.json").then((module) => module.default as PegTablePolicy),
 };
