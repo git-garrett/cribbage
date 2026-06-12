@@ -1,4 +1,4 @@
-import { CRIB_FLUSH_BONUS_BY_SUIT_COUNT } from "./models/schell_table-peg_table-7.0/crib-flush-bonus";
+import cribFlushBonusBySuitCount from "./models/schell_table-peg_table-7.0/crib-flush-bonus.json";
 
 export type PlayerKey = "human" | "ai";
 export type Opponent =
@@ -68,6 +68,7 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "schell_table-peg_table-6.0": "Schell Table + Peg Table 6.0",
   "schell_table-peg_table-7.0": "Schell Table + Peg Table 7.0",
 };
+const CRIB_FLUSH_BONUS_BY_SUIT_COUNT = cribFlushBonusBySuitCount as number[];
 type DiscardTableEngine = Exclude<Opponent, "original-1.1" | "original_exhaustive_peg-1.2">;
 type CribTable = { own: number[][]; opponent: number[][] };
 const DISCARD_TABLES: Record<string, CribTable> = {
