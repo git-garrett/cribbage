@@ -702,6 +702,40 @@ button:disabled {
   font-weight: 800;
 }
 
+.error-average-card {
+  grid-template-columns: 1fr;
+}
+
+.error-average-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.7fr) minmax(0, 1.3fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.error-average-row strong {
+  font-size: 12px;
+}
+
+.error-average-row em {
+  color: var(--ink);
+  font-style: normal;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.error-severity-none {
+  color: var(--muted) !important;
+}
+
+.error-severity-medium {
+  color: #b77900 !important;
+}
+
+.error-severity-high {
+  color: #b42318 !important;
+}
+
 .decision-outcome-impact {
   color: rgba(255, 255, 255, 0.9);
   font-size: 12px;

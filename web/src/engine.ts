@@ -229,6 +229,11 @@ export interface AnalyticsDecisionReview {
   selectedEv: number;
   recommendedEv: number;
   delta: number;
+  components?: {
+    selected: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
+    recommended: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
+    delta: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
+  };
 }
 export type AnalyticsEvent =
   | {
@@ -1329,6 +1334,7 @@ export class CribbageGame {
       selectedEv: roundEv(analysis.selectedEv),
       recommendedEv: roundEv(analysis.recommendedEv),
       delta: roundEv(analysis.recommendedEv - analysis.selectedEv),
+      components: decisionComponents(analysis.selectedComponents, analysis.recommendedComponents),
     };
   }
 
@@ -1343,6 +1349,10 @@ export class CribbageGame {
       selectedEv: roundEv(selectedEv),
       recommendedEv: roundEv(recommendedEv),
       delta: roundEv(recommendedEv - selectedEv),
+      components: decisionComponents(
+        { [player === this.dealer ? "peggingDealer" : "peggingPone"]: selectedEv },
+        { [player === this.dealer ? "peggingDealer" : "peggingPone"]: recommendedEv },
+      ),
     };
   }
 
@@ -1776,6 +1786,8 @@ function analyzeDiscardChoice(
   recommended: Card[];
   selectedPegTableLead: number | null;
   recommendedPegTableLead: number | null;
+  selectedComponents: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
+  recommendedComponents: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
 } {
   const deck = fullDeck().filter((card) => !hand.some((held) => held.id === card.id));
   const role = myCrib ? "dealer" : "pone";
@@ -1784,6 +1796,8 @@ function analyzeDiscardChoice(
   let selectedEv = Number.NEGATIVE_INFINITY;
   let selectedPegTableLead: number | null = null;
   let recommendedPegTableLead: number | null = null;
+  let selectedComponents: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>> = {};
+  let recommendedComponents: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>> = {};
   const selectedKey = cardSetKey(selected);
 
   for (const discard of combinations(hand, 2, 2)) {
@@ -1792,18 +1806,25 @@ function analyzeDiscardChoice(
     const cribScore = expectedCribScore(discard, deck, myCrib, engine);
     const pegging = pegTableEv(hand, discard, role, engine);
     const total = (myCrib ? handScore + cribScore : handScore - cribScore) + pegging.netPeggingEv;
+    const components: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>> = {
+      [myCrib ? "handDealer" : "handPone"]: handScore,
+      [myCrib ? "peggingDealer" : "peggingPone"]: pegging.netPeggingEv,
+      crib: myCrib ? cribScore : -cribScore,
+    };
     if (cardSetKey(discard) === selectedKey) {
       selectedEv = total;
       selectedPegTableLead = pegging.bestLead;
+      selectedComponents = components;
     }
     if (total > recommendedEv) {
       recommendedEv = total;
       recommended = discard;
       recommendedPegTableLead = pegging.bestLead;
+      recommendedComponents = components;
     }
   }
 
-  return { selectedEv, recommendedEv, recommended, selectedPegTableLead, recommendedPegTableLead };
+  return { selectedEv, recommendedEv, recommended, selectedPegTableLead, recommendedPegTableLead, selectedComponents, recommendedComponents };
 }
 
 function peggingPlayEv(
@@ -1868,6 +1889,28 @@ function cardSetKey(cards: Card[]): string {
 
 function roundEv(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function decisionComponents(
+  selected: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>,
+  recommended: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>,
+): AnalyticsDecisionReview["components"] {
+  const selectedRounded: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>> = {};
+  const recommendedRounded: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>> = {};
+  const deltaRounded: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>> = {};
+  const keys = new Set([...Object.keys(selected), ...Object.keys(recommended)] as Array<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib">);
+  for (const key of keys) {
+    const selectedValue = selected[key] ?? 0;
+    const recommendedValue = recommended[key] ?? 0;
+    selectedRounded[key] = roundEv(selectedValue);
+    recommendedRounded[key] = roundEv(recommendedValue);
+    deltaRounded[key] = roundEv(recommendedValue - selectedValue);
+  }
+  return {
+    selected: selectedRounded,
+    recommended: recommendedRounded,
+    delta: deltaRounded,
+  };
 }
 
 function createAnalyticsId(prefix: string): string {

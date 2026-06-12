@@ -188,6 +188,8 @@ interface AnalyticsTotals {
 }
 
 type ScoreKey = "peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib";
+const ERROR_EV_THRESHOLD = 0.25;
+const ERROR_SCORE_KEYS: ScoreKey[] = ["peggingDealer", "peggingPone", "handDealer", "handPone", "crib"];
 type GameEndEvent = Extract<AnalyticsEvent, { type: "game" }> & { action: "end" };
 type ScoreEvent = Extract<AnalyticsEvent, { type: "score" }>;
 type DiscardEvent = Extract<AnalyticsEvent, { type: "discard" }>;
@@ -206,6 +208,11 @@ interface DecisionEvTotals {
   dealer: number;
   pone: number;
   count: number;
+}
+interface DecisionErrorAverages {
+  totals: Record<ScoreKey, number>;
+  games: number;
+  hands: number;
 }
 
 function loadSavedGame(): CribbageGame {
@@ -1132,7 +1139,8 @@ function decisionMistakes(events: AnalyticsEvent[], gameId: string): DecisionRev
     ) {
       return false;
     }
-    return !sameCards(event.review.selected, event.review.recommended);
+    return !sameCards(event.review.selected, event.review.recommended) &&
+      Math.max(0, event.review.delta) >= ERROR_EV_THRESHOLD;
   });
 }
 
@@ -1154,6 +1162,109 @@ function decisionEvTotals(events: DecisionReviewEvent[]): DecisionEvTotals {
     if (event.role === "pone") totals.pone += delta;
   }
   return totals;
+}
+
+function emptyDecisionErrorTotals(): Record<ScoreKey, number> {
+  return {
+    peggingDealer: 0,
+    peggingPone: 0,
+    handDealer: 0,
+    handPone: 0,
+    crib: 0,
+  };
+}
+
+function categorizedDecisionError(event: DecisionReviewEvent): Record<ScoreKey, number> {
+  const totals = emptyDecisionErrorTotals();
+  const totalDelta = Math.max(0, event.review.delta);
+  if (totalDelta < ERROR_EV_THRESHOLD) return totals;
+  const componentDeltas = event.review.components?.delta;
+  if (componentDeltas) {
+    for (const key of ERROR_SCORE_KEYS) {
+      const value = Math.max(0, Number(componentDeltas[key] ?? 0));
+      if (value >= ERROR_EV_THRESHOLD) totals[key] += value;
+    }
+    if (ERROR_SCORE_KEYS.some((key) => totals[key] > 0)) return totals;
+  }
+
+  if (event.type === "pegging") {
+    totals[event.role === "dealer" ? "peggingDealer" : "peggingPone"] += totalDelta;
+    return totals;
+  }
+
+  totals[event.role === "dealer" ? "handDealer" : "handPone"] += totalDelta;
+  if (event.role === "dealer") totals.crib += totalDelta;
+  return totals;
+}
+
+function decisionErrorAverages(events: AnalyticsEvent[], games: GameLogRecord[]): DecisionErrorAverages {
+  const gameIds = new Set(games.map((game) => game.gameId));
+  const handIds = new Set<string>();
+  const totals = emptyDecisionErrorTotals();
+  for (const event of events) {
+    if (event.type === "hand" && gameIds.has(event.gameId)) {
+      handIds.add(`${event.gameId}:${event.handNumber}`);
+    }
+    if (
+      !gameIds.has(event.gameId) ||
+      !((event.type === "discard" && event.player === "human") ||
+        (event.type === "pegging" && event.action === "play" && event.player === "human")) ||
+      !event.review ||
+      sameCards(event.review.selected, event.review.recommended) ||
+      Math.max(0, event.review.delta) < ERROR_EV_THRESHOLD
+    ) {
+      continue;
+    }
+    const categorized = categorizedDecisionError(event as DecisionReviewEvent);
+    for (const key of ERROR_SCORE_KEYS) totals[key] += categorized[key];
+  }
+  return {
+    totals,
+    games: games.length,
+    hands: handIds.size,
+  };
+}
+
+function decisionErrorAveragesCard(all: DecisionErrorAverages, recent: DecisionErrorAverages): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "analytics-total analytics-total-wide error-average-card";
+  const title = document.createElement("strong");
+  title.textContent = "User Error EV";
+  card.append(title);
+  for (const key of ERROR_SCORE_KEYS) {
+    const row = document.createElement("span");
+    row.className = "error-average-row";
+    const label = document.createElement("strong");
+    const perGame = averageError(all.totals[key], all.games);
+    const perHand = averageError(all.totals[key], all.hands);
+    const recentPerGame = averageError(recent.totals[key], recent.games);
+    const recentPerHand = averageError(recent.totals[key], recent.hands);
+    label.textContent = errorScoreLabel(key);
+    label.classList.add(errorSeverityClass(Math.max(perGame, perHand, recentPerGame, recentPerHand)));
+    const value = document.createElement("em");
+    value.textContent = `All ${formatEv(perGame)}/game ${formatEv(perHand)}/hand · L10 ${formatEv(recentPerGame)}/game ${formatEv(recentPerHand)}/hand`;
+    row.append(label, value);
+    card.append(row);
+  }
+  return card;
+}
+
+function averageError(total: number, count: number): number {
+  return count > 0 ? total / count : 0;
+}
+
+function errorSeverityClass(value: number): string {
+  if (value >= 1) return "error-severity-high";
+  if (value > 0) return "error-severity-medium";
+  return "error-severity-none";
+}
+
+function errorScoreLabel(key: ScoreKey): string {
+  if (key === "peggingDealer") return "Peg as dealer";
+  if (key === "peggingPone") return "Peg as pone";
+  if (key === "handDealer") return "Hand as dealer";
+  if (key === "handPone") return "Hand as pone";
+  return "Crib";
 }
 
 function decisionEvSummary(totals: DecisionEvTotals): HTMLElement {
@@ -1592,7 +1703,7 @@ function renderAnalytics(): void {
   const startedHands = handEvents.filter((event) => event.action === "start").length;
   els.analyticsSummary.textContent = `${completedGames} completed game${completedGames === 1 ? "" : "s"}; ${startedHands} hand${startedHands === 1 ? "" : "s"} logged.`;
 
-  renderAnalyticsTotals(scoreEvents, gameEvents);
+  renderAnalyticsTotals(events, scoreEvents, gameEvents);
   renderAnalyticsRows(
     els.analyticsGames,
     [...gameEvents].reverse().slice(0, 40).map((event) =>
@@ -1742,6 +1853,7 @@ function syncGameLogFilter(games: GameLogRecord[]): void {
 }
 
 function renderAnalyticsTotals(
+  events: AnalyticsEvent[],
   scoreEvents: Extract<AnalyticsEvent, { type: "score" }>[],
   gameEvents: Extract<AnalyticsEvent, { type: "game" }>[],
 ): void {
@@ -1875,6 +1987,11 @@ function renderAnalyticsTotals(
   addAiBaselineTotals(aiAllTotals, aiByModel);
   els.analyticsTotals.innerHTML = "";
   els.analyticsTotals.append(analyticsTotalCard("User", humanTotals, "human"));
+  const games = gameLogRecords(events);
+  els.analyticsTotals.append(decisionErrorAveragesCard(
+    decisionErrorAverages(events, games),
+    decisionErrorAverages(events, games.slice(0, 10)),
+  ));
   els.analyticsTotals.append(analyticsTotalCard("User vs All AI", humanTotals, "human"));
   for (const engine of sortedAnalyticsEngines(aiByModel, aiHumanByModel, humanByModel)) {
     const userTotals = humanByModel.get(engine) ?? emptyAnalyticsTotals();
