@@ -13,7 +13,6 @@
     "benchmark:iterative-pegging-table": "node --max-old-space-size=8192 scripts/generate-iterative-pegging-table.cjs benchmark 96 8,10,12 3",
     "generate:iterative-pegging-table": "node --max-old-space-size=8192 scripts/generate-iterative-pegging-table.cjs generate benchmarks/pegging-table 12 3",
     "generate:iterative-pegging-table:2": "node --max-old-space-size=8192 scripts/generate-iterative-pegging-table.cjs generate benchmarks/pegging-table 12 3 0 0 none 0 2",
-    "continue:flush-pegging-table": "node scripts/run-flush-table-continuation.cjs",
     "launch:background": "node scripts/launch-background.cjs",
     "launch:top-three-10k": "node scripts/launch-background.cjs top-three-10k -- /usr/local/bin/node scripts/run-top-three-10k-benchmark.cjs benchmarks/ai-smoke/top-three-10k-full-analytics 10000 25 10",
     "install:git-hooks": "git config core.hooksPath .githooks",
