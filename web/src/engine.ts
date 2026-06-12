@@ -1,3 +1,5 @@
+import { CRIB_FLUSH_BONUS_BY_SUIT_COUNT } from "./models/schell_table-peg_table-7.0/crib-flush-bonus";
+
 export type PlayerKey = "human" | "ai";
 export type Opponent =
   | "original-1.1"
@@ -1544,15 +1546,15 @@ const pegCardCache = Array.from({ length: 13 }, (_, rank) => new Card(rank));
 const PEG_TABLE_POLICIES: Partial<Record<Opponent, PegTablePolicy>> = {};
 const PEG_TABLE_POLICY_LOADERS: Partial<Record<Opponent, () => Promise<PegTablePolicy>>> = {
   "schell_table-peg_table-4.0": () =>
-    import("./peg-table-policy.json").then((module) => module.default as PegTablePolicy),
+    import("./models/schell_table-peg_table-4.0/peg-table-policy.json").then((module) => module.default as PegTablePolicy),
   "ras_table-peg_table-4.0": () =>
-    import("./peg-table-policy.json").then((module) => module.default as PegTablePolicy),
+    import("./models/schell_table-peg_table-4.0/peg-table-policy.json").then((module) => module.default as PegTablePolicy),
   "schell_table-peg_table-5.0": () =>
-    import("./peg-table-policy-5.0.json").then((module) => module.default as PegTablePolicy),
+    import("./models/schell_table-peg_table-5.0/peg-table-policy.json").then((module) => module.default as PegTablePolicy),
   "schell_table-peg_table-6.0": () =>
-    import("./peg-table-policy-6.0.json").then((module) => module.default as PegTablePolicy),
+    import("./models/schell_table-peg_table-6.0/peg-table-policy.json").then((module) => module.default as PegTablePolicy),
   "schell_table-peg_table-7.0": () =>
-    import("./peg-table-policy-6.0.json").then((module) => module.default as PegTablePolicy),
+    import("./models/schell_table-peg_table-6.0/peg-table-policy.json").then((module) => module.default as PegTablePolicy),
 };
 
 export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
@@ -1715,11 +1717,6 @@ function choose(n: number, k: number): number {
   }
   return result;
 }
-
-const CRIB_FLUSH_UNKNOWN_CARDS = 46;
-const CRIB_FLUSH_BONUS_BY_SUIT_COUNT = Array.from({ length: 7 }, (_, suitCount) =>
-  5 * (choose(13 - suitCount, 3) / choose(CRIB_FLUSH_UNKNOWN_CARDS, 3))
-);
 
 function simulatePegging(state: PegSimulationState): WeightedScore {
   const memo = new Map<string, WeightedScore>();

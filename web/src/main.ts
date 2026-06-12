@@ -14,7 +14,7 @@ import {
   WinGame,
 } from "./engine";
 import aiBaseline from "./ai-baseline.json";
-import { MODEL_DOCS, MODEL_INFO_ORDER } from "./model-docs";
+import { MODEL_DOCS, MODEL_INFO_ORDER } from "./models/model-info";
 
 type BaselineScoreTotals = Pick<
   AnalyticsTotals,

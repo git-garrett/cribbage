@@ -1,15 +1,15 @@
-import type { Opponent } from "./engine";
-import original11 from "./model-docs/original-1.1.md?raw";
-import originalPeg12 from "./model-docs/original_exhaustive_peg-1.2.md?raw";
-import ras20 from "./model-docs/ras_table-2.0.md?raw";
-import rasPeg30 from "./model-docs/ras_table-peg-3.0.md?raw";
-import rasPegTable40 from "./model-docs/ras_table-peg_table-4.0.md?raw";
-import schell20 from "./model-docs/schell_table-2.0.md?raw";
-import schellPeg30 from "./model-docs/schell_table-peg-3.0.md?raw";
-import schellPegTable40 from "./model-docs/schell_table-peg_table-4.0.md?raw";
-import schellPegTable50 from "./model-docs/schell_table-peg_table-5.0.md?raw";
-import schellPegTable60 from "./model-docs/schell_table-peg_table-6.0.md?raw";
-import schellPegTable70 from "./model-docs/schell_table-peg_table-7.0.md?raw";
+import type { Opponent } from "../engine";
+import original11 from "./original-1.1/model.md?raw";
+import originalPeg12 from "./original_exhaustive_peg-1.2/model.md?raw";
+import ras20 from "./ras_table-2.0/model.md?raw";
+import rasPeg30 from "./ras_table-peg-3.0/model.md?raw";
+import rasPegTable40 from "./ras_table-peg_table-4.0/model.md?raw";
+import schell20 from "./schell_table-2.0/model.md?raw";
+import schellPeg30 from "./schell_table-peg-3.0/model.md?raw";
+import schellPegTable40 from "./schell_table-peg_table-4.0/model.md?raw";
+import schellPegTable50 from "./schell_table-peg_table-5.0/model.md?raw";
+import schellPegTable60 from "./schell_table-peg_table-6.0/model.md?raw";
+import schellPegTable70 from "./schell_table-peg_table-7.0/model.md?raw";
 
 export const MODEL_INFO_ORDER: Opponent[] = [
   "schell_table-peg_table-5.0",
