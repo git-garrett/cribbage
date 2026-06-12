@@ -550,6 +550,7 @@ button:disabled {
 
 .analytics-page,
 .game-log-page,
+.model-info-page,
 .decision-review-page {
   display: grid;
   gap: 14px;
@@ -561,6 +562,7 @@ button:disabled {
 
 .analytics-page[hidden],
 .game-log-page[hidden],
+.model-info-page[hidden],
 .decision-review-page[hidden] {
   display: none;
 }
@@ -569,6 +571,8 @@ button:disabled {
 .app[data-view="analytics"] .table,
 .app[data-view="game-log"] .scoreboard,
 .app[data-view="game-log"] .table,
+.app[data-view="model-info"] .scoreboard,
+.app[data-view="model-info"] .table,
 .app[data-view="decision-review"] .scoreboard,
 .app[data-view="decision-review"] .table {
   display: none;
@@ -853,6 +857,66 @@ button:disabled {
 .decision-review-content {
   display: grid;
   gap: 8px;
+}
+
+.model-info-layout {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.35fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.model-info-list {
+  display: grid;
+  gap: 6px;
+}
+
+.model-info-item {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-soft);
+  color: var(--ink);
+  font-size: 13px;
+  text-align: left;
+}
+
+.model-info-item.selected {
+  border-color: var(--accent);
+  background: #eef6f5;
+  font-weight: 700;
+}
+
+.model-info-content {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-soft);
+  font-size: 14px;
+  line-height: 1.42;
+}
+
+.model-info-content h3,
+.model-info-content h4,
+.model-info-content p,
+.model-info-content ul {
+  margin: 0;
+}
+
+.model-info-content h3 {
+  font-size: 17px;
+}
+
+.model-info-content h4 {
+  font-size: 15px;
+}
+
+.model-info-content ul {
+  padding-left: 18px;
 }
 
 .game-log-list {
@@ -1543,6 +1607,7 @@ button.card {
   }
 
   .game-log-layout,
+  .model-info-layout,
   .decision-context,
   .decision-ev-summary {
     grid-template-columns: 1fr;

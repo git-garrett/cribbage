@@ -14,6 +14,7 @@ import {
   WinGame,
 } from "./engine";
 import aiBaseline from "./ai-baseline.json";
+import { MODEL_DOCS, MODEL_INFO_ORDER } from "./model-docs";
 
 type BaselineScoreTotals = Pick<
   AnalyticsTotals,
@@ -60,7 +61,9 @@ const state: {
   resultOverride: string[] | null;
   analyticsOpen: boolean;
   gameLogOpen: boolean;
+  modelInfoOpen: boolean;
   decisionReviewOpen: boolean;
+  selectedModelInfo: Opponent;
   selectedLogGameId: string | null;
   snapshotEventId: string | null;
   dismissedGameOverId: string | null;
@@ -73,7 +76,9 @@ const state: {
   resultOverride: null,
   analyticsOpen: false,
   gameLogOpen: false,
+  modelInfoOpen: false,
   decisionReviewOpen: false,
+  selectedModelInfo: DEFAULT_OPPONENT,
   selectedLogGameId: null,
   snapshotEventId: null,
   dismissedGameOverId: null,
@@ -102,6 +107,12 @@ const els = {
   gameLogSummary: document.querySelector("#game-log-summary") as HTMLElement,
   gameLogOpponent: document.querySelector("#game-log-opponent") as HTMLSelectElement,
   gameLogList: document.querySelector("#game-log-list") as HTMLElement,
+  modelInfoOpen: document.querySelector("#model-info-open") as HTMLButtonElement,
+  modelInfoClose: document.querySelector("#model-info-close") as HTMLButtonElement,
+  modelInfoPage: document.querySelector("#model-info-page") as HTMLElement,
+  modelInfoSummary: document.querySelector("#model-info-summary") as HTMLElement,
+  modelInfoList: document.querySelector("#model-info-list") as HTMLElement,
+  modelInfoContent: document.querySelector("#model-info-content") as HTMLElement,
   decisionReviewPage: document.querySelector("#decision-review-page") as HTMLElement,
   decisionReviewClose: document.querySelector("#decision-review-close") as HTMLButtonElement,
   decisionReviewSummary: document.querySelector("#decision-review-summary") as HTMLElement,
@@ -240,7 +251,7 @@ function saveGame(): void {
 }
 
 let localGame = loadSavedGame();
-els.appVersion.textContent = __APP_VERSION__;
+els.appVersion.textContent = displayAppVersion(__APP_VERSION__);
 saveGame();
 
 function loadAnalytics(): AnalyticsStore {
@@ -1860,6 +1871,69 @@ function renderDecisionReviewPage(): void {
   );
 }
 
+function renderModelInfoPage(): void {
+  if (!MODEL_DOCS[state.selectedModelInfo]) state.selectedModelInfo = DEFAULT_OPPONENT;
+  els.modelInfoSummary.textContent = `Current default: ${engineName(DEFAULT_OPPONENT)}.`;
+  els.modelInfoList.innerHTML = "";
+  for (const model of MODEL_INFO_ORDER) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "model-info-item";
+    button.classList.toggle("selected", model === state.selectedModelInfo);
+    button.textContent = engineName(model);
+    button.addEventListener("click", () => {
+      state.selectedModelInfo = model;
+      renderModelInfoPage();
+    });
+    els.modelInfoList.append(button);
+  }
+  els.modelInfoContent.innerHTML = markdownSummary(MODEL_DOCS[state.selectedModelInfo]);
+}
+
+function markdownSummary(markdown: string): string {
+  const html: string[] = [];
+  let listOpen = false;
+  for (const rawLine of markdown.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) {
+      if (listOpen) {
+        html.push("</ul>");
+        listOpen = false;
+      }
+      continue;
+    }
+    if (line.startsWith("- ")) {
+      if (!listOpen) {
+        html.push("<ul>");
+        listOpen = true;
+      }
+      html.push(`<li>${escapeHtml(line.slice(2))}</li>`);
+      continue;
+    }
+    if (listOpen) {
+      html.push("</ul>");
+      listOpen = false;
+    }
+    if (line.startsWith("# ")) {
+      html.push(`<h3>${escapeHtml(line.slice(2))}</h3>`);
+    } else if (line.startsWith("## ")) {
+      html.push(`<h4>${escapeHtml(line.slice(3))}</h4>`);
+    } else {
+      html.push(`<p>${escapeHtml(line)}</p>`);
+    }
+  }
+  if (listOpen) html.push("</ul>");
+  return html.join("");
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;");
+}
+
 function gameLogRecords(events: AnalyticsEvent[]): GameLogRecord[] {
   const starts = new Map<string, Extract<AnalyticsEvent, { type: "game" }>>();
   const records: GameLogRecord[] = [];
@@ -2062,6 +2136,7 @@ function analyticsEngineSortKey(engine: Opponent): number {
   return [
     "schell_table-peg_table-4.0",
     "schell_table-peg_table-5.0",
+    "schell_table-peg_table-7.0",
     "schell_table-peg_table-6.0",
     "ras_table-peg_table-4.0",
     "schell_table-peg-3.0",
@@ -2341,6 +2416,7 @@ function engineName(engine: string | undefined): string {
   if (engine === "schell_table-peg_table-4.0") return "Schell Table + Peg Table 4.0";
   if (engine === "schell_table-peg_table-5.0") return "Schell Table + Peg Table 5.0";
   if (engine === "schell_table-peg_table-6.0") return "Schell Table + Peg Table 6.0";
+  if (engine === "schell_table-peg_table-7.0") return "Schell Table + Peg Table 7.0";
   return engine || "-";
 }
 
@@ -2387,11 +2463,16 @@ function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
     engine === "schell_table-peg_table-4.0" ||
     engine === "schell_table-peg_table-5.0" ||
     engine === "schell_table-peg_table-6.0" ||
+    engine === "schell_table-peg_table-7.0" ||
     engine === "schell_table-2.0"
   ) {
     return engine;
   }
   return DEFAULT_OPPONENT;
+}
+
+function displayAppVersion(version: string): string {
+  return version.replace(/^(\d+\.\d+)\.0$/, "$1");
 }
 
 function shortDate(value: string): string {
@@ -2424,15 +2505,19 @@ function render(game: GameState | null): void {
     ? "analytics"
     : state.gameLogOpen
       ? "game-log"
-      : state.decisionReviewOpen
-        ? "decision-review"
-        : "game";
+      : state.modelInfoOpen
+        ? "model-info"
+        : state.decisionReviewOpen
+          ? "decision-review"
+          : "game";
   els.app.dataset.inlineResult = shouldInlineResult(game) ? "true" : "false";
   els.analyticsPage.hidden = !state.analyticsOpen;
   els.gameLogPage.hidden = !state.gameLogOpen;
+  els.modelInfoPage.hidden = !state.modelInfoOpen;
   els.decisionReviewPage.hidden = !state.decisionReviewOpen;
   if (state.analyticsOpen) renderAnalytics();
   if (state.gameLogOpen) renderGameLog();
+  if (state.modelInfoOpen) renderModelInfoPage();
   if (state.decisionReviewOpen) renderDecisionReviewPage();
   els.humanScore.textContent = String(game.scores.human);
   els.aiScore.textContent = String(game.scores.ai);
@@ -2527,6 +2612,7 @@ els.analyticsOpen.addEventListener("click", () => {
   closeDecisionSnapshot();
   state.analyticsOpen = true;
   state.gameLogOpen = false;
+  state.modelInfoOpen = false;
   state.decisionReviewOpen = false;
   els.settingsPanel.hidden = true;
   els.menuToggle.setAttribute("aria-expanded", "false");
@@ -2542,6 +2628,7 @@ els.gameLogOpen.addEventListener("click", () => {
   closeDecisionSnapshot();
   state.gameLogOpen = true;
   state.analyticsOpen = false;
+  state.modelInfoOpen = false;
   state.decisionReviewOpen = false;
   els.settingsPanel.hidden = true;
   els.menuToggle.setAttribute("aria-expanded", "false");
@@ -2550,6 +2637,23 @@ els.gameLogOpen.addEventListener("click", () => {
 
 els.gameLogClose.addEventListener("click", () => {
   state.gameLogOpen = false;
+  render(state.game);
+});
+
+els.modelInfoOpen.addEventListener("click", () => {
+  closeDecisionSnapshot();
+  state.selectedModelInfo = normalizeAnalyticsEngine(els.opponent.value);
+  state.modelInfoOpen = true;
+  state.analyticsOpen = false;
+  state.gameLogOpen = false;
+  state.decisionReviewOpen = false;
+  els.settingsPanel.hidden = true;
+  els.menuToggle.setAttribute("aria-expanded", "false");
+  render(state.game);
+});
+
+els.modelInfoClose.addEventListener("click", () => {
+  state.modelInfoOpen = false;
   render(state.game);
 });
 

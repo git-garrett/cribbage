@@ -23,6 +23,7 @@
             <select id="opponent">
               <option value="schell_table-peg_table-4.0">Schell Table + Peg Table 4.0</option>
               <option value="schell_table-peg_table-5.0" selected>Schell Table + Peg Table 5.0</option>
+              <option value="schell_table-peg_table-7.0">Schell Table + Peg Table 7.0</option>
               <option value="schell_table-peg_table-6.0">Schell Table + Peg Table 6.0</option>
               <option value="ras_table-peg_table-4.0">Ras Table + Peg Table 4.0</option>
               <option value="schell_table-peg-3.0">Schell Table + Peg 3.0</option>
@@ -35,6 +36,7 @@
           </label>
           <button id="analytics-open" type="button">Analytics</button>
           <button id="game-log-open" type="button">Game log</button>
+          <button id="model-info-open" type="button">Model info</button>
           <button id="new-game" type="button">New game</button>
           <div class="app-version">Version <span id="app-version">-</span></div>
         </div>
@@ -162,6 +164,20 @@
           <button id="decision-review-close" type="button">Back</button>
         </div>
         <div id="decision-review-content" class="decision-review-content"></div>
+      </section>
+
+      <section id="model-info-page" class="model-info-page" aria-label="Model info" hidden>
+        <div class="analytics-header">
+          <div>
+            <h2>Model info</h2>
+            <p id="model-info-summary">Current default: Schell Table + Peg Table 5.0.</p>
+          </div>
+          <button id="model-info-close" type="button">Done</button>
+        </div>
+        <div class="model-info-layout">
+          <div id="model-info-list" class="model-info-list"></div>
+          <article id="model-info-content" class="model-info-content"></article>
+        </div>
       </section>
 
       <div id="decision-snapshot" class="decision-snapshot" role="dialog" aria-modal="true" aria-labelledby="decision-snapshot-title" hidden>

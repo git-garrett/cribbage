@@ -11,6 +11,7 @@ export type Opponent =
   | "schell_table-peg_table-4.0"
   | "schell_table-peg_table-5.0"
   | "schell_table-peg_table-6.0"
+  | "schell_table-peg_table-7.0"
   | "schell_table-2.0";
 type LegacyOpponent =
   | "ras-table-1.0"
@@ -65,6 +66,7 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "schell_table-peg_table-4.0": "Schell Table + Peg Table 4.0",
   "schell_table-peg_table-5.0": "Schell Table + Peg Table 5.0",
   "schell_table-peg_table-6.0": "Schell Table + Peg Table 6.0",
+  "schell_table-peg_table-7.0": "Schell Table + Peg Table 7.0",
 };
 type DiscardTableEngine = Exclude<Opponent, "original-1.1" | "original_exhaustive_peg-1.2">;
 type CribTable = { own: number[][]; opponent: number[][] };
@@ -140,6 +142,7 @@ DISCARD_TABLES["schell_table-peg-3.0"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-4.0"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-5.0"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-6.0"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-7.0"] = DISCARD_TABLES["schell_table-2.0"];
 
 export class WinGame extends Error {}
 
@@ -1543,6 +1546,7 @@ const pegCardCache = Array.from({ length: 13 }, (_, rank) => new Card(rank));
 const defaultPegTablePolicy = pegTablePolicy5 as PegTablePolicy;
 const PEG_TABLE_POLICIES: Partial<Record<Opponent, PegTablePolicy>> = {
   "schell_table-peg_table-5.0": defaultPegTablePolicy,
+  "schell_table-peg_table-7.0": defaultPegTablePolicy,
 };
 const PEG_TABLE_POLICY_LOADERS: Partial<Record<Opponent, () => Promise<PegTablePolicy>>> = {
   "schell_table-peg_table-4.0": () =>
@@ -1574,6 +1578,10 @@ function usesExhaustivePegging(engine: Opponent): boolean {
 
 function usesPegTableDiscard(engine: Opponent): boolean {
   return engine.includes("-peg_table-");
+}
+
+function usesCribFlushAdjustment(engine: Opponent): boolean {
+  return engine === "schell_table-peg_table-7.0";
 }
 
 function pegTableEv(
@@ -1818,7 +1826,8 @@ function expectedCribScore(
   const table = DISCARD_TABLES[engine as DiscardTableEngine];
   if (table) {
     const ranks = discard.map((card) => card.rank).sort((a, b) => a - b);
-    return (myCrib ? table.own : table.opponent)[ranks[0]][ranks[1]];
+    const baseScore = (myCrib ? table.own : table.opponent)[ranks[0]][ranks[1]];
+    return baseScore + (usesCribFlushAdjustment(engine) ? expectedCribFlushBonus(discard, deck) : 0);
   }
   let cribTotal = 0;
   let cribCount = 0;
@@ -1827,6 +1836,14 @@ function expectedCribScore(
     cribCount += 1;
   }
   return cribTotal / cribCount;
+}
+
+function expectedCribFlushBonus(discard: Card[], deck: Card[]): number {
+  if (discard.length !== 2 || discard[0].suit !== discard[1].suit) return 0;
+  const sameSuitRemaining = deck.filter((card) => card.suit === discard[0].suit).length;
+  const totalUnknownTriples = choose(deck.length, 3);
+  if (totalUnknownTriples === 0) return 0;
+  return 5 * (choose(sameSuitRemaining, 3) / totalUnknownTriples);
 }
 
 function analyzeDiscardChoice(
