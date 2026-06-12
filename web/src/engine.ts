@@ -1,4 +1,5 @@
-import pegTablePolicy from "./peg-table-policy.json";
+import pegTablePolicy4 from "./peg-table-policy.json";
+import pegTablePolicy5 from "./peg-table-policy-5.0.json";
 
 export type PlayerKey = "human" | "ai";
 export type Opponent =
@@ -9,6 +10,7 @@ export type Opponent =
   | "ras_table-peg_table-4.0"
   | "schell_table-peg-3.0"
   | "schell_table-peg_table-4.0"
+  | "schell_table-peg_table-5.0"
   | "schell_table-2.0";
 type LegacyOpponent =
   | "ras-table-1.0"
@@ -61,6 +63,7 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "schell_table-2.0": "Schell Table 2.0",
   "schell_table-peg-3.0": "Schell Table + Peg 3.0",
   "schell_table-peg_table-4.0": "Schell Table + Peg Table 4.0",
+  "schell_table-peg_table-5.0": "Schell Table + Peg Table 5.0",
 };
 type DiscardTableEngine = Exclude<Opponent, "original-1.1" | "original_exhaustive_peg-1.2">;
 type CribTable = { own: number[][]; opponent: number[][] };
@@ -134,6 +137,7 @@ DISCARD_TABLES["ras_table-peg-3.0"] = DISCARD_TABLES["ras_table-2.0"];
 DISCARD_TABLES["ras_table-peg_table-4.0"] = DISCARD_TABLES["ras_table-2.0"];
 DISCARD_TABLES["schell_table-peg-3.0"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-4.0"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-5.0"] = DISCARD_TABLES["schell_table-2.0"];
 
 export class WinGame extends Error {}
 
@@ -1494,6 +1498,9 @@ type PegTableEv = {
 };
 
 const pegCardCache = Array.from({ length: 13 }, (_, rank) => new Card(rank));
+const PEG_TABLE_POLICIES = {
+  "schell_table-peg_table-5.0": pegTablePolicy5,
+} as Record<string, { pegEvs: Record<string, PegTableEvTuple | undefined> }>;
 
 function usesExhaustivePegging(engine: Opponent): boolean {
   return engine === "original_exhaustive_peg-1.2" ||
@@ -1519,7 +1526,8 @@ function pegTableEv(
   };
   const handRanks = rankCountsForCards(hand);
   const discardRanks = rankCountsForCards(discard);
-  const entry = ((pegTablePolicy.pegEvs as unknown) as Record<string, PegTableEvTuple | undefined>)[
+  const policy = PEG_TABLE_POLICIES[engine] ?? pegTablePolicy4;
+  const entry = policy.pegEvs[
     `${handRanks.join("")}:${discardRanks.join("")}:${role}`
   ];
   if (!entry) return {

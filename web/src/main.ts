@@ -596,7 +596,7 @@ function completedHandCount(phase: GameState["phase"], handNumber: number): numb
 function parHolesFor(player: "human" | "ai", firstDealerPlayer: "human" | "ai"): number[] {
   const holes: number[] = [player === firstDealerPlayer ? 7 : 17];
   let par = holes[0];
-  for (let hand = 1; hand <= 16 && par < 121; hand += 1) {
+  for (let hand = 2; hand <= 16 && par < 121; hand += 1) {
     par += roleForHand(player, firstDealerPlayer, hand) === "dealer"
       ? GRANULAR_PARS.dealer.total
       : GRANULAR_PARS.pone.total;
@@ -721,13 +721,8 @@ function cumulativeParThroughHand(
   firstDealerPlayer: "human" | "ai",
   handNumber: number,
 ): number {
-  let par = parHolesFor(player, firstDealerPlayer)[0] ?? 0;
-  for (let hand = 1; hand <= handNumber; hand += 1) {
-    par += roleForHand(player, firstDealerPlayer, hand) === "dealer"
-      ? GRANULAR_PARS.dealer.total
-      : GRANULAR_PARS.pone.total;
-  }
-  return par;
+  if (handNumber <= 0) return 0;
+  return parHolesFor(player, firstDealerPlayer)[handNumber - 1] ?? 121;
 }
 
 function completedComponentsForPhase(phase: GameState["phase"]): number {
@@ -753,14 +748,33 @@ function componentForHand(
 ): { player: "human" | "ai"; component: ParComponent; amount: number; label: string; pone: "human" | "ai" } {
   const dealer = dealerForHand(firstDealerPlayer, handNumber);
   const pone = dealer === "human" ? "ai" : "human";
-  const components: Array<{ player: "human" | "ai"; component: ParComponent; amount: number; label: string; pone: "human" | "ai" }> = [
+  const rawComponents: Array<{ player: "human" | "ai"; component: ParComponent; amount: number; label: string; pone: "human" | "ai" }> = [
     { player: pone, component: "ponePeg", amount: GRANULAR_PARS.pone.pegging, label: "pone peg", pone },
     { player: dealer, component: "dealerPeg", amount: GRANULAR_PARS.dealer.pegging, label: "dealer peg", pone },
     { player: pone, component: "poneHand", amount: GRANULAR_PARS.pone.hand, label: "pone hand", pone },
     { player: dealer, component: "dealerHand", amount: GRANULAR_PARS.dealer.hand, label: "dealer hand", pone },
     { player: dealer, component: "crib", amount: GRANULAR_PARS.dealer.crib, label: "crib", pone },
   ];
+  const components = rawComponents.map((component) => ({
+    ...component,
+    amount: scaledParComponentAmount(component.player, firstDealerPlayer, handNumber, component.amount),
+  }));
   return components[index] ?? components[components.length - 1];
+}
+
+function scaledParComponentAmount(
+  player: "human" | "ai",
+  firstDealerPlayer: "human" | "ai",
+  handNumber: number,
+  rawAmount: number,
+): number {
+  const previousPar = cumulativeParThroughHand(player, firstDealerPlayer, handNumber - 1);
+  const nextPar = cumulativeParThroughHand(player, firstDealerPlayer, handNumber);
+  const roleTotal = roleForHand(player, firstDealerPlayer, handNumber) === "dealer"
+    ? GRANULAR_PARS.dealer.total
+    : GRANULAR_PARS.pone.total;
+  const handDelta = Math.max(0, nextPar - previousPar);
+  return roleTotal > 0 ? (rawAmount / roleTotal) * handDelta : 0;
 }
 
 function applyParComponent(
@@ -1885,6 +1899,7 @@ function sortedAnalyticsEngines(
 function analyticsEngineSortKey(engine: Opponent): number {
   return [
     "schell_table-peg_table-4.0",
+    "schell_table-peg_table-5.0",
     "ras_table-peg_table-4.0",
     "schell_table-peg-3.0",
     "ras_table-peg-3.0",
@@ -2161,6 +2176,7 @@ function engineName(engine: string | undefined): string {
   if (engine === "schell_table-2.0") return "Schell Table 2.0";
   if (engine === "schell_table-peg-3.0") return "Schell Table + Peg 3.0";
   if (engine === "schell_table-peg_table-4.0") return "Schell Table + Peg Table 4.0";
+  if (engine === "schell_table-peg_table-5.0") return "Schell Table + Peg Table 5.0";
   return engine || "-";
 }
 
@@ -2205,6 +2221,7 @@ function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
     engine === "ras_table-peg_table-4.0" ||
     engine === "schell_table-peg-3.0" ||
     engine === "schell_table-peg_table-4.0" ||
+    engine === "schell_table-peg_table-5.0" ||
     engine === "schell_table-2.0"
   ) {
     return engine;

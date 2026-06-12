@@ -10,6 +10,7 @@ const enginePath = path.join(root, "web/src/engine.ts");
 
 const currentModels = [
   "schell_table-peg_table-4.0",
+  "schell_table-peg_table-5.0",
   "ras_table-peg_table-4.0",
   "schell_table-peg-3.0",
   "schell_table-2.0",
@@ -24,6 +25,7 @@ const legacyModels = [
 
 const labels = {
   "schell_table-peg_table-4.0": "Schell Table + Peg Table 4.0",
+  "schell_table-peg_table-5.0": "Schell Table + Peg Table 5.0",
   "ras_table-peg_table-4.0": "Ras Table + Peg Table 4.0",
   "schell_table-peg-3.0": "Schell Table + Peg 3.0",
   "schell_table-2.0": "Schell Table 2.0",
@@ -234,10 +236,81 @@ function baselineModel(stats) {
   };
 }
 
-function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0) {
+function normalizeLogDetail(value) {
+  const detail = String(value || "none").toLowerCase();
+  return ["none", "game", "hand", "events"].includes(detail) ? detail : "none";
+}
+
+function handSummaries(events) {
+  const hands = new Map();
+  for (const event of events) {
+    if (event.type === "hand" && event.action === "start") {
+      hands.set(event.handNumber, {
+        handNumber: event.handNumber,
+        dealer: event.dealer,
+        pone: event.pone,
+        startScores: event.scores,
+        turnCard: event.turnCard,
+        scoring: [],
+      });
+    }
+    if (event.type === "score") {
+      const hand = hands.get(event.handNumber) || {
+        handNumber: event.handNumber,
+        scoring: [],
+      };
+      hand.scoring.push({
+        player: event.player,
+        role: event.role,
+        category: event.category,
+        points: event.points,
+        totalScore: event.totalScore,
+        scores: event.scores,
+      });
+      hand.endScores = event.scores;
+      hands.set(event.handNumber, hand);
+    }
+    if (event.type === "hand" && event.action === "end") {
+      const hand = hands.get(event.handNumber) || {
+        handNumber: event.handNumber,
+        scoring: [],
+      };
+      hand.endScores = event.scores;
+      hand.crib = event.crib;
+      hand.tables = event.tables;
+      hands.set(event.handNumber, hand);
+    }
+  }
+  return [...hands.values()].sort((a, b) => a.handNumber - b.handNumber);
+}
+
+function gameLogRecord({ events, end, finalScores, winner, result, leftEngine, rightEngine, gameIndex, detail }) {
+  const start = events.find((event) => event.type === "game" && event.action === "start");
+  const record = {
+    schemaVersion: 1,
+    gameIndex,
+    gameId: start?.gameId || end?.gameId || null,
+    leftEngine,
+    rightEngine,
+    startedAt: start?.at || null,
+    endedAt: end?.at || null,
+    winner: winner === "human" ? "left" : "right",
+    result,
+    finalScores: {
+      left: finalScores.human,
+      right: finalScores.ai,
+    },
+  };
+  if (detail === "hand" || detail === "events") record.hands = handSummaries(events);
+  if (detail === "events") record.events = events;
+  return record;
+}
+
+function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, gameOffset = 0, logDetail = "none") {
   const { CribbageGame } = loadEngine();
   const leftStats = emptyStats();
   const rightStats = emptyStats();
+  const gameLogs = logDetail === "none" ? null : [];
   for (let index = 0; index < gameCount; index += 1) {
     const game = new CribbageGame(rightEngine, leftEngine);
     game.autoPlayToEnd();
@@ -251,6 +324,19 @@ function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0) {
     recordOutcome(rightStats, winner === "ai", finalScores.ai, finalScores.human, result);
     recordScores(leftStats, "human", events);
     recordScores(rightStats, "ai", events);
+    if (gameLogs) {
+      gameLogs.push(gameLogRecord({
+        events,
+        end,
+        finalScores,
+        winner,
+        result,
+        leftEngine,
+        rightEngine,
+        gameIndex: gameOffset + index,
+        detail: logDetail,
+      }));
+    }
     if (progressEvery > 0 && (index + 1) % progressEvery === 0) {
       parentPort?.postMessage({
         type: "progress",
@@ -270,6 +356,7 @@ function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0) {
     leftStats,
     rightStats,
     memory: process.memoryUsage(),
+    gameLogs,
   };
 }
 
@@ -292,6 +379,8 @@ if (!isMainThread) {
       workerData.rightEngine,
       workerData.gameCount,
       workerData.progressEvery,
+      workerData.gameOffset,
+      workerData.logDetail,
     );
     parentPort.postMessage({
       type: "done",
@@ -316,6 +405,12 @@ function parseList(value, fallback) {
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function writeJsonl(filePath, values) {
+  if (!values?.length) return;
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, values.map((value) => JSON.stringify(value)).join("\n") + "\n");
 }
 
 function readJson(filePath) {
@@ -355,10 +450,10 @@ function expectedCompletionAt(updatedAt, estimatedRemainingSeconds) {
   return new Date(Date.parse(updatedAt) + estimatedRemainingSeconds * 1000).toISOString();
 }
 
-function runWorker(leftEngine, rightEngine, gameCount, workerIndex, oldMb, progressEvery = 0, onProgress = () => {}) {
+function runWorker(leftEngine, rightEngine, gameCount, workerIndex, oldMb, progressEvery = 0, onProgress = () => {}, gameOffset = 0, logDetail = "none") {
   return new Promise((resolve, reject) => {
     const worker = new Worker(__filename, {
-      workerData: { leftEngine, rightEngine, gameCount, workerIndex, progressEvery },
+      workerData: { leftEngine, rightEngine, gameCount, workerIndex, progressEvery, gameOffset, logDetail },
       resourceLimits: oldMb > 0 ? { maxOldGenerationSizeMb: oldMb } : {},
     });
     let settled = false;
@@ -428,10 +523,12 @@ function makeBatches(totalGames, batchGames) {
   const batches = [];
   let remaining = totalGames;
   let index = 0;
+  let start = 0;
   while (remaining > 0) {
     const gameCount = Math.min(batchGames, remaining);
-    batches.push({ index, gameCount });
+    batches.push({ index, gameCount, start });
     remaining -= gameCount;
+    start += gameCount;
     index += 1;
   }
   return batches;
@@ -475,11 +572,13 @@ function aggregateBatchResults({ leftEngine, rightEngine, workers, games, oldMb,
   };
 }
 
-async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, jobIndex, jobCount, batchGames }) {
+async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, jobIndex, jobCount, batchGames, logDetail }) {
   const startedAt = Date.now();
   const batches = makeBatches(job.games, batchGames);
   const batchDir = path.join(outDir, `${id}.batches`);
+  const gameLogDir = logDetail === "none" ? null : path.join(outDir, `${id}.game-logs`);
   fs.mkdirSync(batchDir, { recursive: true });
+  if (gameLogDir) fs.mkdirSync(gameLogDir, { recursive: true });
 
   const completed = [];
   const pending = [];
@@ -515,6 +614,8 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
       jobCount,
       currentJob: job,
       batchGames,
+      logDetail,
+      gameLogDir,
       totalBatches: batches.length,
       completedBatches: completed.length,
       activeBatches: active,
@@ -549,11 +650,19 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
             activeBatchProgress.set(batch.index, Math.min(batch.gameCount, message.completed));
             writeStatus();
           },
+          batch.start,
+          logDetail,
         )
           .then((result) => {
+            const gameLogCount = result.gameLogs?.length || 0;
+            if (gameLogDir && gameLogCount) {
+              writeJsonl(path.join(gameLogDir, `${batchId(batch.index)}.${logDetail}.jsonl`), result.gameLogs);
+            }
+            delete result.gameLogs;
             const batchResult = {
               batchIndex: batch.index,
               ...result,
+              gameLogCount,
               completedAt: new Date().toISOString(),
             };
             writeJson(batch.batchPath, batchResult);
@@ -591,6 +700,7 @@ async function main() {
   const batchGames = Number.parseInt(process.argv[6] || "25", 10);
   const statusPath = path.join(outDir, "status.json");
   const summaryPath = path.join(outDir, "summary.json");
+  const logDetail = normalizeLogDetail(process.env.AI_SMOKE_LOG_DETAIL);
   fs.mkdirSync(outDir, { recursive: true });
   const models = modelsForOutDir(outDir);
   const matchups = buildMatchups(models);
@@ -635,6 +745,7 @@ async function main() {
         jobIndex: index + 1,
         jobCount: jobs.length,
         batchGames,
+        logDetail,
       });
       writeJson(resultPath, result);
       completed.push(result);
@@ -706,6 +817,7 @@ async function main() {
     outDir,
     gamesPerJob: games,
     batchGames,
+    logDetail,
     workerCounts,
     oldMbs,
     completedJobs: completed.length,
