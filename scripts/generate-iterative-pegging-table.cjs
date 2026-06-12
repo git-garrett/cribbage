@@ -7,6 +7,17 @@ const { performance } = require("node:perf_hooks");
 const { Worker, isMainThread, parentPort, workerData } = require("node:worker_threads");
 
 const VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10];
+const DISCARD_MODE = process.env.PEG_TABLE_DISCARD_MODE || "schell";
+const OUTPUT_SUFFIX = process.env.PEG_TABLE_OUTPUT_SUFFIX || "";
+const CRIB_FLUSH_BONUS_BY_SUIT_COUNT = [
+  0.094202898551,
+  0.072463768116,
+  0.054347826087,
+  0.0395256917,
+  0.02766798419,
+  0.018445322793,
+  0.011528326746,
+];
 const SCHELL_OWN = [
   [5.38, 4.23, 4.52, 5.43, 5.45, 3.85, 3.85, 3.80, 3.40, 3.42, 3.65, 3.42, 3.41],
   [4.23, 5.72, 7.00, 4.52, 5.45, 3.93, 3.81, 3.66, 3.71, 3.55, 3.84, 3.58, 3.52],
@@ -111,9 +122,10 @@ async function main() {
         ? rows.slice(activeStart, activeStart + count)
         : rows.slice(activeStart);
       const appendOutput = offset === 0 && activeStart > 0;
-      const outputPath = path.join(outDir, `iteration-${activeIteration}.rows.jsonl`);
-      const policyPath = path.join(outDir, `iteration-${activeIteration}.policy.json`);
-      const summaryPath = path.join(outDir, `iteration-${activeIteration}.summary.json`);
+      const iterationFileBase = `iteration-${activeIteration}${OUTPUT_SUFFIX}`;
+      const outputPath = path.join(outDir, `${iterationFileBase}.rows.jsonl`);
+      const policyPath = path.join(outDir, `${iterationFileBase}.policy.json`);
+      const summaryPath = path.join(outDir, `${iterationFileBase}.summary.json`);
       const collectHistograms = shouldCollectHistograms(offset, iterationCount);
       await validateOutputTarget(outputPath, appendOutput, activeStart);
       writeStatus(statusPath, {
@@ -139,6 +151,7 @@ async function main() {
         memoWindowRows,
         appendOutput,
         collectHistograms,
+        discardMode: DISCARD_MODE,
       });
       const result = await runRows({
         rows: activeRows,
@@ -151,6 +164,7 @@ async function main() {
         totalRows: rows.length,
         priorPolicy: activePriorPolicy,
         collectHistograms,
+        discardMode: DISCARD_MODE,
         statusPath,
         statusContext: {
           command: exactCommand(),
@@ -169,6 +183,7 @@ async function main() {
           memoWindowRows,
           appendOutput,
           collectHistograms,
+          discardMode: DISCARD_MODE,
         },
       });
       const expectedWrittenRows = appendOutput ? activeStart + activeRows.length : activeRows.length;
@@ -196,17 +211,16 @@ async function main() {
         memoWindowRows,
         appendOutput,
         collectHistograms,
+        discardMode: DISCARD_MODE,
         validation,
         ...result,
       });
-      const policy = await derivePolicy(outputPath, activePriorPolicy);
+      const policy = await derivePolicy(outputPath, activePriorPolicy, DISCARD_MODE);
       fs.writeFileSync(policyPath, `${JSON.stringify(policy, null, 2)}\n`);
       const summary = {
         version: 1,
         iteration: activeIteration,
-        policy: activePriorPolicyPath
-          ? `rank hand EV +/- Schell crib table + prior pegging policy from ${activePriorPolicyPath}`
-          : "rank hand EV +/- Schell crib table; no prior pegging EV table",
+        policy: policyDescription(activePriorPolicyPath, DISCARD_MODE),
         generatedAt: new Date().toISOString(),
         command: exactCommand(),
         gitCommit: gitCommitHash(),
@@ -221,6 +235,7 @@ async function main() {
         totalRows: rows.length,
         appendOutput,
         collectHistograms,
+        discardMode: DISCARD_MODE,
         workerCount,
         memoWindowRows,
         iterationCount,
@@ -252,6 +267,7 @@ async function main() {
         memoWindowRows,
         appendOutput,
         collectHistograms,
+        discardMode: DISCARD_MODE,
         validation,
         policyStats: policy.stats,
         ...result,
@@ -269,7 +285,7 @@ async function main() {
     if (!rowsPath || !outputPath) {
       throw new Error("Usage: node scripts/generate-iterative-pegging-table.cjs derive-policy <rows.jsonl> [policy.json]");
     }
-    const policy = await derivePolicy(rowsPath);
+    const policy = await derivePolicy(rowsPath, null, DISCARD_MODE);
     fs.writeFileSync(outputPath, `${JSON.stringify(policy, null, 2)}\n`);
     console.log(JSON.stringify({
       rowsPath,
@@ -295,6 +311,7 @@ async function runRows({
   statusPath = "",
   statusContext = {},
   collectHistograms = false,
+  discardMode = "schell",
 }) {
   const startedAt = performance.now();
   let completed = 0;
@@ -319,6 +336,7 @@ async function runRows({
         memoWindowRows,
         priorPolicy,
         collectHistograms,
+        discardMode,
       },
       resourceLimits: {
         maxOldGenerationSizeMb: Number.parseInt(process.env.PEG_TABLE_WORKER_OLD_MB || "2048", 10),
@@ -396,12 +414,13 @@ async function runRows({
   };
 }
 
-function runWorker({ rows, memoWindowRows, priorPolicy, collectHistograms }) {
+function runWorker({ rows, memoWindowRows, priorPolicy, collectHistograms, discardMode }) {
   let stateMemo = new Map();
   let opponentSixMemo = new Map();
   let opponentKeepDistributionMemo = new Map();
   let discardMemo = new Map();
   let handScoreMemo = new Map();
+  let cribFlushMemo = new Map();
   const policy = priorPolicy ? inflatePolicy(priorPolicy) : null;
   let currentSourceHandKey = "";
 
@@ -415,6 +434,7 @@ function runWorker({ rows, memoWindowRows, priorPolicy, collectHistograms }) {
       opponentKeepDistributionMemo = new Map();
       discardMemo = new Map();
       handScoreMemo = new Map();
+      cribFlushMemo = new Map();
     }
     const result = peggingEvForRow(row, {
       stateMemo,
@@ -422,8 +442,10 @@ function runWorker({ rows, memoWindowRows, priorPolicy, collectHistograms }) {
       opponentKeepDistributionMemo,
       discardMemo,
       handScoreMemo,
+      cribFlushMemo,
       priorPolicy: policy,
       collectHistograms,
+      discardMode,
     });
     parentPort.postMessage({
       type: "row",
@@ -585,7 +607,7 @@ function chooseBestDiscard(hand, role, caches) {
   for (const discard of discardsFromHand(hand)) {
     const keep = subtractRanks(hand, discard);
     const handEv = expectedRankHandScore(keep, hand, caches.handScoreMemo);
-    const cribEv = cribTableValue(discard, role === "dealer");
+    const cribEv = cribTableValue(discard, role === "dealer", hand, caches);
     const total = role === "dealer" ? handEv + cribEv : handEv - cribEv;
     const candidate = { discard, keep, total };
     if (!best || compareDiscardCandidate(candidate, best) > 0) best = candidate;
@@ -594,8 +616,9 @@ function chooseBestDiscard(hand, role, caches) {
   return best;
 }
 
-async function derivePolicy(rowsPath, priorPolicy = null) {
+async function derivePolicy(rowsPath, priorPolicy = null, discardMode = "schell") {
   const bestDiscards = {};
+  const cribFlushMemo = new Map();
   for await (const line of readJsonlLines(rowsPath)) {
     const row = JSON.parse(line);
     const hand = parseRanks(row.hand);
@@ -603,7 +626,7 @@ async function derivePolicy(rowsPath, priorPolicy = null) {
     const keep = parseRanks(row.keep);
     const role = row.role;
     const handEv = expectedRankHandScore(keep, hand, new Map());
-    const cribEv = cribTableValue(discard, role === "dealer");
+    const cribEv = cribTableValue(discard, role === "dealer", hand, { discardMode, cribFlushMemo });
     const netPeggingEv = row.netPeggingEv ?? ((row.myPeggingEv ?? row.peggingEv ?? 0) - (row.opponentPeggingEv ?? 0));
     const total = (role === "dealer" ? handEv + cribEv : handEv - cribEv) + netPeggingEv;
     const key = `${row.hand}:${role}`;
@@ -629,7 +652,8 @@ async function derivePolicy(rowsPath, priorPolicy = null) {
     version: 1,
     generatedAt: new Date().toISOString(),
     sourceRows: rowsPath,
-    policy: "rank hand EV +/- Schell crib table + generated net pegging EV",
+    policy: policyDescription(null, discardMode, "generated net pegging EV"),
+    discardMode,
     stats,
     bestDiscards,
   };
@@ -666,6 +690,15 @@ function policyStats(bestDiscards, priorPolicy) {
     averageTotalDelta: comparedEntries ? totalDelta / comparedEntries : null,
     maxTotalDelta,
   };
+}
+
+function policyDescription(priorPolicyPath, discardMode, suffix = "") {
+  const cribText = discardMode === "schell-flush"
+    ? "Schell crib table + rank-averaged static crib flush EV"
+    : "Schell crib table";
+  const priorText = priorPolicyPath ? ` + prior pegging policy from ${priorPolicyPath}` : "";
+  const suffixText = suffix ? ` + ${suffix}` : "";
+  return `rank hand EV +/- ${cribText}${priorText}${suffixText}`;
 }
 
 function readPolicy(policyPath) {
@@ -769,9 +802,94 @@ function scoreRuns(ranks) {
   return longest.length * longest.reduce((product, rank) => product * (counts.get(rank) || 1), 1);
 }
 
-function cribTableValue(discard, myCrib) {
+function cribTableValue(discard, myCrib, hand = null, caches = null) {
   const ranks = expandRanks(discard).sort((a, b) => a - b);
-  return (myCrib ? SCHELL_OWN : SCHELL_OPPONENT)[ranks[0]][ranks[1]];
+  const baseValue = (myCrib ? SCHELL_OWN : SCHELL_OPPONENT)[ranks[0]][ranks[1]];
+  if (caches?.discardMode !== "schell-flush" || !hand) return baseValue;
+  return baseValue + expectedRankCribFlushBonus(hand, discard, caches.cribFlushMemo);
+}
+
+function expectedRankCribFlushBonus(hand, discard, memo) {
+  const key = `${hand.join("")}:${discard.join("")}`;
+  const cached = memo?.get(key);
+  if (cached !== undefined) return cached;
+  const discardRanks = expandRanks(discard);
+  if (discardRanks.length !== 2) return 0;
+  let total = 0;
+  let weight = 0;
+  forEachSuitAssignment(hand, (rankSuits, suitCounts) => {
+    const discardSuitChoices = discardSuitChoicesForAssignment(discardRanks, rankSuits);
+    for (const choice of discardSuitChoices) {
+      weight += 1;
+      if (choice[0] === choice[1]) total += CRIB_FLUSH_BONUS_BY_SUIT_COUNT[suitCounts[choice[0]]] ?? 0;
+    }
+  });
+  const result = weight ? total / weight : 0;
+  if (memo) memo.set(key, result);
+  return result;
+}
+
+function forEachSuitAssignment(hand, visit) {
+  const rankSuitOptions = [];
+  for (let rank = 0; rank < hand.length; rank += 1) {
+    if (hand[rank] > 0) rankSuitOptions.push([rank, suitCombinations(hand[rank])]);
+  }
+  const rankSuits = new Map();
+  const suitCounts = [0, 0, 0, 0];
+
+  function assign(index) {
+    if (index === rankSuitOptions.length) {
+      visit(rankSuits, suitCounts);
+      return;
+    }
+    const [rank, options] = rankSuitOptions[index];
+    for (const suits of options) {
+      rankSuits.set(rank, suits);
+      for (const suit of suits) suitCounts[suit] += 1;
+      assign(index + 1);
+      for (const suit of suits) suitCounts[suit] -= 1;
+    }
+    rankSuits.delete(rank);
+  }
+
+  assign(0);
+}
+
+function discardSuitChoicesForAssignment(discardRanks, rankSuits) {
+  const [firstRank, secondRank] = discardRanks;
+  const firstSuits = rankSuits.get(firstRank) || [];
+  if (firstRank === secondRank) {
+    const choices = [];
+    for (let first = 0; first < firstSuits.length; first += 1) {
+      for (let second = first + 1; second < firstSuits.length; second += 1) {
+        choices.push([firstSuits[first], firstSuits[second]]);
+      }
+    }
+    return choices;
+  }
+  const secondSuits = rankSuits.get(secondRank) || [];
+  const choices = [];
+  for (const firstSuit of firstSuits) {
+    for (const secondSuit of secondSuits) choices.push([firstSuit, secondSuit]);
+  }
+  return choices;
+}
+
+function suitCombinations(count) {
+  const result = [];
+  function visit(start, chosen) {
+    if (chosen.length === count) {
+      result.push(chosen.slice());
+      return;
+    }
+    for (let suit = start; suit < 4; suit += 1) {
+      chosen.push(suit);
+      visit(suit + 1, chosen);
+      chosen.pop();
+    }
+  }
+  visit(0, []);
+  return result;
 }
 
 function simulatePegging(state, memo, collectHistograms = false) {
