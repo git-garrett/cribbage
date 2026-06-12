@@ -308,8 +308,14 @@ function gameLogRecord({ events, end, finalScores, winner, result, leftEngine, r
   return record;
 }
 
-function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, gameOffset = 0, logDetail = "none") {
-  const { CribbageGame } = loadEngine();
+async function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, gameOffset = 0, logDetail = "none") {
+  const { CribbageGame, loadOpponentResources } = loadEngine();
+  if (typeof loadOpponentResources === "function") {
+    await Promise.all([
+      loadOpponentResources(leftEngine),
+      loadOpponentResources(rightEngine),
+    ]);
+  }
   const leftStats = emptyStats();
   const rightStats = emptyStats();
   const gameLogs = logDetail === "none" ? null : [];
@@ -374,9 +380,9 @@ function chunkSizes(total, count) {
 }
 
 if (!isMainThread) {
-  try {
+  (async () => {
     const startedAt = Date.now();
-    const result = simulate(
+    const result = await simulate(
       workerData.leftEngine,
       workerData.rightEngine,
       workerData.gameCount,
@@ -390,12 +396,12 @@ if (!isMainThread) {
       elapsedMs: Date.now() - startedAt,
       gameCount: workerData.gameCount,
     });
-  } catch (error) {
+  })().catch((error) => {
     parentPort.postMessage({
       type: "error",
       error: error instanceof Error ? error.stack || error.message : String(error),
     });
-  }
+  });
   return;
 }
 

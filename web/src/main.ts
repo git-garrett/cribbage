@@ -1,6 +1,7 @@
 import {
   CribbageGame,
   DEFAULT_OPPONENT,
+  loadOpponentResources,
   type AnalyticsDecisionReview,
   type AnalyticsEvent,
   type AnalyticsScoreCategory,
@@ -62,6 +63,7 @@ const state: {
   selectedLogGameId: string | null;
   snapshotEventId: string | null;
   dismissedGameOverId: string | null;
+  aiThinking: boolean;
 } = {
   game: null,
   selected: new Set(),
@@ -73,6 +75,7 @@ const state: {
   selectedLogGameId: null,
   snapshotEventId: null,
   dismissedGameOverId: null,
+  aiThinking: false,
 };
 
 const els = {
@@ -119,6 +122,7 @@ const els = {
   dealer: document.querySelector("#dealer") as HTMLElement,
   turn: document.querySelector("#turn") as HTMLElement,
   count: document.querySelector("#count") as HTMLElement,
+  modelThinking: document.querySelector("#model-thinking") as HTMLElement,
   turnCard: document.querySelector("#turn-card") as HTMLElement,
   playAreaTitle: document.querySelector("#play-area-title") as HTMLElement,
   plays: document.querySelector("#plays") as HTMLElement,
@@ -850,31 +854,56 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
   try {
     if (path === "/api/state") return localGame.state();
     if (path === "/api/new") {
-      localGame = new CribbageGame((body?.opponent as Opponent) || DEFAULT_OPPONENT);
+      const opponent = (body?.opponent as Opponent) || DEFAULT_OPPONENT;
+      await loadOpponentResources(opponent);
+      localGame = new CribbageGame(opponent);
       saveGame();
       return localGame.state();
     }
     if (path === "/api/discard") {
+      await loadOpponentResources(localGame.opponent);
       localGame.discard((body?.ids as number[]) || []);
       saveGame();
       return localGame.state();
     }
     if (path === "/api/finish-discard") {
+      await loadOpponentResources(localGame.opponent);
       localGame.finishDiscard();
       saveGame();
       return localGame.state();
     }
     if (path === "/api/play") {
+      await loadOpponentResources(localGame.opponent);
       localGame.play(body?.id as number);
       saveGame();
       return localGame.state();
     }
+    if (path === "/api/play-human") {
+      await loadOpponentResources(localGame.opponent);
+      localGame.playHumanPeggingCard(body?.id as number);
+      saveGame();
+      return localGame.state();
+    }
     if (path === "/api/go") {
+      await loadOpponentResources(localGame.opponent);
       localGame.go();
       saveGame();
       return localGame.state();
     }
+    if (path === "/api/go-human") {
+      await loadOpponentResources(localGame.opponent);
+      localGame.humanPeggingGo();
+      saveGame();
+      return localGame.state();
+    }
+    if (path === "/api/advance-pegging") {
+      await loadOpponentResources(localGame.opponent);
+      localGame.advancePeggingToHuman();
+      saveGame();
+      return localGame.state();
+    }
     if (path === "/api/continue-scoring") {
+      await loadOpponentResources(localGame.opponent);
       localGame.continueScoring();
       saveGame();
       return localGame.state();
@@ -2397,6 +2426,7 @@ function render(game: GameState | null): void {
   els.dealer.textContent = game.dealer;
   els.turn.textContent = game.turn || "-";
   els.count.textContent = String(game.count);
+  els.modelThinking.hidden = !state.aiThinking;
   renderCutCard(game.turnCard);
   renderScoring(game.scoring);
   renderResult(game);
@@ -2443,6 +2473,31 @@ function render(game: GameState | null): void {
     els.continuePegging.disabled = false;
   }
 
+}
+
+function shouldAdvancePeggingAi(game: GameState): boolean {
+  return game.phase === "pegging" && game.turn === "AI";
+}
+
+function waitForPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
+async function advanceAiPeggingAfterRender(game: GameState): Promise<GameState> {
+  if (!shouldAdvancePeggingAi(game)) return game;
+  state.aiThinking = true;
+  render(game);
+  await waitForPaint();
+  try {
+    const next = await api("/api/advance-pegging", {});
+    render(next);
+    return next;
+  } finally {
+    state.aiThinking = false;
+    render(state.game);
+  }
 }
 
 els.menuToggle.addEventListener("click", () => {
@@ -2532,9 +2587,10 @@ els.play.addEventListener("click", async () => {
   render(state.game);
   try {
     state.resultOverride = null;
-    const next = await api("/api/play", { id: card.id });
+    const next = await api("/api/play-human", { id: card.id });
     state.selected.clear();
     render(next);
+    await advanceAiPeggingAfterRender(next);
   } finally {
     state.pending = false;
     render(state.game);
@@ -2547,8 +2603,9 @@ els.go.addEventListener("click", async () => {
   render(state.game);
   try {
     state.resultOverride = null;
-    const next = await api("/api/go", {});
+    const next = await api("/api/go-human", {});
     render(next);
+    await advanceAiPeggingAfterRender(next);
   } finally {
     state.pending = false;
     render(state.game);

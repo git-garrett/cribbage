@@ -1,6 +1,4 @@
 import pegTablePolicy4 from "./peg-table-policy.json";
-import pegTablePolicy5 from "./peg-table-policy-5.0.json";
-import pegTablePolicy6 from "./peg-table-policy-6.0.json";
 
 export type PlayerKey = "human" | "ai";
 export type Opponent =
@@ -781,6 +779,21 @@ export class CribbageGame {
     this.advanceUntilHuman();
   }
 
+  playHumanPeggingCard(cardId: number): void {
+    this.beginInteraction();
+    if (this.phase !== "pegging" || this.currentPlayer() !== this.human) {
+      throw new Error("It is not your turn to play.");
+    }
+    const legal = this.legalCards(this.human);
+    if (legal.length === 0) {
+      this.sayGo(this.human);
+      return;
+    }
+    const card = this.selectedCards(this.human.hand, [cardId], 1)[0];
+    if (!legal.includes(card)) throw new Error("That card would take the count over 31.");
+    this.playCard(this.human, card, true);
+  }
+
   go(): void {
     this.beginInteraction();
     if (this.phase !== "pegging" || this.currentPlayer() !== this.human) {
@@ -788,6 +801,20 @@ export class CribbageGame {
     }
     if (this.legalCards(this.human).length > 0) throw new Error("User has a legal card to play.");
     this.sayGo(this.human);
+    this.advanceUntilHuman();
+  }
+
+  humanPeggingGo(): void {
+    this.beginInteraction();
+    if (this.phase !== "pegging" || this.currentPlayer() !== this.human) {
+      throw new Error("It is not your turn.");
+    }
+    if (this.legalCards(this.human).length > 0) throw new Error("User has a legal card to play.");
+    this.sayGo(this.human);
+  }
+
+  advancePeggingToHuman(): void {
+    this.beginInteraction();
     this.advanceUntilHuman();
   }
 
@@ -1510,12 +1537,33 @@ type PegTableEv = {
   netPeggingEv: number;
   bestLead: number | null;
 };
+type PegTablePolicy = { pegEvs: Record<string, PegTableEvTuple | undefined> };
 
 const pegCardCache = Array.from({ length: 13 }, (_, rank) => new Card(rank));
-const PEG_TABLE_POLICIES = {
-  "schell_table-peg_table-5.0": pegTablePolicy5,
-  "schell_table-peg_table-6.0": pegTablePolicy6,
-} as Record<string, { pegEvs: Record<string, PegTableEvTuple | undefined> }>;
+const defaultPegTablePolicy = pegTablePolicy4 as PegTablePolicy;
+const PEG_TABLE_POLICIES: Partial<Record<Opponent, PegTablePolicy>> = {
+  "schell_table-peg_table-4.0": defaultPegTablePolicy,
+  "ras_table-peg_table-4.0": defaultPegTablePolicy,
+};
+const PEG_TABLE_POLICY_LOADERS: Partial<Record<Opponent, () => Promise<PegTablePolicy>>> = {
+  "schell_table-peg_table-5.0": () =>
+    import("./peg-table-policy-5.0.json").then((module) => module.default as PegTablePolicy),
+  "schell_table-peg_table-6.0": () =>
+    import("./peg-table-policy-6.0.json").then((module) => module.default as PegTablePolicy),
+};
+
+export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
+  const engine = normalizeOpponent(opponent);
+  return !PEG_TABLE_POLICY_LOADERS[engine] || Boolean(PEG_TABLE_POLICIES[engine]);
+}
+
+export async function loadOpponentResources(opponent: StoredOpponent): Promise<void> {
+  const engine = normalizeOpponent(opponent);
+  if (PEG_TABLE_POLICIES[engine]) return;
+  const loader = PEG_TABLE_POLICY_LOADERS[engine];
+  if (!loader) return;
+  PEG_TABLE_POLICIES[engine] = await loader();
+}
 
 function usesExhaustivePegging(engine: Opponent): boolean {
   return engine === "original_exhaustive_peg-1.2" ||
@@ -1541,7 +1589,7 @@ function pegTableEv(
   };
   const handRanks = rankCountsForCards(hand);
   const discardRanks = rankCountsForCards(discard);
-  const policy = PEG_TABLE_POLICIES[engine] ?? pegTablePolicy4;
+  const policy = PEG_TABLE_POLICIES[engine] ?? defaultPegTablePolicy;
   const entry = policy.pegEvs[
     `${handRanks.join("")}:${discardRanks.join("")}:${role}`
   ];
