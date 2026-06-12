@@ -2017,6 +2017,7 @@ function analyticsEngineSortKey(engine: Opponent): number {
   return [
     "schell_table-peg_table-4.0",
     "schell_table-peg_table-5.0",
+    "schell_table-peg_table-6.0",
     "ras_table-peg_table-4.0",
     "schell_table-peg-3.0",
     "ras_table-peg-3.0",
@@ -2294,6 +2295,7 @@ function engineName(engine: string | undefined): string {
   if (engine === "schell_table-peg-3.0") return "Schell Table + Peg 3.0";
   if (engine === "schell_table-peg_table-4.0") return "Schell Table + Peg Table 4.0";
   if (engine === "schell_table-peg_table-5.0") return "Schell Table + Peg Table 5.0";
+  if (engine === "schell_table-peg_table-6.0") return "Schell Table + Peg Table 6.0";
   return engine || "-";
 }
 
@@ -2339,6 +2341,7 @@ function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
     engine === "schell_table-peg-3.0" ||
     engine === "schell_table-peg_table-4.0" ||
     engine === "schell_table-peg_table-5.0" ||
+    engine === "schell_table-peg_table-6.0" ||
     engine === "schell_table-2.0"
   ) {
     return engine;

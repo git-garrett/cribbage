@@ -11,6 +11,7 @@ const enginePath = path.join(root, "web/src/engine.ts");
 const currentModels = [
   "schell_table-peg_table-4.0",
   "schell_table-peg_table-5.0",
+  "schell_table-peg_table-6.0",
   "ras_table-peg_table-4.0",
   "schell_table-peg-3.0",
   "schell_table-2.0",
@@ -26,6 +27,7 @@ const legacyModels = [
 const labels = {
   "schell_table-peg_table-4.0": "Schell Table + Peg Table 4.0",
   "schell_table-peg_table-5.0": "Schell Table + Peg Table 5.0",
+  "schell_table-peg_table-6.0": "Schell Table + Peg Table 6.0",
   "ras_table-peg_table-4.0": "Ras Table + Peg Table 4.0",
   "schell_table-peg-3.0": "Schell Table + Peg 3.0",
   "schell_table-2.0": "Schell Table 2.0",
