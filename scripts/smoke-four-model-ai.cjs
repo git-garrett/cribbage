@@ -7,6 +7,11 @@ const ts = require("typescript");
 
 const root = path.resolve(__dirname, "..");
 const enginePath = path.join(root, "web/src/engine.ts");
+const holdTableDefaultPath = path.join(root, "benchmarks", "ai-inference", "pegging-hold-rank-probabilities.cumulative.json");
+const holdTableEnabled = process.env.AI_SMOKE_HOLD_TABLE !== "0";
+const holdTablePath = path.resolve(root, process.env.AI_SMOKE_HOLD_TABLE_PATH || holdTableDefaultPath);
+const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+const rankIndex = new Map(ranks.map((rank, index) => [rank, index]));
 
 const currentModels = [
   "schell_table-peg_table-6.0",
@@ -208,6 +213,115 @@ function recordScores(stats, playerKey, events) {
   }
 }
 
+function emptyHoldTable() {
+  return {
+    schemaVersion: 1,
+    description: "Probability a player still holds at least one rank after playing a 1-, 2-, or 3-card ordered pegging prefix.",
+    ranks,
+    prefixLengths: [1, 2, 3],
+    contexts: {},
+  };
+}
+
+function normalizeRank(cardLabel) {
+  return String(cardLabel || "").replace(/[dchs]$/, "");
+}
+
+function removeOneCard(labels, card) {
+  const index = labels.indexOf(card);
+  if (index === -1) return labels.slice();
+  return labels.slice(0, index).concat(labels.slice(index + 1));
+}
+
+function addHoldObservation(table, prefix, remainingCards) {
+  const key = prefix.join(",");
+  const context = table.contexts[key] || {
+    samples: 0,
+    holds: Array(ranks.length).fill(0),
+  };
+  const remainingRanks = new Set(remainingCards.map(normalizeRank));
+  context.samples += 1;
+  for (const rank of remainingRanks) {
+    const index = rankIndex.get(rank);
+    if (index !== undefined) context.holds[index] += 1;
+  }
+  table.contexts[key] = context;
+}
+
+function recordHoldTable(table, events) {
+  if (!table) return;
+  const playedByHand = new Map();
+  for (const event of events) {
+    if (event.type !== "hand" || event.action !== "start") continue;
+    playedByHand.set(`${event.handNumber}:human`, []);
+    playedByHand.set(`${event.handNumber}:ai`, []);
+  }
+  for (const event of events) {
+    if (event.type !== "pegging" || event.action !== "play" || !event.player || !event.card || !event.hand) continue;
+    const playerKey = `${event.handNumber}:${event.player}`;
+    const prefix = playedByHand.get(playerKey) || [];
+    prefix.push(normalizeRank(event.card));
+    playedByHand.set(playerKey, prefix);
+    if (prefix.length > 3) continue;
+    const remainingCards = removeOneCard(event.hand, event.card);
+    addHoldObservation(table, prefix, remainingCards);
+  }
+}
+
+function mergeHoldTables(target, source) {
+  if (!source) return target;
+  for (const [key, incoming] of Object.entries(source.contexts || {})) {
+    const context = target.contexts[key] || {
+      samples: 0,
+      holds: Array(ranks.length).fill(0),
+    };
+    context.samples += incoming.samples || 0;
+    for (let index = 0; index < ranks.length; index += 1) {
+      context.holds[index] += incoming.holds?.[index] || 0;
+    }
+    target.contexts[key] = context;
+  }
+  return target;
+}
+
+function finalizeHoldTable(table, metadata = {}) {
+  const contexts = {};
+  for (const key of Object.keys(table.contexts).sort()) {
+    const context = table.contexts[key];
+    contexts[key] = {
+      samples: context.samples,
+      holds: context.holds,
+      probabilities: context.holds.map((count) => context.samples ? count / context.samples : 0),
+    };
+  }
+  return {
+    schemaVersion: table.schemaVersion,
+    generatedAt: new Date().toISOString(),
+    description: table.description,
+    ranks: table.ranks,
+    prefixLengths: table.prefixLengths,
+    ...metadata,
+    contexts,
+  };
+}
+
+function readHoldTable(filePath) {
+  if (!fs.existsSync(filePath)) return emptyHoldTable();
+  const parsed = readJson(filePath);
+  const table = emptyHoldTable();
+  for (const [key, context] of Object.entries(parsed.contexts || {})) {
+    table.contexts[key] = {
+      samples: context.samples || 0,
+      holds: context.holds || Array(ranks.length).fill(0),
+    };
+  }
+  return table;
+}
+
+function writeHoldTable(filePath, table, metadata = {}) {
+  writeJson(filePath, finalizeHoldTable(table, metadata));
+}
+
 function baselineModel(stats) {
   return {
     games: stats.games,
@@ -320,6 +434,7 @@ async function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, g
   }
   const leftStats = emptyStats();
   const rightStats = emptyStats();
+  const holdTable = holdTableEnabled ? emptyHoldTable() : null;
   const gameLogs = logDetail === "none" ? null : [];
   for (let index = 0; index < gameCount; index += 1) {
     const game = new CribbageGame(rightEngine, leftEngine);
@@ -334,6 +449,7 @@ async function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, g
     recordOutcome(rightStats, winner === "ai", finalScores.ai, finalScores.human, result);
     recordScores(leftStats, "human", events);
     recordScores(rightStats, "ai", events);
+    recordHoldTable(holdTable, events);
     if (gameLogs) {
       gameLogs.push(gameLogRecord({
         events,
@@ -366,6 +482,7 @@ async function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, g
     leftStats,
     rightStats,
     memory: process.memoryUsage(),
+    holdTable,
     gameLogs,
   };
 }
@@ -500,6 +617,7 @@ async function runOne({ leftEngine, rightEngine, workers, games, oldMb }) {
   let maxHeapUsedMb = 0;
   let totalHeapUsedMb = 0;
   let maxRssMb = 0;
+  const holdTable = holdTableEnabled ? emptyHoldTable() : null;
   for (const result of results) {
     addStats(leftStats, result.leftStats);
     addStats(rightStats, result.rightStats);
@@ -508,6 +626,7 @@ async function runOne({ leftEngine, rightEngine, workers, games, oldMb }) {
     maxHeapUsedMb = Math.max(maxHeapUsedMb, heapMb);
     totalHeapUsedMb += heapMb;
     maxRssMb = Math.max(maxRssMb, rssMb);
+    mergeHoldTables(holdTable, result.holdTable);
   }
   const elapsedSeconds = (Date.now() - startedAt) / 1000;
   return {
@@ -524,6 +643,7 @@ async function runOne({ leftEngine, rightEngine, workers, games, oldMb }) {
     maxWorkerHeapUsedMb: maxHeapUsedMb,
     totalWorkerHeapUsedMb: totalHeapUsedMb,
     maxWorkerRssMb: maxRssMb,
+    holdTable: holdTable ? finalizeHoldTable(holdTable, { leftEngine, rightEngine, games }) : null,
     workerElapsedSeconds: results.map((result) => result.elapsedMs / 1000),
     workerGames: results.map((result) => result.gameCount),
   };
@@ -550,6 +670,7 @@ function aggregateBatchResults({ leftEngine, rightEngine, workers, games, oldMb,
   let maxHeapUsedMb = 0;
   let totalHeapUsedMb = 0;
   let maxRssMb = 0;
+  const holdTable = holdTableEnabled ? emptyHoldTable() : null;
   for (const result of batchResults) {
     addStats(leftStats, result.leftStats);
     addStats(rightStats, result.rightStats);
@@ -558,6 +679,7 @@ function aggregateBatchResults({ leftEngine, rightEngine, workers, games, oldMb,
     maxHeapUsedMb = Math.max(maxHeapUsedMb, heapMb);
     totalHeapUsedMb += heapMb;
     maxRssMb = Math.max(maxRssMb, rssMb);
+    mergeHoldTables(holdTable, result.holdTable);
   }
   const elapsedSeconds = (Date.now() - startedAt) / 1000;
   return {
@@ -573,6 +695,7 @@ function aggregateBatchResults({ leftEngine, rightEngine, workers, games, oldMb,
     right: summarize(rightStats),
     leftModel: baselineModel(leftStats),
     rightModel: baselineModel(rightStats),
+    holdTable: holdTable ? finalizeHoldTable(holdTable, { leftEngine, rightEngine, games }) : null,
     maxWorkerHeapUsedMb: maxHeapUsedMb,
     totalWorkerHeapUsedMb: totalHeapUsedMb,
     maxWorkerRssMb: maxRssMb,
@@ -587,8 +710,10 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
   const batches = makeBatches(job.games, batchGames);
   const batchDir = path.join(outDir, `${id}.batches`);
   const gameLogDir = logDetail === "none" ? null : path.join(outDir, `${id}.game-logs`);
+  const holdTableDir = holdTableEnabled ? path.join(outDir, `${id}.hold-tables`) : null;
   fs.mkdirSync(batchDir, { recursive: true });
   if (gameLogDir) fs.mkdirSync(gameLogDir, { recursive: true });
+  if (holdTableDir) fs.mkdirSync(holdTableDir, { recursive: true });
 
   const completed = [];
   const pending = [];
@@ -668,6 +793,14 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
             if (gameLogDir && gameLogCount) {
               writeJsonl(path.join(gameLogDir, `${batchId(batch.index)}.${logDetail}.jsonl`), result.gameLogs);
             }
+            if (holdTableDir && result.holdTable) {
+              writeHoldTable(path.join(holdTableDir, `${batchId(batch.index)}.hold-table.json`), result.holdTable, {
+                leftEngine: job.leftEngine,
+                rightEngine: job.rightEngine,
+                batchIndex: batch.index,
+                games: batch.gameCount,
+              });
+            }
             delete result.gameLogs;
             const batchResult = {
               batchIndex: batch.index,
@@ -699,6 +832,18 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
     batchResults: completed,
   });
   writeJson(resultPath, result);
+  if (holdTableEnabled && result.holdTable) {
+    const runHoldTablePath = path.join(outDir, `${id}.hold-table.json`);
+    writeJson(runHoldTablePath, result.holdTable);
+    const cumulative = readHoldTable(holdTablePath);
+    mergeHoldTables(cumulative, result.holdTable);
+    writeHoldTable(holdTablePath, cumulative, {
+      source: "ai-smoke",
+      cumulative: true,
+      updatedBy: outDir,
+      latestMatchup: id,
+    });
+  }
   return result;
 }
 
@@ -828,6 +973,8 @@ async function main() {
     gamesPerJob: games,
     batchGames,
     logDetail,
+    holdTableEnabled,
+    holdTablePath: holdTableEnabled ? holdTablePath : null,
     workerCounts,
     oldMbs,
     completedJobs: completed.length,
