@@ -8,8 +8,11 @@ const ts = require("typescript");
 const root = path.resolve(__dirname, "..");
 const enginePath = path.join(root, "web/src/engine.ts");
 const holdTableDefaultPath = path.join(root, "benchmarks", "ai-inference", "pegging-hold-rank-probabilities.cumulative.json");
+const gameDbDefaultPath = path.join(root, "benchmarks", "ai-db", "cribbage-games.sqlite");
 const holdTableEnabled = process.env.AI_SMOKE_HOLD_TABLE !== "0";
 const holdTablePath = path.resolve(root, process.env.AI_SMOKE_HOLD_TABLE_PATH || holdTableDefaultPath);
+const gameDbEnabled = process.env.AI_SMOKE_GAME_DB !== "0";
+const gameDbPath = path.resolve(root, process.env.AI_SMOKE_GAME_DB_PATH || gameDbDefaultPath);
 const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
 const rankIndex = new Map(ranks.map((rank, index) => [rank, index]));
 
@@ -402,11 +405,12 @@ function handSummaries(events) {
   return [...hands.values()].sort((a, b) => a.handNumber - b.handNumber);
 }
 
-function gameLogRecord({ events, end, finalScores, winner, result, leftEngine, rightEngine, gameIndex, detail }) {
+function gameLogRecord({ events, end, finalScores, winner, result, leftEngine, rightEngine, gameIndex, detail, randomSeed }) {
   const start = events.find((event) => event.type === "game" && event.action === "start");
   const record = {
     schemaVersion: 1,
     gameIndex,
+    randomSeed,
     gameId: start?.gameId || end?.gameId || null,
     leftEngine,
     rightEngine,
@@ -424,7 +428,7 @@ function gameLogRecord({ events, end, finalScores, winner, result, leftEngine, r
   return record;
 }
 
-async function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, gameOffset = 0, logDetail = "none") {
+async function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, gameOffset = 0, logDetail = "none", runSeed = "ai-smoke") {
   const { CribbageGame, loadOpponentResources } = loadEngine();
   if (typeof loadOpponentResources === "function") {
     await Promise.all([
@@ -437,8 +441,13 @@ async function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, g
   const holdTable = holdTableEnabled ? emptyHoldTable() : null;
   const gameLogs = logDetail === "none" ? null : [];
   for (let index = 0; index < gameCount; index += 1) {
-    const game = new CribbageGame(rightEngine, leftEngine);
-    game.autoPlayToEnd();
+    const gameIndex = gameOffset + index;
+    const randomSeed = gameSeedFor(runSeed, leftEngine, rightEngine, gameIndex);
+    const game = withSeededMathRandom(randomSeed, () => {
+      const seededGame = new CribbageGame(rightEngine, leftEngine);
+      seededGame.autoPlayToEnd();
+      return seededGame;
+    });
     const events = game.state().analyticsEvents;
     const end = [...events].reverse().find((event) => event.type === "game" && event.action === "end");
     const finalScores = end?.finalScores || { human: game.human.score, ai: game.ai.score };
@@ -459,8 +468,9 @@ async function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, g
         result,
         leftEngine,
         rightEngine,
-        gameIndex: gameOffset + index,
+        gameIndex,
         detail: logDetail,
+        randomSeed,
       }));
     }
     if (progressEvery > 0 && (index + 1) % progressEvery === 0) {
@@ -508,6 +518,7 @@ if (!isMainThread) {
       workerData.progressEvery,
       workerData.gameOffset,
       workerData.logDetail,
+      workerData.runSeed,
     );
     parentPort.postMessage({
       type: "done",
@@ -572,15 +583,237 @@ function gitCommit() {
   }
 }
 
+function cyrb128(value) {
+  let h1 = 1779033703;
+  let h2 = 3144134277;
+  let h3 = 1013904242;
+  let h4 = 2773480762;
+  for (let index = 0; index < value.length; index += 1) {
+    const k = value.charCodeAt(index);
+    h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
+    h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
+    h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
+    h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
+  }
+  h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067);
+  h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
+  h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213);
+  h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
+  return [
+    (h1 ^ h2 ^ h3 ^ h4) >>> 0,
+    (h2 ^ h1) >>> 0,
+    (h3 ^ h1) >>> 0,
+    (h4 ^ h1) >>> 0,
+  ];
+}
+
+function sfc32(a, b, c, d) {
+  return function random() {
+    a >>>= 0;
+    b >>>= 0;
+    c >>>= 0;
+    d >>>= 0;
+    const t = (a + b) | 0;
+    a = b ^ (b >>> 9);
+    b = (c + (c << 3)) | 0;
+    c = (c << 21) | (c >>> 11);
+    d = (d + 1) | 0;
+    const result = (t + d) | 0;
+    c = (c + result) | 0;
+    return (result >>> 0) / 4294967296;
+  };
+}
+
+function withSeededMathRandom(seed, callback) {
+  const previousRandom = Math.random;
+  Math.random = sfc32(...cyrb128(seed));
+  try {
+    return callback();
+  } finally {
+    Math.random = previousRandom;
+  }
+}
+
+function makeRunSeed(outDir) {
+  if (process.env.AI_SMOKE_RUN_SEED) return process.env.AI_SMOKE_RUN_SEED;
+  return `ai-smoke:${path.basename(outDir)}:${Date.now().toString(36)}`;
+}
+
+function gameSeedFor(runSeed, leftEngine, rightEngine, gameIndex) {
+  return `${runSeed}:${leftEngine}:${rightEngine}:${gameIndex}`;
+}
+
+function openGameDatabase(filePath) {
+  const { DatabaseSync } = require("node:sqlite");
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const db = new DatabaseSync(filePath);
+  db.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
+    CREATE TABLE IF NOT EXISTS ai_runs (
+      run_id TEXT PRIMARY KEY,
+      out_dir TEXT NOT NULL,
+      command TEXT,
+      git_commit TEXT,
+      run_seed TEXT,
+      status TEXT NOT NULL DEFAULT 'running',
+      included_in_tables INTEGER NOT NULL DEFAULT 1,
+      notes TEXT NOT NULL DEFAULT '',
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE TABLE IF NOT EXISTS ai_games (
+      game_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      matchup_id TEXT NOT NULL,
+      game_index INTEGER NOT NULL,
+      random_seed TEXT NOT NULL,
+      left_engine TEXT NOT NULL,
+      right_engine TEXT NOT NULL,
+      winner TEXT,
+      result TEXT,
+      final_left_score INTEGER,
+      final_right_score INTEGER,
+      started_at TEXT,
+      ended_at TEXT,
+      included_in_tables INTEGER NOT NULL DEFAULT 1,
+      reproducible INTEGER NOT NULL DEFAULT 1,
+      source_log_path TEXT,
+      notes TEXT NOT NULL DEFAULT '',
+      record_json TEXT NOT NULL,
+      hands_json TEXT,
+      events_json TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (run_id) REFERENCES ai_runs(run_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_games_run ON ai_games(run_id);
+    CREATE INDEX IF NOT EXISTS idx_ai_games_matchup ON ai_games(matchup_id);
+    CREATE INDEX IF NOT EXISTS idx_ai_games_models ON ai_games(left_engine, right_engine);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_games_run_index ON ai_games(run_id, matchup_id, game_index);
+    CREATE TABLE IF NOT EXISTS ai_run_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id TEXT NOT NULL,
+      note TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (run_id) REFERENCES ai_runs(run_id)
+    );
+    CREATE TABLE IF NOT EXISTS ai_game_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      game_id TEXT NOT NULL,
+      note TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (game_id) REFERENCES ai_games(game_id)
+    );
+  `);
+  ensureGameDbColumns(db);
+  return db;
+}
+
+function ensureGameDbColumns(db) {
+  const columns = new Set(db.prepare("PRAGMA table_info(ai_games)").all().map((column) => column.name));
+  if (!columns.has("reproducible")) {
+    db.exec("ALTER TABLE ai_games ADD COLUMN reproducible INTEGER NOT NULL DEFAULT 1");
+  }
+  if (!columns.has("source_log_path")) {
+    db.exec("ALTER TABLE ai_games ADD COLUMN source_log_path TEXT");
+  }
+}
+
+function upsertRun(db, { runId, outDir, runSeed, status = "running", metadata = {} }) {
+  if (!db) return;
+  db.prepare(`
+    INSERT INTO ai_runs (
+      run_id, out_dir, command, git_commit, run_seed, status, started_at, metadata_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(run_id) DO UPDATE SET
+      command = excluded.command,
+      git_commit = excluded.git_commit,
+      run_seed = excluded.run_seed,
+      status = excluded.status,
+      metadata_json = excluded.metadata_json
+  `).run(
+    runId,
+    outDir,
+    currentCommand(),
+    gitCommit(),
+    runSeed,
+    status,
+    new Date().toISOString(),
+    JSON.stringify(metadata),
+  );
+}
+
+function markRunComplete(db, runId, status = "complete") {
+  if (!db) return;
+  db.prepare("UPDATE ai_runs SET status = ?, completed_at = ? WHERE run_id = ?")
+    .run(status, new Date().toISOString(), runId);
+}
+
+function insertGameRecords(db, { runId, matchupId, records }) {
+  if (!db || !records?.length) return;
+  const insert = db.prepare(`
+    INSERT OR REPLACE INTO ai_games (
+      game_id,
+      run_id,
+      matchup_id,
+      game_index,
+      random_seed,
+      left_engine,
+      right_engine,
+      winner,
+      result,
+      final_left_score,
+      final_right_score,
+      started_at,
+      ended_at,
+      reproducible,
+      source_log_path,
+      record_json,
+      hands_json,
+      events_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  db.exec("BEGIN");
+  try {
+    for (const record of records) {
+      insert.run(
+        record.gameId || `${runId}:${matchupId}:${record.gameIndex}`,
+        runId,
+        matchupId,
+        record.gameIndex,
+        record.randomSeed || "",
+        record.leftEngine,
+        record.rightEngine,
+        record.winner,
+        record.result,
+        record.finalScores?.left ?? null,
+        record.finalScores?.right ?? null,
+        record.startedAt,
+        record.endedAt,
+        record.reproducible === false ? 0 : 1,
+        record.sourceLogPath ?? null,
+        JSON.stringify(record),
+        record.hands ? JSON.stringify(record.hands) : null,
+        record.events ? JSON.stringify(record.events) : null,
+      );
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 function expectedCompletionAt(updatedAt, estimatedRemainingSeconds) {
   if (!Number.isFinite(estimatedRemainingSeconds)) return null;
   return new Date(Date.parse(updatedAt) + estimatedRemainingSeconds * 1000).toISOString();
 }
 
-function runWorker(leftEngine, rightEngine, gameCount, workerIndex, oldMb, progressEvery = 0, onProgress = () => {}, gameOffset = 0, logDetail = "none") {
+function runWorker(leftEngine, rightEngine, gameCount, workerIndex, oldMb, progressEvery = 0, onProgress = () => {}, gameOffset = 0, logDetail = "none", runSeed = "ai-smoke") {
   return new Promise((resolve, reject) => {
     const worker = new Worker(__filename, {
-      workerData: { leftEngine, rightEngine, gameCount, workerIndex, progressEvery, gameOffset, logDetail },
+      workerData: { leftEngine, rightEngine, gameCount, workerIndex, progressEvery, gameOffset, logDetail, runSeed },
       resourceLimits: oldMb > 0 ? { maxOldGenerationSizeMb: oldMb } : {},
     });
     let settled = false;
@@ -606,11 +839,11 @@ function runWorker(leftEngine, rightEngine, gameCount, workerIndex, oldMb, progr
   });
 }
 
-async function runOne({ leftEngine, rightEngine, workers, games, oldMb }) {
+async function runOne({ leftEngine, rightEngine, workers, games, oldMb, runSeed }) {
   const sizes = chunkSizes(games, workers);
   const startedAt = Date.now();
   const results = await Promise.all(sizes.map((size, index) =>
-    runWorker(leftEngine, rightEngine, size, index, oldMb)
+    runWorker(leftEngine, rightEngine, size, index, oldMb, 0, () => {}, 0, "none", runSeed)
   ));
   const leftStats = emptyStats();
   const rightStats = emptyStats();
@@ -705,7 +938,7 @@ function aggregateBatchResults({ leftEngine, rightEngine, workers, games, oldMb,
   };
 }
 
-async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, jobIndex, jobCount, batchGames, logDetail }) {
+async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, jobIndex, jobCount, batchGames, logDetail, runSeed, gameDb, runId }) {
   const startedAt = Date.now();
   const batches = makeBatches(job.games, batchGames);
   const batchDir = path.join(outDir, `${id}.batches`);
@@ -751,6 +984,10 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
       batchGames,
       logDetail,
       gameLogDir,
+      gameDbEnabled,
+      gameDbPath: gameDbEnabled ? gameDbPath : null,
+      runId,
+      runSeed,
       totalBatches: batches.length,
       completedBatches: completed.length,
       activeBatches: active,
@@ -787,11 +1024,19 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
           },
           batch.start,
           logDetail,
+          runSeed,
         )
           .then((result) => {
             const gameLogCount = result.gameLogs?.length || 0;
             if (gameLogDir && gameLogCount) {
               writeJsonl(path.join(gameLogDir, `${batchId(batch.index)}.${logDetail}.jsonl`), result.gameLogs);
+            }
+            if (gameDb && gameLogCount) {
+              insertGameRecords(gameDb, {
+                runId,
+                matchupId: id,
+                records: result.gameLogs,
+              });
             }
             if (holdTableDir && result.holdTable) {
               writeHoldTable(path.join(holdTableDir, `${batchId(batch.index)}.hold-table.json`), result.holdTable, {
@@ -853,12 +1098,15 @@ async function main() {
   const workerCounts = parseList(process.argv[4], [1, 2]);
   const oldMbs = parseList(process.argv[5], [384, 768]);
   const batchGames = Number.parseInt(process.argv[6] || "25", 10);
+  const runSeed = makeRunSeed(outDir);
+  const runId = path.basename(outDir);
   const statusPath = path.join(outDir, "status.json");
   const summaryPath = path.join(outDir, "summary.json");
   const logDetail = normalizeLogDetail(process.env.AI_SMOKE_LOG_DETAIL);
   fs.mkdirSync(outDir, { recursive: true });
   const models = modelsForOutDir(outDir);
   const matchups = buildMatchups(models);
+  const gameDb = gameDbEnabled ? openGameDatabase(gameDbPath) : null;
 
   const jobs = [];
   for (const [leftEngine, rightEngine] of matchups) {
@@ -868,6 +1116,23 @@ async function main() {
       }
     }
   }
+
+  upsertRun(gameDb, {
+    runId,
+    outDir,
+    runSeed,
+    metadata: {
+      games,
+      batchGames,
+      logDetail,
+      holdTableEnabled,
+      holdTablePath: holdTableEnabled ? holdTablePath : null,
+      workerCounts,
+      oldMbs,
+      models,
+      matchups,
+    },
+  });
 
   const completed = [];
   const failed = [];
@@ -884,6 +1149,10 @@ async function main() {
       command: currentCommand(),
       gitCommit: gitCommit(),
       outDir,
+      runId,
+      runSeed,
+      gameDbEnabled,
+      gameDbPath: gameDbEnabled ? gameDbPath : null,
       jobIndex: index + 1,
       jobCount: jobs.length,
       currentJob: job,
@@ -901,6 +1170,9 @@ async function main() {
         jobCount: jobs.length,
         batchGames,
         logDetail,
+        runSeed,
+        gameDb,
+        runId,
       });
       writeJson(resultPath, result);
       completed.push(result);
@@ -970,11 +1242,15 @@ async function main() {
     version: 1,
     generatedAt: new Date().toISOString(),
     outDir,
+    runId,
+    runSeed,
     gamesPerJob: games,
     batchGames,
     logDetail,
     holdTableEnabled,
     holdTablePath: holdTableEnabled ? holdTablePath : null,
+    gameDbEnabled,
+    gameDbPath: gameDbEnabled ? gameDbPath : null,
     workerCounts,
     oldMbs,
     completedJobs: completed.length,
@@ -989,10 +1265,16 @@ async function main() {
     status: "complete",
     updatedAt: new Date().toISOString(),
     outDir,
+    runId,
+    runSeed,
+    gameDbEnabled,
+    gameDbPath: gameDbEnabled ? gameDbPath : null,
     summaryPath,
     completedJobs: completed.length,
     failedJobs: failed.length,
   });
+  markRunComplete(gameDb, runId, failed.length ? "complete_with_failures" : "complete");
+  gameDb?.close();
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
 }
 

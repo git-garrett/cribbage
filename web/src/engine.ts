@@ -779,7 +779,6 @@ export class CribbageGame {
   }
 
   finishDiscard(): void {
-    this.beginInteraction();
     if (this.phase !== "ai_discarding") throw new Error("AI is not waiting to discard.");
     this.aiDiscard();
     this.beginPegging();
@@ -828,7 +827,6 @@ export class CribbageGame {
   }
 
   humanPeggingGo(): void {
-    this.beginInteraction();
     if (this.phase !== "pegging" || this.currentPlayer() !== this.human) {
       throw new Error("It is not your turn.");
     }
@@ -837,7 +835,6 @@ export class CribbageGame {
   }
 
   advancePeggingToHuman(): void {
-    this.beginInteraction();
     this.advanceUntilHuman();
   }
 

@@ -104,6 +104,50 @@ describe("game state", () => {
     expect(game.phase).toBe("score_pone");
   });
 
+  test("keeps user pegging score messages through automatic pegging continuations", () => {
+    const game = new CribbageGame();
+    game.phase = "pegging";
+    game.pone = game.human;
+    game.dealer = game.ai;
+    game.turn = 0;
+    game.human.score = 0;
+    game.ai.score = 0;
+    game.human.hand = cardsFromString("7c");
+    game.ai.hand = [];
+    game.human.table = cardsFromString("6c");
+    game.ai.table = cardsFromString("5c");
+    game.turnCard = cardsFromString("2d")[0];
+    game.plays = cardsFromString("6c 5c");
+    game.playOwners = ["human", "ai"];
+    game.count = 11;
+
+    game.playHumanPeggingCard(cardsFromString("7c")[0].id);
+    (game as any).advancePeggingToHuman();
+
+    expect(game.human.score).toBeGreaterThanOrEqual(3);
+    expect(game.state().result).toContain("User played 7c: 18 and pegged 3.");
+    expect(game.state().result).toContain("User pegged 1 for last card.");
+  });
+
+  test("keeps prior pegging messages when automatic user go is recorded", () => {
+    const game = new CribbageGame();
+    game.phase = "pegging";
+    game.pone = game.human;
+    game.dealer = game.ai;
+    game.turn = 0;
+    game.human.hand = cardsFromString("2d");
+    game.ai.hand = cardsFromString("3c");
+    game.turnCard = cardsFromString("4h")[0];
+    game.plays = cardsFromString("Kh Qs Jd");
+    game.playOwners = ["ai", "human", "ai"];
+    game.count = 30;
+    game.result = ["AI played Jd: 30."];
+
+    game.humanPeggingGo();
+
+    expect(game.state().result).toEqual(["AI played Jd: 30.", "User says go."]);
+  });
+
   test("restores a saved game snapshot", () => {
     const game = new CribbageGame();
     game.deal = 0;

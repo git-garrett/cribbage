@@ -95,6 +95,7 @@ const els = {
   settingsPanel: document.querySelector("#settings-panel") as HTMLElement,
   appVersion: document.querySelector("#app-version") as HTMLElement,
   analyticsOpen: document.querySelector("#analytics-open") as HTMLButtonElement,
+  exportGameLog: document.querySelector("#export-game-log") as HTMLButtonElement,
   analyticsClose: document.querySelector("#analytics-close") as HTMLButtonElement,
   analyticsPage: document.querySelector("#analytics-page") as HTMLElement,
   analyticsSummary: document.querySelector("#analytics-summary") as HTMLElement,
@@ -179,6 +180,8 @@ const GRANULAR_PARS = {
 } as const;
 const SAVE_KEY = "strong-cribbage.game.v1";
 const ANALYTICS_KEY = "strong-cribbage.analytics.v1";
+const PHONE_GAME_DB_NAME = "cribbage-game-log";
+const PHONE_GAME_DB_VERSION = 1;
 
 interface AnalyticsStore {
   version: 1;
@@ -274,19 +277,125 @@ function saveAnalytics(store: AnalyticsStore): void {
   localStorage.setItem(ANALYTICS_KEY, JSON.stringify(store));
 }
 
+let phoneGameDbPromise: Promise<IDBDatabase | null> | null = null;
+
+function openPhoneGameDb(): Promise<IDBDatabase | null> {
+  if (!("indexedDB" in window)) return Promise.resolve(null);
+  if (phoneGameDbPromise) return phoneGameDbPromise;
+  phoneGameDbPromise = new Promise((resolve) => {
+    const request = indexedDB.open(PHONE_GAME_DB_NAME, PHONE_GAME_DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains("events")) {
+        const events = db.createObjectStore("events", { keyPath: "id" });
+        events.createIndex("gameId", "gameId", { unique: false });
+        events.createIndex("type", "type", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("games")) {
+        const games = db.createObjectStore("games", { keyPath: "gameId" });
+        games.createIndex("opponent", "opponent", { unique: false });
+        games.createIndex("endedAt", "endedAt", { unique: false });
+        games.createIndex("includedInTables", "includedInTables", { unique: false });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+    request.onblocked = () => resolve(null);
+  });
+  return phoneGameDbPromise;
+}
+
+function persistPhoneGameEvents(events: AnalyticsEvent[]): void {
+  if (!events.length) return;
+  void openPhoneGameDb().then((db) => {
+    if (!db) return;
+    const transaction = db.transaction(["events", "games"], "readwrite");
+    const eventStore = transaction.objectStore("events");
+    const gameStore = transaction.objectStore("games");
+    for (const event of events) {
+      eventStore.put(event);
+      if (event.type === "game" && event.action === "end") {
+        gameStore.put({
+          gameId: event.gameId,
+          source: "phone",
+          opponent: event.opponent,
+          winner: event.winner ?? null,
+          loser: event.loser ?? null,
+          result: event.result ?? null,
+          finalScores: event.finalScores ?? null,
+          endedAt: event.at,
+          includedInTables: 1,
+          notes: "",
+          randomSeed: null,
+        });
+      }
+    }
+  }).catch(() => {
+    // localStorage remains the fallback analytics store if IndexedDB is unavailable.
+  });
+}
+
+function idbRequest<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function readPhoneStore<T>(db: IDBDatabase | null, storeName: string): Promise<T[]> {
+  if (!db || !db.objectStoreNames.contains(storeName)) return [];
+  const transaction = db.transaction(storeName, "readonly");
+  return idbRequest<T[]>(transaction.objectStore(storeName).getAll());
+}
+
+async function exportPhoneGameLog(): Promise<void> {
+  const db = await openPhoneGameDb();
+  const store = loadAnalytics();
+  const [indexedDbGames, indexedDbEvents] = await Promise.all([
+    readPhoneStore<Record<string, unknown>>(db, "games"),
+    readPhoneStore<AnalyticsEvent>(db, "events"),
+  ]);
+  const eventsById = new Map<string, AnalyticsEvent>();
+  for (const event of store.events) eventsById.set(event.id, event);
+  for (const event of indexedDbEvents) eventsById.set(event.id, event);
+  const events = [...eventsById.values()].sort((a, b) => a.at.localeCompare(b.at));
+  const exportRecord = {
+    schemaVersion: 1,
+    source: "phone",
+    exportedAt: new Date().toISOString(),
+    appVersion: __APP_VERSION__,
+    analyticsKey: ANALYTICS_KEY,
+    indexedDbName: PHONE_GAME_DB_NAME,
+    games: indexedDbGames,
+    events,
+  };
+  const blob = new Blob([`${JSON.stringify(exportRecord, null, 2)}\n`], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `cribbage-phone-games-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 function syncAnalytics(events: AnalyticsEvent[]): void {
   if (!events.length) return;
   const store = loadAnalytics();
   const known = new Set(store.events.map((event) => event.id));
+  const newEvents: AnalyticsEvent[] = [];
   for (const event of events) {
     if (!known.has(event.id)) {
       store.events.push(event);
       known.add(event.id);
+      newEvents.push(event);
     }
   }
   store.events.sort((a, b) => a.at.localeCompare(b.at));
   store.events = store.events.slice(-8000);
   saveAnalytics(store);
+  persistPhoneGameEvents(newEvents);
 }
 
 function buildBoard(): void {
@@ -2696,6 +2805,19 @@ els.modelInfoOpen.addEventListener("click", () => {
 els.modelInfoClose.addEventListener("click", () => {
   state.modelInfoOpen = false;
   render(state.game);
+});
+
+els.exportGameLog.addEventListener("click", async () => {
+  els.exportGameLog.disabled = true;
+  try {
+    await exportPhoneGameLog();
+    els.settingsPanel.hidden = true;
+    els.menuToggle.setAttribute("aria-expanded", "false");
+  } catch (error) {
+    els.result.textContent = error instanceof Error ? error.message : "Export failed";
+  } finally {
+    els.exportGameLog.disabled = false;
+  }
 });
 
 els.decisionReviewClose.addEventListener("click", () => {
