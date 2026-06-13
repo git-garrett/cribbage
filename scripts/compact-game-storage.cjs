@@ -6,6 +6,7 @@ const PLAYER_LABEL = ["left", "right"];
 const RESULT = { regular: 0, skunk: 1, "double-skunk": 2 };
 const ACTION = { play: 0, go: 1, reset: 2 };
 const CATEGORY = { pegging: 0, hand: 1, crib: 2 };
+const ROLE = { pone: 0, dealer: 1 };
 const STORE_PEG_PLAY_ROWS = process.env.COMPACT_PEG_PLAY_ROWS === "1";
 
 function cardId(label) {
@@ -29,6 +30,10 @@ function playerCode(player) {
 
 function resultCode(result) {
   return RESULT[result] ?? 0;
+}
+
+function roleCode(role) {
+  return ROLE[role] ?? null;
 }
 
 function ensureCompactSchema(db) {
@@ -90,6 +95,9 @@ function ensureCompactSchema(db) {
       hand_number INTEGER NOT NULL,
       sequence INTEGER NOT NULL,
       player INTEGER,
+      role INTEGER,
+      model TEXT,
+      selected_ev REAL,
       action INTEGER NOT NULL,
       card INTEGER,
       count_before INTEGER,
@@ -100,11 +108,32 @@ function ensureCompactSchema(db) {
       PRIMARY KEY (game_id, hand_number, sequence),
       FOREIGN KEY (game_id, hand_number) REFERENCES compact_hands(game_id, hand_number)
     );
+    CREATE TABLE IF NOT EXISTS compact_discards (
+      game_id TEXT NOT NULL,
+      hand_number INTEGER NOT NULL,
+      player INTEGER NOT NULL,
+      role INTEGER NOT NULL,
+      model TEXT,
+      selected_ev REAL,
+      cards BLOB,
+      hand_before BLOB,
+      remaining_hand BLOB,
+      crib_after_discard BLOB,
+      left_score INTEGER,
+      right_score INTEGER,
+      PRIMARY KEY (game_id, hand_number, player),
+      FOREIGN KEY (game_id, hand_number) REFERENCES compact_hands(game_id, hand_number)
+    );
+    CREATE INDEX IF NOT EXISTS idx_compact_discards_model ON compact_discards(model, role);
   `);
   const handColumns = new Set(db.prepare("PRAGMA table_info(compact_hands)").all().map((column) => column.name));
   if (!handColumns.has("peg_sequence")) {
     db.exec("ALTER TABLE compact_hands ADD COLUMN peg_sequence BLOB");
   }
+  const pegColumns = new Set(db.prepare("PRAGMA table_info(compact_peg_plays)").all().map((column) => column.name));
+  if (!pegColumns.has("role")) db.exec("ALTER TABLE compact_peg_plays ADD COLUMN role INTEGER");
+  if (!pegColumns.has("model")) db.exec("ALTER TABLE compact_peg_plays ADD COLUMN model TEXT");
+  if (!pegColumns.has("selected_ev")) db.exec("ALTER TABLE compact_peg_plays ADD COLUMN selected_ev REAL");
 }
 
 function eventsByHand(record) {
@@ -204,11 +233,36 @@ function compactPegPlays(record, events) {
       handNumber,
       sequence,
       player: playerCode(event.player),
+      role: roleCode(event.role),
+      model: event.model ?? null,
+      selectedEv: event.selectedEv ?? null,
       action: ACTION[event.action] ?? 0,
       card: cardId(event.card),
       countBefore: event.countBefore ?? null,
       countAfter: event.count ?? null,
       points: event.points ?? 0,
+      leftScore: event.scores?.human ?? event.scores?.left ?? null,
+      rightScore: event.scores?.ai ?? event.scores?.right ?? null,
+    });
+  }
+  return rows;
+}
+
+function compactDiscards(record, events) {
+  const rows = [];
+  for (const event of events || []) {
+    if (event.type !== "discard") continue;
+    rows.push({
+      gameId: record.gameId,
+      handNumber: event.handNumber,
+      player: playerCode(event.player),
+      role: roleCode(event.role),
+      model: event.model ?? null,
+      selectedEv: event.selectedEv ?? null,
+      cards: cardBlob(event.cards),
+      handBefore: cardBlob(event.handBeforeDiscard),
+      remainingHand: cardBlob(event.remainingHand),
+      cribAfterDiscard: cardBlob(event.cribAfterDiscard),
       leftScore: event.scores?.human ?? event.scores?.left ?? null,
       rightScore: event.scores?.ai ?? event.scores?.right ?? null,
     });
@@ -248,11 +302,18 @@ function insertCompactGameRecords(db, { runId, matchupId, records }) {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const pegDelete = db.prepare("DELETE FROM compact_peg_plays WHERE game_id = ?");
+  const discardDelete = db.prepare("DELETE FROM compact_discards WHERE game_id = ?");
   const pegInsert = db.prepare(`
     INSERT OR REPLACE INTO compact_peg_plays (
-      game_id, hand_number, sequence, player, action, card, count_before, count_after,
-      points, left_score, right_score
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      game_id, hand_number, sequence, player, role, model, selected_ev, action, card,
+      count_before, count_after, points, left_score, right_score
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const discardInsert = db.prepare(`
+    INSERT OR REPLACE INTO compact_discards (
+      game_id, hand_number, player, role, model, selected_ev, cards, hand_before,
+      remaining_hand, crib_after_discard, left_score, right_score
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   let games = 0;
   let hands = 0;
@@ -283,6 +344,7 @@ function insertCompactGameRecords(db, { runId, matchupId, records }) {
         record.notes ?? "",
       );
       pegDelete.run(gameId);
+      discardDelete.run(gameId);
       games += 1;
       for (const hand of handsFromEvents(normalized)) {
         const row = compactHand(normalized, hand);
@@ -311,6 +373,23 @@ function insertCompactGameRecords(db, { runId, matchupId, records }) {
         );
         hands += 1;
       }
+      for (const discard of compactDiscards(normalized, normalized.events)) {
+        if (discard.player === null || discard.role === null) continue;
+        discardInsert.run(
+          discard.gameId,
+          discard.handNumber,
+          discard.player,
+          discard.role,
+          discard.model,
+          discard.selectedEv,
+          discard.cards,
+          discard.handBefore,
+          discard.remainingHand,
+          discard.cribAfterDiscard,
+          discard.leftScore,
+          discard.rightScore,
+        );
+      }
       if (STORE_PEG_PLAY_ROWS) {
         for (const play of compactPegPlays(normalized, normalized.events)) {
           pegInsert.run(
@@ -318,6 +397,9 @@ function insertCompactGameRecords(db, { runId, matchupId, records }) {
             play.handNumber,
             play.sequence,
             play.player,
+            play.role,
+            play.model,
+            play.selectedEv,
             play.action,
             play.card,
             play.countBefore,

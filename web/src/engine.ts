@@ -287,6 +287,8 @@ export type AnalyticsEvent =
       handBeforeDiscard?: string[];
       scores?: Record<PlayerKey, number>;
       dealer?: PlayerKey;
+      model?: Opponent;
+      selectedEv?: number;
       review?: AnalyticsDecisionReview;
     }
   | {
@@ -309,6 +311,8 @@ export type AnalyticsEvent =
       points?: number;
       scores?: Record<PlayerKey, number>;
       message: string;
+      model?: Opponent;
+      selectedEv?: number;
       review?: AnalyticsDecisionReview;
     }
   | {
@@ -542,6 +546,10 @@ export class CribbageGame {
     ai: ["start-back", "start-front"],
   };
   pegTableLeads: Record<PlayerKey, number | null> = {
+    human: null,
+    ai: null,
+  };
+  pegDecisionEvs: Record<PlayerKey, { cardId: number; model: Opponent; ev: number } | null> = {
     human: null,
     ai: null,
   };
@@ -956,10 +964,11 @@ export class CribbageGame {
   }
 
   private aiDiscard(): void {
+    const handBeforeDiscard = [...this.ai.hand];
     const discards = this.chooseDiscards(this.ai, this.dealer === this.ai);
     removeCards(this.ai.hand, discards);
     this.crib.push(...discards);
-    this.recordDiscard(this.ai, discards);
+    this.recordDiscard(this.ai, discards, handBeforeDiscard);
     this.logEvent("AI discarded two cards to the crib.");
   }
 
@@ -1055,24 +1064,40 @@ export class CribbageGame {
 
   private choosePlay(player: PlayerState): Card {
     const legal = this.legalCards(player);
+    const engine = this.playerEngines[player.key];
     const pegTableLead = choosePegTableLead(player.hand, legal, this.pegTableLeads[player.key], {
-      engine: this.playerEngines[player.key],
+      engine,
       isPone: player === this.pone,
       count: this.count,
       plays: this.plays,
     });
-    if (pegTableLead) return pegTableLead;
-    if (usesExhaustivePegging(this.playerEngines[player.key])) {
-      return this.chooseExhaustivePegPlay(player, legal);
+    if (pegTableLead) {
+      this.pegDecisionEvs[player.key] = {
+        cardId: pegTableLead.id,
+        model: engine,
+        ev: roundEv(peggingPlayEv(this, player, pegTableLead, engine, this.pegTableLeads[player.key])),
+      };
+      return pegTableLead;
     }
-    return legal.reduce((best, card) => {
+    if (usesExhaustivePegging(engine)) {
+      const decision = this.chooseExhaustivePegPlay(player, legal);
+      this.pegDecisionEvs[player.key] = { cardId: decision.card.id, model: engine, ev: roundEv(decision.ev) };
+      return decision.card;
+    }
+    const card = legal.reduce((best, candidate) => {
       const bestKey = [scoreCount([...this.plays, best]), best.runVal];
-      const cardKey = [scoreCount([...this.plays, card]), card.runVal];
-      return compareTuple(cardKey, bestKey) > 0 ? card : best;
+      const cardKey = [scoreCount([...this.plays, candidate]), candidate.runVal];
+      return compareTuple(cardKey, bestKey) > 0 ? candidate : best;
     });
+    this.pegDecisionEvs[player.key] = {
+      cardId: card.id,
+      model: engine,
+      ev: roundEv(peggingPlayEv(this, player, card, engine, this.pegTableLeads[player.key])),
+    };
+    return card;
   }
 
-  private chooseExhaustivePegPlay(player: PlayerState, legal: Card[]): Card {
+  private chooseExhaustivePegPlay(player: PlayerState, legal: Card[]): { card: Card; ev: number } {
     const opponent = player === this.human ? this.ai : this.human;
     const knownCards = [
       ...player.hand,
@@ -1120,11 +1145,17 @@ export class CribbageGame {
         bestCard = card;
       }
     }
-    return bestCard;
+    return { card: bestCard, ev: bestScore };
   }
 
   private playCard(player: PlayerState, card: Card, reviewDecision = false): void {
     const pendingReviewSnapshot = reviewDecision && player === this.human ? this.reviewSnapshot() : null;
+    const engine = this.playerEngines[player.key];
+    const pendingEv = this.pegDecisionEvs[player.key];
+    const selectedEv = pendingEv?.cardId === card.id && pendingEv.model === engine
+      ? pendingEv.ev
+      : roundEv(peggingPlayEv(this, player, card, engine, this.pegTableLeads[player.key]));
+    this.pegDecisionEvs[player.key] = null;
     const handBeforePlay = this.cardLabels(player.hand);
     const playedCardsBefore = this.cardLabels(this.plays);
     const completedPlayGroupsBefore = this.completedPlays.map((group) => this.cardLabels(group));
@@ -1160,6 +1191,8 @@ export class CribbageGame {
       points,
       scores: scoreAfterPlay,
       message: `${this.name(player)} played ${this.cardLabel(card)}: ${this.count}`,
+      model: engine,
+      selectedEv,
     });
     if (pendingReviewSnapshot) {
       this.pendingPeggingReviews.push({
@@ -1381,6 +1414,9 @@ export class CribbageGame {
     handBeforeDiscard: Card[] = player.hand,
     reviewDecision = player === this.human,
   ): void {
+    const engine = this.playerEngines[player.key];
+    const analysis = analyzeDiscardChoice(handBeforeDiscard, cards, player === this.dealer, engine);
+    this.pegTableLeads[player.key] = analysis.selectedPegTableLead;
     const review = reviewDecision && player === this.human
       ? this.reviewDiscard(player, cards, handBeforeDiscard)
       : undefined;
@@ -1396,6 +1432,8 @@ export class CribbageGame {
       handBeforeDiscard: this.cardLabels(handBeforeDiscard),
       scores: { human: this.human.score, ai: this.ai.score },
       dealer: this.dealer.key,
+      model: engine,
+      selectedEv: roundEv(analysis.selectedEv),
       review,
     });
   }
@@ -1446,7 +1484,7 @@ export class CribbageGame {
     });
     if (pegTableLead) return pegTableLead;
     if (usesExhaustivePegging(engine)) {
-      return this.chooseExhaustivePegPlay(player, legal);
+      return this.chooseExhaustivePegPlay(player, legal).card;
     }
     return bestImmediatePegPlay(this.plays, legal);
   }
