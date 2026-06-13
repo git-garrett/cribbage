@@ -12,6 +12,7 @@ export type Opponent =
   | "schell_table-peg_table-5.0"
   | "schell_table-peg_table-6.0"
   | "schell_table-peg_table-7.0"
+  | "schell_table-peg_table-8.0"
   | "schell_table-2.0";
 type LegacyOpponent =
   | "ras-table-1.0"
@@ -67,6 +68,7 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "schell_table-peg_table-5.0": "Schell Table + Peg Table 5.0",
   "schell_table-peg_table-6.0": "Schell Table + Peg Table 6.0",
   "schell_table-peg_table-7.0": "Schell Table + Peg Table 7.0",
+  "schell_table-peg_table-8.0": "Schell Table + Peg Table 8.0",
 };
 const CRIB_FLUSH_BONUS_BY_SUIT_COUNT = cribFlushBonusBySuitCount as number[];
 type DiscardTableEngine = Exclude<Opponent, "original-1.1" | "original_exhaustive_peg-1.2">;
@@ -144,6 +146,7 @@ DISCARD_TABLES["schell_table-peg_table-4.0"] = DISCARD_TABLES["schell_table-2.0"
 DISCARD_TABLES["schell_table-peg_table-5.0"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-6.0"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-7.0"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-8.0"] = DISCARD_TABLES["schell_table-2.0"];
 
 export class WinGame extends Error {}
 
@@ -1600,6 +1603,8 @@ const PEG_TABLE_POLICY_LOADERS: Partial<Record<Opponent, () => Promise<PegTableP
     import("./models/schell_table-peg_table-6.0/peg-table-policy.json").then((module) => module.default as unknown as PegTablePolicy),
   "schell_table-peg_table-7.0": () =>
     import("./models/schell_table-peg_table-6.0/peg-table-policy.json").then((module) => module.default as unknown as PegTablePolicy),
+  "schell_table-peg_table-8.0": () =>
+    import("./models/schell_table-peg_table-8.0/peg-table-policy.json").then((module) => module.default as unknown as PegTablePolicy),
 };
 
 export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
@@ -1638,7 +1643,7 @@ function usesPegTableDiscard(engine: Opponent): boolean {
 }
 
 function usesCribFlushAdjustment(engine: Opponent): boolean {
-  return engine === "schell_table-peg_table-7.0";
+  return engine === "schell_table-peg_table-7.0" || engine === "schell_table-peg_table-8.0";
 }
 
 function pegTableEv(
