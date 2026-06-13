@@ -1510,7 +1510,6 @@ export class CribbageGame {
       gameId: this.gameId,
     } as AnalyticsEvent;
     this.analyticsEvents.push(analyticsEvent);
-    this.analyticsEvents = this.analyticsEvents.slice(-2000);
     return analyticsEvent;
   }
 

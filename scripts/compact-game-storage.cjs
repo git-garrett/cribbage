@@ -7,7 +7,6 @@ const RESULT = { regular: 0, skunk: 1, "double-skunk": 2 };
 const ACTION = { play: 0, go: 1, reset: 2 };
 const CATEGORY = { pegging: 0, hand: 1, crib: 2 };
 const ROLE = { pone: 0, dealer: 1 };
-const STORE_PEG_PLAY_ROWS = process.env.COMPACT_PEG_PLAY_ROWS === "1";
 
 function cardId(label) {
   if (!label) return null;
@@ -390,26 +389,24 @@ function insertCompactGameRecords(db, { runId, matchupId, records }) {
           discard.rightScore,
         );
       }
-      if (STORE_PEG_PLAY_ROWS) {
-        for (const play of compactPegPlays(normalized, normalized.events)) {
-          pegInsert.run(
-            play.gameId,
-            play.handNumber,
-            play.sequence,
-            play.player,
-            play.role,
-            play.model,
-            play.selectedEv,
-            play.action,
-            play.card,
-            play.countBefore,
-            play.countAfter,
-            play.points,
-            play.leftScore,
-            play.rightScore,
-          );
-          pegPlays += 1;
-        }
+      for (const play of compactPegPlays(normalized, normalized.events)) {
+        pegInsert.run(
+          play.gameId,
+          play.handNumber,
+          play.sequence,
+          play.player,
+          play.role,
+          play.model,
+          play.selectedEv,
+          play.action,
+          play.card,
+          play.countBefore,
+          play.countAfter,
+          play.points,
+          play.leftScore,
+          play.rightScore,
+        );
+        pegPlays += 1;
       }
     }
     db.exec("COMMIT");

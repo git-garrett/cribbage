@@ -13,7 +13,7 @@ import {
   type PlayerKey,
   WinGame,
 } from "./engine";
-import aiBaseline from "./ai-baseline.json";
+import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 import { MODEL_DOCS, MODEL_INFO_ORDER } from "./models/model-info";
 
 type BaselineScoreTotals = Pick<
@@ -31,7 +31,7 @@ type BaselineScoreTotals = Pick<
   | "crib"
 >;
 
-interface AiBaselineSource {
+interface AiBenchmarkSummarySource {
   version: number;
   source?: string;
   games?: number;
@@ -393,7 +393,6 @@ function syncAnalytics(events: AnalyticsEvent[]): void {
     }
   }
   store.events.sort((a, b) => a.at.localeCompare(b.at));
-  store.events = store.events.slice(-8000);
   saveAnalytics(store);
   persistPhoneGameEvents(newEvents);
 }
@@ -2382,7 +2381,7 @@ function engineByGame(gameEvents: Extract<AnalyticsEvent, { type: "game" }>[]): 
 }
 
 function addAiBaselineTotals(aiAllTotals: AnalyticsTotals, aiByModel: Map<Opponent, AnalyticsTotals>): void {
-  const baseline = aiBaseline as unknown as AiBaselineSource;
+  const baseline = aiBenchmarkSummary as unknown as AiBenchmarkSummarySource;
   if (baseline.version !== 1) return;
   const addModel = (
     engineValue: string | undefined,
@@ -2501,7 +2500,7 @@ function benchmarkLabel(source: string | undefined, games: number | undefined): 
   if (source === "schell-v-expert-1.1-1000-large") return "1,000 Schell vs Original 1.1";
   if (source === "four-model-ai-vs-ai-6000") return "6,000 four-model AI vs AI";
   if (source === "top-three-10k-30000") return "30,000 top-three AI vs AI";
-  if (source === "ai-vs-ai-baseline") return `${games ?? 0} Original 1.1 AI baseline`;
+  if (source === "sqlite-ai-benchmark-summary") return "SQLite AI benchmark summary";
   return source || "AI baseline";
 }
 

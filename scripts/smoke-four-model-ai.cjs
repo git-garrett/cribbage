@@ -13,8 +13,6 @@ const gameDbDefaultPath = path.join(root, "benchmarks", "ai-db", "cribbage-games
 const holdTableEnabled = process.env.AI_SMOKE_HOLD_TABLE !== "0";
 const holdTablePath = path.resolve(root, process.env.AI_SMOKE_HOLD_TABLE_PATH || holdTableDefaultPath);
 const gameDbEnabled = process.env.AI_SMOKE_GAME_DB !== "0";
-const jsonGameDbEnabled = process.env.AI_SMOKE_JSON_GAME_DB === "1";
-const gameLogFilesEnabled = process.env.AI_SMOKE_GAME_LOG_FILES !== "0";
 const gameDbPath = path.resolve(root, process.env.AI_SMOKE_GAME_DB_PATH || gameDbDefaultPath);
 const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
 const rankIndex = new Map(ranks.map((rank, index) => [rank, index]));
@@ -364,11 +362,6 @@ function baselineModel(stats) {
   };
 }
 
-function normalizeLogDetail(value) {
-  const detail = String(value || "none").toLowerCase();
-  return ["none", "game", "hand", "events"].includes(detail) ? detail : "none";
-}
-
 function handSummaries(events) {
   const hands = new Map();
   for (const event of events) {
@@ -412,7 +405,7 @@ function handSummaries(events) {
   return [...hands.values()].sort((a, b) => a.handNumber - b.handNumber);
 }
 
-function gameLogRecord({ events, end, finalScores, winner, result, leftEngine, rightEngine, gameIndex, detail, randomSeed }) {
+function gameLogRecord({ events, end, finalScores, winner, result, leftEngine, rightEngine, gameIndex, randomSeed }) {
   const start = events.find((event) => event.type === "game" && event.action === "start");
   const record = {
     schemaVersion: 1,
@@ -430,12 +423,12 @@ function gameLogRecord({ events, end, finalScores, winner, result, leftEngine, r
       right: finalScores.ai,
     },
   };
-  if (detail === "hand" || detail === "events") record.hands = handSummaries(events);
-  if (detail === "events") record.events = events;
+  record.hands = handSummaries(events);
+  record.events = events;
   return record;
 }
 
-async function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, gameOffset = 0, logDetail = "none", runSeed = "ai-smoke") {
+async function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, gameOffset = 0, runSeed = "ai-smoke") {
   const { CribbageGame, loadOpponentResources } = loadEngine();
   if (typeof loadOpponentResources === "function") {
     await Promise.all([
@@ -446,7 +439,7 @@ async function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, g
   const leftStats = emptyStats();
   const rightStats = emptyStats();
   const holdTable = holdTableEnabled ? emptyHoldTable() : null;
-  const gameLogs = logDetail === "none" ? null : [];
+  const gameLogs = [];
   for (let index = 0; index < gameCount; index += 1) {
     const gameIndex = gameOffset + index;
     const randomSeed = gameSeedFor(runSeed, leftEngine, rightEngine, gameIndex);
@@ -466,20 +459,17 @@ async function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, g
     recordScores(leftStats, "human", events);
     recordScores(rightStats, "ai", events);
     recordHoldTable(holdTable, events);
-    if (gameLogs) {
-      gameLogs.push(gameLogRecord({
-        events,
-        end,
-        finalScores,
-        winner,
-        result,
-        leftEngine,
-        rightEngine,
-        gameIndex,
-        detail: logDetail,
-        randomSeed,
-      }));
-    }
+    gameLogs.push(gameLogRecord({
+      events,
+      end,
+      finalScores,
+      winner,
+      result,
+      leftEngine,
+      rightEngine,
+      gameIndex,
+      randomSeed,
+    }));
     if (progressEvery > 0 && (index + 1) % progressEvery === 0) {
       parentPort?.postMessage({
         type: "progress",
@@ -524,7 +514,6 @@ if (!isMainThread) {
       workerData.gameCount,
       workerData.progressEvery,
       workerData.gameOffset,
-      workerData.logDetail,
       workerData.runSeed,
     );
     parentPort.postMessage({
@@ -550,12 +539,6 @@ function parseList(value, fallback) {
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
-}
-
-function writeJsonl(filePath, values) {
-  if (!values?.length) return;
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, values.map((value) => JSON.stringify(value)).join("\n") + "\n");
 }
 
 function readJson(filePath) {
@@ -670,34 +653,6 @@ function openGameDatabase(filePath) {
       completed_at TEXT,
       metadata_json TEXT NOT NULL DEFAULT '{}'
     );
-    CREATE TABLE IF NOT EXISTS ai_games (
-      game_id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL,
-      matchup_id TEXT NOT NULL,
-      game_index INTEGER NOT NULL,
-      random_seed TEXT NOT NULL,
-      left_engine TEXT NOT NULL,
-      right_engine TEXT NOT NULL,
-      winner TEXT,
-      result TEXT,
-      final_left_score INTEGER,
-      final_right_score INTEGER,
-      started_at TEXT,
-      ended_at TEXT,
-      included_in_tables INTEGER NOT NULL DEFAULT 1,
-      reproducible INTEGER NOT NULL DEFAULT 1,
-      source_log_path TEXT,
-      notes TEXT NOT NULL DEFAULT '',
-      record_json TEXT NOT NULL,
-      hands_json TEXT,
-      events_json TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (run_id) REFERENCES ai_runs(run_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_ai_games_run ON ai_games(run_id);
-    CREATE INDEX IF NOT EXISTS idx_ai_games_matchup ON ai_games(matchup_id);
-    CREATE INDEX IF NOT EXISTS idx_ai_games_models ON ai_games(left_engine, right_engine);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_games_run_index ON ai_games(run_id, matchup_id, game_index);
     CREATE TABLE IF NOT EXISTS ai_run_notes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id TEXT NOT NULL,
@@ -705,27 +660,9 @@ function openGameDatabase(filePath) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (run_id) REFERENCES ai_runs(run_id)
     );
-    CREATE TABLE IF NOT EXISTS ai_game_notes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      game_id TEXT NOT NULL,
-      note TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (game_id) REFERENCES ai_games(game_id)
-    );
   `);
-  ensureGameDbColumns(db);
   ensureCompactSchema(db);
   return db;
-}
-
-function ensureGameDbColumns(db) {
-  const columns = new Set(db.prepare("PRAGMA table_info(ai_games)").all().map((column) => column.name));
-  if (!columns.has("reproducible")) {
-    db.exec("ALTER TABLE ai_games ADD COLUMN reproducible INTEGER NOT NULL DEFAULT 1");
-  }
-  if (!columns.has("source_log_path")) {
-    db.exec("ALTER TABLE ai_games ADD COLUMN source_log_path TEXT");
-  }
 }
 
 function upsertRun(db, { runId, outDir, runSeed, status = "running", metadata = {} }) {
@@ -761,58 +698,6 @@ function markRunComplete(db, runId, status = "complete") {
 function insertGameRecords(db, { runId, matchupId, records }) {
   if (!db || !records?.length) return;
   insertCompactGameRecords(db, { runId, matchupId, records });
-  if (!jsonGameDbEnabled) return;
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO ai_games (
-      game_id,
-      run_id,
-      matchup_id,
-      game_index,
-      random_seed,
-      left_engine,
-      right_engine,
-      winner,
-      result,
-      final_left_score,
-      final_right_score,
-      started_at,
-      ended_at,
-      reproducible,
-      source_log_path,
-      record_json,
-      hands_json,
-      events_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  db.exec("BEGIN");
-  try {
-    for (const record of records) {
-      insert.run(
-        record.gameId || `${runId}:${matchupId}:${record.gameIndex}`,
-        runId,
-        matchupId,
-        record.gameIndex,
-        record.randomSeed || "",
-        record.leftEngine,
-        record.rightEngine,
-        record.winner,
-        record.result,
-        record.finalScores?.left ?? null,
-        record.finalScores?.right ?? null,
-        record.startedAt,
-        record.endedAt,
-        record.reproducible === false ? 0 : 1,
-        record.sourceLogPath ?? null,
-        JSON.stringify(record),
-        record.hands ? JSON.stringify(record.hands) : null,
-        record.events ? JSON.stringify(record.events) : null,
-      );
-    }
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
 }
 
 function expectedCompletionAt(updatedAt, estimatedRemainingSeconds) {
@@ -820,10 +705,10 @@ function expectedCompletionAt(updatedAt, estimatedRemainingSeconds) {
   return new Date(Date.parse(updatedAt) + estimatedRemainingSeconds * 1000).toISOString();
 }
 
-function runWorker(leftEngine, rightEngine, gameCount, workerIndex, oldMb, progressEvery = 0, onProgress = () => {}, gameOffset = 0, logDetail = "none", runSeed = "ai-smoke") {
+function runWorker(leftEngine, rightEngine, gameCount, workerIndex, oldMb, progressEvery = 0, onProgress = () => {}, gameOffset = 0, runSeed = "ai-smoke") {
   return new Promise((resolve, reject) => {
     const worker = new Worker(__filename, {
-      workerData: { leftEngine, rightEngine, gameCount, workerIndex, progressEvery, gameOffset, logDetail, runSeed },
+      workerData: { leftEngine, rightEngine, gameCount, workerIndex, progressEvery, gameOffset, runSeed },
       resourceLimits: oldMb > 0 ? { maxOldGenerationSizeMb: oldMb } : {},
     });
     let settled = false;
@@ -853,7 +738,7 @@ async function runOne({ leftEngine, rightEngine, workers, games, oldMb, runSeed 
   const sizes = chunkSizes(games, workers);
   const startedAt = Date.now();
   const results = await Promise.all(sizes.map((size, index) =>
-    runWorker(leftEngine, rightEngine, size, index, oldMb, 0, () => {}, 0, "none", runSeed)
+    runWorker(leftEngine, rightEngine, size, index, oldMb, 0, () => {}, 0, runSeed)
   ));
   const leftStats = emptyStats();
   const rightStats = emptyStats();
@@ -962,14 +847,12 @@ function aggregateBatchResults({ leftEngine, rightEngine, workers, games, oldMb,
   };
 }
 
-async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, jobIndex, jobCount, batchGames, logDetail, runSeed, gameDb, runId }) {
+async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, jobIndex, jobCount, batchGames, runSeed, gameDb, runId }) {
   const startedAt = Date.now();
   const batches = makeBatches(job.games, batchGames);
   const batchDir = path.join(outDir, `${id}.batches`);
-  const gameLogDir = logDetail === "none" || !gameLogFilesEnabled ? null : path.join(outDir, `${id}.game-logs`);
   const holdTableDir = holdTableEnabled ? path.join(outDir, `${id}.hold-tables`) : null;
   fs.mkdirSync(batchDir, { recursive: true });
-  if (gameLogDir) fs.mkdirSync(gameLogDir, { recursive: true });
   if (holdTableDir) fs.mkdirSync(holdTableDir, { recursive: true });
 
   const completed = [];
@@ -1006,9 +889,6 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
       jobCount,
       currentJob: job,
       batchGames,
-      logDetail,
-      gameLogFilesEnabled,
-      gameLogDir,
       gameDbEnabled,
       gameDbPath: gameDbEnabled ? gameDbPath : null,
       runId,
@@ -1048,14 +928,10 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
             writeStatus();
           },
           batch.start,
-          logDetail,
           runSeed,
         )
           .then((result) => {
             const gameLogCount = result.gameLogs?.length || 0;
-            if (gameLogDir && gameLogCount) {
-              writeJsonl(path.join(gameLogDir, `${batchId(batch.index)}.${logDetail}.jsonl`), result.gameLogs);
-            }
             if (gameDb && gameLogCount) {
               insertGameRecords(gameDb, {
                 runId,
@@ -1127,7 +1003,6 @@ async function main() {
   const runId = path.basename(outDir);
   const statusPath = path.join(outDir, "status.json");
   const summaryPath = path.join(outDir, "summary.json");
-  const logDetail = normalizeLogDetail(process.env.AI_SMOKE_LOG_DETAIL);
   fs.mkdirSync(outDir, { recursive: true });
   const models = modelsForOutDir(outDir);
   const matchups = buildMatchups(models);
@@ -1149,7 +1024,6 @@ async function main() {
     metadata: {
       games,
       batchGames,
-      logDetail,
       holdTableEnabled,
       holdTablePath: holdTableEnabled ? holdTablePath : null,
       workerCounts,
@@ -1194,7 +1068,6 @@ async function main() {
         jobIndex: index + 1,
         jobCount: jobs.length,
         batchGames,
-        logDetail,
         runSeed,
         gameDb,
         runId,
@@ -1271,7 +1144,6 @@ async function main() {
     runSeed,
     gamesPerJob: games,
     batchGames,
-    logDetail,
     holdTableEnabled,
     holdTablePath: holdTableEnabled ? holdTablePath : null,
     gameDbEnabled,

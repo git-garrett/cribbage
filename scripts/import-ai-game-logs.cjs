@@ -89,34 +89,6 @@ function openDb(filePath) {
       completed_at TEXT,
       metadata_json TEXT NOT NULL DEFAULT '{}'
     );
-    CREATE TABLE IF NOT EXISTS ai_games (
-      game_id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL,
-      matchup_id TEXT NOT NULL,
-      game_index INTEGER NOT NULL,
-      random_seed TEXT NOT NULL,
-      left_engine TEXT NOT NULL,
-      right_engine TEXT NOT NULL,
-      winner TEXT,
-      result TEXT,
-      final_left_score INTEGER,
-      final_right_score INTEGER,
-      started_at TEXT,
-      ended_at TEXT,
-      included_in_tables INTEGER NOT NULL DEFAULT 1,
-      reproducible INTEGER NOT NULL DEFAULT 1,
-      source_log_path TEXT,
-      notes TEXT NOT NULL DEFAULT '',
-      record_json TEXT NOT NULL,
-      hands_json TEXT,
-      events_json TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (run_id) REFERENCES ai_runs(run_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_ai_games_run ON ai_games(run_id);
-    CREATE INDEX IF NOT EXISTS idx_ai_games_matchup ON ai_games(matchup_id);
-    CREATE INDEX IF NOT EXISTS idx_ai_games_models ON ai_games(left_engine, right_engine);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_games_run_index ON ai_games(run_id, matchup_id, game_index);
     CREATE TABLE IF NOT EXISTS ai_run_notes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id TEXT NOT NULL,
@@ -124,17 +96,7 @@ function openDb(filePath) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (run_id) REFERENCES ai_runs(run_id)
     );
-    CREATE TABLE IF NOT EXISTS ai_game_notes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      game_id TEXT NOT NULL,
-      note TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (game_id) REFERENCES ai_games(game_id)
-    );
   `);
-  const columns = new Set(db.prepare("PRAGMA table_info(ai_games)").all().map((column) => column.name));
-  if (!columns.has("reproducible")) db.exec("ALTER TABLE ai_games ADD COLUMN reproducible INTEGER NOT NULL DEFAULT 1");
-  if (!columns.has("source_log_path")) db.exec("ALTER TABLE ai_games ADD COLUMN source_log_path TEXT");
   ensureCompactSchema(db);
   return db;
 }
@@ -154,13 +116,7 @@ function importLogs({ dbPath, searchDir }) {
       END,
       metadata_json = excluded.metadata_json
   `);
-  const gameInsert = db.prepare(`
-    INSERT OR IGNORE INTO ai_games (
-      game_id, run_id, matchup_id, game_index, random_seed, left_engine, right_engine,
-      winner, result, final_left_score, final_right_score, started_at, ended_at,
-      included_in_tables, reproducible, source_log_path, notes, record_json, hands_json, events_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?)
-  `);
+  const compactExists = db.prepare("SELECT 1 FROM compact_games WHERE game_id = ? LIMIT 1");
   const runStats = new Map();
   let inserted = 0;
   let skipped = 0;
@@ -200,52 +156,31 @@ function importLogs({ dbPath, searchDir }) {
     stats.matchups.add(matchupId);
     stats.logDetails.add(logDetail);
 
-    const compactRecords = [];
-    db.exec("BEGIN");
     try {
-      records.forEach((record, lineIndex) => {
+      const compactRecords = records.map((record, lineIndex) => {
         const gameId = record.gameId || syntheticGameId(runId, matchupId, sourceLogPath, lineIndex);
+        if (compactExists.get(gameId)) {
+          skipped += 1;
+          stats.skipped += 1;
+        } else {
+          inserted += 1;
+          stats.inserted += 1;
+        }
         const normalized = {
           ...record,
           schemaVersion: record.schemaVersion || 1,
+          gameId,
+          gameIndex: Number.isFinite(record.gameIndex) ? record.gameIndex : lineIndex,
           importedFrom: sourceLogPath,
+          sourceLogPath,
           logDetail,
           reproducible: false,
           deterministicReproduction: false,
         };
-        compactRecords.push(normalized);
-        const result = gameInsert.run(
-          gameId,
-          runId,
-          matchupId,
-          Number.isFinite(record.gameIndex) ? record.gameIndex : lineIndex,
-          "",
-          record.leftEngine || "",
-          record.rightEngine || "",
-          record.winner || null,
-          record.result || null,
-          record.finalScores?.left ?? null,
-          record.finalScores?.right ?? null,
-          record.startedAt || null,
-          record.endedAt || null,
-          sourceLogPath,
-          "Imported from legacy JSONL logs; legitimate contest but not deterministically reproducible.",
-          JSON.stringify(normalized),
-          record.hands ? JSON.stringify(record.hands) : null,
-          record.events ? JSON.stringify(record.events) : null,
-        );
-        if (result.changes) {
-          inserted += 1;
-          stats.inserted += 1;
-        } else {
-          skipped += 1;
-          stats.skipped += 1;
-        }
+        return normalized;
       });
-      db.exec("COMMIT");
       insertCompactGameRecords(db, { runId, matchupId, records: compactRecords });
     } catch (error) {
-      db.exec("ROLLBACK");
       errors += 1;
       console.error(`Failed to import ${sourceLogPath}: ${error.message}`);
     }
@@ -359,6 +294,7 @@ function phoneRecordFromEvents({ gameId, events, exportPath, exportRecord }) {
     exportedAt: exportRecord.exportedAt || null,
     appVersion: exportRecord.appVersion || null,
     importedFrom: path.relative(root, exportPath),
+    sourceLogPath: path.relative(root, exportPath),
     reproducible: false,
     deterministicReproduction: false,
     hands: hands.sort((a, b) => a.handNumber - b.handNumber),
@@ -381,13 +317,7 @@ function importPhoneExport({ dbPath, phoneExport }) {
       status = excluded.status,
       metadata_json = excluded.metadata_json
   `);
-  const gameInsert = db.prepare(`
-    INSERT OR IGNORE INTO ai_games (
-      game_id, run_id, matchup_id, game_index, random_seed, left_engine, right_engine,
-      winner, result, final_left_score, final_right_score, started_at, ended_at,
-      included_in_tables, reproducible, source_log_path, notes, record_json, hands_json, events_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, '', ?, ?, ?)
-  `);
+  const compactExists = db.prepare("SELECT 1 FROM compact_games WHERE game_id = ? LIMIT 1");
   const records = [];
   for (const [gameId, gameEvents] of byGame.entries()) {
     const record = phoneRecordFromEvents({ gameId, events: gameEvents, exportPath: phoneExport, exportRecord });
@@ -414,36 +344,20 @@ function importPhoneExport({ dbPath, phoneExport }) {
   );
   let inserted = 0;
   let skipped = 0;
-  db.exec("BEGIN");
   try {
-    records.forEach((record, index) => {
+    const byMatchup = new Map();
+    for (const [index, record] of records.entries()) {
       record.gameIndex = index;
       const matchupId = `human__vs__${matchupSafeName(record.rightEngine)}`;
-      const result = gameInsert.run(
-        record.gameId,
-        runId,
-        matchupId,
-        index,
-        "",
-        record.leftEngine,
-        record.rightEngine,
-        record.winner,
-        record.result,
-        record.finalScores.left,
-        record.finalScores.right,
-        record.startedAt,
-        record.endedAt,
-        sourceLogPath,
-        JSON.stringify(record),
-        JSON.stringify(record.hands || []),
-        JSON.stringify(record.events || []),
-      );
-      if (result.changes) inserted += 1;
-      else skipped += 1;
-    });
-    db.exec("COMMIT");
+      if (!byMatchup.has(matchupId)) byMatchup.set(matchupId, []);
+      byMatchup.get(matchupId).push(record);
+      if (compactExists.get(record.gameId)) skipped += 1;
+      else inserted += 1;
+    }
+    for (const [matchupId, matchupRecords] of byMatchup.entries()) {
+      insertCompactGameRecords(db, { runId, matchupId, records: matchupRecords });
+    }
   } catch (error) {
-    db.exec("ROLLBACK");
     db.close();
     throw error;
   }
