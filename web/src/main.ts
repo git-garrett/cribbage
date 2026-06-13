@@ -2134,10 +2134,10 @@ function sortedAnalyticsEngines(
 
 function analyticsEngineSortKey(engine: Opponent): number {
   return [
-    "schell_table-peg_table-4.0",
-    "schell_table-peg_table-5.0",
-    "schell_table-peg_table-7.0",
     "schell_table-peg_table-6.0",
+    "schell_table-peg_table-5.0",
+    "schell_table-peg_table-4.0",
+    "schell_table-peg_table-7.0",
     "ras_table-peg_table-4.0",
     "schell_table-peg-3.0",
     "ras_table-peg-3.0",

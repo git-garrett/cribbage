@@ -9,10 +9,10 @@ const root = path.resolve(__dirname, "..");
 const enginePath = path.join(root, "web/src/engine.ts");
 
 const currentModels = [
-  "schell_table-peg_table-4.0",
-  "schell_table-peg_table-5.0",
-  "schell_table-peg_table-7.0",
   "schell_table-peg_table-6.0",
+  "schell_table-peg_table-5.0",
+  "schell_table-peg_table-4.0",
+  "schell_table-peg_table-7.0",
   "ras_table-peg_table-4.0",
   "schell_table-peg-3.0",
   "schell_table-2.0",
