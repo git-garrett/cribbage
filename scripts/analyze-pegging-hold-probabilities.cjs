@@ -40,7 +40,7 @@ function parseArgs(argv) {
 
 Options:
   --db <path>          SQLite compact game DB
-  --out <path>         Output JSON path
+  --out <path>         Output JSON path. Includes marginal hold probabilities and exact remaining-hand distributions.
   --status <path>      Status JSON path
   --workers <n>        Worker threads for parallel DB scans
   --limit <n>          Sample at most n compact_hands rows, for calibration
@@ -95,7 +95,7 @@ function playedRanksForPlayer(blob, player) {
 }
 
 function newPrefixStats() {
-  return { samples: 0, present: Array(13).fill(0), counts: Array(13).fill(0) };
+  return { samples: 0, present: Array(13).fill(0), counts: Array(13).fill(0), remainingHands: {} };
 }
 
 function newAggregate() {
@@ -114,6 +114,10 @@ function prefixKey(ranks) {
   return [...ranks].sort((a, b) => a - b).map((rank) => RANKS[rank]).join(",");
 }
 
+function rankCountKey(counts) {
+  return counts.join("");
+}
+
 function tallyPlayer(aggregate, role, keepBlob, pegSequenceBlob, player) {
   const keepCounts = rankCounts(keepBlob);
   const playedRanks = playedRanksForPlayer(pegSequenceBlob, player);
@@ -128,6 +132,8 @@ function tallyPlayer(aggregate, role, keepBlob, pegSequenceBlob, player) {
     bucket[key] ??= newPrefixStats();
     const stats = bucket[key];
     stats.samples += 1;
+    const remainingKey = rankCountKey(remaining);
+    stats.remainingHands[remainingKey] = (stats.remainingHands[remainingKey] || 0) + 1;
     aggregate.playerHandsWithPrefix[String(length)] += 1;
     for (let index = 0; index < 13; index += 1) {
       if (remaining[index] > 0) stats.present[index] += 1;
@@ -141,6 +147,9 @@ function mergeStats(target, source) {
   for (let index = 0; index < 13; index += 1) {
     target.present[index] += source.present[index];
     target.counts[index] += source.counts[index];
+  }
+  for (const [key, count] of Object.entries(source.remainingHands || {})) {
+    target.remainingHands[key] = (target.remainingHands[key] || 0) + count;
   }
 }
 
@@ -233,6 +242,9 @@ function finalizeAggregate(aggregate, metadata) {
           samples: stats.samples,
           probabilityHeld,
           expectedCountHeld,
+          remainingHands: Object.fromEntries(
+            Object.entries(stats.remainingHands).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+          ),
         };
       }
       roles[role][length] = { prefixLength: Number(length), prefixes };
@@ -244,6 +256,7 @@ function finalizeAggregate(aggregate, metadata) {
     ranks: RANKS,
     prefixSemantics: "unordered rank multiset of the player's first N pegging plays; remaining cards are after those N plays",
     probabilitySemantics: "probabilityHeld is P(player has at least one remaining card of rank R | prefix, role); expectedCountHeld is E(count of remaining rank R | prefix, role)",
+    distributionSemantics: "remainingHands maps a 13-digit rank-count key to observed samples for the exact remaining rank-count hand after the prefix; rank order is A,2,3,4,5,6,7,8,9,10,J,Q,K",
     filters: metadata.filters,
     sourceGames: metadata.sourceGames,
     totals: {

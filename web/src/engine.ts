@@ -1621,7 +1621,7 @@ type RankCounts = number[];
 type WeightedRankHand = { ranks: RankCounts; weight: number };
 type PeggingHoldPrefix = {
   samples: number;
-  probabilityHeld: Record<string, number | undefined>;
+  remainingHands: Record<string, number | undefined>;
 };
 type PeggingHoldTable = {
   ranks: string[];
@@ -1667,7 +1667,7 @@ const PEG_TABLE_POLICY_LOADERS: Partial<Record<Opponent, () => Promise<PegTableP
 };
 const PEGGING_HOLD_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<PeggingHoldTable>>> = {
   "schell_table-peg_table-9.0": () =>
-    import("./models/schell_table-peg_table-9.0/pegging-hold-probabilities.json").then((module) => module.default as unknown as PeggingHoldTable),
+    import("./models/schell_table-peg_table-9.0/pegging-remaining-hand-distribution.json").then((module) => module.default as unknown as PeggingHoldTable),
 };
 
 export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
@@ -1846,38 +1846,23 @@ function opponentRankHandsForEngine(
   const prefixRanks = opponent.table.slice(0, 3).map((card) => card.rank);
   const prefixKey = rankPrefixKey(prefixRanks);
   const context = holdTable.roles[opponentRole]?.[String(prefixRanks.length)]?.prefixes[prefixKey];
-  if (!context || context.samples < 100) return hands;
+  if (!context) return hands;
 
-  const totalBaseWeight = hands.reduce((total, hand) => total + hand.weight, 0);
-  if (!totalBaseWeight) return hands;
-  const baselinePresence = Array.from({ length: 13 }, (_, rank) => {
-    const presentWeight = hands.reduce((total, hand) => total + (hand.ranks[rank] > 0 ? hand.weight : 0), 0);
-    return presentWeight / totalBaseWeight;
-  });
-
-  const reweighted = hands.map((hand) => {
-    let likelihoodRatio = 1;
-    for (let rank = 0; rank < 13; rank += 1) {
-      const rankLabel = RANKS[rank];
-      const empirical = clampProbability(context.probabilityHeld[rankLabel] ?? baselinePresence[rank]);
-      const baseline = clampProbability(baselinePresence[rank]);
-      likelihoodRatio *= hand.ranks[rank] > 0
-        ? empirical / baseline
-        : (1 - empirical) / (1 - baseline);
-    }
-    return { ranks: hand.ranks, weight: hand.weight * likelihoodRatio };
-  });
-  const totalReweighted = reweighted.reduce((total, hand) => total + hand.weight, 0);
-  return totalReweighted > 0 && Number.isFinite(totalReweighted) ? reweighted : hands;
+  const empiricalHands = hands
+    .map((hand) => ({
+      ranks: hand.ranks,
+      weight: context.remainingHands[rankCountKey(hand.ranks)] ?? 0,
+    }))
+    .filter((hand) => hand.weight > 0);
+  return empiricalHands;
 }
 
 function rankPrefixKey(ranks: number[]): string {
   return [...ranks].sort((a, b) => a - b).map((rank) => RANKS[rank]).join(",");
 }
 
-function clampProbability(value: number): number {
-  if (!Number.isFinite(value)) return 0.5;
-  return Math.min(0.99, Math.max(0.01, value));
+function rankCountKey(ranks: RankCounts): string {
+  return ranks.join("");
 }
 
 function choose(n: number, k: number): number {
