@@ -882,20 +882,36 @@ function componentForHand(
   handNumber: number,
   index: number,
 ): { player: "human" | "ai"; component: ParComponent; amount: number; label: string; pone: "human" | "ai" } {
+  const rawComponents = rawComponentsForHand(firstDealerPlayer, handNumber);
+  const components = rawComponents.map((component) => ({
+    ...component,
+    amount: scaledParComponentAmount(component.player, firstDealerPlayer, handNumber, component.amount),
+  }));
+  return components[index] ?? components[components.length - 1];
+}
+
+function forecastComponentForHand(
+  firstDealerPlayer: "human" | "ai",
+  handNumber: number,
+  index: number,
+): { player: "human" | "ai"; component: ParComponent; amount: number; label: string; pone: "human" | "ai" } {
+  const components = rawComponentsForHand(firstDealerPlayer, handNumber);
+  return components[index] ?? components[components.length - 1];
+}
+
+function rawComponentsForHand(
+  firstDealerPlayer: "human" | "ai",
+  handNumber: number,
+): Array<{ player: "human" | "ai"; component: ParComponent; amount: number; label: string; pone: "human" | "ai" }> {
   const dealer = dealerForHand(firstDealerPlayer, handNumber);
   const pone = dealer === "human" ? "ai" : "human";
-  const rawComponents: Array<{ player: "human" | "ai"; component: ParComponent; amount: number; label: string; pone: "human" | "ai" }> = [
+  return [
     { player: pone, component: "ponePeg", amount: GRANULAR_PARS.pone.pegging, label: "pone peg", pone },
     { player: dealer, component: "dealerPeg", amount: GRANULAR_PARS.dealer.pegging, label: "dealer peg", pone },
     { player: pone, component: "poneHand", amount: GRANULAR_PARS.pone.hand, label: "pone hand", pone },
     { player: dealer, component: "dealerHand", amount: GRANULAR_PARS.dealer.hand, label: "dealer hand", pone },
     { player: dealer, component: "crib", amount: GRANULAR_PARS.dealer.crib, label: "crib", pone },
   ];
-  const components = rawComponents.map((component) => ({
-    ...component,
-    amount: scaledParComponentAmount(component.player, firstDealerPlayer, handNumber, component.amount),
-  }));
-  return components[index] ?? components[components.length - 1];
 }
 
 function scaledParComponentAmount(
@@ -927,18 +943,19 @@ function projectedOutMoment(
 ): OutProjection | null {
   let handNumber = game.handNumber;
   let componentIndex = parState.next;
+  const forecastParState = granularForecastParState(game, firstDealerPlayer);
   const projected = { ...game.scores };
-  const currentPar = { ...parState.par };
+  const currentPar = { ...forecastParState.par };
   const offsets = {
     human: game.scores.human - currentPar.human,
     ai: game.scores.ai - currentPar.ai,
   };
-  for (let guard = 0; guard < 80; guard += 1) {
+  for (let guard = 0; guard < 160; guard += 1) {
     if (componentIndex >= 5) {
       handNumber += 1;
       componentIndex = 0;
     }
-    const component = componentForHand(firstDealerPlayer, handNumber, componentIndex);
+    const component = forecastComponentForHand(firstDealerPlayer, handNumber, componentIndex);
     const alreadyOut = (["human", "ai"] as const).find((player) => projected[player] >= 121);
     if (alreadyOut) {
       return {
@@ -973,6 +990,34 @@ function relativeOutLabel(viewer: "human" | "ai", projection: OutProjection): st
       ? "hand"
       : "peg";
   return `${viewer === projection.player ? "own" : "opponent"} ${kind}`;
+}
+
+function granularForecastParState(game: GameState, firstDealerPlayer: "human" | "ai"): GranularParState {
+  const completedFullHands = Math.max(0, game.handNumber - 1);
+  const par = {
+    human: cumulativeForecastParThroughHand("human", firstDealerPlayer, completedFullHands),
+    ai: cumulativeForecastParThroughHand("ai", firstDealerPlayer, completedFullHands),
+  };
+  const completedCurrent = completedComponentsForPhase(game.phase);
+  for (let index = 0; index < completedCurrent; index += 1) {
+    applyParComponent(par, forecastComponentForHand(firstDealerPlayer, game.handNumber, index));
+  }
+  return { par, next: completedCurrent };
+}
+
+function cumulativeForecastParThroughHand(
+  player: "human" | "ai",
+  firstDealerPlayer: "human" | "ai",
+  handNumber: number,
+): number {
+  if (handNumber <= 0) return 0;
+  let par = player === firstDealerPlayer ? 7 : 17;
+  for (let hand = 2; hand <= handNumber; hand += 1) {
+    par += roleForHand(player, firstDealerPlayer, hand) === "dealer"
+      ? GRANULAR_PARS.dealer.total
+      : GRANULAR_PARS.pone.total;
+  }
+  return par;
 }
 
 async function ensureOpponentResources(opponent: Opponent): Promise<void> {
@@ -1110,7 +1155,6 @@ function onCardClick(card: GameState["humanHand"][number]): void {
       state.selected.clear();
       state.selected.add(card.id);
     }
-    state.resultOverride = [];
     render(game);
   }
 }
@@ -2758,6 +2802,15 @@ els.menuToggle.addEventListener("click", () => {
   els.menuToggle.setAttribute("aria-expanded", String(open));
 });
 
+document.addEventListener("pointerdown", (event) => {
+  if (els.settingsPanel.hidden) return;
+  const target = event.target;
+  if (!(target instanceof Node)) return;
+  if (els.settingsPanel.contains(target) || els.menuToggle.contains(target)) return;
+  els.settingsPanel.hidden = true;
+  els.menuToggle.setAttribute("aria-expanded", "false");
+});
+
 els.analyticsOpen.addEventListener("click", () => {
   closeDecisionSnapshot();
   state.analyticsOpen = true;
@@ -2868,7 +2921,9 @@ els.play.addEventListener("click", async () => {
   const card = state.game ? selectedPlayableCard(state.game) : null;
   if (!card) return;
   state.pending = true;
+  state.aiThinking = true;
   render(state.game);
+  await waitForPaint();
   try {
     state.resultOverride = null;
     const next = await api("/api/play-human", { id: card.id });
@@ -2876,6 +2931,7 @@ els.play.addEventListener("click", async () => {
     render(next);
     await continuePeggingAfterRender(next);
   } finally {
+    state.aiThinking = false;
     state.pending = false;
     render(state.game);
   }

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
+const { ensureCompactSchema, insertCompactGameRecords } = require("./compact-game-storage.cjs");
 
 const root = path.resolve(__dirname, "..");
 const defaultDbPath = path.join(root, "benchmarks", "ai-db", "cribbage-games.sqlite");
@@ -134,6 +135,7 @@ function openDb(filePath) {
   const columns = new Set(db.prepare("PRAGMA table_info(ai_games)").all().map((column) => column.name));
   if (!columns.has("reproducible")) db.exec("ALTER TABLE ai_games ADD COLUMN reproducible INTEGER NOT NULL DEFAULT 1");
   if (!columns.has("source_log_path")) db.exec("ALTER TABLE ai_games ADD COLUMN source_log_path TEXT");
+  ensureCompactSchema(db);
   return db;
 }
 
@@ -198,6 +200,7 @@ function importLogs({ dbPath, searchDir }) {
     stats.matchups.add(matchupId);
     stats.logDetails.add(logDetail);
 
+    const compactRecords = [];
     db.exec("BEGIN");
     try {
       records.forEach((record, lineIndex) => {
@@ -210,6 +213,7 @@ function importLogs({ dbPath, searchDir }) {
           reproducible: false,
           deterministicReproduction: false,
         };
+        compactRecords.push(normalized);
         const result = gameInsert.run(
           gameId,
           runId,
@@ -239,6 +243,7 @@ function importLogs({ dbPath, searchDir }) {
         }
       });
       db.exec("COMMIT");
+      insertCompactGameRecords(db, { runId, matchupId, records: compactRecords });
     } catch (error) {
       db.exec("ROLLBACK");
       errors += 1;

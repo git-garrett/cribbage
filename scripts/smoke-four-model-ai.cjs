@@ -4,6 +4,7 @@ const Module = require("node:module");
 const os = require("node:os");
 const { Worker, isMainThread, parentPort, workerData } = require("node:worker_threads");
 const ts = require("typescript");
+const { ensureCompactSchema, insertCompactGameRecords } = require("./compact-game-storage.cjs");
 
 const root = path.resolve(__dirname, "..");
 const enginePath = path.join(root, "web/src/engine.ts");
@@ -12,6 +13,8 @@ const gameDbDefaultPath = path.join(root, "benchmarks", "ai-db", "cribbage-games
 const holdTableEnabled = process.env.AI_SMOKE_HOLD_TABLE !== "0";
 const holdTablePath = path.resolve(root, process.env.AI_SMOKE_HOLD_TABLE_PATH || holdTableDefaultPath);
 const gameDbEnabled = process.env.AI_SMOKE_GAME_DB !== "0";
+const jsonGameDbEnabled = process.env.AI_SMOKE_JSON_GAME_DB === "1";
+const gameLogFilesEnabled = process.env.AI_SMOKE_GAME_LOG_FILES !== "0";
 const gameDbPath = path.resolve(root, process.env.AI_SMOKE_GAME_DB_PATH || gameDbDefaultPath);
 const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
 const rankIndex = new Map(ranks.map((rank, index) => [rank, index]));
@@ -707,6 +710,7 @@ function openGameDatabase(filePath) {
     );
   `);
   ensureGameDbColumns(db);
+  ensureCompactSchema(db);
   return db;
 }
 
@@ -752,6 +756,8 @@ function markRunComplete(db, runId, status = "complete") {
 
 function insertGameRecords(db, { runId, matchupId, records }) {
   if (!db || !records?.length) return;
+  insertCompactGameRecords(db, { runId, matchupId, records });
+  if (!jsonGameDbEnabled) return;
   const insert = db.prepare(`
     INSERT OR REPLACE INTO ai_games (
       game_id,
@@ -897,6 +903,20 @@ function makeBatches(totalGames, batchGames) {
   return batches;
 }
 
+function compactBatchHasRows(db, runId, matchupId, batch) {
+  if (!db) return true;
+  ensureCompactSchema(db);
+  const row = db.prepare(`
+    SELECT count(*) AS count
+    FROM compact_games
+    WHERE run_id = ?
+      AND matchup_id = ?
+      AND game_index >= ?
+      AND game_index < ?
+  `).get(runId, matchupId, batch.start, batch.start + batch.gameCount);
+  return (row?.count || 0) >= batch.gameCount;
+}
+
 function aggregateBatchResults({ leftEngine, rightEngine, workers, games, oldMb, startedAt, batchResults }) {
   const leftStats = emptyStats();
   const rightStats = emptyStats();
@@ -942,7 +962,7 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
   const startedAt = Date.now();
   const batches = makeBatches(job.games, batchGames);
   const batchDir = path.join(outDir, `${id}.batches`);
-  const gameLogDir = logDetail === "none" ? null : path.join(outDir, `${id}.game-logs`);
+  const gameLogDir = logDetail === "none" || !gameLogFilesEnabled ? null : path.join(outDir, `${id}.game-logs`);
   const holdTableDir = holdTableEnabled ? path.join(outDir, `${id}.hold-tables`) : null;
   fs.mkdirSync(batchDir, { recursive: true });
   if (gameLogDir) fs.mkdirSync(gameLogDir, { recursive: true });
@@ -952,7 +972,7 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
   const pending = [];
   for (const batch of batches) {
     const batchPath = path.join(batchDir, `${batchId(batch.index)}.json`);
-    if (fs.existsSync(batchPath)) {
+    if (fs.existsSync(batchPath) && compactBatchHasRows(gameDb, runId, id, batch)) {
       completed.push(readJson(batchPath));
     } else {
       pending.push({ ...batch, batchPath });
@@ -983,6 +1003,7 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
       currentJob: job,
       batchGames,
       logDetail,
+      gameLogFilesEnabled,
       gameLogDir,
       gameDbEnabled,
       gameDbPath: gameDbEnabled ? gameDbPath : null,
