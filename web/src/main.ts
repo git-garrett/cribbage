@@ -2556,7 +2556,7 @@ function render(game: GameState | null): void {
   const gameActive = game.phase !== "game_over";
   els.discard.hidden = !gameActive || game.phase !== "discard";
   els.play.hidden = !gameActive || !(game.phase === "pegging" && game.turn === "User");
-  els.go.hidden = !gameActive || !(game.phase === "pegging" && game.turn === "User" && game.canGo);
+  els.go.hidden = true;
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
   els.play.disabled = !(game.phase === "pegging" && game.turn === "User" && selectedPlayableCard(game));
   els.go.disabled = !game.canGo;
@@ -2581,25 +2581,42 @@ function shouldAdvancePeggingAi(game: GameState): boolean {
   return game.phase === "pegging" && game.turn === "AI";
 }
 
+function shouldAutoHumanGo(game: GameState): boolean {
+  return game.phase === "pegging" && game.turn === "User" && game.canGo;
+}
+
 function waitForPaint(): Promise<void> {
   return new Promise((resolve) => {
     requestAnimationFrame(() => resolve());
   });
 }
 
-async function advanceAiPeggingAfterRender(game: GameState): Promise<GameState> {
-  if (!shouldAdvancePeggingAi(game)) return game;
-  state.aiThinking = true;
-  render(game);
-  await waitForPaint();
-  try {
-    const next = await api("/api/advance-pegging", {});
-    render(next);
-    return next;
-  } finally {
-    state.aiThinking = false;
-    render(state.game);
+async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
+  let current = game;
+  for (let guard = 0; guard < 16; guard += 1) {
+    if (shouldAutoHumanGo(current)) {
+      render(current);
+      await waitForPaint();
+      current = await api("/api/go-human", {});
+      render(current);
+      continue;
+    }
+    if (shouldAdvancePeggingAi(current)) {
+      state.aiThinking = true;
+      render(current);
+      await waitForPaint();
+      try {
+        current = await api("/api/advance-pegging", {});
+        render(current);
+      } finally {
+        state.aiThinking = false;
+        render(state.game);
+      }
+      continue;
+    }
+    return current;
   }
+  throw new Error("Pegging continuation did not settle.");
 }
 
 els.menuToggle.addEventListener("click", () => {
@@ -2711,7 +2728,7 @@ els.play.addEventListener("click", async () => {
     const next = await api("/api/play-human", { id: card.id });
     state.selected.clear();
     render(next);
-    await advanceAiPeggingAfterRender(next);
+    await continuePeggingAfterRender(next);
   } finally {
     state.pending = false;
     render(state.game);
@@ -2726,7 +2743,7 @@ els.go.addEventListener("click", async () => {
     state.resultOverride = null;
     const next = await api("/api/go-human", {});
     render(next);
-    await advanceAiPeggingAfterRender(next);
+    await continuePeggingAfterRender(next);
   } finally {
     state.pending = false;
     render(state.game);
@@ -2788,6 +2805,7 @@ async function finishDiscardInBackground(): Promise<void> {
     state.resultOverride = null;
     const next = await api("/api/finish-discard", {});
     render(next);
+    await continuePeggingAfterRender(next);
   } catch (error) {
     els.result.textContent = error instanceof Error ? error.message : "Request failed";
   }
@@ -2799,6 +2817,7 @@ api("/api/state")
     render(game);
     await ensureOpponentResources(game.opponent);
     if (game.phase === "ai_discarding") finishDiscardInBackground();
+    else await continuePeggingAfterRender(game);
   })
   .catch((error) => {
     els.result.textContent = error instanceof Error ? error.message : "Request failed";
