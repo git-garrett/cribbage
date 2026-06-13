@@ -428,7 +428,7 @@ describe("game state", () => {
     expect((discard as any).review.delta).toBeGreaterThan(0);
   });
 
-  test("records pegging review against the current best model", () => {
+  test("defers pegging review against the current best model", () => {
     const game = new CribbageGame("schell_table-peg_table-4.0");
     game.phase = "pegging";
     game.pone = game.human;
@@ -451,6 +451,11 @@ describe("game state", () => {
     );
     expect(pegging).toMatchObject({
       card: "10c",
+    });
+    expect((pegging as any).review).toBeUndefined();
+
+    expect(game.completePendingDecisionReviews()).toBe(1);
+    expect(pegging).toMatchObject({
       review: {
         model: DEFAULT_OPPONENT,
         selected: ["10c"],

@@ -69,6 +69,7 @@ const state: {
   dismissedGameOverId: string | null;
   aiThinking: boolean;
   modelLoading: boolean;
+  completingReviews: boolean;
 } = {
   game: null,
   selected: new Set(),
@@ -84,6 +85,7 @@ const state: {
   dismissedGameOverId: null,
   aiThinking: false,
   modelLoading: false,
+  completingReviews: false,
 };
 
 const els = {
@@ -888,49 +890,55 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       return localGame.state();
     }
     if (path === "/api/discard") {
-      await ensureOpponentResources(localGame.opponent);
+      await ensureOpponentResources(localGame.opponent as Opponent);
       localGame.discard((body?.ids as number[]) || []);
       saveGame();
       return localGame.state();
     }
     if (path === "/api/finish-discard") {
-      await ensureOpponentResources(localGame.opponent);
+      await ensureOpponentResources(localGame.opponent as Opponent);
       localGame.finishDiscard();
       saveGame();
       return localGame.state();
     }
     if (path === "/api/play") {
-      await ensureOpponentResources(localGame.opponent);
+      await ensureOpponentResources(localGame.opponent as Opponent);
       localGame.play(body?.id as number);
       saveGame();
       return localGame.state();
     }
     if (path === "/api/play-human") {
-      await ensureOpponentResources(localGame.opponent);
+      await ensureOpponentResources(localGame.opponent as Opponent);
       localGame.playHumanPeggingCard(body?.id as number);
       saveGame();
       return localGame.state();
     }
     if (path === "/api/go") {
-      await ensureOpponentResources(localGame.opponent);
+      await ensureOpponentResources(localGame.opponent as Opponent);
       localGame.go();
       saveGame();
       return localGame.state();
     }
     if (path === "/api/go-human") {
-      await ensureOpponentResources(localGame.opponent);
+      await ensureOpponentResources(localGame.opponent as Opponent);
       localGame.humanPeggingGo();
       saveGame();
       return localGame.state();
     }
     if (path === "/api/advance-pegging") {
-      await ensureOpponentResources(localGame.opponent);
+      await ensureOpponentResources(localGame.opponent as Opponent);
       localGame.advancePeggingToHuman();
       saveGame();
       return localGame.state();
     }
+    if (path === "/api/complete-decision-reviews") {
+      await ensureOpponentResources(DEFAULT_OPPONENT);
+      localGame.completePendingDecisionReviews();
+      saveGame();
+      return localGame.state();
+    }
     if (path === "/api/continue-scoring") {
-      await ensureOpponentResources(localGame.opponent);
+      await ensureOpponentResources(localGame.opponent as Opponent);
       localGame.continueScoring();
       saveGame();
       return localGame.state();
@@ -2608,6 +2616,7 @@ async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
       try {
         current = await api("/api/advance-pegging", {});
         render(current);
+        scheduleDecisionReviewCompletion();
       } finally {
         state.aiThinking = false;
         render(state.game);
@@ -2617,6 +2626,21 @@ async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
     return current;
   }
   throw new Error("Pegging continuation did not settle.");
+}
+
+function scheduleDecisionReviewCompletion(): void {
+  if (state.completingReviews) return;
+  state.completingReviews = true;
+  window.setTimeout(() => {
+    api("/api/complete-decision-reviews", {})
+      .then((next) => render(next))
+      .catch((error) => {
+        els.result.textContent = error instanceof Error ? error.message : "Request failed";
+      })
+      .finally(() => {
+        state.completingReviews = false;
+      });
+  }, 0);
 }
 
 els.menuToggle.addEventListener("click", () => {
@@ -2815,9 +2839,10 @@ buildBoard();
 api("/api/state")
   .then(async (game) => {
     render(game);
-    await ensureOpponentResources(game.opponent);
+    await ensureOpponentResources(localGame.opponent as Opponent);
     if (game.phase === "ai_discarding") finishDiscardInBackground();
     else await continuePeggingAfterRender(game);
+    scheduleDecisionReviewCompletion();
   })
   .catch((error) => {
     els.result.textContent = error instanceof Error ? error.message : "Request failed";

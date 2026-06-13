@@ -374,6 +374,14 @@ export interface GameSnapshot {
   result: string[];
   pegPositions: Record<PlayerKey, [number | string, number | string]>;
   pegTableLeads?: Record<PlayerKey, number | null>;
+  pendingPeggingReviews?: PendingPeggingReview[];
+}
+
+interface PendingPeggingReview {
+  eventId: string;
+  player: PlayerKey;
+  cardId: number;
+  snapshot: GameSnapshot;
 }
 
 export function cardFromString(input: string): Card {
@@ -534,6 +542,7 @@ export class CribbageGame {
     human: null,
     ai: null,
   };
+  pendingPeggingReviews: PendingPeggingReview[] = [];
 
   constructor(opponent: StoredOpponent = DEFAULT_OPPONENT, humanEngine: StoredOpponent = opponent) {
     this.opponent = normalizeOpponent(opponent);
@@ -610,6 +619,7 @@ export class CribbageGame {
       human: snapshot.pegTableLeads?.human ?? null,
       ai: snapshot.pegTableLeads?.ai ?? null,
     };
+    game.pendingPeggingReviews = [...snapshot.pendingPeggingReviews ?? []];
     return game;
   }
 
@@ -654,6 +664,15 @@ export class CribbageGame {
         ai: [...this.pegPositions.ai],
       },
       pegTableLeads: { ...this.pegTableLeads },
+      pendingPeggingReviews: [...this.pendingPeggingReviews],
+    };
+  }
+
+  private reviewSnapshot(): GameSnapshot {
+    return {
+      ...this.snapshot(),
+      analyticsEvents: [],
+      pendingPeggingReviews: [],
     };
   }
 
@@ -820,6 +839,25 @@ export class CribbageGame {
   advancePeggingToHuman(): void {
     this.beginInteraction();
     this.advanceUntilHuman();
+  }
+
+  completePendingDecisionReviews(): number {
+    let completed = 0;
+    const remaining: PendingPeggingReview[] = [];
+    for (const pending of this.pendingPeggingReviews) {
+      const event = this.analyticsEvents.find((candidate) => candidate.id === pending.eventId);
+      if (!event || event.type !== "pegging" || event.action !== "play") continue;
+      try {
+        const reviewGame = CribbageGame.restore(pending.snapshot);
+        const player = reviewGame.playerByKey(pending.player);
+        event.review = reviewGame.reviewPegPlay(player, new Card(pending.cardId));
+        completed += 1;
+      } catch {
+        remaining.push(pending);
+      }
+    }
+    this.pendingPeggingReviews = remaining;
+    return completed;
   }
 
   autoPlayToEnd(maxHands = 200): void {
@@ -1086,7 +1124,7 @@ export class CribbageGame {
   }
 
   private playCard(player: PlayerState, card: Card, reviewDecision = false): void {
-    const review = reviewDecision && player === this.human ? this.reviewPegPlay(player, card) : undefined;
+    const pendingReviewSnapshot = reviewDecision && player === this.human ? this.reviewSnapshot() : null;
     const handBeforePlay = this.cardLabels(player.hand);
     const playedCardsBefore = this.cardLabels(this.plays);
     const completedPlayGroupsBefore = this.completedPlays.map((group) => this.cardLabels(group));
@@ -1105,7 +1143,7 @@ export class CribbageGame {
           ai: this.ai.score + (player === this.ai ? points : 0),
         }
       : { human: this.human.score, ai: this.ai.score };
-    this.recordAnalytics({
+    const event = this.recordAnalytics({
       type: "pegging",
       action: "play",
       handNumber: this.handNumber,
@@ -1122,8 +1160,15 @@ export class CribbageGame {
       points,
       scores: scoreAfterPlay,
       message: `${this.name(player)} played ${this.cardLabel(card)}: ${this.count}`,
-      review,
     });
+    if (pendingReviewSnapshot) {
+      this.pendingPeggingReviews.push({
+        eventId: event.id,
+        player: player.key,
+        cardId: card.id,
+        snapshot: pendingReviewSnapshot,
+      });
+    }
     if (points) this.recordScore(player, "pegging", points, "count", card, this.count);
     if (points) this.peg(player, points);
     this.logEvent(
@@ -1408,15 +1453,17 @@ export class CribbageGame {
 
   private recordAnalytics(
     event: NewAnalyticsEvent,
-  ): void {
+  ): AnalyticsEvent {
     this.analyticsCounter += 1;
-    this.analyticsEvents.push({
+    const analyticsEvent = {
       ...event,
       id: `${this.gameId}-${this.analyticsCounter}`,
       at: new Date().toISOString(),
       gameId: this.gameId,
-    } as AnalyticsEvent);
+    } as AnalyticsEvent;
+    this.analyticsEvents.push(analyticsEvent);
     this.analyticsEvents = this.analyticsEvents.slice(-2000);
+    return analyticsEvent;
   }
 
   private roleFor(player: PlayerState): AnalyticsRole {
@@ -1547,15 +1594,15 @@ const pegCardCache = Array.from({ length: 13 }, (_, rank) => new Card(rank));
 const PEG_TABLE_POLICIES: Partial<Record<Opponent, PegTablePolicy>> = {};
 const PEG_TABLE_POLICY_LOADERS: Partial<Record<Opponent, () => Promise<PegTablePolicy>>> = {
   "schell_table-peg_table-4.0": () =>
-    import("./models/schell_table-peg_table-4.0/peg-table-policy.json").then((module) => module.default as PegTablePolicy),
+    import("./models/schell_table-peg_table-4.0/peg-table-policy.json").then((module) => module.default as unknown as PegTablePolicy),
   "ras_table-peg_table-4.0": () =>
-    import("./models/schell_table-peg_table-4.0/peg-table-policy.json").then((module) => module.default as PegTablePolicy),
+    import("./models/schell_table-peg_table-4.0/peg-table-policy.json").then((module) => module.default as unknown as PegTablePolicy),
   "schell_table-peg_table-5.0": () =>
-    import("./models/schell_table-peg_table-5.0/peg-table-policy.json").then((module) => module.default as PegTablePolicy),
+    import("./models/schell_table-peg_table-5.0/peg-table-policy.json").then((module) => module.default as unknown as PegTablePolicy),
   "schell_table-peg_table-6.0": () =>
-    import("./models/schell_table-peg_table-6.0/peg-table-policy.json").then((module) => module.default as PegTablePolicy),
+    import("./models/schell_table-peg_table-6.0/peg-table-policy.json").then((module) => module.default as unknown as PegTablePolicy),
   "schell_table-peg_table-7.0": () =>
-    import("./models/schell_table-peg_table-6.0/peg-table-policy.json").then((module) => module.default as PegTablePolicy),
+    import("./models/schell_table-peg_table-6.0/peg-table-policy.json").then((module) => module.default as unknown as PegTablePolicy),
 };
 
 export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
