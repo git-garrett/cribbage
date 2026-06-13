@@ -12,9 +12,9 @@ import schellPegTable60 from "./schell_table-peg_table-6.0/model.md?raw";
 import schellPegTable70 from "./schell_table-peg_table-7.0/model.md?raw";
 
 export const MODEL_INFO_ORDER: Opponent[] = [
+  "schell_table-peg_table-7.0",
   "schell_table-peg_table-6.0",
   "schell_table-peg_table-5.0",
-  "schell_table-peg_table-7.0",
   "schell_table-peg_table-4.0",
   "ras_table-peg_table-4.0",
   "schell_table-peg-3.0",

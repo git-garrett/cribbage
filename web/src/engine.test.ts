@@ -41,8 +41,8 @@ describe("scoring", () => {
 
 describe("game state", () => {
   test("defaults to the latest expert peg table engine", () => {
-    expect(DEFAULT_OPPONENT).toBe("schell_table-peg_table-6.0");
-    expect(new CribbageGame().opponent).toBe("schell_table-peg_table-6.0");
+    expect(DEFAULT_OPPONENT).toBe("schell_table-peg_table-7.0");
+    expect(new CribbageGame().opponent).toBe("schell_table-peg_table-7.0");
   });
 
   test("keeps first dealer stable while current dealer alternates", () => {
