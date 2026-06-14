@@ -1,7 +1,7 @@
 {
   "version": "9.0.0",
   "scripts": {
-    "build": "vite build",
+    "build": "node --max-old-space-size=8192 node_modules/vite/bin/vite.js build",
     "cap:copy": "npm run build && cap copy",
     "cap:sync:ios": "npm run build && cap sync ios",
     "dev": "vite --host 0.0.0.0",
@@ -13,6 +13,7 @@
     "launch:background": "node scripts/launch-background.cjs",
     "launch:top-three-10k": "node scripts/launch-background.cjs top-three-10k -- /usr/local/bin/node scripts/run-top-three-10k-benchmark.cjs benchmarks/ai-smoke/top-three-10k-full-analytics 10000 25 10",
     "export:ai-benchmark-summary": "node scripts/export-ai-benchmark-summary.cjs",
+    "export:board-position-stats": "node scripts/export-board-position-stats.cjs",
     "import:ai-game-logs": "node scripts/import-ai-game-logs.cjs",
     "compact:ai-games": "node scripts/compact-existing-ai-games.cjs",
     "mark:ai-record": "node scripts/mark-ai-record.cjs",
@@ -21,7 +22,7 @@
     "prepare": "git config core.hooksPath .githooks || true",
     "status:background": "node scripts/report-background-status.cjs",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit"
   },
   "dependencies": {
     "@capacitor/core": "^7.4.4"
