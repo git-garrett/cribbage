@@ -41,8 +41,8 @@ describe("scoring", () => {
 
 describe("game state", () => {
   test("defaults to the latest expert peg table engine", () => {
-    expect(DEFAULT_OPPONENT).toBe("schell_table-peg_table-9.0");
-    expect(new CribbageGame().opponent).toBe("schell_table-peg_table-9.0");
+    expect(DEFAULT_OPPONENT).toBe("schell_table-peg_table-11.0");
+    expect(new CribbageGame().opponent).toBe("schell_table-peg_table-11.0");
   });
 
   test("keeps first dealer stable while current dealer alternates", () => {
@@ -467,9 +467,11 @@ describe("game state", () => {
         selected: ["5s", "6d"],
         recommended: ["As", "2d"],
         delta: expect.any(Number),
+        winProbabilityDelta: expect.any(Number),
       },
     });
     expect((discard as any).review.delta).toBeGreaterThan(0);
+    expect((discard as any).review.recommendedEv).toEqual(expect.any(Number));
   });
 
   test("defers pegging review against the current best model", () => {
@@ -504,6 +506,9 @@ describe("game state", () => {
         model: DEFAULT_OPPONENT,
         selected: ["10c"],
         recommended: ["5d"],
+        selectedEv: expect.any(Number),
+        recommendedEv: expect.any(Number),
+        winProbabilityDelta: expect.any(Number),
       },
     });
   });

@@ -46,7 +46,7 @@ type LegacyOpponent =
   | "expert-peg-2.2"
   | "expert-peg_table-2.3";
 type StoredOpponent = Opponent | LegacyOpponent;
-export const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-9.0";
+export const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-11.0";
 export type Phase =
   | "discard"
   | "ai_discarding"
@@ -260,6 +260,9 @@ export interface AnalyticsDecisionReview {
   selectedEv: number;
   recommendedEv: number;
   delta: number;
+  selectedWinProbability?: number;
+  recommendedWinProbability?: number;
+  winProbabilityDelta?: number;
   components?: {
     selected: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
     recommended: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
@@ -1551,6 +1554,18 @@ export class CribbageGame {
   ): AnalyticsDecisionReview | undefined {
     const analysis = analyzeDiscardChoice(handBeforeDiscard, cards, player === this.dealer, DEFAULT_OPPONENT);
     this.pegTableLeads[player.key] = analysis.selectedPegTableLead;
+    const selectedWinProbability = discardChoiceWinProbability(
+      this,
+      player,
+      analysis.selectedComponents,
+      DEFAULT_OPPONENT,
+    );
+    const recommendedWinProbability = discardChoiceWinProbability(
+      this,
+      player,
+      analysis.recommendedComponents,
+      DEFAULT_OPPONENT,
+    );
     return {
       model: DEFAULT_OPPONENT,
       selected: this.cardLabels(cards),
@@ -1558,24 +1573,30 @@ export class CribbageGame {
       selectedEv: roundEv(analysis.selectedEv),
       recommendedEv: roundEv(analysis.recommendedEv),
       delta: roundEv(analysis.recommendedEv - analysis.selectedEv),
+      selectedWinProbability: roundProbability(selectedWinProbability),
+      recommendedWinProbability: roundProbability(recommendedWinProbability),
+      winProbabilityDelta: roundProbability(recommendedWinProbability - selectedWinProbability),
       components: decisionComponents(analysis.selectedComponents, analysis.recommendedComponents),
     };
   }
 
   private reviewPegPlay(player: PlayerState, card: Card): AnalyticsDecisionReview | undefined {
     const recommended = this.choosePlayForEngine(player, DEFAULT_OPPONENT);
-    const selectedEv = peggingPlayEv(this, player, card, DEFAULT_OPPONENT, this.pegTableLeads[player.key]);
-    const recommendedEv = peggingPlayEv(this, player, recommended, DEFAULT_OPPONENT, this.pegTableLeads[player.key]);
+    const selected = peggingPlayReviewValues(this, player, card, DEFAULT_OPPONENT);
+    const recommendedValues = peggingPlayReviewValues(this, player, recommended, DEFAULT_OPPONENT);
     return {
       model: DEFAULT_OPPONENT,
       selected: [this.cardLabel(card)],
       recommended: [this.cardLabel(recommended)],
-      selectedEv: roundEv(selectedEv),
-      recommendedEv: roundEv(recommendedEv),
-      delta: roundEv(recommendedEv - selectedEv),
+      selectedEv: roundEv(selected.pointEv),
+      recommendedEv: roundEv(recommendedValues.pointEv),
+      delta: roundEv(recommendedValues.pointEv - selected.pointEv),
+      selectedWinProbability: roundProbability(selected.winProbability),
+      recommendedWinProbability: roundProbability(recommendedValues.winProbability),
+      winProbabilityDelta: roundProbability(recommendedValues.winProbability - selected.winProbability),
       components: decisionComponents(
-        { [player === this.dealer ? "peggingDealer" : "peggingPone"]: selectedEv },
-        { [player === this.dealer ? "peggingDealer" : "peggingPone"]: recommendedEv },
+        { [player === this.dealer ? "peggingDealer" : "peggingPone"]: selected.pointEv },
+        { [player === this.dealer ? "peggingDealer" : "peggingPone"]: recommendedValues.pointEv },
       ),
     };
   }
@@ -2508,6 +2529,75 @@ function expectedWinProbabilityAfterPegging(
   return total / distribution.totalWeight;
 }
 
+function discardChoiceWinProbability(
+  game: CribbageGame,
+  player: PlayerState,
+  components: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>,
+  engine: Opponent,
+): number {
+  if (!usesWinProbabilityPegging(engine)) return 0.5;
+  const opponent = player === game.human ? game.ai : game.human;
+  const netPegging = player === game.dealer
+    ? components.peggingDealer ?? 0
+    : components.peggingPone ?? 0;
+  const myPegging = Math.max(0, netPegging);
+  const opponentPegging = Math.max(0, -netPegging);
+  const myHand = player === game.dealer
+    ? components.handDealer ?? 0
+    : components.handPone ?? 0;
+  const myCrib = player === game.dealer ? components.crib ?? 0 : 0;
+  const opponentCrib = player === game.pone ? -(components.crib ?? 0) : 0;
+  const myScore = player.score + myPegging + myHand + myCrib;
+  const opponentScore = opponent.score + opponentPegging + opponentCrib;
+  const nextRole = player === game.dealer ? "pone" : "dealer";
+  return approximateFutureWinProbability(myScore, opponentScore, nextRole, "peggingPone");
+}
+
+function peggingPlayReviewValues(
+  game: CribbageGame,
+  player: PlayerState,
+  card: Card,
+  engine: Opponent,
+): { pointEv: number; winProbability: number } {
+  if (!usesExhaustivePegging(engine)) {
+    const pointEv = peggingPlayEv(game, player, card, engine, game.pegTableLeads[player.key]);
+    const pointScore = Math.max(0, pointEv);
+    const myScore = player.score + pointScore;
+    const opponent = player === game.human ? game.ai : game.human;
+    return {
+      pointEv,
+      winProbability: approximateFutureWinProbability(
+        myScore,
+        opponent.score,
+        player === game.pone ? "pone" : "dealer",
+        "handPone",
+      ),
+    };
+  }
+  const opponent = player === game.human ? game.ai : game.human;
+  const knownCards = [
+    ...player.hand,
+    ...player.table,
+    ...opponent.table,
+    ...game.crib,
+    game.turnCard,
+  ];
+  const rankCounts = remainingRankCounts(knownCards);
+  const opponentHands = opponentRankHandsForEngine(
+    rankCounts,
+    opponent.hand.length,
+    opponent,
+    opponent === game.dealer ? "dealer" : "pone",
+    engine,
+  );
+  const pointEv = exhaustivePeggingPointEv(game, player, card, opponentHands);
+  const distribution = peggingOutcomeDistributionForCandidate(game, player, card, opponentHands);
+  return {
+    pointEv,
+    winProbability: expectedWinProbabilityAfterPegging(game, player, distribution),
+  };
+}
+
 const WIN_PROBABILITY_MEMO = new Map<string, number>();
 
 function approximateFutureWinProbability(
@@ -2520,6 +2610,7 @@ function approximateFutureWinProbability(
   const opponent = Math.min(121, Math.max(0, Math.round(opponentScore)));
   if (my >= 121) return 1;
   if (opponent >= 121) return 0;
+  if (my < 90 && opponent < 90) return heuristicWinProbability(my, opponent, perspectiveRole);
   const key = `${my}:${opponent}:${perspectiveRole}:${phase}`;
   const cached = WIN_PROBABILITY_MEMO.get(key);
   if (cached !== undefined) return cached;
@@ -2544,6 +2635,16 @@ function approximateFutureWinProbability(
   }
   WIN_PROBABILITY_MEMO.set(key, probability);
   return probability;
+}
+
+function heuristicWinProbability(
+  myScore: number,
+  opponentScore: number,
+  perspectiveRole: "dealer" | "pone",
+): number {
+  const roleBonus = perspectiveRole === "dealer" ? 2.4 : -1.2;
+  const scoreEdge = myScore - opponentScore + roleBonus;
+  return Math.max(0.02, Math.min(0.98, 0.5 + scoreEdge / 80));
 }
 
 function nextScorePhase(phase: ScorePhase): ScorePhase {
@@ -2865,6 +2966,10 @@ function cardSetKey(cards: Card[]): string {
 
 function roundEv(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function roundProbability(value: number): number {
+  return Math.round(value * 10000) / 10000;
 }
 
 function decisionComponents(

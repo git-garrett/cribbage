@@ -212,6 +212,7 @@ interface AnalyticsTotals {
 
 type ScoreKey = "peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib";
 const ERROR_EV_THRESHOLD = 0.25;
+const ERROR_WIN_PROBABILITY_THRESHOLD = 0.0025;
 const ERROR_SCORE_KEYS: ScoreKey[] = ["peggingDealer", "peggingPone", "handDealer", "handPone", "crib"];
 type GameEndEvent = Extract<AnalyticsEvent, { type: "game" }> & { action: "end" };
 type ScoreEvent = Extract<AnalyticsEvent, { type: "score" }>;
@@ -230,6 +231,7 @@ interface DecisionEvTotals {
   pegging: number;
   dealer: number;
   pone: number;
+  pointEvTotal: number;
   count: number;
 }
 interface DecisionErrorAverages {
@@ -1299,7 +1301,7 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
 
   const mistakes = decisionMistakes(events, end.gameId);
   const totals = decisionEvTotals(mistakes);
-  section.append(decisionEvSummary(totals), decisionOutcomeImpact(totals, end, events));
+  section.append(decisionEvSummary(totals), decisionWinProbabilityImpact(totals));
 
   if (!mistakes.length) {
     const empty = document.createElement("div");
@@ -1355,8 +1357,9 @@ function decisionMistakes(events: AnalyticsEvent[], gameId: string): DecisionRev
     ) {
       return false;
     }
-    return !sameCards(event.review.selected, event.review.recommended) &&
-      Math.max(0, event.review.delta) >= ERROR_EV_THRESHOLD;
+    const reviewedEvent = event as DecisionReviewEvent;
+    return !sameCards(reviewedEvent.review.selected, reviewedEvent.review.recommended) &&
+      decisionMistakeMagnitude(reviewedEvent) >= decisionMistakeThreshold(reviewedEvent);
   });
 }
 
@@ -1367,17 +1370,37 @@ function decisionEvTotals(events: DecisionReviewEvent[]): DecisionEvTotals {
     pegging: 0,
     dealer: 0,
     pone: 0,
+    pointEvTotal: 0,
     count: events.length,
   };
   for (const event of events) {
-    const delta = Math.max(0, event.review.delta);
+    const delta = Math.max(0, decisionWinProbabilityDelta(event));
+    const pointEvDelta = Math.max(0, event.review.delta);
     totals.total += delta;
+    totals.pointEvTotal += pointEvDelta;
     if (event.type === "discard") totals.discard += delta;
     if (event.type === "pegging") totals.pegging += delta;
     if (event.role === "dealer") totals.dealer += delta;
     if (event.role === "pone") totals.pone += delta;
   }
   return totals;
+}
+
+function decisionWinProbabilityDelta(event: DecisionReviewEvent): number {
+  return Number(event.review.winProbabilityDelta ?? 0);
+}
+
+function decisionMistakeMagnitude(event: DecisionReviewEvent): number {
+  const winProbabilityDelta = event.review.winProbabilityDelta;
+  return winProbabilityDelta === undefined
+    ? Math.max(0, event.review.delta)
+    : Math.max(0, winProbabilityDelta);
+}
+
+function decisionMistakeThreshold(event: DecisionReviewEvent): number {
+  return event.review.winProbabilityDelta === undefined
+    ? ERROR_EV_THRESHOLD
+    : ERROR_WIN_PROBABILITY_THRESHOLD;
 }
 
 function emptyDecisionErrorTotals(): Record<ScoreKey, number> {
@@ -1393,7 +1416,7 @@ function emptyDecisionErrorTotals(): Record<ScoreKey, number> {
 function categorizedDecisionError(event: DecisionReviewEvent): Record<ScoreKey, number> {
   const totals = emptyDecisionErrorTotals();
   const totalDelta = Math.max(0, event.review.delta);
-  if (totalDelta < ERROR_EV_THRESHOLD) return totals;
+  if (decisionMistakeMagnitude(event) < decisionMistakeThreshold(event)) return totals;
   const componentDeltas = event.review.components?.delta;
   if (componentDeltas) {
     for (const key of ERROR_SCORE_KEYS) {
@@ -1427,7 +1450,7 @@ function decisionErrorAverages(events: AnalyticsEvent[], games: GameLogRecord[])
         (event.type === "pegging" && event.action === "play" && event.player === "human")) ||
       !event.review ||
       sameCards(event.review.selected, event.review.recommended) ||
-      Math.max(0, event.review.delta) < ERROR_EV_THRESHOLD
+      decisionMistakeMagnitude(event as DecisionReviewEvent) < decisionMistakeThreshold(event as DecisionReviewEvent)
     ) {
       continue;
     }
@@ -1487,7 +1510,7 @@ function decisionEvSummary(totals: DecisionEvTotals): HTMLElement {
   const summary = document.createElement("div");
   summary.className = "decision-ev-summary";
   for (const [label, value] of [
-    ["Total EV", totals.total],
+    ["Total WP", totals.total],
     ["Pegging", totals.pegging],
     ["Discard", totals.discard],
     ["Dealer", totals.dealer],
@@ -1497,10 +1520,17 @@ function decisionEvSummary(totals: DecisionEvTotals): HTMLElement {
     const name = document.createElement("strong");
     name.textContent = label;
     const amount = document.createElement("em");
-    amount.textContent = formatEv(value);
+    amount.textContent = formatPercentagePointDelta(value);
     item.append(name, amount);
     summary.append(item);
   }
+  const pointEv = document.createElement("span");
+  const pointEvName = document.createElement("strong");
+  pointEvName.textContent = "Point EV";
+  const pointEvAmount = document.createElement("em");
+  pointEvAmount.textContent = formatEv(totals.pointEvTotal);
+  pointEv.append(pointEvName, pointEvAmount);
+  summary.append(pointEv);
   return summary;
 }
 
@@ -1508,32 +1538,18 @@ function formatEv(value: number): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
 }
 
-function decisionOutcomeImpact(totals: DecisionEvTotals, end: GameEndEvent, events: AnalyticsEvent[]): HTMLElement {
+function formatPercentagePointDelta(value: number): string {
+  return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)} pp`;
+}
+
+function formatWinProbability(value: number): string {
+  return `${(value * 100).toFixed(2)}%`;
+}
+
+function decisionWinProbabilityImpact(totals: DecisionEvTotals): HTMLElement {
   const impact = document.createElement("p");
   impact.className = "decision-outcome-impact";
-  const scores = end.finalScores;
-  if (!scores || !end.winner) {
-    impact.textContent = `Outcome impact unavailable; total error EV ${formatEv(totals.total)}.`;
-    return impact;
-  }
-  const loser = end.loser ?? (end.winner === "human" ? "ai" : "human");
-  if (end.winner !== "ai") {
-    impact.textContent = `Expected outcome impact: no. User won by ${scores.human - scores[loser]} despite total error EV ${formatEv(totals.total)}.`;
-    return impact;
-  }
-  const finalOut = finalOutScoreEvent(events, end);
-  if (!finalOut) {
-    impact.textContent = `Expected outcome impact unavailable; total user error EV ${formatEv(totals.total)} but the final out play was not logged.`;
-    return impact;
-  }
-  const winnerPreOut = finalOut.totalScore - finalOut.points;
-  const winnerAdjustedOut = winnerPreOut + Math.max(0, finalOut.points - totals.total);
-  const loserAdjustedFinal = scores.human + totals.total;
-  const stopsWinner = winnerAdjustedOut < 121;
-  const letsUserOut = loserAdjustedFinal >= 121;
-  impact.textContent = stopsWinner && letsUserOut
-    ? `Expected outcome impact: likely yes. Correcting ${formatEv(totals.total)} EV projects AI short of going out on the final ${scoreLabel(finalOut.category, finalOut.role).toLowerCase()} and puts User at ${loserAdjustedFinal.toFixed(1)}.`
-    : `Expected outcome impact: likely no. Correcting ${formatEv(totals.total)} EV ${stopsWinner ? "projects AI short on the final out play" : "does not project AI short on the final out play"}, and User projects to ${loserAdjustedFinal.toFixed(1)}.`;
+  impact.textContent = `Total win probability change from reviewed errors: ${formatPercentagePointDelta(totals.total)}.`;
   return impact;
 }
 
@@ -1588,9 +1604,14 @@ function decisionContext(event: DecisionReviewEvent, events: AnalyticsEvent[]): 
     rows.push(["You played", event.review.selected.join(" ")]);
     rows.push(["Model preferred", event.review.recommended.join(" ")]);
   }
-  rows.push(["Selected EV", formatEv(event.review.selectedEv)]);
-  rows.push(["Recommended EV", formatEv(event.review.recommendedEv)]);
-  rows.push(["Model gain", formatEv(event.review.delta)]);
+  rows.push(["Your point EV", formatEv(event.review.selectedEv)]);
+  rows.push(["Advised point EV", formatEv(event.review.recommendedEv)]);
+  rows.push(["Point EV gain", formatEv(event.review.delta)]);
+  if (event.review.selectedWinProbability !== undefined && event.review.recommendedWinProbability !== undefined) {
+    rows.push(["Your win probability", formatWinProbability(event.review.selectedWinProbability)]);
+    rows.push(["Advised win probability", formatWinProbability(event.review.recommendedWinProbability)]);
+    rows.push(["Win probability gain", formatPercentagePointDelta(event.review.winProbabilityDelta ?? 0)]);
+  }
 
   for (const [label, value] of rows) {
     const term = document.createElement("strong");
@@ -1848,7 +1869,12 @@ function cardValueFromLabel(label: string | undefined): number {
 
 function decisionReviewText(event: DecisionReviewEvent): string {
   const review = event.review;
-  const delta = review.delta !== 0 ? `; model gain ${formatEv(review.delta)}` : "";
+  const pointEv = `your EV ${formatEv(review.selectedEv)}, advised EV ${formatEv(review.recommendedEv)}`;
+  const delta = review.winProbabilityDelta !== undefined
+    ? `; WP gain ${formatPercentagePointDelta(review.winProbabilityDelta)}; ${pointEv}`
+    : review.delta !== 0
+      ? `; model gain ${formatEv(review.delta)}`
+      : "";
   if (event.type === "discard") {
     return `You discarded ${review.selected.join(" ")}; model preferred ${review.recommended.join(" ")}${delta}.`;
   }
@@ -1995,7 +2021,7 @@ function renderGameLog(): void {
     meta.textContent = `${playerName(game.end.winner)} won ${result}${game.end.result && game.end.result !== "regular" ? ` (${game.end.result})` : ""}`;
     const ev = document.createElement("span");
     const totals = decisionEvTotals(decisionMistakes(events, game.gameId));
-    ev.textContent = `${formatEv(totals.total)} error EV (${totals.count})`;
+    ev.textContent = `${formatPercentagePointDelta(totals.total)} error WP (${totals.count}); ${formatEv(totals.pointEvTotal)} EV`;
     ev.className = totals.total > 0 ? "game-log-ev has-errors" : "game-log-ev";
     button.append(title, meta, ev);
     button.addEventListener("click", () => {
