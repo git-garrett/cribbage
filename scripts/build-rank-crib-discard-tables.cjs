@@ -73,6 +73,13 @@ function scoreRankOnly(rankList) {
   return scoreRankFifteens(rankList) + scoreRankSets(rankList) + scoreRankRuns(rankList);
 }
 
+function scoreRankComponents(rankList) {
+  const fifteens = scoreRankFifteens(rankList);
+  const pairs = scoreRankSets(rankList);
+  const runs = scoreRankRuns(rankList);
+  return { fifteens, pairs, runs, total: fifteens + pairs + runs };
+}
+
 function scoreRankFifteens(rankList) {
   let points = 0;
   const n = rankList.length;
@@ -204,35 +211,50 @@ function buildHandRankScores() {
 
 function buildCribRankScores(frequencies) {
   const table = { dealer: {}, pone: {} };
+  const components = { dealer: {}, pone: {} };
   const pairs = generateRankSets(2);
   for (const myRole of ["dealer", "pone"]) {
     const opponentRole = myRole === "dealer" ? "pone" : "dealer";
     const opponentFrequencies = Object.entries(frequencies.roles[opponentRole]);
     for (const discard of pairs) {
       const cuts = Array.from({ length: 13 }, () => null);
+      const componentCuts = Array.from({ length: 13 }, () => null);
       for (let cut = 0; cut < 13; cut += 1) {
         const cutCounts = emptyRanks();
         cutCounts[cut] = 1;
         if (!isPossible(discard, cutCounts)) continue;
         let total = 0;
+        const componentTotal = { fifteens: 0, pairs: 0, runs: 0 };
         let weight = 0;
         for (const [opponentKey, count] of opponentFrequencies) {
           const opponentDiscard = opponentKey.split("").map((digit) => Number.parseInt(digit, 10));
           if (!isPossible(discard, cutCounts, opponentDiscard)) continue;
-          const score = scoreRankOnly([
+          const cribRanks = [
             ...rankListFromCounts(discard),
             ...rankListFromCounts(opponentDiscard),
             cut,
-          ]);
-          total += score * count;
+          ];
+          const score = scoreRankComponents(cribRanks);
+          total += score.total * count;
+          componentTotal.fifteens += score.fifteens * count;
+          componentTotal.pairs += score.pairs * count;
+          componentTotal.runs += score.runs * count;
           weight += count;
         }
         cuts[cut] = weight ? Number((total / weight).toFixed(5)) : null;
+        componentCuts[cut] = weight
+          ? [
+              Number((componentTotal.fifteens / weight).toFixed(5)),
+              Number((componentTotal.pairs / weight).toFixed(5)),
+              Number((componentTotal.runs / weight).toFixed(5)),
+            ]
+          : null;
       }
       table[myRole][ranksKey(discard)] = cuts;
+      components[myRole][ranksKey(discard)] = componentCuts;
     }
   }
-  return table;
+  return { table, components };
 }
 
 function main() {
@@ -250,7 +272,8 @@ function main() {
   };
   fs.writeFileSync(path.join(outDir, "discard-frequency.json"), `${JSON.stringify({ ...meta, ...frequencies })}\n`);
   fs.writeFileSync(path.join(outDir, "hand-rank-score-by-keep-cut.json"), `${JSON.stringify({ ...meta, table: handRankScores })}\n`);
-  fs.writeFileSync(path.join(outDir, "crib-rank-score-by-discard-cut.json"), `${JSON.stringify({ ...meta, table: cribRankScores })}\n`);
+  fs.writeFileSync(path.join(outDir, "crib-rank-score-by-discard-cut.json"), `${JSON.stringify({ ...meta, table: cribRankScores.table })}\n`);
+  fs.writeFileSync(path.join(outDir, "crib-rank-components-by-discard-cut.json"), `${JSON.stringify({ ...meta, componentKeys: ["fifteens", "pairs", "runs"], table: cribRankScores.components })}\n`);
   process.stdout.write(`Wrote ${path.relative(root, outDir)} from ${frequencies.sourceGameCount} games and ${frequencies.sourceDiscardCount} discards\n`);
 }
 

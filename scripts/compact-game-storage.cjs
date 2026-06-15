@@ -9,6 +9,20 @@ const CATEGORY = { pegging: 0, hand: 1, crib: 2 };
 const ROLE = { pone: 0, dealer: 1 };
 const HAND_COMPONENT_KEYS = ["fifteens", "pairs", "runs", "flush", "knobs"];
 const PEG_COMPONENT_KEYS = ["fifteens", "thirtyOne", "pairs", "runs", "go", "lastCard", "heels"];
+const DISCARD_EV_COMPONENT_KEYS = [
+  "handFifteens",
+  "handPairs",
+  "handRuns",
+  "handFlush",
+  "handKnobs",
+  "cribFifteens",
+  "cribPairs",
+  "cribRuns",
+  "cribFlush",
+  "cribKnobs",
+  "pegging",
+];
+const PEG_EV_COMPONENT_KEYS = ["pegFifteens", "pegThirtyOne", "pegPairs", "pegRuns", "pegGo", "pegLastCard", "pegHeels"];
 
 function cardId(label) {
   if (!label) return null;
@@ -40,6 +54,15 @@ function roleCode(role) {
 function componentBlob(components, keys) {
   if (!components) return null;
   return Buffer.from(keys.map((key) => Math.max(0, Math.min(255, Math.round(components[key] ?? 0)))));
+}
+
+function floatComponentBlob(components, keys) {
+  if (!components) return null;
+  const buffer = Buffer.alloc(keys.length * 4);
+  keys.forEach((key, index) => {
+    buffer.writeFloatLE(Number.isFinite(components[key]) ? components[key] : 0, index * 4);
+  });
+  return buffer;
 }
 
 function addComponentTotals(target, components, keys) {
@@ -155,6 +178,9 @@ function ensureCompactSchema(db) {
   if (!pegColumns.has("model")) db.exec("ALTER TABLE compact_peg_plays ADD COLUMN model TEXT");
   if (!pegColumns.has("selected_ev")) db.exec("ALTER TABLE compact_peg_plays ADD COLUMN selected_ev REAL");
   if (!pegColumns.has("score_components")) db.exec("ALTER TABLE compact_peg_plays ADD COLUMN score_components BLOB");
+  if (!pegColumns.has("selected_ev_components")) db.exec("ALTER TABLE compact_peg_plays ADD COLUMN selected_ev_components BLOB");
+  const discardColumns = new Set(db.prepare("PRAGMA table_info(compact_discards)").all().map((column) => column.name));
+  if (!discardColumns.has("selected_ev_components")) db.exec("ALTER TABLE compact_discards ADD COLUMN selected_ev_components BLOB");
 }
 
 function eventsByHand(record) {
@@ -290,6 +316,7 @@ function compactPegPlays(record, events) {
       leftScore: event.scores?.human ?? event.scores?.left ?? null,
       rightScore: event.scores?.ai ?? event.scores?.right ?? null,
       scoreComponents: componentBlob(event.scoreComponents, PEG_COMPONENT_KEYS),
+      selectedEvComponents: floatComponentBlob(event.selectedEvComponents, PEG_EV_COMPONENT_KEYS),
     });
   }
   return rows;
@@ -312,6 +339,7 @@ function compactDiscards(record, events) {
       cribAfterDiscard: cardBlob(event.cribAfterDiscard),
       leftScore: event.scores?.human ?? event.scores?.left ?? null,
       rightScore: event.scores?.ai ?? event.scores?.right ?? null,
+      selectedEvComponents: floatComponentBlob(event.selectedEvComponents, DISCARD_EV_COMPONENT_KEYS),
     });
   }
   return rows;
@@ -354,14 +382,14 @@ function insertCompactGameRecords(db, { runId, matchupId, records }) {
   const pegInsert = db.prepare(`
     INSERT OR REPLACE INTO compact_peg_plays (
       game_id, hand_number, sequence, player, role, model, selected_ev, action, card,
-      count_before, count_after, points, left_score, right_score, score_components
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      count_before, count_after, points, left_score, right_score, score_components, selected_ev_components
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const discardInsert = db.prepare(`
     INSERT OR REPLACE INTO compact_discards (
       game_id, hand_number, player, role, model, selected_ev, cards, hand_before,
-      remaining_hand, crib_after_discard, left_score, right_score
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      remaining_hand, crib_after_discard, left_score, right_score, selected_ev_components
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   let games = 0;
   let hands = 0;
@@ -441,6 +469,7 @@ function insertCompactGameRecords(db, { runId, matchupId, records }) {
           discard.cribAfterDiscard,
           discard.leftScore,
           discard.rightScore,
+          discard.selectedEvComponents,
         );
       }
       for (const play of compactPegPlays(normalized, normalized.events)) {
@@ -460,6 +489,7 @@ function insertCompactGameRecords(db, { runId, matchupId, records }) {
           play.leftScore,
           play.rightScore,
           play.scoreComponents,
+          play.selectedEvComponents,
         );
         pegPlays += 1;
       }

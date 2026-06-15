@@ -1,5 +1,6 @@
 import cribFlushBonusBySuitCount from "./models/schell_table-peg_table-7.0/crib-flush-bonus.json";
 import boardPositionStats from "./models/flush-aware-board-position-stats.json";
+import cribRankComponentsByDiscardCut from "./models/rank-crib-discard/crib-rank-components-by-discard-cut.json";
 import cribRankScoreByDiscardCut from "./models/rank-crib-discard/crib-rank-score-by-discard-cut.json";
 import handRankScoreByKeepCut from "./models/rank-crib-discard/hand-rank-score-by-keep-cut.json";
 
@@ -85,6 +86,9 @@ const HAND_RANK_SCORE_BY_KEEP_CUT = (handRankScoreByKeepCut as {
 }).table;
 const CRIB_RANK_SCORE_BY_DISCARD_CUT = (cribRankScoreByDiscardCut as {
   table: Record<"dealer" | "pone", Record<string, Array<number | null>>>;
+}).table;
+const CRIB_RANK_COMPONENTS_BY_DISCARD_CUT = (cribRankComponentsByDiscardCut as {
+  table: Record<"dealer" | "pone", Record<string, Array<number[] | null>>>;
 }).table;
 type DiscardTableEngine = Exclude<Opponent, "original-1.1" | "original_exhaustive_peg-1.2">;
 type CribTable = { own: number[][]; opponent: number[][] };
@@ -274,6 +278,7 @@ export interface AnalyticsScoreComponents {
   lastCard?: number;
   heels?: number;
 }
+export type AnalyticsEvComponents = Record<string, number>;
 export type AnalyticsEvent =
   | {
       id: string;
@@ -319,6 +324,7 @@ export type AnalyticsEvent =
       dealer?: PlayerKey;
       model?: Opponent;
       selectedEv?: number;
+      selectedEvComponents?: AnalyticsEvComponents;
       review?: AnalyticsDecisionReview;
     }
   | {
@@ -343,6 +349,7 @@ export type AnalyticsEvent =
       message: string;
       model?: Opponent;
       selectedEv?: number;
+      selectedEvComponents?: AnalyticsEvComponents;
       scoreComponents?: AnalyticsScoreComponents;
       review?: AnalyticsDecisionReview;
     }
@@ -1230,6 +1237,9 @@ export class CribbageGame {
     const selectedEv = pendingEv?.cardId === card.id && pendingEv.model === engine
       ? pendingEv.ev
       : roundEv(peggingPlayEv(this, player, card, engine, this.pegTableLeads[player.key]));
+    const selectedEvComponents = shouldLogScoreComponents()
+      ? peggingPlayEvComponents(this, player, card, engine)
+      : undefined;
     this.pegDecisionEvs[player.key] = null;
     const handBeforePlay = this.cardLabels(player.hand);
     const playedCardsBefore = this.cardLabels(this.plays);
@@ -1269,6 +1279,7 @@ export class CribbageGame {
       message: `${this.name(player)} played ${this.cardLabel(card)}: ${this.count}`,
       model: engine,
       selectedEv,
+      selectedEvComponents,
       scoreComponents: playScoreComponents,
     });
     if (pendingReviewSnapshot) {
@@ -1508,6 +1519,9 @@ export class CribbageGame {
     const engine = this.playerEngines[player.key];
     const analysis = analyzeDiscardChoice(handBeforeDiscard, cards, player === this.dealer, engine);
     this.pegTableLeads[player.key] = analysis.selectedPegTableLead;
+    const selectedEvComponents = shouldLogScoreComponents()
+      ? selectedDiscardEvComponents(handBeforeDiscard, cards, player === this.dealer, engine)
+      : undefined;
     const review = reviewDecision && player === this.human
       ? this.reviewDiscard(player, cards, handBeforeDiscard)
       : undefined;
@@ -1525,6 +1539,7 @@ export class CribbageGame {
       dealer: this.dealer.key,
       model: engine,
       selectedEv: roundEv(analysis.selectedEv),
+      selectedEvComponents,
       review,
     });
   }
@@ -1717,6 +1732,7 @@ type PegSimulationState = {
   perspective: PlayerKey;
 };
 type WeightedScore = { total: number; weight: number };
+type WeightedPegComponents = { components: AnalyticsEvComponents; weight: number };
 type PegTableEvTuple = [number, number, number | null];
 type PegTableEv = {
   myPeggingEv: number;
@@ -2084,6 +2100,131 @@ function simulatePeggingFuture(
   return result;
 }
 
+function simulatePeggingComponentFuture(
+  state: PegSimulationState,
+  memo: Map<string, WeightedPegComponents>,
+): WeightedPegComponents {
+  const key = pegSimulationKey(state);
+  const cached = memo.get(key);
+  if (cached) return cached;
+
+  const remainingCards = rankCountTotal(state.hands.human) + rankCountTotal(state.hands.ai);
+  if (remainingCards === 0) {
+    const components: AnalyticsEvComponents = {};
+    if (state.lastPlayer && state.count !== 0) {
+      addSignedPegComponents(components, { total: 1, lastCard: 1 }, state.lastPlayer === state.perspective ? 1 : -1, 1);
+    }
+    const terminal = { components, weight: 1 };
+    memo.set(key, terminal);
+    return terminal;
+  }
+
+  const legalRanks = legalPegRanks(state.hands[state.current], state.count);
+  if (legalRanks.length === 0) {
+    if (state.goPlayer) {
+      const future = simulatePeggingComponentFuture({
+        ...state,
+        plays: [],
+        count: 0,
+        current: otherPlayerKey(state.current),
+        goPlayer: null,
+        lastPlayer: null,
+      }, memo);
+      const components = scaleEvComponents(future.components, 1);
+      if (state.lastPlayer && state.count !== 31) {
+        addSignedPegComponents(components, { total: 1, go: 1 }, state.lastPlayer === state.perspective ? 1 : -1, future.weight);
+      }
+      const result = { components, weight: future.weight };
+      memo.set(key, result);
+      return result;
+    }
+    const result = simulatePeggingComponentFuture({
+      ...state,
+      current: otherPlayerKey(state.current),
+      goPlayer: state.current,
+    }, memo);
+    memo.set(key, result);
+    return result;
+  }
+
+  const components: AnalyticsEvComponents = {};
+  let weight = 0;
+  for (const rank of legalRanks) {
+    const branchWeight = state.hands[state.current][rank];
+    const hands = {
+      human: [...state.hands.human],
+      ai: [...state.hands.ai],
+    };
+    hands[state.current][rank] -= 1;
+    const plays = [...state.plays, rank];
+    const scoreComponents = scoreCountComponents(plays.map((playedRank) => pegCardCache[playedRank]));
+    const nextCount = state.count + pegCardCache[rank].value;
+    const nextState: PegSimulationState = nextCount === 31
+      ? {
+          ...state,
+          hands,
+          plays: [],
+          count: 0,
+          current: otherPlayerKey(state.current),
+          goPlayer: null,
+          lastPlayer: null,
+        }
+      : {
+          ...state,
+          hands,
+          plays,
+          count: nextCount,
+          current: otherPlayerKey(state.current),
+          goPlayer: null,
+          lastPlayer: state.current,
+        };
+    const future = simulatePeggingComponentFuture(nextState, memo);
+    mergeEvComponents(components, future.components, branchWeight);
+    addSignedPegComponents(
+      components,
+      scoreComponents,
+      state.current === state.perspective ? 1 : -1,
+      branchWeight * future.weight,
+    );
+    weight += future.weight * branchWeight;
+  }
+
+  const result = { components, weight };
+  memo.set(key, result);
+  return result;
+}
+
+function scaleEvComponents(components: AnalyticsEvComponents, scale: number): AnalyticsEvComponents {
+  return Object.fromEntries(Object.entries(components).map(([key, value]) => [key, value * scale]));
+}
+
+function mergeEvComponents(target: AnalyticsEvComponents, source: AnalyticsEvComponents, scale: number): void {
+  for (const [key, value] of Object.entries(source)) {
+    target[key] = (target[key] ?? 0) + (value * scale);
+  }
+}
+
+function addSignedPegComponents(
+  target: AnalyticsEvComponents,
+  source: AnalyticsScoreComponents,
+  sign: 1 | -1,
+  scale: number,
+): void {
+  const mapping: Array<[keyof AnalyticsScoreComponents, string]> = [
+    ["fifteens", "pegFifteens"],
+    ["thirtyOne", "pegThirtyOne"],
+    ["pairs", "pegPairs"],
+    ["runs", "pegRuns"],
+    ["go", "pegGo"],
+    ["lastCard", "pegLastCard"],
+    ["heels", "pegHeels"],
+  ];
+  for (const [sourceKey, targetKey] of mapping) {
+    const value = source[sourceKey] ?? 0;
+    if (value) target[targetKey] = (target[targetKey] ?? 0) + (sign * value * scale);
+  }
+}
+
 function legalPegRanks(ranks: RankCounts, count: number): number[] {
   const legal: number[] = [];
   for (let rank = 0; rank < ranks.length; rank += 1) {
@@ -2150,6 +2291,63 @@ function exhaustivePeggingPointEv(
     totalWeight += result.weight * possibleOpponentHand.weight;
   }
   return totalWeight ? weightedTotal / totalWeight : immediateScore;
+}
+
+function peggingPlayEvComponents(
+  game: CribbageGame,
+  player: PlayerState,
+  card: Card,
+  engine: Opponent,
+): AnalyticsEvComponents {
+  if (!usesExhaustivePegging(engine)) {
+    return roundEvComponents(immediatePeggingEvComponents(game.plays, card));
+  }
+  const opponent = player === game.human ? game.ai : game.human;
+  const knownCards = [
+    ...player.hand,
+    ...player.table,
+    ...opponent.table,
+    ...game.crib,
+    game.turnCard,
+  ];
+  const rankCounts = remainingRankCounts(knownCards);
+  const opponentHands = opponentRankHandsForEngine(
+    rankCounts,
+    opponent.hand.length,
+    opponent,
+    opponent === game.dealer ? "dealer" : "pone",
+    engine,
+  );
+  const ownRanks = ranksAfterPlaying(player.hand, card);
+  const immediateComponents = scoreCountComponents([...game.plays, card]);
+  const countAfterPlay = game.count + card.value;
+  const memo = new Map<string, WeightedPegComponents>();
+  const totals: AnalyticsEvComponents = {};
+  let totalWeight = 0;
+  for (const possibleOpponentHand of opponentHands) {
+    const result = simulatePeggingComponentFuture({
+      hands: player === game.human
+        ? { human: ownRanks, ai: possibleOpponentHand.ranks }
+        : { human: possibleOpponentHand.ranks, ai: ownRanks },
+      plays: countAfterPlay === 31 ? [] : [...game.plays, card].map((playedCard) => playedCard.rank),
+      count: countAfterPlay === 31 ? 0 : countAfterPlay,
+      current: otherPlayerKey(player.key),
+      goPlayer: null,
+      lastPlayer: countAfterPlay === 31 ? null : player.key,
+      perspective: player.key,
+    }, memo);
+    mergeEvComponents(totals, result.components, possibleOpponentHand.weight);
+    addSignedPegComponents(totals, immediateComponents, 1, result.weight * possibleOpponentHand.weight);
+    totalWeight += result.weight * possibleOpponentHand.weight;
+  }
+  if (!totalWeight) return roundEvComponents(immediatePeggingEvComponents(game.plays, card));
+  return roundEvComponents(scaleEvComponents(totals, 1 / totalWeight));
+}
+
+function immediatePeggingEvComponents(plays: Card[], card: Card): AnalyticsEvComponents {
+  const components: AnalyticsEvComponents = {};
+  addSignedPegComponents(components, scoreCountComponents([...plays, card]), 1, 1);
+  return components;
 }
 
 function peggingOutcomeDistributionForCandidate(
@@ -2450,6 +2648,84 @@ function cribFlushBonusesBySuit(hand: Card[]): number[] {
 function expectedCribFlushBonus(discard: Card[], cribFlushBonusBySuit: number[] | null): number {
   if (discard.length !== 2 || discard[0].suit !== discard[1].suit) return 0;
   return cribFlushBonusBySuit?.[discard[0].suit] ?? 0;
+}
+
+function averageHandEvComponents(keep: Card[], deck: Card[]): AnalyticsEvComponents {
+  const totals: AnalyticsEvComponents = {
+    handFifteens: 0,
+    handPairs: 0,
+    handRuns: 0,
+    handFlush: 0,
+    handKnobs: 0,
+  };
+  for (const cut of deck) {
+    const components = scoreHandComponents(keep, cut);
+    totals.handFifteens += components.fifteens ?? 0;
+    totals.handPairs += components.pairs ?? 0;
+    totals.handRuns += components.runs ?? 0;
+    totals.handFlush += components.flush ?? 0;
+    totals.handKnobs += components.knobs ?? 0;
+  }
+  const count = deck.length || 1;
+  for (const key of Object.keys(totals)) totals[key] = totals[key] / count;
+  return totals;
+}
+
+function expectedCribEvComponents(
+  discard: Card[],
+  deck: Card[],
+  role: "dealer" | "pone",
+  sign: 1 | -1,
+  cribFlushBonusBySuit: number[] | null,
+): AnalyticsEvComponents {
+  const totals: AnalyticsEvComponents = {
+    cribFifteens: 0,
+    cribPairs: 0,
+    cribRuns: 0,
+    cribFlush: expectedCribFlushBonus(discard, cribFlushBonusBySuit),
+    cribKnobs: 0,
+  };
+  const discardKey = rankCountsForCards(discard).join("");
+  for (const cut of deck) {
+    const row = CRIB_RANK_COMPONENTS_BY_DISCARD_CUT[role]?.[discardKey]?.[cut.rank];
+    if (!row) continue;
+    totals.cribFifteens += row[0];
+    totals.cribPairs += row[1];
+    totals.cribRuns += row[2];
+    if (discard.some((card) => card.rankStr === "J" && card.suit === cut.suit)) {
+      totals.cribKnobs += 1;
+    }
+  }
+  const count = deck.length || 1;
+  totals.cribFifteens /= count;
+  totals.cribPairs /= count;
+  totals.cribRuns /= count;
+  totals.cribKnobs /= count;
+  for (const key of Object.keys(totals)) totals[key] *= sign;
+  return totals;
+}
+
+function selectedDiscardEvComponents(
+  hand: Card[],
+  discard: Card[],
+  myCrib: boolean,
+  engine: Opponent,
+): AnalyticsEvComponents {
+  const deck = fullDeck().filter((card) => !hand.some((held) => held.id === card.id));
+  const keep = hand.filter((card) => !discard.includes(card));
+  const role = myCrib ? "dealer" : "pone";
+  const cribFlushBonusBySuit = usesCribFlushAdjustment(engine) ? cribFlushBonusesBySuit(hand) : null;
+  const components = {
+    ...averageHandEvComponents(keep, deck),
+    ...expectedCribEvComponents(discard, deck, role, myCrib ? 1 : -1, cribFlushBonusBySuit),
+  };
+  const pegging = pegTableEv(hand, discard, role, engine);
+  components.pegging = pegging.netPeggingEv;
+  return roundEvComponents(components);
+}
+
+function roundEvComponents(components: AnalyticsEvComponents): AnalyticsEvComponents {
+  return Object.fromEntries(Object.entries(components).map(([key, value]) => [key, roundEv(value)]));
 }
 
 function rankCutHandScore(keep: Card[], cut: Card): number {
