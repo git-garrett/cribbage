@@ -21,7 +21,8 @@
           <label>
             Engine
             <select id="opponent">
-              <option value="schell_table-peg_table-11.0" selected>Schell Table + Peg Table 11.0</option>
+              <option value="schell_table-peg_table-11.1" selected>Schell Table + Peg Table 11.1</option>
+              <option value="schell_table-peg_table-11.0">Schell Table + Peg Table 11.0</option>
               <option value="schell_table-peg_table-10.0">Schell Table + Peg Table 10.0</option>
               <option value="schell_table-peg_table-9.0">Schell Table + Peg Table 9.0</option>
               <option value="schell_table-peg_table-8.0">Schell Table + Peg Table 8.0</option>
@@ -38,6 +39,10 @@
               <option value="original-1.1">Original 1.1</option>
             </select>
           </label>
+          <div id="model-loading" class="menu-loading" role="status" aria-live="polite" hidden>
+            <span class="throbber" aria-hidden="true"></span>
+            <span>Loading model</span>
+          </div>
           <button id="analytics-open" type="button">Analytics</button>
           <button id="game-log-open" type="button">Game log</button>
           <button id="model-info-open" type="button">Model info</button>
@@ -76,7 +81,10 @@
           <span>Dealer: <strong id="dealer">-</strong></span>
           <span class="status-count">Count: <strong id="count">0</strong></span>
           <span>Turn: <strong id="turn">-</strong></span>
-          <span id="model-thinking" class="thinking-indicator" hidden>AI thinking...</span>
+          <span id="model-thinking" class="thinking-indicator" role="status" aria-live="polite" hidden>
+            <span class="throbber" aria-hidden="true"></span>
+            <span class="thinking-label">AI thinking</span>
+          </span>
         </div>
         <div class="played">
           <h2 id="play-area-title">Current count</h2>

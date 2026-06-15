@@ -116,6 +116,7 @@ const els = {
   modelInfoSummary: document.querySelector("#model-info-summary") as HTMLElement,
   modelInfoList: document.querySelector("#model-info-list") as HTMLElement,
   modelInfoContent: document.querySelector("#model-info-content") as HTMLElement,
+  modelLoading: document.querySelector("#model-loading") as HTMLElement,
   decisionReviewPage: document.querySelector("#decision-review-page") as HTMLElement,
   decisionReviewClose: document.querySelector("#decision-review-close") as HTMLButtonElement,
   decisionReviewSummary: document.querySelector("#decision-review-summary") as HTMLElement,
@@ -2320,6 +2321,7 @@ function sortedAnalyticsEngines(
 
 function analyticsEngineSortKey(engine: Opponent): number {
   return [
+    "schell_table-peg_table-11.1",
     "schell_table-peg_table-11.0",
     "schell_table-peg_table-10.0",
     "schell_table-peg_table-9.0",
@@ -2611,6 +2613,7 @@ function engineName(engine: string | undefined): string {
   if (engine === "schell_table-peg_table-9.0") return "Schell Table + Peg Table 9.0";
   if (engine === "schell_table-peg_table-10.0") return "Schell Table + Peg Table 10.0";
   if (engine === "schell_table-peg_table-11.0") return "Schell Table + Peg Table 11.0";
+  if (engine === "schell_table-peg_table-11.1") return "Schell Table + Peg Table 11.1";
   return engine || "-";
 }
 
@@ -2662,6 +2665,7 @@ function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
     engine === "schell_table-peg_table-9.0" ||
     engine === "schell_table-peg_table-10.0" ||
     engine === "schell_table-peg_table-11.0" ||
+    engine === "schell_table-peg_table-11.1" ||
     engine === "schell_table-2.0"
   ) {
     return engine;
@@ -2726,7 +2730,9 @@ function render(game: GameState | null): void {
   els.turn.textContent = game.turn || "-";
   els.count.textContent = String(game.count);
   els.modelThinking.hidden = !state.aiThinking && !state.modelLoading;
-  els.modelThinking.textContent = state.modelLoading ? "Loading model..." : "AI thinking...";
+  const thinkingLabel = els.modelThinking.querySelector(".thinking-label");
+  if (thinkingLabel) thinkingLabel.textContent = state.modelLoading ? "Loading model" : "AI thinking";
+  els.modelLoading.hidden = !state.modelLoading;
   renderCutCard(game.turnCard);
   renderScoring(game.scoring);
   renderResult(game);
@@ -2924,6 +2930,15 @@ els.decisionSnapshotClose.addEventListener("click", () => {
 els.gameLogOpponent.addEventListener("change", () => {
   state.selectedLogGameId = null;
   renderGameLog();
+});
+
+els.opponent.addEventListener("change", async () => {
+  if (state.pending) return;
+  try {
+    await ensureOpponentResources(normalizeAnalyticsEngine(els.opponent.value));
+  } catch (error) {
+    els.result.textContent = error instanceof Error ? error.message : "Model load failed";
+  }
 });
 
 els.gameOverClose.addEventListener("click", () => {
