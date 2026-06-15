@@ -14,6 +14,7 @@ const holdTableEnabled = process.env.AI_SMOKE_HOLD_TABLE !== "0";
 const holdTablePath = path.resolve(root, process.env.AI_SMOKE_HOLD_TABLE_PATH || holdTableDefaultPath);
 const gameDbEnabled = process.env.AI_SMOKE_GAME_DB !== "0";
 const gameDbPath = path.resolve(root, process.env.AI_SMOKE_GAME_DB_PATH || gameDbDefaultPath);
+const scoreComponentsEnabled = process.env.AI_SMOKE_SCORE_COMPONENTS === "1";
 const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
 const rankIndex = new Map(ranks.map((rank, index) => [rank, index]));
 
@@ -168,6 +169,7 @@ function summarize(stats) {
 }
 
 function loadEngine() {
+  globalThis.__CRIBBAGE_LOG_SCORE_COMPONENTS = scoreComponentsEnabled;
   const source = fs.readFileSync(enginePath, "utf8");
   const compiled = ts.transpileModule(source, {
     compilerOptions: {
@@ -1032,6 +1034,7 @@ async function main() {
       holdTablePath: holdTableEnabled ? holdTablePath : null,
       workerCounts,
       oldMbs,
+      scoreComponentsEnabled,
       models,
       matchups,
     },
@@ -1056,6 +1059,7 @@ async function main() {
       runSeed,
       gameDbEnabled,
       gameDbPath: gameDbEnabled ? gameDbPath : null,
+      scoreComponentsEnabled,
       jobIndex: index + 1,
       jobCount: jobs.length,
       currentJob: job,

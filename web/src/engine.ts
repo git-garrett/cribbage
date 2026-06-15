@@ -262,6 +262,18 @@ export interface AnalyticsDecisionReview {
     delta: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
   };
 }
+export interface AnalyticsScoreComponents {
+  total: number;
+  fifteens?: number;
+  thirtyOne?: number;
+  pairs?: number;
+  runs?: number;
+  flush?: number;
+  knobs?: number;
+  go?: number;
+  lastCard?: number;
+  heels?: number;
+}
 export type AnalyticsEvent =
   | {
       id: string;
@@ -331,6 +343,7 @@ export type AnalyticsEvent =
       message: string;
       model?: Opponent;
       selectedEv?: number;
+      scoreComponents?: AnalyticsScoreComponents;
       review?: AnalyticsDecisionReview;
     }
   | {
@@ -350,6 +363,7 @@ export type AnalyticsEvent =
       turnCard?: string;
       card?: string;
       count?: number;
+      scoreComponents?: AnalyticsScoreComponents;
     };
 type NewAnalyticsEvent = AnalyticsEvent extends infer Event
   ? Event extends AnalyticsEvent
@@ -424,6 +438,10 @@ export function cardsFromString(input: string): Card[] {
 
 const handScoreCache = new Map<string, number>();
 
+function shouldLogScoreComponents(): boolean {
+  return (globalThis as { __CRIBBAGE_LOG_SCORE_COMPONENTS?: boolean }).__CRIBBAGE_LOG_SCORE_COMPONENTS === true;
+}
+
 export function scoreHand(hand: Card[], turnCard: Card, crib = false): number {
   const key = `${crib ? "crib" : "hand"}:${[...hand, turnCard]
     .map((card) => card.id)
@@ -439,6 +457,31 @@ export function scoreHand(hand: Card[], turnCard: Card, crib = false): number {
   );
   handScoreCache.set(key, score);
   return score;
+}
+
+export function scoreHandComponents(hand: Card[], turnCard: Card, crib = false): AnalyticsScoreComponents {
+  const fifteens = scoreFifteens(hand, turnCard);
+  const pairs = scoreSets(hand, turnCard);
+  const runs = scoreRuns(hand, turnCard);
+  let flush = 0;
+  let knobs = 0;
+  for (const card of hand) {
+    if (card.rankStr === "J" && card.suit === turnCard.suit) knobs += 1;
+  }
+  const handSuits = new Set(hand.map((card) => card.suit));
+  if (handSuits.size === 1) {
+    const suit = hand[0]?.suit;
+    if (suit === turnCard.suit) flush = 5;
+    else if (!crib) flush = 4;
+  }
+  return {
+    total: fifteens + pairs + runs + flush + knobs,
+    fifteens,
+    pairs,
+    runs,
+    flush,
+    knobs,
+  };
 }
 
 export function scoreFifteens(hand: Card[], turnCard: Card): number {
@@ -500,17 +543,22 @@ export function scoreFlushAndRightJack(hand: Card[], turnCard: Card, crib = fals
 }
 
 export function scoreCount(plays: Card[]): number {
-  if (plays.length < 2) return 0;
-  let score = 0;
+  return scoreCountComponents(plays).total;
+}
+
+export function scoreCountComponents(plays: Card[]): AnalyticsScoreComponents {
+  const components: AnalyticsScoreComponents = { total: 0, fifteens: 0, thirtyOne: 0, pairs: 0, runs: 0 };
+  if (plays.length < 2) return components;
   const count = plays.reduce((total, card) => total + card.value, 0);
-  if (count === 15 || count === 31) score += 2;
+  if (count === 15) components.fifteens = 2;
+  if (count === 31) components.thirtyOne = 2;
 
   let sameRankCount = 1;
   for (let i = plays.length - 2; i >= 0; i -= 1) {
     if (plays[i].rank !== plays[plays.length - 1].rank) break;
     sameRankCount += 1;
   }
-  score += new Map([
+  components.pairs = new Map([
     [2, 2],
     [3, 6],
     [4, 12],
@@ -524,11 +572,15 @@ export function scoreCount(plays: Card[]): number {
       unique.size === runLen &&
       sorted[sorted.length - 1] - sorted[0] + 1 === runLen
     ) {
-      score += runLen;
+      components.runs = runLen;
       break;
     }
   }
-  return score;
+  components.total = (components.fifteens ?? 0) +
+    (components.thirtyOne ?? 0) +
+    (components.pairs ?? 0) +
+    (components.runs ?? 0);
+  return components;
 }
 
 export class CribbageGame {
@@ -1019,7 +1071,15 @@ export class CribbageGame {
     this.dealer.crib = [...this.crib];
     this.logEvent(`Turn card is ${this.cardLabel(this.turnCard)}.`);
     if (this.turnCard.rankStr === "J") {
-      this.recordScore(this.dealer, "pegging", 2, "his heels", this.turnCard);
+      this.recordScore(
+        this.dealer,
+        "pegging",
+        2,
+        "his heels",
+        this.turnCard,
+        undefined,
+        shouldLogScoreComponents() ? { total: 2, heels: 2 } : undefined,
+      );
       this.peg(this.dealer, 2);
       this.logEvent(`${this.name(this.dealer)} pegged 2 for his heels.`);
     }
@@ -1068,7 +1128,15 @@ export class CribbageGame {
 
   private finishPegging(): void {
     if (this.lastPlayer && this.count !== 0) {
-      this.recordScore(this.lastPlayer, "pegging", 1, "last card", undefined, this.count);
+      this.recordScore(
+        this.lastPlayer,
+        "pegging",
+        1,
+        "last card",
+        undefined,
+        this.count,
+        shouldLogScoreComponents() ? { total: 1, lastCard: 1 } : undefined,
+      );
       this.peg(this.lastPlayer, 1);
       this.logEvent(`${this.name(this.lastPlayer)} pegged 1 for last card.`);
       this.archivePlays();
@@ -1174,7 +1242,8 @@ export class CribbageGame {
     this.playOwners.push(player.key);
     this.count += card.value;
     this.lastPlayer = player;
-    const points = scoreCount(this.plays);
+    const playScoreComponents = shouldLogScoreComponents() ? scoreCountComponents(this.plays) : undefined;
+    const points = playScoreComponents?.total ?? scoreCount(this.plays);
     const scoreAfterPlay = points
       ? {
           human: this.human.score + (player === this.human ? points : 0),
@@ -1200,6 +1269,7 @@ export class CribbageGame {
       message: `${this.name(player)} played ${this.cardLabel(card)}: ${this.count}`,
       model: engine,
       selectedEv,
+      scoreComponents: playScoreComponents,
     });
     if (pendingReviewSnapshot) {
       this.pendingPeggingReviews.push({
@@ -1209,7 +1279,7 @@ export class CribbageGame {
         snapshot: pendingReviewSnapshot,
       });
     }
-    if (points) this.recordScore(player, "pegging", points, "count", card, this.count);
+    if (points) this.recordScore(player, "pegging", points, "count", card, this.count, playScoreComponents);
     if (points) this.peg(player, points);
     this.logEvent(
       `${this.name(player)} played ${this.cardLabel(card)}: ${this.count}` +
@@ -1240,7 +1310,15 @@ export class CribbageGame {
   private sayGo(player: PlayerState): void {
     if (this.goPlayer) {
       if (this.lastPlayer && this.count !== 31) {
-        this.recordScore(this.lastPlayer, "pegging", 1, "go", undefined, this.count);
+        this.recordScore(
+          this.lastPlayer,
+          "pegging",
+          1,
+          "go",
+          undefined,
+          this.count,
+          shouldLogScoreComponents() ? { total: 1, go: 1 } : undefined,
+        );
         this.peg(this.lastPlayer, 1);
         this.logEvent(`${this.name(this.lastPlayer)} pegged 1 for go.`);
       }
@@ -1287,25 +1365,29 @@ export class CribbageGame {
     let points: number;
     let title: string;
     let nextLabel: string;
+    let scoreComponents: AnalyticsScoreComponents | undefined;
 
     if (stage === "pone") {
       player = this.pone;
       cards = this.pone.table;
-      points = scoreHand(cards, this.turnCard);
+      scoreComponents = shouldLogScoreComponents() ? scoreHandComponents(cards, this.turnCard) : undefined;
+      points = scoreComponents?.total ?? scoreHand(cards, this.turnCard);
       title = `${this.name(player)} hand`;
       nextLabel = "Show dealer hand";
       this.phase = "score_pone";
     } else if (stage === "dealer") {
       player = this.dealer;
       cards = this.dealer.table;
-      points = scoreHand(cards, this.turnCard);
+      scoreComponents = shouldLogScoreComponents() ? scoreHandComponents(cards, this.turnCard) : undefined;
+      points = scoreComponents?.total ?? scoreHand(cards, this.turnCard);
       title = `${this.name(player)} hand`;
       nextLabel = "Show crib";
       this.phase = "score_dealer";
     } else {
       player = this.dealer;
       cards = this.dealer.crib;
-      points = scoreHand(cards, this.turnCard, true);
+      scoreComponents = shouldLogScoreComponents() ? scoreHandComponents(cards, this.turnCard, true) : undefined;
+      points = scoreComponents?.total ?? scoreHand(cards, this.turnCard, true);
       title = `${this.name(player)} crib`;
       nextLabel = "Next hand";
       this.phase = "score_crib";
@@ -1320,7 +1402,7 @@ export class CribbageGame {
       points,
       nextLabel,
     };
-    this.recordScore(player, stage === "crib" ? "crib" : "hand", points, title);
+    this.recordScore(player, stage === "crib" ? "crib" : "hand", points, title, undefined, undefined, scoreComponents);
     this.peg(player, points);
     this.logEvent(`${title} scored ${points}.`);
   }
@@ -1380,6 +1462,7 @@ export class CribbageGame {
     reason: string,
     card?: Card,
     count?: number,
+    scoreComponents?: AnalyticsScoreComponents,
   ): void {
     if (points <= 0) return;
     this.recordAnalytics({
@@ -1405,6 +1488,7 @@ export class CribbageGame {
         : undefined,
       card: card ? this.cardLabel(card) : undefined,
       count,
+      scoreComponents,
     });
   }
 
