@@ -1,5 +1,7 @@
 import cribFlushBonusBySuitCount from "./models/schell_table-peg_table-7.0/crib-flush-bonus.json";
 import boardPositionStats from "./models/flush-aware-board-position-stats.json";
+import cribRankScoreByDiscardCut from "./models/rank-crib-discard/crib-rank-score-by-discard-cut.json";
+import handRankScoreByKeepCut from "./models/rank-crib-discard/hand-rank-score-by-keep-cut.json";
 
 export type PlayerKey = "human" | "ai";
 export type Opponent =
@@ -16,6 +18,7 @@ export type Opponent =
   | "schell_table-peg_table-8.0"
   | "schell_table-peg_table-9.0"
   | "schell_table-peg_table-10.0"
+  | "schell_table-peg_table-11.0"
   | "schell_table-2.0";
 type LegacyOpponent =
   | "ras-table-1.0"
@@ -74,8 +77,15 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "schell_table-peg_table-8.0": "Schell Table + Peg Table 8.0",
   "schell_table-peg_table-9.0": "Schell Table + Peg Table 9.0",
   "schell_table-peg_table-10.0": "Schell Table + Peg Table 10.0",
+  "schell_table-peg_table-11.0": "Schell Table + Peg Table 11.0",
 };
 const CRIB_FLUSH_BONUS_BY_SUIT_COUNT = cribFlushBonusBySuitCount as number[];
+const HAND_RANK_SCORE_BY_KEEP_CUT = (handRankScoreByKeepCut as {
+  table: Record<string, Array<number | null>>;
+}).table;
+const CRIB_RANK_SCORE_BY_DISCARD_CUT = (cribRankScoreByDiscardCut as {
+  table: Record<"dealer" | "pone", Record<string, Array<number | null>>>;
+}).table;
 type DiscardTableEngine = Exclude<Opponent, "original-1.1" | "original_exhaustive_peg-1.2">;
 type CribTable = { own: number[][]; opponent: number[][] };
 const DISCARD_TABLES: Record<string, CribTable> = {
@@ -154,6 +164,7 @@ DISCARD_TABLES["schell_table-peg_table-7.0"] = DISCARD_TABLES["schell_table-2.0"
 DISCARD_TABLES["schell_table-peg_table-8.0"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-9.0"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-10.0"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-11.0"] = DISCARD_TABLES["schell_table-2.0"];
 
 export class WinGame extends Error {}
 
@@ -1669,12 +1680,16 @@ const PEG_TABLE_POLICY_LOADERS: Partial<Record<Opponent, () => Promise<PegTableP
     import("./models/schell_table-peg_table-9.0/peg-table-policy.json").then((module) => module.default as unknown as PegTablePolicy),
   "schell_table-peg_table-10.0": () =>
     import("./models/schell_table-peg_table-10.0/peg-table-policy.json").then((module) => module.default as unknown as PegTablePolicy),
+  "schell_table-peg_table-11.0": () =>
+    import("./models/schell_table-peg_table-11.0/peg-table-policy.json").then((module) => module.default as unknown as PegTablePolicy),
 };
 const PEGGING_HOLD_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<PeggingHoldTable>>> = {
   "schell_table-peg_table-9.0": () =>
     import("./models/schell_table-peg_table-9.0/pegging-remaining-hand-distribution.json").then((module) => module.default as unknown as PeggingHoldTable),
   "schell_table-peg_table-10.0": () =>
     import("./models/schell_table-peg_table-10.0/pegging-remaining-hand-distribution.json").then((module) => module.default as unknown as PeggingHoldTable),
+  "schell_table-peg_table-11.0": () =>
+    import("./models/schell_table-peg_table-11.0/pegging-remaining-hand-distribution.json").then((module) => module.default as unknown as PeggingHoldTable),
 };
 
 export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
@@ -1726,11 +1741,17 @@ function usesCribFlushAdjustment(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-7.0" ||
     engine === "schell_table-peg_table-8.0" ||
     engine === "schell_table-peg_table-9.0" ||
-    engine === "schell_table-peg_table-10.0";
+    engine === "schell_table-peg_table-10.0" ||
+    engine === "schell_table-peg_table-11.0";
 }
 
 function usesWinProbabilityPegging(engine: Opponent): boolean {
-  return engine === "schell_table-peg_table-10.0";
+  return engine === "schell_table-peg_table-10.0" ||
+    engine === "schell_table-peg_table-11.0";
+}
+
+function usesRankCutDiscardTables(engine: Opponent): boolean {
+  return engine === "schell_table-peg_table-11.0";
 }
 
 function pegTableEv(
@@ -2347,6 +2368,40 @@ function expectedCribFlushBonus(discard: Card[], cribFlushBonusBySuit: number[] 
   return cribFlushBonusBySuit?.[discard[0].suit] ?? 0;
 }
 
+function rankCutHandScore(keep: Card[], cut: Card): number {
+  const keepKey = rankCountsForCards(keep).join("");
+  return HAND_RANK_SCORE_BY_KEEP_CUT[keepKey]?.[cut.rank] ?? scoreHandRankOnly(keep, cut);
+}
+
+function rankCutCribScore(discard: Card[], role: "dealer" | "pone", cut: Card): number {
+  const discardKey = rankCountsForCards(discard).join("");
+  return CRIB_RANK_SCORE_BY_DISCARD_CUT[role]?.[discardKey]?.[cut.rank] ?? 0;
+}
+
+function scoreHandRankOnly(hand: Card[], turnCard: Card): number {
+  return scoreFifteens(hand, turnCard) + scoreSets(hand, turnCard) + scoreRuns(hand, turnCard);
+}
+
+function rankCutDiscardScores(
+  keep: Card[],
+  discard: Card[],
+  deck: Card[],
+  role: "dealer" | "pone",
+  cribFlushBonusBySuit: number[] | null,
+): { handScore: number; cribScore: number } {
+  let handTotal = 0;
+  let cribTotal = 0;
+  for (const cut of deck) {
+    handTotal += rankCutHandScore(keep, cut) + scoreFlushAndRightJack(keep, cut, false);
+    cribTotal += rankCutCribScore(discard, role, cut);
+  }
+  const count = deck.length || 1;
+  return {
+    handScore: handTotal / count,
+    cribScore: (cribTotal / count) + expectedCribFlushBonus(discard, cribFlushBonusBySuit),
+  };
+}
+
 function analyzeDiscardChoice(
   hand: Card[],
   selected: Card[],
@@ -2375,8 +2430,11 @@ function analyzeDiscardChoice(
 
   for (const discard of combinations(hand, 2, 2)) {
     const keep = hand.filter((card) => !discard.includes(card));
-    const handScore = mean(deck.map((cut) => scoreHand(keep, cut)));
-    const cribScore = expectedCribScore(discard, deck, myCrib, engine, cribFlushBonusBySuit);
+    const cutJoinedScores = usesRankCutDiscardTables(engine)
+      ? rankCutDiscardScores(keep, discard, deck, role, cribFlushBonusBySuit)
+      : null;
+    const handScore = cutJoinedScores?.handScore ?? mean(deck.map((cut) => scoreHand(keep, cut)));
+    const cribScore = cutJoinedScores?.cribScore ?? expectedCribScore(discard, deck, myCrib, engine, cribFlushBonusBySuit);
     const pegging = pegTableEv(hand, discard, role, engine);
     const total = (myCrib ? handScore + cribScore : handScore - cribScore) + pegging.netPeggingEv;
     const components: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>> = {
@@ -2507,6 +2565,7 @@ function normalizeOpponent(opponent: StoredOpponent): Opponent {
     opponent === "expert_schell-table-peg_table-1.2" ||
     opponent === "expert_schell_table-peg_table-4.0"
   ) return "schell_table-peg_table-4.0";
+  if (opponent === "schell_table-peg_table-11.0") return "schell_table-peg_table-11.0";
   if (opponent === "schell_table-peg_table-10.0") return "schell_table-peg_table-10.0";
   return opponent;
 }

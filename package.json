@@ -14,6 +14,7 @@
     "launch:top-three-10k": "node scripts/launch-background.cjs top-three-10k -- /usr/local/bin/node scripts/run-top-three-10k-benchmark.cjs benchmarks/ai-smoke/top-three-10k-full-analytics 10000 25 10",
     "export:ai-benchmark-summary": "node scripts/export-ai-benchmark-summary.cjs",
     "export:board-position-stats": "node scripts/export-board-position-stats.cjs",
+    "build:rank-crib-discard-tables": "node --experimental-sqlite scripts/build-rank-crib-discard-tables.cjs",
     "analyze:ai-run": "node --no-warnings scripts/analyze-ai-run.cjs",
     "import:ai-game-logs": "node scripts/import-ai-game-logs.cjs",
     "compact:ai-games": "node scripts/compact-existing-ai-games.cjs",
