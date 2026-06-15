@@ -12,7 +12,7 @@ const defaultDbPath = path.join(root, "benchmarks", "ai-db", "cribbage-games.sql
 
 function usage() {
   return [
-    "Usage: node scripts/analyze-ai-run.cjs [run-id] [--db <path>] [--json]",
+    "Usage: node scripts/analyze-ai-run.cjs [run-id[,run-id...]] [additional-run-id...] [--db <path>] [--json]",
     "",
     "If run-id is omitted, the most recently started compact AI run is used.",
   ].join("\n");
@@ -20,7 +20,7 @@ function usage() {
 
 function parseArgs(argv) {
   const args = {
-    runId: null,
+    runIds: [],
     dbPath: process.env.AI_SMOKE_GAME_DB_PATH || defaultDbPath,
     json: false,
   };
@@ -34,8 +34,8 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg === "--json") {
       args.json = true;
-    } else if (!args.runId) {
-      args.runId = arg;
+    } else if (!arg.startsWith("--")) {
+      args.runIds.push(...arg.split(",").map((runId) => runId.trim()).filter(Boolean));
     } else {
       throw new Error(`Unexpected argument: ${arg}`);
     }
@@ -158,6 +158,10 @@ function statusForRun(run) {
   }
 }
 
+function placeholders(values) {
+  return values.map(() => "?").join(",");
+}
+
 function modelForSide(game, side) {
   return side === 0 ? game.left_engine : game.right_engine;
 }
@@ -227,7 +231,8 @@ function completedDecisionHands(games, hands) {
   };
 }
 
-function evCalibration(db, runId, completedHands) {
+function evCalibration(db, runIds, completedHands) {
+  const runPlaceholders = placeholders(runIds);
   const discards = db.prepare(`
     SELECT
       d.game_id,
@@ -244,8 +249,8 @@ function evCalibration(db, runId, completedHands) {
     FROM compact_discards d
     JOIN compact_hands h ON h.game_id = d.game_id AND h.hand_number = d.hand_number
     JOIN compact_games g ON g.game_id = d.game_id
-    WHERE g.run_id = ? AND d.selected_ev IS NOT NULL
-  `).all(runId);
+    WHERE g.run_id IN (${runPlaceholders}) AND d.selected_ev IS NOT NULL
+  `).all(...runIds);
   const pegRows = db.prepare(`
     SELECT
       p.game_id,
@@ -258,9 +263,9 @@ function evCalibration(db, runId, completedHands) {
       p.points
     FROM compact_peg_plays p
     JOIN compact_games g ON g.game_id = p.game_id
-    WHERE g.run_id = ? AND p.selected_ev IS NOT NULL AND p.action = 0
+    WHERE g.run_id IN (${runPlaceholders}) AND p.selected_ev IS NOT NULL AND p.action = 0
     ORDER BY p.game_id, p.hand_number, p.sequence
-  `).all(runId);
+  `).all(...runIds);
   const pegAllRows = db.prepare(`
     SELECT
       p.game_id,
@@ -270,9 +275,9 @@ function evCalibration(db, runId, completedHands) {
       p.points
     FROM compact_peg_plays p
     JOIN compact_games g ON g.game_id = p.game_id
-    WHERE g.run_id = ?
+    WHERE g.run_id IN (${runPlaceholders})
     ORDER BY p.game_id, p.hand_number, p.sequence
-  `).all(runId);
+  `).all(...runIds);
 
   const pegRowsByHand = new Map();
   for (const row of pegAllRows) {
@@ -366,29 +371,35 @@ function main() {
   if (!fs.existsSync(args.dbPath)) throw new Error(`SQLite database not found: ${args.dbPath}`);
   const { DatabaseSync } = require("node:sqlite");
   const db = new DatabaseSync(args.dbPath, { readOnly: true });
-  const runId = args.runId || latestRunId(db);
-  if (!runId) throw new Error("No compact AI runs found.");
+  const runIds = args.runIds.length ? args.runIds : [latestRunId(db)].filter(Boolean);
+  if (!runIds.length) throw new Error("No compact AI runs found.");
+  const runPlaceholders = placeholders(runIds);
 
-  const run = db.prepare("SELECT * FROM ai_runs WHERE run_id = ?").get(runId) ?? { run_id: runId };
-  const games = db.prepare("SELECT * FROM compact_games WHERE run_id = ? ORDER BY game_index").all(runId);
-  if (!games.length) throw new Error(`No compact games found for run: ${runId}`);
+  const runs = db.prepare(`SELECT * FROM ai_runs WHERE run_id IN (${runPlaceholders})`).all(...runIds);
+  const runsById = new Map(runs.map((run) => [run.run_id, run]));
+  const games = db.prepare(`SELECT * FROM compact_games WHERE run_id IN (${runPlaceholders}) ORDER BY run_id, game_index`).all(...runIds);
+  if (!games.length) throw new Error(`No compact games found for run(s): ${runIds.join(", ")}`);
   const hands = db.prepare(`
     SELECT h.*, g.left_engine, g.right_engine
     FROM compact_hands h
     JOIN compact_games g ON g.game_id = h.game_id
-    WHERE g.run_id = ?
-    ORDER BY h.game_id, h.hand_number
-  `).all(runId);
+    WHERE g.run_id IN (${runPlaceholders})
+    ORDER BY g.run_id, h.game_id, h.hand_number
+  `).all(...runIds);
 
   const models = [...new Set(games.flatMap((game) => [game.left_engine, game.right_engine]))];
   if (models.length !== 2) {
     throw new Error(`Expected a two-model run; found ${models.length}: ${models.join(", ")}`);
   }
   const [leftModel, rightModel] = [games[0].left_engine, games[0].right_engine];
-  const status = statusForRun(run);
+  const runStatuses = runIds.map((runId) => ({
+    runId,
+    status: statusForRun(runsById.get(runId) ?? { run_id: runId }),
+  }));
+  const status = runIds.length === 1 ? runStatuses[0]?.status ?? null : null;
   const scores = scoreSamplesByModel(games, hands);
   const completedHands = completedDecisionHands(games, hands);
-  const ev = evCalibration(db, runId, completedHands);
+  const ev = evCalibration(db, runIds, completedHands);
   db.close();
 
   const rightWins = games.filter((game) => game.winner === 1).length;
@@ -411,9 +422,11 @@ function main() {
   const evRows = ev.buckets.map(summarizeEv);
 
   const report = {
-    runId,
+    runId: runIds.join(","),
+    runIds,
     dbPath: path.relative(root, args.dbPath),
     status,
+    runStatuses,
     matchup: { leftModel, rightModel },
     games: games.length,
     wins: { [leftModel]: leftWins, [rightModel]: rightWins },
@@ -434,7 +447,7 @@ function main() {
   }
 
   const lines = [];
-  lines.push(`Run: ${runId}`);
+  lines.push(`${runIds.length === 1 ? "Run" : "Runs"}: ${runIds.join(", ")}`);
   lines.push(`DB: ${report.dbPath}`);
   lines.push(`Matchup: ${leftModel} vs ${rightModel}`);
   if (status) {
