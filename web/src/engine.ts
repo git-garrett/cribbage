@@ -4,6 +4,8 @@ import cribRankComponentsByDiscardCut from "./models/rank-crib-discard/crib-rank
 import cribRankScoreByDiscardCut from "./models/rank-crib-discard/crib-rank-score-by-discard-cut.json";
 import cribScoreHistogramByDiscardCut from "./models/rank-crib-discard/crib-score-histogram-by-discard-cut.json";
 import handRankScoreByKeepCut from "./models/rank-crib-discard/hand-rank-score-by-keep-cut.json";
+import peggingPairwise12Manifest from "./models/schell_table-peg_table-12.0/pegging-outcome-pairwise.manifest.json";
+import peggingPairwise12Url from "./models/schell_table-peg_table-12.0/pegging-outcome-pairwise.bin?url";
 
 export type PlayerKey = "human" | "ai";
 export type Opponent =
@@ -22,6 +24,7 @@ export type Opponent =
   | "schell_table-peg_table-10.0"
   | "schell_table-peg_table-11.0"
   | "schell_table-peg_table-11.1"
+  | "schell_table-peg_table-12.0"
   | "schell_table-2.0";
 type LegacyOpponent =
   | "ras-table-1.0"
@@ -48,7 +51,7 @@ type LegacyOpponent =
   | "expert-peg-2.2"
   | "expert-peg_table-2.3";
 type StoredOpponent = Opponent | LegacyOpponent;
-export const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-11.1";
+export const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-12.0";
 export type Phase =
   | "discard"
   | "ai_discarding"
@@ -82,6 +85,7 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "schell_table-peg_table-10.0": "Schell Table + Peg Table 10.0",
   "schell_table-peg_table-11.0": "Schell Table + Peg Table 11.0",
   "schell_table-peg_table-11.1": "Schell Table + Peg Table 11.1",
+  "schell_table-peg_table-12.0": "Schell Table + Peg Table 12.0",
 };
 const CRIB_FLUSH_BONUS_BY_SUIT_COUNT = cribFlushBonusBySuitCount as number[];
 const HAND_RANK_SCORE_BY_KEEP_CUT = (handRankScoreByKeepCut as {
@@ -181,6 +185,7 @@ DISCARD_TABLES["schell_table-peg_table-9.0"] = DISCARD_TABLES["schell_table-2.0"
 DISCARD_TABLES["schell_table-peg_table-10.0"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-11.0"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-11.1"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-12.0"] = DISCARD_TABLES["schell_table-2.0"];
 
 export class WinGame extends Error {}
 
@@ -1173,6 +1178,15 @@ export class CribbageGame {
   private choosePlay(player: PlayerState): Card {
     const legal = this.legalCards(player);
     const engine = this.playerEngines[player.key];
+    const outcomeLead = choosePeggingOutcomeLead(this, player, legal, engine);
+    if (outcomeLead) {
+      this.pegDecisionEvs[player.key] = {
+        cardId: outcomeLead.card.id,
+        model: engine,
+        ev: roundEv(outcomeLead.ev),
+      };
+      return outcomeLead.card;
+    }
     const pegTableLead = choosePegTableLead(player.hand, legal, this.pegTableLeads[player.key], {
       engine,
       isPone: player === this.pone,
@@ -1615,6 +1629,8 @@ export class CribbageGame {
 
   private choosePlayForEngine(player: PlayerState, engine: Opponent): Card {
     const legal = this.legalCards(player);
+    const outcomeLead = choosePeggingOutcomeLead(this, player, legal, engine);
+    if (outcomeLead) return outcomeLead.card;
     const pegTableLead = choosePegTableLead(player.hand, legal, this.pegTableLeads[player.key], {
       engine,
       isPone: player === this.pone,
@@ -1787,10 +1803,29 @@ type PeggingOutcomeDistribution = {
   outcomes: Map<string, number>;
   totalWeight: number;
 };
+type PeggingOutcomeSummary = {
+  totalWeight: number;
+  myEv: number;
+  opponentEv: number;
+  hist: Array<[number, number, number]>;
+};
+type PeggingPairwiseManifest = {
+  keepKeys: string[];
+};
+type PeggingPairwiseTable = {
+  keepKeys: string[];
+  keepRanks: RankCounts[];
+  keepIdByKey: Map<string, number>;
+  dealerOffsets: Uint32Array;
+  poneOffsets: Uint32Array;
+  dealerRecords: Uint32Array;
+  poneRecords: Uint32Array;
+};
 
 const pegCardCache = Array.from({ length: 13 }, (_, rank) => new Card(rank));
 const PEG_TABLE_POLICIES: Partial<Record<Opponent, PegTablePolicy>> = {};
 const PEGGING_HOLD_TABLES: Partial<Record<Opponent, PeggingHoldTable>> = {};
+const PEGGING_PAIRWISE_TABLES: Partial<Record<Opponent, PeggingPairwiseTable>> = {};
 const BOARD_POSITION_STATS = boardPositionStats as BoardPositionStats;
 const SCORE_PHASES: ScorePhase[] = ["peggingPone", "peggingDealer", "handPone", "handDealer", "crib"];
 const SCORE_PHASE_DISTRIBUTIONS: Record<ScorePhase, Array<[number, number]>> = Object.fromEntries(
@@ -1827,13 +1862,20 @@ const PEGGING_HOLD_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Pegging
     import("./models/schell_table-peg_table-11.0/pegging-remaining-hand-distribution.json").then((module) => module.default as unknown as PeggingHoldTable),
   "schell_table-peg_table-11.1": () =>
     import("./models/schell_table-peg_table-11.1/pegging-remaining-hand-distribution.json").then((module) => module.default as unknown as PeggingHoldTable),
+  "schell_table-peg_table-12.0": () =>
+    import("./models/schell_table-peg_table-11.1/pegging-remaining-hand-distribution.json").then((module) => module.default as unknown as PeggingHoldTable),
+};
+const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<PeggingPairwiseTable>>> = {
+  "schell_table-peg_table-12.0": () =>
+    loadPairwisePeggingTable(peggingPairwise12Url, peggingPairwise12Manifest as PeggingPairwiseManifest),
 };
 
 export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
   const engine = normalizeOpponent(opponent);
   const hasPegTable = !PEG_TABLE_POLICY_LOADERS[engine] || Boolean(PEG_TABLE_POLICIES[engine]);
   const hasHoldTable = !PEGGING_HOLD_TABLE_LOADERS[engine] || Boolean(PEGGING_HOLD_TABLES[engine]);
-  return hasPegTable && hasHoldTable;
+  const hasOutcomeTable = !PEGGING_PAIRWISE_TABLE_LOADERS[engine] || Boolean(PEGGING_PAIRWISE_TABLES[engine]);
+  return hasPegTable && hasHoldTable && hasOutcomeTable;
 }
 
 export async function loadOpponentResources(opponent: StoredOpponent): Promise<void> {
@@ -1844,6 +1886,7 @@ export async function loadOpponentResources(opponent: StoredOpponent): Promise<v
   }
   const loader = PEG_TABLE_POLICY_LOADERS[engine];
   const holdTableLoader = PEGGING_HOLD_TABLE_LOADERS[engine];
+  const outcomeTableLoader = PEGGING_PAIRWISE_TABLE_LOADERS[engine];
   const loadPegTable = loader && !PEG_TABLE_POLICIES[engine]
     ? loader().then((policy) => {
         PEG_TABLE_POLICIES[engine] = policy;
@@ -1855,7 +1898,12 @@ export async function loadOpponentResources(opponent: StoredOpponent): Promise<v
         PEGGING_HOLD_TABLES[engine] = table;
       })
     : Promise.resolve();
-  await Promise.all([loadPegTable, loadHoldTable]);
+  const loadOutcomeTable = outcomeTableLoader && !PEGGING_PAIRWISE_TABLES[engine]
+    ? outcomeTableLoader().then((table) => {
+        PEGGING_PAIRWISE_TABLES[engine] = table;
+      })
+    : Promise.resolve();
+  await Promise.all([loadPegTable, loadHoldTable, loadOutcomeTable]);
 }
 
 function sharedPegTablePolicyEngine(engine: Opponent): Opponent | null {
@@ -1880,22 +1928,30 @@ function usesCribFlushAdjustment(engine: Opponent): boolean {
     engine === "schell_table-peg_table-9.0" ||
     engine === "schell_table-peg_table-10.0" ||
     engine === "schell_table-peg_table-11.0" ||
-    engine === "schell_table-peg_table-11.1";
+    engine === "schell_table-peg_table-11.1" ||
+    engine === "schell_table-peg_table-12.0";
 }
 
 function usesWinProbabilityPegging(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-10.0" ||
     engine === "schell_table-peg_table-11.0" ||
-    engine === "schell_table-peg_table-11.1";
+    engine === "schell_table-peg_table-11.1" ||
+    engine === "schell_table-peg_table-12.0";
 }
 
 function usesRankCutDiscardTables(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-11.0" ||
-    engine === "schell_table-peg_table-11.1";
+    engine === "schell_table-peg_table-11.1" ||
+    engine === "schell_table-peg_table-12.0";
 }
 
 function usesDiscardWinProbability(engine: Opponent): boolean {
-  return engine === "schell_table-peg_table-11.1";
+  return engine === "schell_table-peg_table-11.1" ||
+    engine === "schell_table-peg_table-12.0";
+}
+
+function usesPeggingOutcomeTables(engine: Opponent): boolean {
+  return engine === "schell_table-peg_table-12.0";
 }
 
 function pegTableEv(
@@ -1954,6 +2010,226 @@ function choosePegTableLead(
     return null;
   }
   return legal.find((card) => card.rank === bestLead) ?? null;
+}
+
+async function loadPairwisePeggingTable(url: string, manifest: PeggingPairwiseManifest): Promise<PeggingPairwiseTable> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Unable to load pairwise pegging table: ${response.status}`);
+  const buffer = await response.arrayBuffer();
+  const view = new DataView(buffer);
+  const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  if (magic !== "P12P") throw new Error(`Unexpected pairwise pegging table magic: ${magic}`);
+  const version = view.getUint16(4, true);
+  if (version !== 1) throw new Error(`Unsupported pairwise pegging table version: ${version}`);
+  const keepCount = view.getUint16(6, true);
+  const dealerRecordCount = view.getUint32(8, true);
+  const poneRecordCount = view.getUint32(12, true);
+  if (keepCount !== manifest.keepKeys.length) {
+    throw new Error(`Pairwise pegging table keep count mismatch: ${keepCount} vs ${manifest.keepKeys.length}`);
+  }
+  let offset = 20;
+  const dealerOffsets = new Uint32Array(buffer, offset, keepCount + 1);
+  offset += (keepCount + 1) * 4;
+  const poneOffsets = new Uint32Array(buffer, offset, (keepCount * 13) + 1);
+  offset += ((keepCount * 13) + 1) * 4;
+  const dealerRecords = new Uint32Array(buffer, offset, dealerRecordCount);
+  offset += dealerRecordCount * 4;
+  const poneRecords = new Uint32Array(buffer, offset, poneRecordCount);
+  const keepRanks = manifest.keepKeys.map((key) => key.split("").map((digit) => Number.parseInt(digit, 10)) as RankCounts);
+  return {
+    keepKeys: manifest.keepKeys,
+    keepRanks,
+    keepIdByKey: new Map(manifest.keepKeys.map((key, index) => [key, index])),
+    dealerOffsets,
+    poneOffsets,
+    dealerRecords,
+    poneRecords,
+  };
+}
+
+function peggingOutcomeTableEv(
+  keep: Card[],
+  role: "dealer" | "pone",
+  engine: Opponent,
+  knownCards: Card[],
+): PegTableEv | null {
+  const summary = bestPeggingOutcomeSummary(keep, role, engine, knownCards);
+  if (!summary) return null;
+  return {
+    myPeggingEv: summary.myEv,
+    opponentPeggingEv: summary.opponentEv,
+    netPeggingEv: summary.myEv - summary.opponentEv,
+    bestLead: summary.bestLead,
+  };
+}
+
+function peggingOutcomeHistogram(
+  keep: Card[],
+  role: "dealer" | "pone",
+  engine: Opponent,
+  knownCards: Card[],
+): Array<[number, number, number]> | null {
+  return bestPeggingOutcomeSummary(keep, role, engine, knownCards)?.hist ?? null;
+}
+
+function bestPeggingOutcomeSummary(
+  keep: Card[],
+  role: "dealer" | "pone",
+  engine: Opponent,
+  knownCards: Card[],
+): (PeggingOutcomeSummary & { bestLead: number | null }) | null {
+  if (!usesPeggingOutcomeTables(engine)) return null;
+  if (role === "dealer") {
+    const summary = aggregatePairwisePeggingOutcomes(keep, "dealer", engine, knownCards, null);
+    return summary ? { ...summary, bestLead: null } : null;
+  }
+  let best: (PeggingOutcomeSummary & { bestLead: number }) | null = null;
+  for (const lead of legalPegRanks(rankCountsForCards(keep), 0)) {
+    const summary = aggregatePairwisePeggingOutcomes(keep, "pone", engine, knownCards, lead);
+    if (!summary) continue;
+    if (!best || compareLeadSummary(summary, best, lead) > 0) best = { ...summary, bestLead: lead };
+  }
+  return best;
+}
+
+function compareLeadSummary(candidate: PeggingOutcomeSummary, current: PeggingOutcomeSummary, candidateRank: number): number {
+  const candidateNet = candidate.myEv - candidate.opponentEv;
+  const currentNet = current.myEv - current.opponentEv;
+  if (candidateNet !== currentNet) return candidateNet - currentNet;
+  if (candidate.myEv !== current.myEv) return candidate.myEv - current.myEv;
+  return -VALUES[candidateRank];
+}
+
+function aggregatePairwisePeggingOutcomes(
+  keep: Card[],
+  role: "dealer" | "pone",
+  engine: Opponent,
+  knownCards: Card[],
+  leadRank: number | null,
+): PeggingOutcomeSummary | null {
+  const table = PEGGING_PAIRWISE_TABLES[engine];
+  if (!table) return null;
+  const keepKey = rankCountsForCards(keep).join("");
+  const keepId = table.keepIdByKey.get(keepKey);
+  if (keepId === undefined) return null;
+  const records = role === "dealer" ? table.dealerRecords : table.poneRecords;
+  const start = role === "dealer"
+    ? table.dealerOffsets[keepId]
+    : table.poneOffsets[(keepId * 13) + (leadRank ?? 0)];
+  const end = role === "dealer"
+    ? table.dealerOffsets[keepId + 1]
+    : table.poneOffsets[(keepId * 13) + (leadRank ?? 0) + 1];
+  if (end <= start) return null;
+  const available = remainingRankCounts(knownCards);
+  const hist = new Map<string, number>();
+  let totalWeight = 0;
+  let myTotal = 0;
+  let opponentTotal = 0;
+  for (let index = start; index < end; index += 1) {
+    const record = unpackPairwiseRecord(records[index]);
+    const opponentRanks = table.keepRanks[record.opponentKeepId];
+    const weight = opponentKeepWeight(available, opponentRanks);
+    if (!weight) continue;
+    const key = `${record.myPegging},${record.opponentPegging}`;
+    hist.set(key, (hist.get(key) ?? 0) + weight);
+    totalWeight += weight;
+    myTotal += record.myPegging * weight;
+    opponentTotal += record.opponentPegging * weight;
+  }
+  if (!totalWeight) return null;
+  return {
+    totalWeight,
+    myEv: myTotal / totalWeight,
+    opponentEv: opponentTotal / totalWeight,
+    hist: [...hist.entries()]
+      .map(([key, weight]) => {
+        const [my, opponent] = key.split(",").map((value) => Number.parseInt(value, 10));
+        return [my, opponent, weight] as [number, number, number];
+      })
+      .sort((a, b) => a[0] - b[0] || a[1] - b[1]),
+  };
+}
+
+function unpackPairwiseRecord(record: number): { opponentKeepId: number; myPegging: number; opponentPegging: number; weight: number } {
+  return {
+    opponentKeepId: record & 0x7ff,
+    myPegging: (record >>> 11) & 0x1f,
+    opponentPegging: (record >>> 16) & 0x1f,
+    weight: ((record >>> 21) & 0xff) + 1,
+  };
+}
+
+function opponentKeepWeight(available: RankCounts, opponentRanks: RankCounts): number {
+  let weight = 1;
+  for (let rank = 0; rank < 13; rank += 1) {
+    const count = opponentRanks[rank];
+    if (!count) continue;
+    if (available[rank] < count) return 0;
+    weight *= choose(available[rank], count);
+  }
+  return weight;
+}
+
+function choosePeggingOutcomeLead(
+  game: CribbageGame,
+  player: PlayerState,
+  legal: Card[],
+  engine: Opponent,
+): { card: Card; ev: number } | null {
+  if (
+    !usesPeggingOutcomeTables(engine) ||
+    player !== game.pone ||
+    game.count !== 0 ||
+    game.plays.length !== 0 ||
+    player.hand.length !== 4
+  ) {
+    return null;
+  }
+  const opponent = player === game.human ? game.ai : game.human;
+  const knownCards = [
+    ...player.hand,
+    ...player.table,
+    ...opponent.table,
+    ...game.crib,
+    game.turnCard,
+  ];
+  let best: { card: Card; ev: number; score: number } | null = null;
+  for (const card of legal) {
+    const summary = aggregatePairwisePeggingOutcomes(player.hand, "pone", engine, knownCards, card.rank);
+    if (!summary) continue;
+    const score = peggingOutcomeWinProbability(game, player, summary.hist);
+    const ev = summary.myEv - summary.opponentEv;
+    if (
+      !best ||
+      score > best.score ||
+      (score === best.score && ev > best.ev) ||
+      (score === best.score && ev === best.ev && VALUES[card.rank] < VALUES[best.card.rank])
+    ) {
+      best = { card, ev, score };
+    }
+  }
+  return best ? { card: best.card, ev: best.ev } : null;
+}
+
+function peggingOutcomeWinProbability(
+  game: CribbageGame,
+  player: PlayerState,
+  hist: Array<[number, number, number]>,
+): number {
+  const opponent = player === game.human ? game.ai : game.human;
+  const perspectiveRole = player === game.pone ? "pone" : "dealer";
+  let total = 0;
+  let totalWeight = 0;
+  for (const [myPegging, opponentPegging, weight] of hist) {
+    total += weight * approximateFutureWinProbability(
+      player.score + myPegging,
+      opponent.score + opponentPegging,
+      perspectiveRole,
+      "handPone",
+    );
+    totalWeight += weight;
+  }
+  return totalWeight ? total / totalWeight : 0.5;
 }
 
 function rankCountsForCards(cards: Card[]): RankCounts {
@@ -2843,7 +3119,7 @@ function selectedDiscardEvComponents(
     ...averageHandEvComponents(keep, deck),
     ...expectedCribEvComponents(discard, deck, role, myCrib ? 1 : -1, cribFlushBonusBySuit),
   };
-  const pegging = pegTableEv(hand, discard, role, engine);
+  const pegging = peggingOutcomeTableEv(keep, role, engine, hand) ?? pegTableEv(hand, discard, role, engine);
   components.pegging = pegging.netPeggingEv;
   return roundEvComponents(components);
 }
@@ -2972,6 +3248,7 @@ function discardCandidateWinProbability(
   deck: Card[],
   myCrib: boolean,
   pegging: PegTableEv,
+  peggingHist: Array<[number, number, number]> | null,
   suitedDiscardCache: Map<string, Card[][]>,
 ): number {
   const opponent = player === game.human ? game.ai : game.human;
@@ -2980,23 +3257,30 @@ function discardCandidateWinProbability(
   const nextRole = myCrib ? "pone" : "dealer";
   let total = 0;
   let totalWeight = 0;
+  const peggingOutcomes = peggingHist?.length
+    ? peggingHist
+    : [[pegging.myPeggingEv, pegging.opponentPeggingEv, 1] as [number, number, number]];
+  const peggingWeightTotal = peggingOutcomes.reduce((sum, outcome) => sum + outcome[2], 0) || 1;
   for (const cut of deck) {
     const ownHandScore = rankCutHandScore(keep, cut) + scoreFlushAndRightJack(keep, cut, false);
     const cribOutcomes = cribScoreOutcomesForCut(discard, cut, myCrib ? "dealer" : "pone", [...fullHand, cut], suitedDiscardCache);
     const cutWeight = 1 / (deck.length || 1);
-    for (const [cribScore, cribWeight] of cribOutcomes) {
-      for (const [opponentHandScore, opponentHandWeight] of opponentHandDistribution) {
-        const myScore = player.score +
-          pegging.myPeggingEv +
-          ownHandScore +
-          (myCrib ? cribScore : 0);
-        const opponentScore = opponent.score +
-          pegging.opponentPeggingEv +
-          opponentHandScore +
-          (myCrib ? 0 : cribScore);
-        const weight = cutWeight * cribWeight * opponentHandWeight;
-        total += weight * approximateFutureWinProbability(myScore, opponentScore, nextRole, "peggingPone");
-        totalWeight += weight;
+    for (const [myPegging, opponentPegging, peggingWeight] of peggingOutcomes) {
+      const normalizedPeggingWeight = peggingWeight / peggingWeightTotal;
+      for (const [cribScore, cribWeight] of cribOutcomes) {
+        for (const [opponentHandScore, opponentHandWeight] of opponentHandDistribution) {
+          const myScore = player.score +
+            myPegging +
+            ownHandScore +
+            (myCrib ? cribScore : 0);
+          const opponentScore = opponent.score +
+            opponentPegging +
+            opponentHandScore +
+            (myCrib ? 0 : cribScore);
+          const weight = cutWeight * normalizedPeggingWeight * cribWeight * opponentHandWeight;
+          total += weight * approximateFutureWinProbability(myScore, opponentScore, nextRole, "peggingPone");
+          totalWeight += weight;
+        }
       }
     }
   }
@@ -3043,7 +3327,8 @@ function analyzeDiscardChoice(
       : null;
     const handScore = cutJoinedScores?.handScore ?? mean(deck.map((cut) => scoreHand(keep, cut)));
     const cribScore = cutJoinedScores?.cribScore ?? expectedCribScore(discard, deck, myCrib, engine, cribFlushBonusBySuit);
-    const pegging = pegTableEv(hand, discard, role, engine);
+    const pegging = peggingOutcomeTableEv(keep, role, engine, hand) ?? pegTableEv(hand, discard, role, engine);
+    const peggingHist = peggingOutcomeHistogram(keep, role, engine, hand);
     const total = (myCrib ? handScore + cribScore : handScore - cribScore) + pegging.netPeggingEv;
     const components: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>> = {
       [myCrib ? "handDealer" : "handPone"]: handScore,
@@ -3051,7 +3336,7 @@ function analyzeDiscardChoice(
       crib: myCrib ? cribScore : -cribScore,
     };
     const winProbability = usesDiscardWinProbability(engine) && context
-      ? discardCandidateWinProbability(context.game, context.player, hand, keep, discard, deck, myCrib, pegging, suitedDiscardCache)
+      ? discardCandidateWinProbability(context.game, context.player, hand, keep, discard, deck, myCrib, pegging, peggingHist, suitedDiscardCache)
       : undefined;
     const choiceScore = winProbability ?? total;
     if (cardSetKey(discard) === selectedKey) {
@@ -3194,6 +3479,7 @@ function normalizeOpponent(opponent: StoredOpponent): Opponent {
     opponent === "expert_schell-table-peg_table-1.2" ||
     opponent === "expert_schell_table-peg_table-4.0"
   ) return "schell_table-peg_table-4.0";
+  if (opponent === "schell_table-peg_table-12.0") return "schell_table-peg_table-12.0";
   if (opponent === "schell_table-peg_table-11.1") return "schell_table-peg_table-11.1";
   if (opponent === "schell_table-peg_table-11.0") return "schell_table-peg_table-11.0";
   if (opponent === "schell_table-peg_table-10.0") return "schell_table-peg_table-10.0";

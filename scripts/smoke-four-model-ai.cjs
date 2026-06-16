@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const Module = require("node:module");
 const os = require("node:os");
+const { fileURLToPath, pathToFileURL } = require("node:url");
 const { Worker, isMainThread, parentPort, workerData } = require("node:worker_threads");
 const ts = require("typescript");
 const { ensureCompactSchema, insertCompactGameRecords } = require("./compact-game-storage.cjs");
@@ -19,6 +20,8 @@ const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
 const rankIndex = new Map(ranks.map((rank, index) => [rank, index]));
 
 const currentModels = [
+  "schell_table-peg_table-12.0",
+  "schell_table-peg_table-11.1",
   "schell_table-peg_table-11.0",
   "schell_table-peg_table-10.0",
   "schell_table-peg_table-9.0",
@@ -47,6 +50,8 @@ const labels = {
   "schell_table-peg_table-9.0": "Schell Table + Peg Table 9.0",
   "schell_table-peg_table-10.0": "Schell Table + Peg Table 10.0",
   "schell_table-peg_table-11.0": "Schell Table + Peg Table 11.0",
+  "schell_table-peg_table-11.1": "Schell Table + Peg Table 11.1",
+  "schell_table-peg_table-12.0": "Schell Table + Peg Table 12.0",
   "schell_table-peg_table-6.0": "Schell Table + Peg Table 6.0",
   "ras_table-peg_table-4.0": "Ras Table + Peg Table 4.0",
   "schell_table-peg-3.0": "Schell Table + Peg 3.0",
@@ -170,7 +175,8 @@ function summarize(stats) {
 
 function loadEngine() {
   globalThis.__CRIBBAGE_LOG_SCORE_COMPONENTS = scoreComponentsEnabled;
-  const source = fs.readFileSync(enginePath, "utf8");
+  installLocalAssetFetch();
+  const source = patchEngineAssetImports(fs.readFileSync(enginePath, "utf8"));
   const compiled = ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.CommonJS,
@@ -184,6 +190,36 @@ function loadEngine() {
   engineModule.paths = Module._nodeModulePaths(path.dirname(enginePath));
   engineModule._compile(compiled, enginePath);
   return engineModule.exports;
+}
+
+function patchEngineAssetImports(source) {
+  return source.replace(
+    /import\s+peggingPairwise12Url\s+from\s+"\.\/models\/schell_table-peg_table-12\.0\/pegging-outcome-pairwise\.bin\?url";/,
+    () => {
+      const assetPath = path.join(path.dirname(enginePath), "models", "schell_table-peg_table-12.0", "pegging-outcome-pairwise.bin");
+      return `const peggingPairwise12Url = ${JSON.stringify(pathToFileURL(assetPath).href)};`;
+    },
+  );
+}
+
+function installLocalAssetFetch() {
+  if (globalThis.__CRIBBAGE_LOCAL_ASSET_FETCH_INSTALLED) return;
+  const nativeFetch = globalThis.fetch?.bind(globalThis);
+  globalThis.fetch = async (resource, init) => {
+    const url = typeof resource === "string" ? resource : resource?.url;
+    if (typeof url === "string" && (url.startsWith("file:") || path.isAbsolute(url))) {
+      const filePath = url.startsWith("file:") ? fileURLToPath(url) : url;
+      const bytes = fs.readFileSync(filePath);
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+      };
+    }
+    if (!nativeFetch) throw new Error(`No fetch implementation available for ${url}`);
+    return nativeFetch(resource, init);
+  };
+  globalThis.__CRIBBAGE_LOCAL_ASSET_FETCH_INSTALLED = true;
 }
 
 function resultFromScores(_winner, loserScore) {

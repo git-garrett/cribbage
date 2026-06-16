@@ -260,6 +260,8 @@ function evCalibration(db, runIds, completedHands) {
       p.role,
       p.model,
       p.selected_ev,
+      p.action,
+      p.count_after,
       p.points
     FROM compact_peg_plays p
     JOIN compact_games g ON g.game_id = p.game_id
@@ -272,6 +274,8 @@ function evCalibration(db, runIds, completedHands) {
       p.hand_number,
       p.sequence,
       p.player,
+      p.action,
+      p.count_after,
       p.points
     FROM compact_peg_plays p
     JOIN compact_games g ON g.game_id = p.game_id
@@ -287,15 +291,13 @@ function evCalibration(db, runIds, completedHands) {
   }
   const futureNetPegging = new Map();
   for (const rows of pegRowsByHand.values()) {
-    for (let index = 0; index < rows.length; index += 1) {
-      const decision = rows[index];
-      if (decision.player === null || decision.player === undefined) continue;
+    const awards = peggingAwardsForHand(rows);
+    for (const decision of rows) {
+      if (decision.action !== 0 || decision.player === null || decision.player === undefined) continue;
       let realized = 0;
-      for (let futureIndex = index; futureIndex < rows.length; futureIndex += 1) {
-        const future = rows[futureIndex];
-        if (future.player === null || future.player === undefined) continue;
-        const points = future.points ?? 0;
-        realized += future.player === decision.player ? points : -points;
+      for (const award of awards) {
+        if (award.sequence < decision.sequence) continue;
+        realized += award.player === decision.player ? award.points : -award.points;
       }
       futureNetPegging.set(`${decision.game_id}:${decision.hand_number}:${decision.sequence}:${decision.player}`, realized);
     }
@@ -348,6 +350,38 @@ function evCalibration(db, runIds, completedHands) {
       a.kind.localeCompare(b.kind) || a.role.localeCompare(b.role) || a.model.localeCompare(b.model)),
     skipped,
   };
+}
+
+function peggingAwardsForHand(rows) {
+  const awards = [];
+  let lastPlayer = null;
+  let count = 0;
+  let terminalSequence = 0;
+
+  for (const row of rows) {
+    terminalSequence = Math.max(terminalSequence, row.sequence + 1);
+    if (row.action === 0) {
+      if (row.player !== null && row.player !== undefined) {
+        const points = row.points ?? 0;
+        if (points) awards.push({ sequence: row.sequence, player: row.player, points });
+        lastPlayer = row.player;
+      }
+      count = row.count_after ?? count;
+    } else if (row.action === 1) {
+      count = row.count_after ?? count;
+    } else if (row.action === 2) {
+      if (lastPlayer !== null && lastPlayer !== undefined && count > 0 && count !== 31) {
+        awards.push({ sequence: row.sequence, player: lastPlayer, points: 1 });
+      }
+      lastPlayer = null;
+      count = 0;
+    }
+  }
+
+  if (lastPlayer !== null && lastPlayer !== undefined && count > 0 && count !== 31) {
+    awards.push({ sequence: terminalSequence, player: lastPlayer, points: 1 });
+  }
+  return awards;
 }
 
 function summarizeEv(bucket) {
