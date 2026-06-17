@@ -17,6 +17,7 @@ const gameDbEnabled = process.env.AI_SMOKE_GAME_DB !== "0";
 const gameDbPath = path.resolve(root, process.env.AI_SMOKE_GAME_DB_PATH || gameDbDefaultPath);
 const scoreComponentsEnabled = process.env.AI_SMOKE_SCORE_COMPONENTS === "1";
 const model13TreeCacheLimit = Number.parseInt(process.env.AI_SMOKE_MODEL13_TREE_CACHE_LIMIT || "10000", 10);
+const streamGamesEvery = Math.max(0, Number.parseInt(process.env.AI_SMOKE_STREAM_GAMES_EVERY || "0", 10) || 0);
 const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
 const rankIndex = new Map(ranks.map((rank, index) => [rank, index]));
 
@@ -488,6 +489,17 @@ async function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, g
   const rightStats = emptyStats();
   const holdTable = holdTableEnabled ? emptyHoldTable() : null;
   const gameLogs = [];
+  const streamEvery = streamGamesEvery;
+  let streamedGames = 0;
+  const flushGameLogs = (force = false) => {
+    if (!parentPort || !streamEvery || (!force && gameLogs.length < streamEvery) || !gameLogs.length) return;
+    parentPort.postMessage({
+      type: "gameLogs",
+      workerIndex: workerData?.workerIndex,
+      records: gameLogs.splice(0),
+    });
+    streamedGames += 1;
+  };
   for (let index = 0; index < gameCount; index += 1) {
     const gameIndex = gameOffset + index;
     const randomSeed = gameSeedFor(runSeed, leftEngine, rightEngine, gameIndex);
@@ -518,6 +530,7 @@ async function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, g
       gameIndex,
       randomSeed,
     }));
+    flushGameLogs(false);
     if (progressEvery > 0 && (index + 1) % progressEvery === 0) {
       parentPort?.postMessage({
         type: "progress",
@@ -527,6 +540,7 @@ async function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, g
       });
     }
   }
+  flushGameLogs(true);
   parentPort?.postMessage({
     type: "progress",
     workerIndex: workerData?.workerIndex,
@@ -539,6 +553,7 @@ async function simulate(leftEngine, rightEngine, gameCount, progressEvery = 0, g
     memory: process.memoryUsage(),
     holdTable,
     gameLogs,
+    streamedGames,
   };
 }
 
@@ -753,7 +768,18 @@ function expectedCompletionAt(updatedAt, estimatedRemainingSeconds) {
   return new Date(Date.parse(updatedAt) + estimatedRemainingSeconds * 1000).toISOString();
 }
 
-function runWorker(leftEngine, rightEngine, gameCount, workerIndex, oldMb, progressEvery = 0, onProgress = () => {}, gameOffset = 0, runSeed = "ai-smoke") {
+function runWorker(
+  leftEngine,
+  rightEngine,
+  gameCount,
+  workerIndex,
+  oldMb,
+  progressEvery = 0,
+  onProgress = () => {},
+  gameOffset = 0,
+  runSeed = "ai-smoke",
+  onGameLogs = () => {},
+) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(__filename, {
       workerData: { leftEngine, rightEngine, gameCount, workerIndex, progressEvery, gameOffset, runSeed },
@@ -768,6 +794,10 @@ function runWorker(leftEngine, rightEngine, gameCount, workerIndex, oldMb, progr
       }
       if (message.type === "progress") {
         onProgress(message);
+        return;
+      }
+      if (message.type === "gameLogs") {
+        onGameLogs(message);
         return;
       }
       if (message.type === "done") {
@@ -918,10 +948,12 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
   let active = 0;
   let currentCompletedGames = completed.reduce((sum, item) => sum + item.gameCount, 0);
   const activeBatchProgress = new Map();
+  const streamedGameCounts = new Map();
 
   const writeStatus = () => {
     const elapsedSeconds = (Date.now() - startedAt) / 1000;
     const activeCompletedGames = Array.from(activeBatchProgress.values()).reduce((sum, value) => sum + value, 0);
+    const streamedActiveGames = Array.from(streamedGameCounts.values()).reduce((sum, value) => sum + value, 0);
     const visibleCompletedGames = Math.min(job.games, currentCompletedGames + activeCompletedGames);
     const gamesPerSecond = elapsedSeconds > 0 ? Math.max(0, visibleCompletedGames) / elapsedSeconds : 0;
     const remainingGames = Math.max(0, job.games - visibleCompletedGames);
@@ -944,8 +976,9 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
       totalBatches: batches.length,
       completedBatches: completed.length,
       activeBatches: active,
-      savedGames: currentCompletedGames,
+      savedGames: Math.min(job.games, currentCompletedGames + streamedActiveGames),
       activeCompletedGames,
+      streamedActiveGames,
       completedGames: visibleCompletedGames,
       totalGames: job.games,
       progressPercent: job.games ? (visibleCompletedGames / job.games) * 100 : 100,
@@ -977,6 +1010,18 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
           },
           batch.start,
           runSeed,
+          (message) => {
+            const records = message.records || [];
+            if (gameDb && records.length) {
+              insertGameRecords(gameDb, {
+                runId,
+                matchupId: id,
+                records,
+              });
+            }
+            streamedGameCounts.set(batch.index, (streamedGameCounts.get(batch.index) || 0) + records.length);
+            writeStatus();
+          },
         )
           .then((result) => {
             const gameLogCount = result.gameLogs?.length || 0;
@@ -1006,6 +1051,7 @@ async function runOneCheckpointed({ job, id, outDir, resultPath, statusPath, job
             completed.push(batchResult);
             currentCompletedGames += batch.gameCount;
             activeBatchProgress.delete(batch.index);
+            streamedGameCounts.delete(batch.index);
             process.stdout.write(`BATCH ${labels[job.leftEngine]} vs ${labels[job.rightEngine]} ${currentCompletedGames}/${job.games} workers=${job.workers} oldMb=${job.oldMb}\n`);
             active -= 1;
             writeStatus();
@@ -1078,6 +1124,7 @@ async function main() {
       oldMbs,
       scoreComponentsEnabled,
       model13TreeCacheLimit,
+      streamGamesEvery,
       models,
       matchups,
     },
@@ -1104,6 +1151,7 @@ async function main() {
       gameDbPath: gameDbEnabled ? gameDbPath : null,
       scoreComponentsEnabled,
       model13TreeCacheLimit,
+      streamGamesEvery,
       jobIndex: index + 1,
       jobCount: jobs.length,
       currentJob: job,
@@ -1201,6 +1249,7 @@ async function main() {
     gameDbEnabled,
     gameDbPath: gameDbEnabled ? gameDbPath : null,
     model13TreeCacheLimit,
+    streamGamesEvery,
     workerCounts,
     oldMbs,
     completedJobs: completed.length,
