@@ -68,6 +68,8 @@ const state: {
   snapshotEventId: string | null;
   dismissedGameOverId: string | null;
   aiThinking: boolean;
+  aiThinkingStartedAt: number | null;
+  aiThinkingTimer: number | null;
   modelLoading: boolean;
   completingReviews: boolean;
 } = {
@@ -84,9 +86,29 @@ const state: {
   snapshotEventId: null,
   dismissedGameOverId: null,
   aiThinking: false,
+  aiThinkingStartedAt: null,
+  aiThinkingTimer: null,
   modelLoading: false,
   completingReviews: false,
 };
+
+function setAiThinking(active: boolean): void {
+  state.aiThinking = active;
+  if (active) {
+    state.aiThinkingStartedAt = performance.now();
+    if (state.aiThinkingTimer === null) {
+      state.aiThinkingTimer = window.setInterval(() => {
+        if (state.aiThinking || state.modelLoading) render(state.game);
+      }, 250);
+    }
+    return;
+  }
+  state.aiThinkingStartedAt = null;
+  if (state.aiThinkingTimer !== null) {
+    window.clearInterval(state.aiThinkingTimer);
+    state.aiThinkingTimer = null;
+  }
+}
 
 const els = {
   app: document.querySelector(".app") as HTMLElement,
@@ -96,6 +118,7 @@ const els = {
   appVersion: document.querySelector("#app-version") as HTMLElement,
   analyticsOpen: document.querySelector("#analytics-open") as HTMLButtonElement,
   exportGameLog: document.querySelector("#export-game-log") as HTMLButtonElement,
+  troubleGame: document.querySelector("#trouble-game") as HTMLButtonElement,
   analyticsClose: document.querySelector("#analytics-close") as HTMLButtonElement,
   analyticsPage: document.querySelector("#analytics-page") as HTMLElement,
   analyticsSummary: document.querySelector("#analytics-summary") as HTMLElement,
@@ -1045,6 +1068,13 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       saveGame();
       return localGame.state();
     }
+    if (path === "/api/trouble-game") {
+      await ensureOpponentResources("schell_table-peg_table-13.0");
+      localGame = new CribbageGame("schell_table-peg_table-13.0");
+      localGame.startTroublePeggingPosition();
+      saveGame();
+      return localGame.state();
+    }
     if (path === "/api/discard") {
       await ensureOpponentResources(localGame.opponent as Opponent);
       localGame.discard((body?.ids as number[]) || []);
@@ -1083,7 +1113,9 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
     }
     if (path === "/api/advance-pegging") {
       await ensureOpponentResources(localGame.opponent as Opponent);
+      const startedAt = performance.now();
       localGame.advancePeggingToHuman();
+      localGame.recordAiPeggingThinkTime(performance.now() - startedAt);
       saveGame();
       return localGame.state();
     }
@@ -2321,6 +2353,7 @@ function sortedAnalyticsEngines(
 
 function analyticsEngineSortKey(engine: Opponent): number {
   return [
+    "schell_table-peg_table-13.0",
     "schell_table-peg_table-12.0",
     "schell_table-peg_table-11.1",
     "schell_table-peg_table-11.0",
@@ -2616,6 +2649,7 @@ function engineName(engine: string | undefined): string {
   if (engine === "schell_table-peg_table-11.0") return "Schell Table + Peg Table 11.0";
   if (engine === "schell_table-peg_table-11.1") return "Schell Table + Peg Table 11.1";
   if (engine === "schell_table-peg_table-12.0") return "Schell Table + Peg Table 12.0";
+  if (engine === "schell_table-peg_table-13.0") return "Schell Table + Peg Table 13.0";
   return engine || "-";
 }
 
@@ -2669,6 +2703,7 @@ function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
     engine === "schell_table-peg_table-11.0" ||
     engine === "schell_table-peg_table-11.1" ||
     engine === "schell_table-peg_table-12.0" ||
+    engine === "schell_table-peg_table-13.0" ||
     engine === "schell_table-2.0"
   ) {
     return engine;
@@ -2734,7 +2769,10 @@ function render(game: GameState | null): void {
   els.count.textContent = String(game.count);
   els.modelThinking.hidden = !state.aiThinking && !state.modelLoading;
   const thinkingLabel = els.modelThinking.querySelector(".thinking-label");
-  if (thinkingLabel) thinkingLabel.textContent = state.modelLoading ? "Loading model" : "AI thinking";
+  if (thinkingLabel) {
+    const elapsed = state.aiThinkingStartedAt === null ? "" : ` ${(Math.max(0, performance.now() - state.aiThinkingStartedAt) / 1000).toFixed(1)}s`;
+    thinkingLabel.textContent = state.modelLoading ? "Loading model" : `AI thinking${elapsed}`;
+  }
   els.modelLoading.hidden = !state.modelLoading;
   renderCutCard(game.turnCard);
   renderScoring(game.scoring);
@@ -2798,6 +2836,17 @@ function waitForPaint(): Promise<void> {
   });
 }
 
+function scheduleModel13PeggingPreparation(game: GameState): void {
+  if (game.phase !== "pegging" || localGame.opponent !== "schell_table-peg_table-13.0") return;
+  window.setTimeout(() => {
+    try {
+      localGame.prepareModel13Pegging();
+    } catch (error) {
+      console.warn("Model 13 pegging preparation failed", error);
+    }
+  }, 0);
+}
+
 async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
   let current = game;
   for (let guard = 0; guard < 16; guard += 1) {
@@ -2809,7 +2858,7 @@ async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
       continue;
     }
     if (shouldAdvancePeggingAi(current)) {
-      state.aiThinking = true;
+      setAiThinking(true);
       render(current);
       await waitForPaint();
       try {
@@ -2817,7 +2866,7 @@ async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
         render(current);
         scheduleDecisionReviewCompletion();
       } finally {
-        state.aiThinking = false;
+        setAiThinking(false);
         render(state.game);
       }
       continue;
@@ -2959,6 +3008,7 @@ els.discard.addEventListener("click", async () => {
     const next = await api("/api/discard", { ids: Array.from(state.selected) });
     state.selected.clear();
     render(next);
+    scheduleModel13PeggingPreparation(next);
     if (next.phase === "ai_discarding") {
       state.pending = false;
       render(state.game);
@@ -2976,7 +3026,7 @@ els.play.addEventListener("click", async () => {
   const card = state.game ? selectedPlayableCard(state.game) : null;
   if (!card) return;
   state.pending = true;
-  state.aiThinking = true;
+  setAiThinking(true);
   render(state.game);
   await waitForPaint();
   try {
@@ -2986,7 +3036,7 @@ els.play.addEventListener("click", async () => {
     render(next);
     await continuePeggingAfterRender(next);
   } finally {
-    state.aiThinking = false;
+    setAiThinking(false);
     state.pending = false;
     render(state.game);
   }
@@ -3055,6 +3105,26 @@ els.newGame.addEventListener("click", async () => {
   }
 });
 
+els.troubleGame.addEventListener("click", async () => {
+  if (state.pending) return;
+  state.pending = true;
+  state.selected.clear();
+  render(state.game);
+  try {
+    state.resultOverride = null;
+    state.dismissedGameOverId = null;
+    els.opponent.value = "schell_table-peg_table-13.0";
+    const next = await api("/api/trouble-game", {});
+    els.settingsPanel.hidden = true;
+    els.menuToggle.setAttribute("aria-expanded", "false");
+    render(next);
+    scheduleModel13PeggingPreparation(next);
+  } finally {
+    state.pending = false;
+    render(state.game);
+  }
+});
+
 window.addEventListener("resize", () => render(state.game));
 
 async function finishDiscardInBackground(): Promise<void> {
@@ -3062,6 +3132,7 @@ async function finishDiscardInBackground(): Promise<void> {
     state.resultOverride = null;
     const next = await api("/api/finish-discard", {});
     render(next);
+    scheduleModel13PeggingPreparation(next);
     await continuePeggingAfterRender(next);
   } catch (error) {
     els.result.textContent = error instanceof Error ? error.message : "Request failed";

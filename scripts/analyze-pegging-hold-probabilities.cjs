@@ -9,6 +9,7 @@ const RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
 const ROLE_LABELS = ["pone", "dealer"];
 const PLAYER_LABELS = ["left", "right"];
 const PLAY_ACTION = 0;
+const PREFIX_LENGTHS = ["0", "1", "2", "3"];
 const DEFAULT_MODELS = ["schell_table-peg_table-7.0", "schell_table-peg_table-8.0"];
 
 function parseArgs(argv) {
@@ -101,12 +102,12 @@ function newPrefixStats() {
 function newAggregate() {
   return {
     roles: {
-      pone: { "1": {}, "2": {}, "3": {} },
-      dealer: { "1": {}, "2": {}, "3": {} },
+      pone: { "0": {}, "1": {}, "2": {}, "3": {} },
+      dealer: { "0": {}, "1": {}, "2": {}, "3": {} },
     },
     handsSeen: 0,
     playerHandsSeen: 0,
-    playerHandsWithPrefix: { "1": 0, "2": 0, "3": 0 },
+    playerHandsWithPrefix: { "0": 0, "1": 0, "2": 0, "3": 0 },
   };
 }
 
@@ -123,10 +124,12 @@ function tallyPlayer(aggregate, role, keepBlob, pegSequenceBlob, player) {
   const playedRanks = playedRanksForPlayer(pegSequenceBlob, player);
   aggregate.playerHandsSeen += 1;
   const remaining = [...keepCounts];
-  for (let length = 1; length <= Math.min(3, playedRanks.length); length += 1) {
-    const rank = playedRanks[length - 1];
-    remaining[rank] -= 1;
-    if (remaining[rank] < 0) return;
+  for (let length = 0; length <= Math.min(3, playedRanks.length); length += 1) {
+    if (length > 0) {
+      const rank = playedRanks[length - 1];
+      remaining[rank] -= 1;
+      if (remaining[rank] < 0) return;
+    }
     const key = prefixKey(playedRanks.slice(0, length));
     const bucket = aggregate.roles[role][String(length)];
     bucket[key] ??= newPrefixStats();
@@ -156,11 +159,11 @@ function mergeStats(target, source) {
 function mergeAggregate(target, source) {
   target.handsSeen += source.handsSeen;
   target.playerHandsSeen += source.playerHandsSeen;
-  for (const length of ["1", "2", "3"]) {
+  for (const length of PREFIX_LENGTHS) {
     target.playerHandsWithPrefix[length] += source.playerHandsWithPrefix[length];
   }
   for (const role of ROLE_LABELS) {
-    for (const length of ["1", "2", "3"]) {
+    for (const length of PREFIX_LENGTHS) {
       for (const [key, stats] of Object.entries(source.roles[role][length])) {
         target.roles[role][length][key] ??= newPrefixStats();
         mergeStats(target.roles[role][length][key], stats);
@@ -180,7 +183,7 @@ function stabilityMetrics(previous, current, minSamples) {
   let sumDelta = 0;
   let maxDeltaAt = null;
   for (const role of ROLE_LABELS) {
-    for (const length of ["1", "2", "3"]) {
+    for (const length of PREFIX_LENGTHS) {
       const priorBucket = previous.roles[role][length];
       const currentBucket = current.roles[role][length];
       for (const [key, stats] of Object.entries(currentBucket)) {
@@ -228,7 +231,7 @@ function finalizeAggregate(aggregate, metadata) {
   const roles = {};
   for (const role of ROLE_LABELS) {
     roles[role] = {};
-    for (const length of ["1", "2", "3"]) {
+    for (const length of PREFIX_LENGTHS) {
       const prefixes = {};
       for (const [key, stats] of Object.entries(aggregate.roles[role][length]).sort((a, b) => b[1].samples - a[1].samples || a[0].localeCompare(b[0]))) {
         const probabilityHeld = {};
