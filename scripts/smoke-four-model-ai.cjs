@@ -16,10 +16,12 @@ const holdTablePath = path.resolve(root, process.env.AI_SMOKE_HOLD_TABLE_PATH ||
 const gameDbEnabled = process.env.AI_SMOKE_GAME_DB !== "0";
 const gameDbPath = path.resolve(root, process.env.AI_SMOKE_GAME_DB_PATH || gameDbDefaultPath);
 const scoreComponentsEnabled = process.env.AI_SMOKE_SCORE_COMPONENTS === "1";
+const model13TreeCacheLimit = Number.parseInt(process.env.AI_SMOKE_MODEL13_TREE_CACHE_LIMIT || "10000", 10);
 const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
 const rankIndex = new Map(ranks.map((rank, index) => [rank, index]));
 
 const currentModels = [
+  "schell_table-peg_table-13.0",
   "schell_table-peg_table-12.0",
   "schell_table-peg_table-11.1",
   "schell_table-peg_table-11.0",
@@ -52,6 +54,7 @@ const labels = {
   "schell_table-peg_table-11.0": "Schell Table + Peg Table 11.0",
   "schell_table-peg_table-11.1": "Schell Table + Peg Table 11.1",
   "schell_table-peg_table-12.0": "Schell Table + Peg Table 12.0",
+  "schell_table-peg_table-13.0": "Schell Table + Peg Table 13.0",
   "schell_table-peg_table-6.0": "Schell Table + Peg Table 6.0",
   "ras_table-peg_table-4.0": "Ras Table + Peg Table 4.0",
   "schell_table-peg-3.0": "Schell Table + Peg 3.0",
@@ -175,6 +178,9 @@ function summarize(stats) {
 
 function loadEngine() {
   globalThis.__CRIBBAGE_LOG_SCORE_COMPONENTS = scoreComponentsEnabled;
+  globalThis.__CRIBBAGE_MODEL13_TREE_CACHE_LIMIT = Number.isFinite(model13TreeCacheLimit)
+    ? model13TreeCacheLimit
+    : 10000;
   installLocalAssetFetch();
   const source = patchEngineAssetImports(fs.readFileSync(enginePath, "utf8"));
   const compiled = ts.transpileModule(source, {
@@ -1071,6 +1077,7 @@ async function main() {
       workerCounts,
       oldMbs,
       scoreComponentsEnabled,
+      model13TreeCacheLimit,
       models,
       matchups,
     },
@@ -1096,6 +1103,7 @@ async function main() {
       gameDbEnabled,
       gameDbPath: gameDbEnabled ? gameDbPath : null,
       scoreComponentsEnabled,
+      model13TreeCacheLimit,
       jobIndex: index + 1,
       jobCount: jobs.length,
       currentJob: job,
@@ -1192,6 +1200,7 @@ async function main() {
     holdTablePath: holdTableEnabled ? holdTablePath : null,
     gameDbEnabled,
     gameDbPath: gameDbEnabled ? gameDbPath : null,
+    model13TreeCacheLimit,
     workerCounts,
     oldMbs,
     completedJobs: completed.length,

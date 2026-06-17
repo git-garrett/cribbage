@@ -1960,7 +1960,7 @@ const PONE_LEAD_FREQUENCY_TABLES: Partial<Record<Opponent, PoneLeadFrequencyTabl
 const MODEL13_PEGGING_DECISION_CACHE = new Map<string, { cardId: number; ev: number }>();
 const MODEL13_PEGGING_DECISION_CACHE_LIMIT = 500;
 const MODEL13_OPTIMAL_PEGGING_TREE_CACHE = new Map<string, PeggingOutcomeDistribution>();
-const MODEL13_OPTIMAL_PEGGING_TREE_CACHE_LIMIT = 10000;
+const MODEL13_OPTIMAL_PEGGING_TREE_CACHE_LIMIT = model13TreeCacheLimit();
 const BOARD_POSITION_STATS = boardPositionStats as BoardPositionStats;
 const SCORE_PHASES: ScorePhase[] = ["peggingPone", "peggingDealer", "handPone", "handDealer", "crib"];
 const SCORE_PHASE_DISTRIBUTIONS: Record<ScorePhase, Array<[number, number]>> = Object.fromEntries(
@@ -2486,6 +2486,16 @@ function model13PeggingDecisionCacheKey(game: CribbageGame, player: PlayerState)
     ranksKey(game.plays),
     game.playOwners.join(""),
   ].join("|");
+}
+
+function model13TreeCacheLimit(): number {
+  const configured = (globalThis as unknown as { __CRIBBAGE_MODEL13_TREE_CACHE_LIMIT?: unknown }).__CRIBBAGE_MODEL13_TREE_CACHE_LIMIT;
+  const parsed = typeof configured === "number"
+    ? configured
+    : typeof configured === "string"
+      ? Number.parseInt(configured, 10)
+      : Number.NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 10000;
 }
 
 function idsKey(cards: Card[]): string {
