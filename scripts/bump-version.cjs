@@ -14,15 +14,18 @@ function writeJson(path, value) {
   fs.writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function versionFromDefaultModel() {
+function versionFromHighestModel() {
   const engine = fs.readFileSync(enginePath, "utf8");
-  const match = /DEFAULT_OPPONENT:\s*Opponent\s*=\s*"[^"]*?(\d+)\.(\d+)"/.exec(engine);
-  if (!match) throw new Error(`Could not determine default model version from ${enginePath}`);
-  return `${match[1]}.${match[2]}.0`;
+  const matches = [...engine.matchAll(/schell_table-peg_table-(\d+)\.(\d+)/g)];
+  if (!matches.length) throw new Error(`Could not determine app model version from ${enginePath}`);
+  const [major, minor] = matches
+    .map((match) => [Number(match[1]), Number(match[2])])
+    .sort((a, b) => b[0] - a[0] || b[1] - a[1])[0];
+  return `${major}.${minor}.0`;
 }
 
 const pkg = readJson(packagePath);
-const version = versionFromDefaultModel();
+const version = versionFromHighestModel();
 pkg.version = version;
 writeJson(packagePath, pkg);
 
