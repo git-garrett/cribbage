@@ -1906,7 +1906,7 @@ type PegTableEv = {
   bestLead: number | null;
 };
 type PegTablePolicy = { pegEvs: Record<string, PegTableEvTuple | undefined> };
-type ScorePhase = "peggingPone" | "peggingDealer" | "handPone" | "handDealer" | "crib";
+export type ScorePhase = "peggingPone" | "peggingDealer" | "handPone" | "handDealer" | "crib";
 type ScorePhaseStats = {
   average: number;
   variance: number;
@@ -3348,7 +3348,7 @@ function peggingPlayReviewValues(
 
 const WIN_PROBABILITY_MEMO = new Map<string, number>();
 
-function approximateFutureWinProbability(
+export function approximateFutureWinProbability(
   myScore: number,
   opponentScore: number,
   perspectiveRole: "dealer" | "pone",

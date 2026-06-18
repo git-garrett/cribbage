@@ -49,7 +49,14 @@
           <button id="game-log-open" type="button">Game log</button>
           <button id="model-info-open" type="button">Model info</button>
           <button id="export-game-log" type="button">Export games</button>
-          <button id="trouble-game" type="button">Trouble game</button>
+          <details id="admin-menu" class="admin-menu">
+            <summary>Administrator</summary>
+            <label class="toggle-row">
+              <span>Par guides</span>
+              <input id="par-guides-toggle" type="checkbox" role="switch">
+            </label>
+            <button id="trouble-game" type="button">Trouble game</button>
+          </details>
           <button id="new-game" type="button">New game</button>
           <div class="app-version">Version <span id="app-version">-</span></div>
         </div>
@@ -61,10 +68,6 @@
           <strong id="human-score">0</strong>
           <span id="human-pace" class="score-pace"></span>
           <span id="human-final" class="score-final"></span>
-        </div>
-        <div id="score-cut" class="score-cut">
-          <span>Cut</span>
-          <span id="turn-card" class="cut-card"></span>
         </div>
         <div class="score ai">
           <span class="score-label"><span class="player-name">AI <span id="ai-dealer" class="dealer-button" hidden>Crib</span></span></span>
@@ -92,8 +95,15 @@
         <div class="played">
           <h2 id="play-area-title">Current count</h2>
           <div id="plays" class="cards"></div>
+          <div id="score-cut" class="score-cut">
+            <span>Cut</span>
+            <span id="turn-card" class="cut-card"></span>
+          </div>
+        </div>
+        <div class="notification-row">
+          <button id="notice-back" class="notice-back" type="button" aria-label="Previous notice" disabled>‹</button>
           <div id="result" class="result" aria-live="polite"></div>
-          <button id="continue-pegging" class="inline-continue" type="button" hidden>Count hands</button>
+          <button id="notice-forward" class="notice-forward" type="button" aria-label="Next notice" disabled>›</button>
         </div>
         <div id="scoring-review" class="scoring-review" hidden>
           <h2 id="scoring-title">Hand score</h2>
@@ -114,6 +124,7 @@
             <button id="discard" type="button" disabled>Discard selected</button>
             <button id="play" type="button" disabled>Play selected</button>
             <button id="go" type="button" disabled>Go</button>
+            <button id="continue-pegging" class="inline-continue" type="button" hidden>Count hands</button>
           </div>
         </div>
         <div id="game-over-alert" class="game-over-alert" role="alertdialog" aria-modal="true" aria-labelledby="game-over-title" hidden>
@@ -124,6 +135,13 @@
         </div>
         <div id="single-game-report" class="single-game-report" hidden></div>
       </section>
+
+      <div id="thinking-overlay" class="thinking-overlay" role="status" aria-live="polite" hidden>
+        <div class="thinking-overlay-box">
+          <span class="throbber thinking-overlay-throbber" aria-hidden="true"></span>
+          <span id="thinking-overlay-label">AI thinking</span>
+        </div>
+      </div>
 
       <section id="analytics-page" class="analytics-page" aria-label="Analytics" hidden>
         <div class="analytics-header">

@@ -1,6 +1,7 @@
 import {
   CribbageGame,
   DEFAULT_OPPONENT,
+  approximateFutureWinProbability,
   hasLoadedOpponentResources,
   loadOpponentResources,
   type AnalyticsDecisionReview,
@@ -11,6 +12,7 @@ import {
   type GameState,
   type Opponent,
   type PlayerKey,
+  type ScorePhase,
   WinGame,
 } from "./engine";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
@@ -59,6 +61,7 @@ const state: {
   selected: Set<number>;
   pending: boolean;
   resultOverride: string[] | null;
+  parGuides: boolean;
   analyticsOpen: boolean;
   gameLogOpen: boolean;
   modelInfoOpen: boolean;
@@ -72,11 +75,17 @@ const state: {
   aiThinkingTimer: number | null;
   modelLoading: boolean;
   completingReviews: boolean;
+  noticeText: string;
+  noticeHistory: string[];
+  noticeHistoryIndex: number | null;
+  noticeUpdatedAt: number;
+  noticeTimer: number | null;
 } = {
   game: null,
   selected: new Set(),
   pending: false,
   resultOverride: null,
+  parGuides: localStorage.getItem("strong-cribbage.admin.parGuides") === "1",
   analyticsOpen: false,
   gameLogOpen: false,
   modelInfoOpen: false,
@@ -90,6 +99,11 @@ const state: {
   aiThinkingTimer: null,
   modelLoading: false,
   completingReviews: false,
+  noticeText: "",
+  noticeHistory: [],
+  noticeHistoryIndex: null,
+  noticeUpdatedAt: 0,
+  noticeTimer: null,
 };
 
 function setAiThinking(active: boolean): void {
@@ -115,6 +129,8 @@ const els = {
   board: document.querySelector("#board") as HTMLElement,
   menuToggle: document.querySelector("#menu-toggle") as HTMLButtonElement,
   settingsPanel: document.querySelector("#settings-panel") as HTMLElement,
+  adminMenu: document.querySelector("#admin-menu") as HTMLElement,
+  parGuidesToggle: document.querySelector("#par-guides-toggle") as HTMLInputElement,
   appVersion: document.querySelector("#app-version") as HTMLElement,
   analyticsOpen: document.querySelector("#analytics-open") as HTMLButtonElement,
   exportGameLog: document.querySelector("#export-game-log") as HTMLButtonElement,
@@ -164,9 +180,13 @@ const els = {
   turn: document.querySelector("#turn") as HTMLElement,
   count: document.querySelector("#count") as HTMLElement,
   modelThinking: document.querySelector("#model-thinking") as HTMLElement,
+  thinkingOverlay: document.querySelector("#thinking-overlay") as HTMLElement,
+  thinkingOverlayLabel: document.querySelector("#thinking-overlay-label") as HTMLElement,
   turnCard: document.querySelector("#turn-card") as HTMLElement,
   playAreaTitle: document.querySelector("#play-area-title") as HTMLElement,
   plays: document.querySelector("#plays") as HTMLElement,
+  noticeBack: document.querySelector("#notice-back") as HTMLButtonElement,
+  noticeForward: document.querySelector("#notice-forward") as HTMLButtonElement,
   userHandTitle: document.querySelector("#user-hand-title") as HTMLElement,
   aiStrip: document.querySelector(".ai-strip") as HTMLElement,
   humanHand: document.querySelector("#human-hand") as HTMLElement,
@@ -206,6 +226,15 @@ const SAVE_KEY = "strong-cribbage.game.v1";
 const ANALYTICS_KEY = "strong-cribbage.analytics.v1";
 const PHONE_GAME_DB_NAME = "cribbage-game-log";
 const PHONE_GAME_DB_VERSION = 1;
+const NOTICE_MIN_MS = 600;
+const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-13.0";
+const URL_PARAMS = new URLSearchParams(window.location.search);
+const FULL_APP_MODE = URL_PARAMS.get("full") === "1" || URL_PARAMS.get("mode") === "full";
+const SIMPLE_NETWORK_MODE = !FULL_APP_MODE;
+const SESSION_TAG = (URL_PARAMS.get("tag") || "").trim();
+const SIMPLE_NETWORK_SESSION_KEY = "strong-cribbage.simpleNetworkSession";
+
+els.parGuidesToggle.checked = state.parGuides;
 
 interface AnalyticsStore {
   version: 1;
@@ -266,12 +295,12 @@ interface DecisionErrorAverages {
 
 function loadSavedGame(): CribbageGame {
   const saved = localStorage.getItem(SAVE_KEY);
-  if (!saved) return new CribbageGame(DEFAULT_OPPONENT);
+  if (!saved) return new CribbageGame(SIMPLE_NETWORK_MODE ? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT);
   try {
     return CribbageGame.restore(JSON.parse(saved) as GameSnapshot);
   } catch {
     localStorage.removeItem(SAVE_KEY);
-    return new CribbageGame(DEFAULT_OPPONENT);
+    return new CribbageGame(SIMPLE_NETWORK_MODE ? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT);
   }
 }
 
@@ -282,8 +311,40 @@ function saveGame(): void {
 }
 
 let localGame = loadSavedGame();
+const simpleNetworkSessionValue = `${SIMPLE_NETWORK_OPPONENT}:${SESSION_TAG || "untagged"}`;
+const simpleLoadedState = localGame.state();
+if (
+  SIMPLE_NETWORK_MODE &&
+  (
+    localGame.opponent !== SIMPLE_NETWORK_OPPONENT ||
+    localStorage.getItem(SIMPLE_NETWORK_SESSION_KEY) !== simpleNetworkSessionValue ||
+    simpleLoadedState.phase === "game_over"
+  )
+) {
+  localGame = new CribbageGame(SIMPLE_NETWORK_OPPONENT);
+}
+if (SIMPLE_NETWORK_MODE) localStorage.setItem(SIMPLE_NETWORK_SESSION_KEY, simpleNetworkSessionValue);
+else localStorage.removeItem(SIMPLE_NETWORK_SESSION_KEY);
 els.appVersion.textContent = displayAppVersion(__APP_VERSION__);
+buildBoard();
+
+function applySimpleNetworkMode(): void {
+  if (!SIMPLE_NETWORK_MODE) return;
+  els.app.dataset.simpleNetwork = "true";
+  els.opponent.value = SIMPLE_NETWORK_OPPONENT;
+  els.opponent.disabled = true;
+  els.opponent.closest("label")?.setAttribute("hidden", "");
+  els.analyticsOpen.hidden = true;
+  els.gameLogOpen.hidden = true;
+  els.modelInfoOpen.hidden = true;
+  els.exportGameLog.hidden = true;
+  els.adminMenu.hidden = true;
+  els.modelLoading.hidden = true;
+}
+
+applySimpleNetworkMode();
 saveGame();
+render(localGame.state());
 
 function loadAnalytics(): AnalyticsStore {
   const fallback: AnalyticsStore = { version: 1, events: [] };
@@ -339,7 +400,8 @@ function persistPhoneGameEvents(events: AnalyticsEvent[]): void {
     const eventStore = transaction.objectStore("events");
     const gameStore = transaction.objectStore("games");
     for (const event of events) {
-      eventStore.put(event);
+      const taggedEvent = tagPhoneRecord(event);
+      eventStore.put(taggedEvent);
       if (event.type === "game" && event.action === "end") {
         gameStore.put({
           gameId: event.gameId,
@@ -351,7 +413,9 @@ function persistPhoneGameEvents(events: AnalyticsEvent[]): void {
           finalScores: event.finalScores ?? null,
           endedAt: event.at,
           includedInTables: 1,
-          notes: "",
+          tags: SESSION_TAG ? [SESSION_TAG] : [],
+          sessionTag: SESSION_TAG || null,
+          notes: SESSION_TAG ? `tag:${SESSION_TAG}` : "",
           randomSeed: null,
         });
       }
@@ -359,6 +423,18 @@ function persistPhoneGameEvents(events: AnalyticsEvent[]): void {
   }).catch(() => {
     // localStorage remains the fallback analytics store if IndexedDB is unavailable.
   });
+}
+
+function tagPhoneRecord<T extends object>(record: T): T & { tags?: string[]; sessionTag?: string } {
+  if (!SESSION_TAG) return record;
+  const rawTags = (record as { tags?: unknown }).tags;
+  const existingTags = Array.isArray(rawTags) ? rawTags.filter((tag): tag is string => typeof tag === "string") : [];
+  const tags = existingTags.includes(SESSION_TAG) ? existingTags : [...existingTags, SESSION_TAG];
+  return {
+    ...record,
+    tags,
+    sessionTag: SESSION_TAG,
+  };
 }
 
 function idbRequest<T>(request: IDBRequest<T>): Promise<T> {
@@ -388,6 +464,8 @@ async function exportPhoneGameLog(): Promise<void> {
   const exportRecord = {
     schemaVersion: 1,
     source: "phone",
+    sessionTag: SESSION_TAG || null,
+    tags: SESSION_TAG ? [SESSION_TAG] : [],
     exportedAt: new Date().toISOString(),
     appVersion: __APP_VERSION__,
     analyticsKey: ANALYTICS_KEY,
@@ -413,9 +491,10 @@ function syncAnalytics(events: AnalyticsEvent[]): void {
   const newEvents: AnalyticsEvent[] = [];
   for (const event of events) {
     if (!known.has(event.id)) {
-      store.events.push(event);
+      const taggedEvent = tagPhoneRecord(event);
+      store.events.push(taggedEvent);
       known.add(event.id);
-      newEvents.push(event);
+      newEvents.push(taggedEvent);
     }
   }
   store.events.sort((a, b) => a.at.localeCompare(b.at));
@@ -509,7 +588,11 @@ function renderBoard(
   const fallback = fallbackPegPositions(scores);
   const firstDealerPlayer = firstDealer === "User" ? "human" : "ai";
   const completedHands = completedHandCount(phase, handNumber);
-  const projections = projectedCourse(scores, firstDealerPlayer, completedHands);
+  const showParGuides = state.parGuides;
+  const projections = showParGuides ? projectedCourse(scores, firstDealerPlayer, completedHands) : {
+    human: new Map<string, { hand: number; score: number }>(),
+    ai: new Map<string, { hand: number; score: number }>(),
+  };
   for (const lane of els.board.querySelectorAll(".lane")) {
     const player = lane.classList.contains("human") ? "human" : "ai";
     const positions = pegPositions[player] || fallback[player];
@@ -528,7 +611,7 @@ function renderBoard(
         "ring-long",
       );
       wrap.removeAttribute("title");
-      applyRingMarker(wrap, Number(hole.dataset.position), player, firstDealerPlayer);
+      if (showParGuides) applyRingMarker(wrap, Number(hole.dataset.position), player, firstDealerPlayer);
       const projection = projectedPositions.get(hole.dataset.position || "");
       if (projection) {
         wrap.classList.add(paceStatus(Number(hole.dataset.position), parHolesFor(player, firstDealerPlayer)[completedHands - 1 + projection.hand]));
@@ -538,7 +621,14 @@ function renderBoard(
       if (String(positions[1]) === hole.dataset.position) hole.classList.add("peg", "front-peg");
     }
   }
-  requestAnimationFrame(() => renderPaceLines(pegPositions, projections, firstDealerPlayer, completedHands));
+  requestAnimationFrame(() => {
+    if (showParGuides) renderPaceLines(pegPositions, projections, firstDealerPlayer, completedHands);
+    else clearPaceLines();
+  });
+}
+
+function clearPaceLines(): void {
+  for (const svg of els.board.querySelectorAll<SVGSVGElement>(".pace-lines")) svg.replaceChildren();
 }
 
 function applyRingMarker(
@@ -825,27 +915,49 @@ function dealerForHand(firstDealerPlayer: "human" | "ai", handNumber: number): "
   return oddHand ? firstDealerPlayer : firstDealerPlayer === "human" ? "ai" : "human";
 }
 
+function winProbabilityPhaseForGame(game: GameState): ScorePhase {
+  if (game.phase === "score_pone") return "handPone";
+  if (game.phase === "score_dealer") return "handDealer";
+  if (game.phase === "score_crib") return "crib";
+  return "peggingPone";
+}
+
 function renderScorePace(game: GameState): void {
   const firstDealerPlayer = game.firstDealer === "User" ? "human" : "ai";
-  const parState = granularParState(game, firstDealerPlayer);
-  const outProjection = projectedOutMoment(game, firstDealerPlayer, parState);
+  const winProbabilityPhase = winProbabilityPhaseForGame(game);
   for (const player of ["human", "ai"] as const) {
-    const parHole = Math.round(parState.par[player]);
-    const score = game.scores[player];
-    const delta = score - parHole;
     const pace = player === "human" ? els.humanPace : els.aiPace;
     const final = player === "human" ? els.humanFinal : els.aiFinal;
-    pace.classList.toggle("ahead", delta >= 0);
-    pace.classList.toggle("behind", delta < 0);
-    pace.textContent = `${delta >= 0 ? "+" : ""}${delta} Par ${parHole}`;
-    if (!outProjection) {
+    if (!state.parGuides) {
+      pace.replaceChildren();
+      pace.classList.remove("ahead", "behind");
       final.textContent = "";
       final.classList.remove("expected-win");
       continue;
     }
-    const wins = player === outProjection.player;
-    final.textContent = `${Math.round(outProjection.beforeScores[player])} before ${relativeOutLabel(player, outProjection)}${wins ? " ★" : ""}`;
-    final.classList.toggle("expected-win", wins);
+    const targetHole = Math.round(cumulativeParThroughHand(player, firstDealerPlayer, game.handNumber));
+    const score = game.scores[player];
+    const delta = score - targetHole;
+    pace.classList.toggle("ahead", delta >= 0);
+    pace.classList.toggle("behind", delta < 0);
+    pace.replaceChildren();
+    const parLine = document.createElement("span");
+    parLine.textContent = `${delta >= 0 ? "+" : ""}${delta} Par ${targetHole}`;
+    const opponent = player === "human" ? "ai" : "human";
+    const role = roleForHand(player, firstDealerPlayer, game.handNumber);
+    const winProbability = approximateFutureWinProbability(
+      game.scores[player],
+      game.scores[opponent],
+      role,
+      winProbabilityPhase,
+    );
+    const winDelta = winProbability - 0.5;
+    const winLine = document.createElement("span");
+    winLine.className = `score-win-prob ${winDelta >= 0 ? "ahead" : "behind"}`;
+    winLine.textContent = `WP ${(winProbability * 100).toFixed(1)}% (${winDelta >= 0 ? "+" : ""}${(winDelta * 100).toFixed(1)})`;
+    pace.append(parLine, winLine);
+    final.textContent = "";
+    final.classList.remove("expected-win");
   }
 }
 
@@ -1062,7 +1174,9 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
   try {
     if (path === "/api/state") return localGame.state();
     if (path === "/api/new") {
-      const opponent = (body?.opponent as Opponent) || DEFAULT_OPPONENT;
+      const opponent = SIMPLE_NETWORK_MODE
+        ? SIMPLE_NETWORK_OPPONENT
+        : (body?.opponent as Opponent) || DEFAULT_OPPONENT;
       await ensureOpponentResources(opponent);
       localGame = new CribbageGame(opponent);
       saveGame();
@@ -1194,25 +1308,19 @@ function onCardClick(card: GameState["humanHand"][number]): void {
 }
 
 function renderCards(container: HTMLElement, cards: GameState["humanHand"], options = {}): void {
+  container.hidden = false;
   container.innerHTML = "";
   for (const card of cards) container.append(cardElement(card, options));
 }
 
-function renderPlayedCards(
-  activeCards: GameState["plays"],
-  completedGroups: GameState["completedPlays"] = [],
-): void {
+function renderPlayedCards(activeCards: GameState["plays"]): void {
   els.plays.innerHTML = "";
+  els.plays.hidden = activeCards.length === 0;
+  if (!activeCards.length) return;
   const active = document.createElement("div");
   active.className = "cards played-active pegging-row";
   for (const card of activeCards) active.append(cardElement(card));
   els.plays.append(active);
-  for (const group of [...completedGroups].reverse()) {
-    const archived = document.createElement("div");
-    archived.className = "cards played-archive pegging-row";
-    for (const card of group) archived.append(cardElement(card));
-    els.plays.append(archived);
-  }
 }
 
 function renderCutCard(card: GameState["turnCard"]): void {
@@ -1242,24 +1350,62 @@ function renderScoring(scoring: GameState["scoring"]): void {
 
 function renderResult(game: GameState): void {
   if (game.phase === "game_over") {
-    els.result.innerHTML = "";
+    updateNotice("");
     els.resultInline.innerHTML = "";
     return;
   }
   const lines = (state.resultOverride ?? (game.result.length ? game.result : [game.message])).filter(
     (line) => line !== "User turn.",
   );
-  const inline = shouldInlineResult(game);
-  const target = game.scoring ? els.scoringResult : inline ? els.resultInline : els.result;
-  for (const other of [els.result, els.resultInline, els.scoringResult]) {
-    if (other !== target) other.innerHTML = "";
+  updateNotice([...lines].reverse().find(Boolean) ?? "");
+  els.resultInline.innerHTML = "";
+  els.scoringResult.innerHTML = "";
+}
+
+function updateNotice(nextText: string): void {
+  if (state.noticeHistoryIndex !== null) {
+    if (nextText === state.noticeText) {
+      renderNoticeText(state.noticeHistory[state.noticeHistoryIndex] ?? "");
+      return;
+    }
+    state.noticeHistoryIndex = null;
   }
-  target.innerHTML = "";
-  for (const line of [...lines].reverse().filter(Boolean)) {
+  if (nextText === state.noticeText) {
+    renderNoticeText(state.noticeText);
+    return;
+  }
+  if (state.noticeTimer !== null) {
+    window.clearTimeout(state.noticeTimer);
+    state.noticeTimer = null;
+  }
+  const elapsed = performance.now() - state.noticeUpdatedAt;
+  const apply = () => {
+    if (state.noticeText) {
+      state.noticeHistory.push(state.noticeText);
+      if (state.noticeHistory.length > 40) state.noticeHistory.shift();
+    }
+    state.noticeText = nextText;
+    state.noticeUpdatedAt = performance.now();
+    renderNoticeText(state.noticeText);
+  };
+  if (!state.noticeText || elapsed >= NOTICE_MIN_MS) apply();
+  else {
+    state.noticeTimer = window.setTimeout(() => {
+      state.noticeTimer = null;
+      apply();
+    }, NOTICE_MIN_MS - elapsed);
+  }
+}
+
+function renderNoticeText(text: string): void {
+  els.result.innerHTML = "";
+  if (text) {
     const item = document.createElement("div");
-    item.textContent = line;
-    target.append(item);
+    item.textContent = text;
+    els.result.append(item);
   }
+  els.noticeBack.disabled = state.noticeHistory.length === 0 || state.noticeHistoryIndex === 0;
+  els.noticeForward.disabled = state.noticeHistoryIndex === null;
 }
 
 function shouldInlineResult(game: GameState): boolean {
@@ -2751,6 +2897,7 @@ function render(game: GameState | null): void {
           ? "decision-review"
           : "game";
   els.app.dataset.inlineResult = shouldInlineResult(game) ? "true" : "false";
+  els.app.dataset.parGuides = state.parGuides ? "true" : "false";
   els.analyticsPage.hidden = !state.analyticsOpen;
   els.gameLogPage.hidden = !state.gameLogOpen;
   els.modelInfoPage.hidden = !state.modelInfoOpen;
@@ -2767,13 +2914,16 @@ function render(game: GameState | null): void {
   els.dealer.textContent = game.dealer;
   els.turn.textContent = game.turn || "-";
   els.count.textContent = String(game.count);
-  els.modelThinking.hidden = !state.aiThinking && !state.modelLoading;
+  const showModelLoadingUi = state.modelLoading && !SIMPLE_NETWORK_MODE;
+  els.modelThinking.hidden = !state.aiThinking && !showModelLoadingUi;
   const thinkingLabel = els.modelThinking.querySelector(".thinking-label");
+  const thinkingElapsed = state.aiThinkingStartedAt === null ? "" : ` ${(Math.max(0, performance.now() - state.aiThinkingStartedAt) / 1000).toFixed(1)}s`;
   if (thinkingLabel) {
-    const elapsed = state.aiThinkingStartedAt === null ? "" : ` ${(Math.max(0, performance.now() - state.aiThinkingStartedAt) / 1000).toFixed(1)}s`;
-    thinkingLabel.textContent = state.modelLoading ? "Loading model" : `AI thinking${elapsed}`;
+    thinkingLabel.textContent = showModelLoadingUi ? "Loading model" : `AI thinking${thinkingElapsed}`;
   }
-  els.modelLoading.hidden = !state.modelLoading;
+  els.thinkingOverlay.hidden = !state.aiThinking && !showModelLoadingUi;
+  els.thinkingOverlayLabel.textContent = showModelLoadingUi ? "Loading model" : `AI thinking${thinkingElapsed}`;
+  els.modelLoading.hidden = !showModelLoadingUi;
   renderCutCard(game.turnCard);
   renderScoring(game.scoring);
   renderResult(game);
@@ -2787,8 +2937,9 @@ function render(game: GameState | null): void {
     renderCards(els.plays, game.humanHand, { clickable: true });
   } else if (game.scoring) {
     els.plays.innerHTML = "";
+    els.plays.hidden = true;
   } else {
-    renderPlayedCards(game.plays, game.completedPlays);
+    renderPlayedCards(game.plays);
   }
   renderCards(els.humanHand, game.humanHand, {
     clickable: game.phase !== "discard" && game.phase === "pegging" && game.turn === "User",
@@ -2836,15 +2987,22 @@ function waitForPaint(): Promise<void> {
   });
 }
 
-function scheduleModel13PeggingPreparation(game: GameState): void {
+async function prepareModel13Pegging(game: GameState): Promise<void> {
   if (game.phase !== "pegging" || localGame.opponent !== "schell_table-peg_table-13.0") return;
-  window.setTimeout(() => {
-    try {
-      localGame.prepareModel13Pegging();
-    } catch (error) {
-      console.warn("Model 13 pegging preparation failed", error);
-    }
-  }, 0);
+  setAiThinking(true);
+  render(game);
+  await waitForPaint();
+  await new Promise<void>((resolve) => {
+    window.setTimeout(() => {
+      try {
+        localGame.prepareModel13Pegging();
+      } catch (error) {
+        console.warn("Model 13 pegging preparation failed", error);
+      } finally {
+        resolve();
+      }
+    }, 0);
+  });
 }
 
 async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
@@ -2984,6 +3142,30 @@ els.gameLogOpponent.addEventListener("change", () => {
   renderGameLog();
 });
 
+els.parGuidesToggle.addEventListener("change", () => {
+  state.parGuides = els.parGuidesToggle.checked;
+  localStorage.setItem("strong-cribbage.admin.parGuides", state.parGuides ? "1" : "0");
+  render(state.game);
+});
+
+els.noticeBack.addEventListener("click", () => {
+  if (!state.noticeHistory.length) return;
+  if (state.noticeHistoryIndex === null) state.noticeHistoryIndex = state.noticeHistory.length - 1;
+  else state.noticeHistoryIndex = Math.max(0, state.noticeHistoryIndex - 1);
+  renderNoticeText(state.noticeHistory[state.noticeHistoryIndex] ?? "");
+});
+
+els.noticeForward.addEventListener("click", () => {
+  if (state.noticeHistoryIndex === null) return;
+  if (state.noticeHistoryIndex >= state.noticeHistory.length - 1) {
+    state.noticeHistoryIndex = null;
+    renderNoticeText(state.noticeText);
+    return;
+  }
+  state.noticeHistoryIndex += 1;
+  renderNoticeText(state.noticeHistory[state.noticeHistoryIndex] ?? "");
+});
+
 els.opponent.addEventListener("change", async () => {
   if (state.pending) return;
   try {
@@ -3003,19 +3185,25 @@ els.discard.addEventListener("click", async () => {
   if (state.pending) return;
   state.pending = true;
   render(state.game);
+  await waitForPaint();
+  let handoffToBackground = false;
   try {
     state.resultOverride = null;
     const next = await api("/api/discard", { ids: Array.from(state.selected) });
     state.selected.clear();
     render(next);
-    scheduleModel13PeggingPreparation(next);
+    await waitForPaint();
     if (next.phase === "ai_discarding") {
+      handoffToBackground = true;
       state.pending = false;
       render(state.game);
+      await waitForPaint();
       finishDiscardInBackground();
       return;
     }
+    await prepareModel13Pegging(next);
   } finally {
+    if (!handoffToBackground) setAiThinking(false);
     state.pending = false;
     render(state.game);
   }
@@ -3118,8 +3306,9 @@ els.troubleGame.addEventListener("click", async () => {
     els.settingsPanel.hidden = true;
     els.menuToggle.setAttribute("aria-expanded", "false");
     render(next);
-    scheduleModel13PeggingPreparation(next);
+    await prepareModel13Pegging(next);
   } finally {
+    setAiThinking(false);
     state.pending = false;
     render(state.game);
   }
@@ -3128,18 +3317,23 @@ els.troubleGame.addEventListener("click", async () => {
 window.addEventListener("resize", () => render(state.game));
 
 async function finishDiscardInBackground(): Promise<void> {
+  setAiThinking(true);
+  render(state.game);
+  await waitForPaint();
   try {
     state.resultOverride = null;
     const next = await api("/api/finish-discard", {});
     render(next);
-    scheduleModel13PeggingPreparation(next);
+    await prepareModel13Pegging(next);
     await continuePeggingAfterRender(next);
   } catch (error) {
     els.result.textContent = error instanceof Error ? error.message : "Request failed";
+  } finally {
+    setAiThinking(false);
+    render(state.game);
   }
 }
 
-buildBoard();
 api("/api/state")
   .then(async (game) => {
     render(game);
