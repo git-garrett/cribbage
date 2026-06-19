@@ -242,7 +242,6 @@ const REMOTE_AI_BASE = (URL_PARAMS.get("api") || "").replace(/\/$/, "");
 const REMOTE_AI_EXPLICIT = URL_PARAMS.has("api");
 const IS_VITE_DEV = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV);
 const SERVER_UPLOAD_KEY = "strong-cribbage.serverUploadedGames.v1";
-const SIMPLE_NETWORK_FIRST_LOAD_KEY = "strong-cribbage.simpleNetworkFirstLoad.v1";
 
 els.parGuidesToggle.checked = state.parGuides;
 
@@ -335,12 +334,10 @@ function saveGame(): void {
 let localGame = loadSavedGame();
 const simpleNetworkSessionValue = `${SIMPLE_NETWORK_OPPONENT}:${SESSION_TAG || "untagged"}`;
 const simpleLoadedState = localGame.state();
-const simpleNetworkFirstLoad = SIMPLE_NETWORK_MODE && sessionStorage.getItem(SIMPLE_NETWORK_FIRST_LOAD_KEY) !== simpleNetworkSessionValue;
-state.splashOpen = SIMPLE_NETWORK_MODE && simpleNetworkFirstLoad;
+state.splashOpen = SIMPLE_NETWORK_MODE;
 if (
   SIMPLE_NETWORK_MODE &&
   (
-    simpleNetworkFirstLoad ||
     localGame.opponent !== SIMPLE_NETWORK_OPPONENT ||
     localStorage.getItem(SIMPLE_NETWORK_SESSION_KEY) !== simpleNetworkSessionValue ||
     simpleLoadedState.phase === "game_over"
@@ -350,10 +347,8 @@ if (
 }
 if (SIMPLE_NETWORK_MODE) {
   localStorage.setItem(SIMPLE_NETWORK_SESSION_KEY, simpleNetworkSessionValue);
-  sessionStorage.setItem(SIMPLE_NETWORK_FIRST_LOAD_KEY, simpleNetworkSessionValue);
 } else {
   localStorage.removeItem(SIMPLE_NETWORK_SESSION_KEY);
-  sessionStorage.removeItem(SIMPLE_NETWORK_FIRST_LOAD_KEY);
 }
 els.appVersion.textContent = displayAppVersion(__APP_VERSION__);
 buildBoard();
