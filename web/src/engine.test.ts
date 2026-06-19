@@ -154,6 +154,8 @@ describe("game state", () => {
     expect(game.ai.score).toBe(3);
     expect(game.state().result).toContain("AI played 10d: 15 and pegged 2.");
     expect(game.state().result).toContain("AI pegged 1 for last card.");
+    expect(game.state().peggingResetPending).toBe(true);
+    expect(game.state().completedPlays.at(-1)?.map((card) => card.label)).toEqual(["5d", "10d"]);
   });
 
   test("pauses after count reset until acknowledged", () => {

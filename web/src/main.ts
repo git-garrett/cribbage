@@ -1367,6 +1367,7 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       if (usesRemoteAi()) {
         for (let guard = 0; guard < 16; guard += 1) {
           const current = localGame.state();
+          if (current.peggingResetPending) break;
           if (current.phase !== "pegging" || current.turn !== "AI") break;
           const response = await serverJson<ServerPeggingResponse>("/api/ai/peg", {
             tag: currentSessionTag() || null,

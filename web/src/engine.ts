@@ -1349,6 +1349,7 @@ export class CribbageGame {
       this.count = 0;
       this.goPlayer = null;
       this.lastPlayer = null;
+      this.peggingResetPending = true;
     }
   }
 
