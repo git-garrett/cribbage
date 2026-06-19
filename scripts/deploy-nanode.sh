@@ -11,7 +11,7 @@ REMOTE_APP_DIR="${REMOTE_APP_DIR:-/opt/cribbage}"
 REMOTE_DATA_DIR="${REMOTE_DATA_DIR:-/var/lib/cribbage}"
 REMOTE_PORT_APP="${REMOTE_PORT_APP:-8787}"
 REMOTE_BIND_HOST="${REMOTE_BIND_HOST:-127.0.0.1}"
-DOMAIN="${DOMAIN:-cribbage.strongcribbage.com, strongcribbage.com, www.strongcribbage.com}"
+DOMAIN="${DOMAIN:-cribbage.strongcribbage.com, strongcribbage.com}"
 ARCHIVE="${ROOT_DIR}/cribbage-server-${VERSION}.tgz"
 
 SSH_BASE=(ssh -p "$REMOTE_PORT" -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)

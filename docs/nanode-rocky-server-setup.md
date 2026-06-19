@@ -43,7 +43,7 @@ The easiest path is the deploy helper:
 scripts/deploy-nanode.sh deploy
 ```
 
-By default it targets `root@45.79.111.69` using `../2019.private`, builds locally, uploads the artifact, installs the systemd unit, writes the Caddy reverse proxy for `cribbage.strongcribbage.com`, `strongcribbage.com`, and `www.strongcribbage.com`, restarts services, and checks health.
+By default it targets `root@45.79.111.69` using `../2019.private`, builds locally, uploads the artifact, installs the systemd unit, writes the Caddy reverse proxy for `cribbage.strongcribbage.com` and `strongcribbage.com`, restarts services, and checks health.
 
 On the build machine:
 
@@ -119,7 +119,7 @@ curl http://127.0.0.1:8787/health
 Set `/etc/caddy/Caddyfile`:
 
 ```caddyfile
-cribbage.strongcribbage.com, strongcribbage.com, www.strongcribbage.com {
+cribbage.strongcribbage.com, strongcribbage.com {
 	reverse_proxy 127.0.0.1:8787
 }
 ```
@@ -132,7 +132,7 @@ sudo systemctl reload caddy
 curl https://cribbage.strongcribbage.com/health
 ```
 
-The Node server serves the game app on `cribbage.strongcribbage.com` and a lightweight coming-soon page on `strongcribbage.com` / `www.strongcribbage.com`.
+The Node server serves the game app on `cribbage.strongcribbage.com` and a lightweight coming-soon page on `strongcribbage.com`.
 
 ## 8. Operating Notes
 
