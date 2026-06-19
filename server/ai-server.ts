@@ -20,6 +20,7 @@ const STATIC_DIR = resolve(process.env.CRIBBAGE_STATIC_DIR || join(ROOT, "dist")
 const DATA_DIR = resolve(process.env.CRIBBAGE_DATA_DIR || join(ROOT, "data"));
 const DB_PATH = resolve(process.env.CRIBBAGE_DB_PATH || join(DATA_DIR, "cribbage-server.sqlite"));
 const MODEL: Opponent = "schell_table-peg_table-13.0";
+const MARKETING_HOSTS = new Set(["strongcribbage.com", "www.strongcribbage.com"]);
 
 type JsonRecord = Record<string, unknown>;
 type DatabaseSyncLike = {
@@ -301,6 +302,14 @@ async function serveStatic(response: ServerResponse, pathname: string): Promise<
   }
 }
 
+async function serveComingSoon(response: ServerResponse): Promise<void> {
+  await serveStatic(response, "/coming-soon.html");
+}
+
+function requestHost(request: IncomingMessage): string {
+  return String(request.headers.host || "").split(":")[0].toLowerCase();
+}
+
 const nativeFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const value = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -322,6 +331,10 @@ const server = createServer((request, response) => {
     }
     if (url.pathname === "/health" || url.pathname.startsWith("/api/")) {
       await handleApi(request, response, url.pathname);
+      return;
+    }
+    if (MARKETING_HOSTS.has(requestHost(request)) && (url.pathname === "/" || url.pathname === "/index.html")) {
+      await serveComingSoon(response);
       return;
     }
     await serveStatic(response, url.pathname);

@@ -1,0 +1,17 @@
+{
+  "name": "Strong Cribbage",
+  "short_name": "Strong Cribbage",
+  "description": "Play one-on-one cribbage against the current Strong Cribbage server engine.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#101513",
+  "theme_color": "#17654b",
+  "icons": [
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
