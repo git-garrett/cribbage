@@ -43,7 +43,7 @@ The easiest path is the deploy helper:
 scripts/deploy-nanode.sh deploy
 ```
 
-By default it targets `root@45.79.111.69` using `../2019.private`, builds locally, uploads the artifact, installs the systemd unit, writes the Caddy reverse proxy, restarts services, and checks health.
+By default it targets `root@45.79.111.69` using `../2019.private`, builds locally, uploads the artifact, installs the systemd unit, writes the Caddy reverse proxy for `cribbage.strongcribbage.com`, restarts services, and checks health.
 
 On the build machine:
 
@@ -119,7 +119,7 @@ curl http://127.0.0.1:8787/health
 Set `/etc/caddy/Caddyfile`:
 
 ```caddyfile
-your-domain.example.com {
+cribbage.strongcribbage.com {
 	reverse_proxy 127.0.0.1:8787
 }
 ```
@@ -129,7 +129,7 @@ Then reload:
 ```bash
 sudo caddy fmt --overwrite /etc/caddy/Caddyfile
 sudo systemctl reload caddy
-curl https://your-domain.example.com/health
+curl https://cribbage.strongcribbage.com/health
 ```
 
 ## 8. Operating Notes
