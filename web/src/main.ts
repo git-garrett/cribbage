@@ -60,6 +60,7 @@ const state: {
   game: GameState | null;
   selected: Set<number>;
   pending: boolean;
+  splashOpen: boolean;
   resultOverride: string[] | null;
   parGuides: boolean;
   analyticsOpen: boolean;
@@ -84,6 +85,7 @@ const state: {
   game: null,
   selected: new Set(),
   pending: false,
+  splashOpen: false,
   resultOverride: null,
   parGuides: localStorage.getItem("strong-cribbage.admin.parGuides") === "1",
   analyticsOpen: false,
@@ -126,6 +128,8 @@ function setAiThinking(active: boolean): void {
 
 const els = {
   app: document.querySelector(".app") as HTMLElement,
+  splashPage: document.querySelector("#splash-page") as HTMLElement,
+  splashNewGame: document.querySelector("#splash-new-game") as HTMLButtonElement,
   board: document.querySelector("#board") as HTMLElement,
   menuToggle: document.querySelector("#menu-toggle") as HTMLButtonElement,
   settingsPanel: document.querySelector("#settings-panel") as HTMLElement,
@@ -332,6 +336,7 @@ let localGame = loadSavedGame();
 const simpleNetworkSessionValue = `${SIMPLE_NETWORK_OPPONENT}:${SESSION_TAG || "untagged"}`;
 const simpleLoadedState = localGame.state();
 const simpleNetworkFirstLoad = SIMPLE_NETWORK_MODE && sessionStorage.getItem(SIMPLE_NETWORK_FIRST_LOAD_KEY) !== simpleNetworkSessionValue;
+state.splashOpen = SIMPLE_NETWORK_MODE && simpleNetworkFirstLoad;
 if (
   SIMPLE_NETWORK_MODE &&
   (
@@ -3009,6 +3014,8 @@ function render(game: GameState | null): void {
   if (!game) return;
   syncAnalytics(game.analyticsEvents);
   state.game = game;
+  document.body.dataset.splash = state.splashOpen ? "true" : "false";
+  els.splashPage.hidden = !state.splashOpen;
   els.app.dataset.phase = game.phase;
   els.app.dataset.view = state.analyticsOpen
     ? "analytics"
@@ -3398,7 +3405,7 @@ els.continuePegging.addEventListener("click", async () => {
   }
 });
 
-els.newGame.addEventListener("click", async () => {
+async function startNewGameFromUi(): Promise<void> {
   if (state.pending) return;
   state.pending = true;
   state.selected.clear();
@@ -3407,6 +3414,7 @@ els.newGame.addEventListener("click", async () => {
     state.resultOverride = null;
     state.dismissedGameOverId = null;
     const next = await api("/api/new", { opponent: els.opponent.value });
+    state.splashOpen = false;
     els.settingsPanel.hidden = true;
     els.menuToggle.setAttribute("aria-expanded", "false");
     render(next);
@@ -3414,6 +3422,14 @@ els.newGame.addEventListener("click", async () => {
     state.pending = false;
     render(state.game);
   }
+}
+
+els.splashNewGame.addEventListener("click", () => {
+  void startNewGameFromUi();
+});
+
+els.newGame.addEventListener("click", () => {
+  void startNewGameFromUi();
 });
 
 els.troubleGame.addEventListener("click", async () => {
