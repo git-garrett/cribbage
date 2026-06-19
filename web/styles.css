@@ -79,9 +79,7 @@ body {
   display: grid;
   place-items: center;
   padding: max(20px, env(safe-area-inset-top)) 18px max(20px, env(safe-area-inset-bottom));
-  background:
-    radial-gradient(circle at 50% 18%, rgba(205, 168, 95, 0.28), transparent 34%),
-    linear-gradient(145deg, #f5f7f2 0%, #e8ede6 44%, #dce6df 100%);
+  background: #fefefe;
 }
 
 .splash-page[hidden] {
