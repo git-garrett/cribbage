@@ -1032,12 +1032,7 @@ export class CribbageGame {
   acknowledgePeggingReset(): void {
     if (!this.peggingResetPending) return;
     this.peggingResetPending = false;
-    this.archivePlays();
-    this.plays = [];
-    this.playOwners = [];
-    this.count = 0;
-    this.goPlayer = null;
-    this.lastPlayer = null;
+    this.clearCurrentPeggingSeries();
     this.otherTurn();
     this.completePeggingIfNoCards();
   }
@@ -1178,7 +1173,10 @@ export class CribbageGame {
 
   continueScoring(): void {
     this.beginInteraction();
-    if (this.phase === "pegging_complete") this.startScoring();
+    if (this.phase === "pegging_complete") {
+      this.clearCurrentPeggingSeries();
+      this.startScoring();
+    }
     else if (this.phase === "score_pone") this.showScoreStage("dealer");
     else if (this.phase === "score_dealer") this.showScoreStage("crib");
     else if (this.phase === "score_crib") {
@@ -1351,12 +1349,6 @@ export class CribbageGame {
       );
       this.peg(this.lastPlayer, 1);
       this.logEvent(`${this.name(this.lastPlayer)} pegged 1 for last card.`);
-      this.archivePlays();
-      this.plays = [];
-      this.playOwners = [];
-      this.count = 0;
-      this.goPlayer = null;
-      this.lastPlayer = null;
     }
   }
 
@@ -1861,6 +1853,15 @@ export class CribbageGame {
       this.completedPlays.push([...this.plays]);
       this.completedPlayOwners.push([...this.playOwners]);
     }
+  }
+
+  private clearCurrentPeggingSeries(): void {
+    this.archivePlays();
+    this.plays = [];
+    this.playOwners = [];
+    this.count = 0;
+    this.goPlayer = null;
+    this.lastPlayer = null;
   }
 
   private logEvent(message: string): void {
