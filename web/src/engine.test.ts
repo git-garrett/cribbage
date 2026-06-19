@@ -104,6 +104,32 @@ describe("game state", () => {
     expect(game.phase).toBe("score_pone");
   });
 
+  test("completes pegging when user plays the final card through granular play", () => {
+    const game = new CribbageGame();
+    game.phase = "pegging";
+    game.pone = game.human;
+    game.dealer = game.ai;
+    game.turn = 0;
+    game.human.score = 0;
+    game.ai.score = 0;
+    game.human.hand = cardsFromString("7c");
+    game.ai.hand = [];
+    game.human.table = cardsFromString("Ad 6c 8h");
+    game.ai.table = cardsFromString("Kh 4d 2s 9c");
+    game.turnCard = cardsFromString("2d")[0];
+    game.plays = cardsFromString("5c");
+    game.count = 5;
+    game.lastPlayer = game.ai;
+
+    game.playHumanPeggingCard(game.human.hand[0].id);
+
+    expect(game.phase).toBe("pegging_complete");
+    expect(game.log).toContain("User pegged 1 for last card.");
+    expect(game.state().turn).toBeNull();
+    expect(game.state().legalCardIds).toEqual([]);
+    expect(game.state().canGo).toBe(false);
+  });
+
   test("keeps user pegging score messages through automatic pegging continuations", () => {
     const game = new CribbageGame();
     game.phase = "pegging";

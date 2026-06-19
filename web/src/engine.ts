@@ -1330,6 +1330,13 @@ export class CribbageGame {
     }
   }
 
+  private completePeggingIfNoCards(): void {
+    if (this.phase !== "pegging") return;
+    if (this.dealer.hand.length + this.pone.hand.length !== 0) return;
+    this.finishPegging();
+    if (this.phase === "pegging") this.phase = "pegging_complete";
+  }
+
   private choosePlay(player: PlayerState): Card {
     const legal = this.legalCards(player);
     const engine = this.playerEngines[player.key];
@@ -1513,6 +1520,7 @@ export class CribbageGame {
     } else if (!this.goPlayer) {
       this.otherTurn();
     }
+    this.completePeggingIfNoCards();
   }
 
   private sayGo(player: PlayerState): void {
@@ -1546,6 +1554,7 @@ export class CribbageGame {
       });
       this.logEvent("Count resets to 0.");
       this.otherTurn();
+      this.completePeggingIfNoCards();
     } else {
       this.goPlayer = player;
       this.recordAnalytics({
