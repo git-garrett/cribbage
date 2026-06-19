@@ -1697,7 +1697,7 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   model.textContent = "Compared to AI analysis.";
   section.append(title, model);
 
-  const mistakes = decisionMistakes(events, end.gameId);
+  const mistakes = sortedDecisionMistakes(events, end.gameId);
   const totals = decisionEvTotals(mistakes);
   section.append(decisionEvSummary(totals), decisionWinProbabilityImpact(totals));
 
@@ -1759,6 +1759,20 @@ function decisionMistakes(events: AnalyticsEvent[], gameId: string): DecisionRev
     return !sameCards(reviewedEvent.review.selected, reviewedEvent.review.recommended) &&
       decisionMistakeMagnitude(reviewedEvent) >= decisionMistakeThreshold(reviewedEvent);
   });
+}
+
+function sortedDecisionMistakes(events: AnalyticsEvent[], gameId: string): DecisionReviewEvent[] {
+  return decisionMistakes(events, gameId).sort((left, right) =>
+    decisionMistakeSortValue(right) - decisionMistakeSortValue(left) ||
+    left.handNumber - right.handNumber ||
+    events.indexOf(left) - events.indexOf(right)
+  );
+}
+
+function decisionMistakeSortValue(event: DecisionReviewEvent): number {
+  return event.review.winProbabilityDelta === undefined
+    ? Math.max(0, event.review.delta)
+    : Math.max(0, event.review.winProbabilityDelta);
 }
 
 function decisionEvTotals(events: DecisionReviewEvent[]): DecisionEvTotals {
