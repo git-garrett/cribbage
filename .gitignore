@@ -7,6 +7,7 @@ build
 *.so
 *.c
 dist
+server-dist
 cribbage.egg-info
 .ipynb_checkpoints
 node_modules

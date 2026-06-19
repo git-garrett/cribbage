@@ -233,12 +233,27 @@ const FULL_APP_MODE = URL_PARAMS.get("full") === "1" || URL_PARAMS.get("mode") =
 const SIMPLE_NETWORK_MODE = !FULL_APP_MODE;
 const SESSION_TAG = (URL_PARAMS.get("tag") || "").trim();
 const SIMPLE_NETWORK_SESSION_KEY = "strong-cribbage.simpleNetworkSession";
+const REMOTE_AI_DISABLED = URL_PARAMS.get("local") === "1";
+const REMOTE_AI_BASE = (URL_PARAMS.get("api") || "").replace(/\/$/, "");
+const SERVER_UPLOAD_KEY = "strong-cribbage.serverUploadedGames.v1";
 
 els.parGuidesToggle.checked = state.parGuides;
 
 interface AnalyticsStore {
   version: 1;
   events: AnalyticsEvent[];
+}
+
+interface ServerDiscardResponse {
+  cardIds?: number[];
+  cards?: Array<{ id: number }>;
+}
+
+interface ServerPeggingResponse {
+  action?: "play" | "go";
+  cardId?: number;
+  card?: { id: number };
+  ev?: number;
 }
 
 interface AnalyticsTotals {
@@ -437,6 +452,59 @@ function tagPhoneRecord<T extends object>(record: T): T & { tags?: string[]; ses
   };
 }
 
+function usesRemoteAi(): boolean {
+  return SIMPLE_NETWORK_MODE && !REMOTE_AI_DISABLED;
+}
+
+async function serverJson<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  const response = await fetch(`${REMOTE_AI_BASE}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(text || `Server request failed with ${response.status}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+function uploadedGameIds(): Set<string> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SERVER_UPLOAD_KEY) || "[]");
+    return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function markGameUploaded(gameId: string): void {
+  const ids = uploadedGameIds();
+  ids.add(gameId);
+  localStorage.setItem(SERVER_UPLOAD_KEY, JSON.stringify([...ids]));
+}
+
+function uploadCompletedGame(gameId: string): void {
+  if (!usesRemoteAi() || uploadedGameIds().has(gameId)) return;
+  const store = loadAnalytics();
+  const events = store.events.filter((event) => event.gameId === gameId).map((event) => tagPhoneRecord(event));
+  if (!events.length) return;
+  const endEvent = events.find((event) => event.type === "game" && event.action === "end");
+  void serverJson("/api/games", {
+    gameId,
+    tag: SESSION_TAG || null,
+    appVersion: __APP_VERSION__,
+    model: SIMPLE_NETWORK_OPPONENT,
+    finalResult: endEvent ?? null,
+    snapshot: localGame.gameId === gameId ? localGame.snapshot() : null,
+    events,
+  }).then(() => {
+    markGameUploaded(gameId);
+  }).catch((error) => {
+    console.warn("Completed game upload failed", error);
+  });
+}
+
 function idbRequest<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
@@ -500,6 +568,9 @@ function syncAnalytics(events: AnalyticsEvent[]): void {
   store.events.sort((a, b) => a.at.localeCompare(b.at));
   saveAnalytics(store);
   persistPhoneGameEvents(newEvents);
+  for (const event of newEvents) {
+    if (event.type === "game" && event.action === "end") uploadCompletedGame(event.gameId);
+  }
 }
 
 function buildBoard(): void {
@@ -1196,8 +1267,18 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       return localGame.state();
     }
     if (path === "/api/finish-discard") {
-      await ensureOpponentResources(localGame.opponent as Opponent);
-      localGame.finishDiscard();
+      if (usesRemoteAi()) {
+        const response = await serverJson<ServerDiscardResponse>("/api/ai/discard", {
+          tag: SESSION_TAG || null,
+          model: SIMPLE_NETWORK_OPPONENT,
+          snapshot: localGame.snapshot(),
+        });
+        const cardIds = response.cardIds ?? response.cards?.map((card) => card.id) ?? [];
+        localGame.finishDiscardWithAiCards(cardIds);
+      } else {
+        await ensureOpponentResources(localGame.opponent as Opponent);
+        localGame.finishDiscard();
+      }
       saveGame();
       return localGame.state();
     }
@@ -1226,9 +1307,30 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       return localGame.state();
     }
     if (path === "/api/advance-pegging") {
-      await ensureOpponentResources(localGame.opponent as Opponent);
       const startedAt = performance.now();
-      localGame.advancePeggingToHuman();
+      if (usesRemoteAi()) {
+        for (let guard = 0; guard < 16; guard += 1) {
+          const current = localGame.state();
+          if (current.phase !== "pegging" || current.turn !== "AI") break;
+          const response = await serverJson<ServerPeggingResponse>("/api/ai/peg", {
+            tag: SESSION_TAG || null,
+            model: SIMPLE_NETWORK_OPPONENT,
+            snapshot: localGame.snapshot(),
+          });
+          if (response.action === "go") {
+            localGame.aiPeggingGo();
+          } else if (response.action === "play") {
+            const cardId = response.cardId ?? response.card?.id;
+            if (typeof cardId !== "number") throw new Error("Server did not return an AI pegging card.");
+            localGame.playAiPeggingCard(cardId);
+          } else {
+            throw new Error("Server did not return a valid AI pegging action.");
+          }
+        }
+      } else {
+        await ensureOpponentResources(localGame.opponent as Opponent);
+        localGame.advancePeggingToHuman();
+      }
       localGame.recordAiPeggingThinkTime(performance.now() - startedAt);
       saveGame();
       return localGame.state();

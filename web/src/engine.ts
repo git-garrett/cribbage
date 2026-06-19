@@ -824,7 +824,6 @@ export class CribbageGame {
       },
       scores: { human: this.human.score, ai: this.ai.score },
     });
-    if (this.dealer === this.ai) this.aiDiscard();
   }
 
   startTroublePeggingPosition(): void {
@@ -931,7 +930,7 @@ export class CribbageGame {
     this.crib.push(...discards);
     this.recordDiscard(this.human, discards, handBeforeDiscard);
     this.logEvent("User discarded two cards to the crib.");
-    if (this.dealer === this.human) {
+    if (this.ai.hand.length === 6) {
       this.phase = "ai_discarding";
       this.logEvent("Waiting for AI to discard.");
       return;
@@ -942,6 +941,26 @@ export class CribbageGame {
   finishDiscard(): void {
     if (this.phase !== "ai_discarding") throw new Error("AI is not waiting to discard.");
     this.aiDiscard();
+    this.beginPegging();
+  }
+
+  recommendAiDiscard(): { cards: SerializedCard[]; cardIds: number[] } {
+    if (this.phase !== "ai_discarding") throw new Error("AI is not waiting to discard.");
+    const discards = this.chooseDiscards(this.ai, this.dealer === this.ai);
+    return {
+      cards: discards.map((card) => this.serializeCard(card)),
+      cardIds: discards.map((card) => card.id),
+    };
+  }
+
+  finishDiscardWithAiCards(ids: number[]): void {
+    if (this.phase !== "ai_discarding") throw new Error("AI is not waiting to discard.");
+    const handBeforeDiscard = [...this.ai.hand];
+    const discards = this.selectedCards(this.ai.hand, ids, 2);
+    removeCards(this.ai.hand, discards);
+    this.crib.push(...discards);
+    this.recordDiscard(this.ai, discards, handBeforeDiscard);
+    this.logEvent("AI discarded two cards to the crib.");
     this.beginPegging();
   }
 
@@ -997,6 +1016,44 @@ export class CribbageGame {
 
   advancePeggingToHuman(): void {
     this.advanceUntilHuman();
+  }
+
+  recommendAiPeggingAction(): { action: "go" } | { action: "play"; card: SerializedCard; cardId: number; ev?: number } {
+    if (this.phase !== "pegging" || this.currentPlayer() !== this.ai) {
+      throw new Error("It is not AI's turn to play.");
+    }
+    const legal = this.legalCards(this.ai);
+    if (!legal.length) return { action: "go" };
+    const card = this.choosePlay(this.ai);
+    const decision = this.pegDecisionEvs.ai;
+    return {
+      action: "play",
+      card: this.serializeCard(card),
+      cardId: card.id,
+      ev: decision?.cardId === card.id ? decision.ev : undefined,
+    };
+  }
+
+  playAiPeggingCard(cardId: number): void {
+    if (this.phase !== "pegging" || this.currentPlayer() !== this.ai) {
+      throw new Error("It is not AI's turn to play.");
+    }
+    const legal = this.legalCards(this.ai);
+    if (!legal.length) {
+      this.sayGo(this.ai);
+      return;
+    }
+    const card = this.selectedCards(this.ai.hand, [cardId], 1)[0];
+    if (!legal.includes(card)) throw new Error("That card would take the count over 31.");
+    this.playCard(this.ai, card);
+  }
+
+  aiPeggingGo(): void {
+    if (this.phase !== "pegging" || this.currentPlayer() !== this.ai) {
+      throw new Error("It is not AI's turn.");
+    }
+    if (this.legalCards(this.ai).length > 0) throw new Error("AI has a legal card to play.");
+    this.sayGo(this.ai);
   }
 
   prepareModel13Pegging(): void {
@@ -1176,7 +1233,7 @@ export class CribbageGame {
     this.crib.push(...discards);
     this.recordDiscard(this.human, discards, handBeforeDiscard, false);
     this.logEvent("User discarded two cards to the crib.");
-    if (this.dealer === this.human) {
+    if (this.ai.hand.length === 6) {
       this.phase = "ai_discarding";
       this.logEvent("Waiting for AI to discard.");
       return;
