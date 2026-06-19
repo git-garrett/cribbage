@@ -61,6 +61,7 @@ const state: {
   selected: Set<number>;
   pending: boolean;
   splashOpen: boolean;
+  hasResumableGame: boolean;
   resultOverride: string[] | null;
   parGuides: boolean;
   analyticsOpen: boolean;
@@ -86,6 +87,7 @@ const state: {
   selected: new Set(),
   pending: false,
   splashOpen: false,
+  hasResumableGame: false,
   resultOverride: null,
   parGuides: localStorage.getItem("strong-cribbage.admin.parGuides") === "1",
   analyticsOpen: false,
@@ -130,6 +132,9 @@ const els = {
   app: document.querySelector(".app") as HTMLElement,
   splashPage: document.querySelector("#splash-page") as HTMLElement,
   splashNewGame: document.querySelector("#splash-new-game") as HTMLButtonElement,
+  splashResumeGame: document.querySelector("#splash-resume-game") as HTMLButtonElement,
+  splashNameRow: document.querySelector("#splash-name-row") as HTMLElement,
+  splashFirstName: document.querySelector("#splash-first-name") as HTMLInputElement,
   board: document.querySelector("#board") as HTMLElement,
   menuToggle: document.querySelector("#menu-toggle") as HTMLButtonElement,
   settingsPanel: document.querySelector("#settings-panel") as HTMLElement,
@@ -236,12 +241,15 @@ const URL_PARAMS = new URLSearchParams(window.location.search);
 const FULL_APP_MODE = URL_PARAMS.get("full") === "1" || URL_PARAMS.get("mode") === "full";
 const SIMPLE_NETWORK_MODE = !FULL_APP_MODE;
 const SESSION_TAG = (URL_PARAMS.get("tag") || "").trim();
+const PLAYER_FIRST_NAME_KEY = "strong-cribbage.playerFirstName.v1";
 const SIMPLE_NETWORK_SESSION_KEY = "strong-cribbage.simpleNetworkSession";
 const REMOTE_AI_DISABLED = URL_PARAMS.get("local") === "1";
 const REMOTE_AI_BASE = (URL_PARAMS.get("api") || "").replace(/\/$/, "");
 const REMOTE_AI_EXPLICIT = URL_PARAMS.has("api");
 const IS_VITE_DEV = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV);
 const SERVER_UPLOAD_KEY = "strong-cribbage.serverUploadedGames.v1";
+
+let playerFirstName = (localStorage.getItem(PLAYER_FIRST_NAME_KEY) || "").trim();
 
 els.parGuidesToggle.checked = state.parGuides;
 
@@ -332,9 +340,10 @@ function saveGame(): void {
 }
 
 let localGame = loadSavedGame();
-const simpleNetworkSessionValue = `${SIMPLE_NETWORK_OPPONENT}:${SESSION_TAG || "untagged"}`;
+const simpleNetworkSessionValue = SIMPLE_NETWORK_OPPONENT;
 const simpleLoadedState = localGame.state();
 state.splashOpen = SIMPLE_NETWORK_MODE;
+state.hasResumableGame = SIMPLE_NETWORK_MODE && localGame.opponent === SIMPLE_NETWORK_OPPONENT && simpleLoadedState.phase !== "game_over";
 if (
   SIMPLE_NETWORK_MODE &&
   (
@@ -345,6 +354,7 @@ if (
 ) {
   localGame = new CribbageGame(SIMPLE_NETWORK_OPPONENT);
 }
+state.hasResumableGame = SIMPLE_NETWORK_MODE && localGame.opponent === SIMPLE_NETWORK_OPPONENT && localGame.state().phase !== "game_over";
 if (SIMPLE_NETWORK_MODE) {
   localStorage.setItem(SIMPLE_NETWORK_SESSION_KEY, simpleNetworkSessionValue);
 } else {
@@ -438,9 +448,9 @@ function persistPhoneGameEvents(events: AnalyticsEvent[]): void {
           finalScores: event.finalScores ?? null,
           endedAt: event.at,
           includedInTables: 1,
-          tags: SESSION_TAG ? [SESSION_TAG] : [],
-          sessionTag: SESSION_TAG || null,
-          notes: SESSION_TAG ? `tag:${SESSION_TAG}` : "",
+          tags: currentSessionTag() ? [currentSessionTag()] : [],
+          sessionTag: currentSessionTag() || null,
+          notes: currentSessionTag() ? `tag:${currentSessionTag()}` : "",
           randomSeed: null,
         });
       }
@@ -451,15 +461,41 @@ function persistPhoneGameEvents(events: AnalyticsEvent[]): void {
 }
 
 function tagPhoneRecord<T extends object>(record: T): T & { tags?: string[]; sessionTag?: string } {
-  if (!SESSION_TAG) return record;
+  const sessionTag = currentSessionTag();
+  if (!sessionTag) return record;
   const rawTags = (record as { tags?: unknown }).tags;
   const existingTags = Array.isArray(rawTags) ? rawTags.filter((tag): tag is string => typeof tag === "string") : [];
-  const tags = existingTags.includes(SESSION_TAG) ? existingTags : [...existingTags, SESSION_TAG];
+  const tags = existingTags.includes(sessionTag) ? existingTags : [...existingTags, sessionTag];
   return {
     ...record,
     tags,
-    sessionTag: SESSION_TAG,
+    sessionTag,
   };
+}
+
+function cleanFirstName(value: string): string {
+  return value.trim().replace(/\s+/g, " ").slice(0, 40);
+}
+
+function currentSessionTag(): string {
+  return SESSION_TAG || playerFirstName;
+}
+
+function saveSplashName(): boolean {
+  const name = cleanFirstName(els.splashFirstName.value);
+  if (!name) {
+    if (!playerFirstName) {
+      els.splashFirstName.focus();
+      els.splashFirstName.setCustomValidity("Enter your first name.");
+      els.splashFirstName.reportValidity();
+      return false;
+    }
+    return true;
+  }
+  els.splashFirstName.setCustomValidity("");
+  playerFirstName = name;
+  localStorage.setItem(PLAYER_FIRST_NAME_KEY, playerFirstName);
+  return true;
 }
 
 function usesRemoteAi(): boolean {
@@ -513,7 +549,7 @@ function uploadCompletedGame(gameId: string): void {
   const endEvent = events.find((event) => event.type === "game" && event.action === "end");
   void serverJson("/api/games", {
     gameId,
-    tag: SESSION_TAG || null,
+    tag: currentSessionTag() || null,
     appVersion: __APP_VERSION__,
     model: SIMPLE_NETWORK_OPPONENT,
     finalResult: endEvent ?? null,
@@ -553,8 +589,8 @@ async function exportPhoneGameLog(): Promise<void> {
   const exportRecord = {
     schemaVersion: 1,
     source: "phone",
-    sessionTag: SESSION_TAG || null,
-    tags: SESSION_TAG ? [SESSION_TAG] : [],
+    sessionTag: currentSessionTag() || null,
+    tags: currentSessionTag() ? [currentSessionTag()] : [],
     exportedAt: new Date().toISOString(),
     appVersion: __APP_VERSION__,
     analyticsKey: ANALYTICS_KEY,
@@ -1290,7 +1326,7 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
     if (path === "/api/finish-discard") {
       if (usesRemoteAi()) {
         const response = await serverJson<ServerDiscardResponse>("/api/ai/discard", {
-          tag: SESSION_TAG || null,
+          tag: currentSessionTag() || null,
           model: SIMPLE_NETWORK_OPPONENT,
           snapshot: localGame.snapshot(),
         });
@@ -1334,7 +1370,7 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
           const current = localGame.state();
           if (current.phase !== "pegging" || current.turn !== "AI") break;
           const response = await serverJson<ServerPeggingResponse>("/api/ai/peg", {
-            tag: SESSION_TAG || null,
+            tag: currentSessionTag() || null,
             model: SIMPLE_NETWORK_OPPONENT,
             snapshot: localGame.snapshot(),
           });
@@ -3009,8 +3045,12 @@ function render(game: GameState | null): void {
   if (!game) return;
   syncAnalytics(game.analyticsEvents);
   state.game = game;
+  if (SIMPLE_NETWORK_MODE && game.phase === "game_over") state.hasResumableGame = false;
   document.body.dataset.splash = state.splashOpen ? "true" : "false";
   els.splashPage.hidden = !state.splashOpen;
+  els.splashResumeGame.hidden = !state.hasResumableGame;
+  els.splashNameRow.hidden = Boolean(playerFirstName);
+  els.splashFirstName.value = playerFirstName || els.splashFirstName.value;
   els.app.dataset.phase = game.phase;
   els.app.dataset.view = state.analyticsOpen
     ? "analytics"
@@ -3402,6 +3442,7 @@ els.continuePegging.addEventListener("click", async () => {
 
 async function startNewGameFromUi(): Promise<void> {
   if (state.pending) return;
+  if (state.splashOpen && !saveSplashName()) return;
   state.pending = true;
   state.selected.clear();
   render(state.game);
@@ -3410,6 +3451,7 @@ async function startNewGameFromUi(): Promise<void> {
     state.dismissedGameOverId = null;
     const next = await api("/api/new", { opponent: els.opponent.value });
     state.splashOpen = false;
+    state.hasResumableGame = true;
     els.settingsPanel.hidden = true;
     els.menuToggle.setAttribute("aria-expanded", "false");
     render(next);
@@ -3419,8 +3461,26 @@ async function startNewGameFromUi(): Promise<void> {
   }
 }
 
+function resumeGameFromSplash(): void {
+  if (state.pending || !state.hasResumableGame) return;
+  if (!saveSplashName()) return;
+  state.splashOpen = false;
+  render(state.game);
+  void continuePeggingAfterRender(state.game as GameState).catch((error) => {
+    els.result.textContent = error instanceof Error ? error.message : "Request failed";
+  });
+}
+
+els.splashFirstName.addEventListener("input", () => {
+  els.splashFirstName.setCustomValidity("");
+});
+
 els.splashNewGame.addEventListener("click", () => {
   void startNewGameFromUi();
+});
+
+els.splashResumeGame.addEventListener("click", () => {
+  resumeGameFromSplash();
 });
 
 els.newGame.addEventListener("click", () => {

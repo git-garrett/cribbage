@@ -134,6 +134,48 @@ body {
   font-size: 18px;
 }
 
+.splash-resume-game {
+  width: min(100%, 320px);
+  min-height: 48px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--ink);
+}
+
+.splash-resume-game[hidden] {
+  display: none;
+}
+
+.splash-name-row {
+  display: grid;
+  gap: 7px;
+  width: min(100%, 320px);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.splash-name-row[hidden] {
+  display: none;
+}
+
+.splash-name-row input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--ink);
+  font-size: 17px;
+}
+
+.splash-name-row input:focus {
+  outline: 3px solid rgba(29, 127, 209, 0.22);
+  border-color: var(--human);
+}
+
 body[data-splash="true"] .app {
   display: none;
 }
