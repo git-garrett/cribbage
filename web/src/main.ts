@@ -1908,7 +1908,7 @@ function decisionEvSummary(totals: DecisionEvTotals): HTMLElement {
   const summary = document.createElement("div");
   summary.className = "decision-ev-summary";
   for (const [label, value] of [
-    ["Total WP", totals.total],
+    ["Total win%", totals.total],
     ["Pegging", totals.pegging],
     ["Discard", totals.discard],
     ["Dealer", totals.dealer],
@@ -1926,7 +1926,7 @@ function decisionEvSummary(totals: DecisionEvTotals): HTMLElement {
   const pointEvName = document.createElement("strong");
   pointEvName.textContent = "Point EV";
   const pointEvAmount = document.createElement("em");
-  pointEvAmount.textContent = formatEv(totals.pointEvTotal);
+  pointEvAmount.textContent = formatEvPoints(totals.pointEvTotal);
   pointEv.append(pointEvName, pointEvAmount);
   summary.append(pointEv);
   return summary;
@@ -1936,8 +1936,12 @@ function formatEv(value: number): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
 }
 
+function formatEvPoints(value: number): string {
+  return `${formatEv(value)} points`;
+}
+
 function formatPercentagePointDelta(value: number): string {
-  return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)} percentage points`;
+  return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)}%`;
 }
 
 function formatWinProbability(value: number): string {
@@ -2002,9 +2006,9 @@ function decisionContext(event: DecisionReviewEvent, events: AnalyticsEvent[]): 
     rows.push(["You played", event.review.selected.join(" ")]);
     rows.push(["AI advised", event.review.recommended.join(" ")]);
   }
-  rows.push(["Your point EV", formatEv(event.review.selectedEv)]);
-  rows.push(["Advised point EV", formatEv(event.review.recommendedEv)]);
-  rows.push(["Point EV gain", formatEv(event.review.delta)]);
+  rows.push(["Your point EV", formatEvPoints(event.review.selectedEv)]);
+  rows.push(["Advised point EV", formatEvPoints(event.review.recommendedEv)]);
+  rows.push(["Point EV gain", formatEvPoints(event.review.delta)]);
   if (event.review.selectedWinProbability !== undefined && event.review.recommendedWinProbability !== undefined) {
     rows.push(["Your win probability", formatWinProbability(event.review.selectedWinProbability)]);
     rows.push(["Advised win probability", formatWinProbability(event.review.recommendedWinProbability)]);
@@ -2291,9 +2295,9 @@ function cardValueFromLabel(label: string | undefined): number {
 
 function decisionReviewText(event: DecisionReviewEvent): string {
   const review = event.review;
-  const pointEv = `your EV ${formatEv(review.selectedEv)}, advised EV ${formatEv(review.recommendedEv)}`;
+  const pointEv = `your EV ${formatEvPoints(review.selectedEv)}, advised EV ${formatEvPoints(review.recommendedEv)}`;
   const delta = review.winProbabilityDelta !== undefined
-    ? `; WP gain ${formatPercentagePointDelta(review.winProbabilityDelta)}; ${pointEv}`
+    ? `; win% gain ${formatPercentagePointDelta(review.winProbabilityDelta)}; ${pointEv}`
     : review.delta !== 0
       ? `; AI analysis gain ${formatEv(review.delta)}`
       : "";
@@ -2499,7 +2503,7 @@ function renderGameLog(): void {
     meta.textContent = `${playerName(game.end.winner)} won ${result}${game.end.result && game.end.result !== "regular" ? ` (${game.end.result})` : ""}`;
     const ev = document.createElement("span");
     const totals = decisionEvTotals(decisionMistakes(events, game.gameId));
-    ev.textContent = `${formatPercentagePointDelta(totals.total)} error WP (${totals.count}); ${formatEv(totals.pointEvTotal)} EV`;
+    ev.textContent = `${formatPercentagePointDelta(totals.total)} error win% (${totals.count}); ${formatEvPoints(totals.pointEvTotal)} EV`;
     ev.className = totals.total > 0 ? "game-log-ev has-errors" : "game-log-ev";
     button.append(title, meta, ev);
     button.addEventListener("click", () => {
