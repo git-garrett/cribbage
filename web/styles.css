@@ -58,6 +58,10 @@
     --human: #58a6ff;
     --ai: #ff6b62;
   }
+
+  .splash-eyebrow {
+    color: #75d5aa !important;
+  }
 }
 
 * {
@@ -79,7 +83,7 @@ body {
   display: grid;
   place-items: center;
   padding: max(20px, env(safe-area-inset-top)) 18px max(20px, env(safe-area-inset-bottom));
-  background: #fefefe;
+  background: var(--app-bg);
 }
 
 .splash-page[hidden] {
@@ -97,7 +101,11 @@ body {
 .splash-logo {
   width: min(58vw, 250px);
   height: auto;
-  filter: drop-shadow(0 18px 28px rgba(18, 35, 28, 0.18));
+  padding: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 24px;
+  background: #fefefe;
+  box-shadow: 0 18px 28px rgba(18, 35, 28, 0.18);
 }
 
 .splash-copy {
@@ -117,27 +125,27 @@ body {
 }
 
 .splash-eyebrow {
-  color: var(--felt-dark) !important;
+  color: #17654b !important;
   font-size: 12px !important;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.splash-new-game {
+.splash-new-game,
+.splash-resume-game {
   width: min(100%, 320px);
   min-height: 54px;
-  margin-top: 8px;
   border-radius: 8px;
   font-size: 18px;
 }
 
+.splash-new-game {
+  margin-top: 8px;
+}
+
 .splash-resume-game {
-  width: min(100%, 320px);
-  min-height: 48px;
-  border: 1px solid var(--line-strong);
-  background: rgba(255, 255, 255, 0.76);
-  color: var(--ink);
+  margin-top: -8px;
 }
 
 .splash-resume-game[hidden] {
