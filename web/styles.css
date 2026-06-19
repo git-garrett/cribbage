@@ -90,6 +90,23 @@ body {
   display: none;
 }
 
+body:not([data-ready="true"]) .splash-page[hidden] {
+  display: grid;
+}
+
+body:not([data-ready="true"]) .splash-name-row,
+body:not([data-ready="true"]) .splash-new-game,
+body:not([data-ready="true"]) .splash-resume-game {
+  display: none;
+}
+
+body:not([data-ready="true"]) .splash-shell::after {
+  content: "Loading preview...";
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 800;
+}
+
 .splash-shell {
   display: grid;
   justify-items: center;
@@ -189,6 +206,10 @@ body {
 }
 
 body[data-splash="true"] .app {
+  display: none;
+}
+
+body:not([data-ready="true"]) .app {
   display: none;
 }
 

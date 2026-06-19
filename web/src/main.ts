@@ -56,6 +56,31 @@ interface AiBenchmarkSummarySource {
   }>;
 }
 
+function safeLocalStorageGet(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeLocalStorageSet(key: string, value: string): boolean {
+  try {
+    window.localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeLocalStorageRemove(key: string): void {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Storage can be unavailable in private browsing or locked-down contexts.
+  }
+}
+
 const state: {
   game: GameState | null;
   selected: Set<number>;
@@ -90,7 +115,7 @@ const state: {
   splashOpen: false,
   hasResumableGame: false,
   resultOverride: null,
-  parGuides: localStorage.getItem("strong-cribbage.admin.parGuides") === "1",
+  parGuides: safeLocalStorageGet("strong-cribbage.admin.parGuides") === "1",
   analyticsOpen: false,
   analyticsMode: "my",
   gameLogOpen: false,
@@ -231,7 +256,6 @@ const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-13.0";
 const URL_PARAMS = new URLSearchParams(window.location.search);
 const FULL_APP_MODE = URL_PARAMS.get("full") === "1" || URL_PARAMS.get("mode") === "full";
 const SIMPLE_NETWORK_MODE = !FULL_APP_MODE;
-const FORCE_SPLASH = URL_PARAMS.get("splash") === "1";
 const SESSION_TAG = (URL_PARAMS.get("tag") || "").trim();
 const PLAYER_FIRST_NAME_KEY = "strong-cribbage.playerFirstName.v1";
 const SIMPLE_NETWORK_SESSION_KEY = "strong-cribbage.simpleNetworkSession";
@@ -242,7 +266,7 @@ const IS_VITE_DEV = Boolean((import.meta as unknown as { env?: { DEV?: boolean }
 const SERVER_UPLOAD_KEY = "strong-cribbage.serverUploadedGames.v1";
 const ADMIN_HASH = "#strong-admin-13";
 
-let playerFirstName = (localStorage.getItem(PLAYER_FIRST_NAME_KEY) || "").trim();
+let playerFirstName = (safeLocalStorageGet(PLAYER_FIRST_NAME_KEY) || "").trim();
 
 els.parGuidesToggle.checked = state.parGuides;
 
@@ -316,32 +340,32 @@ interface DecisionErrorAverages {
 }
 
 function loadSavedGame(): CribbageGame {
-  const saved = localStorage.getItem(SAVE_KEY);
+  const saved = safeLocalStorageGet(SAVE_KEY);
   if (!saved) return new CribbageGame(SIMPLE_NETWORK_MODE ? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT);
   try {
     return CribbageGame.restore(JSON.parse(saved) as GameSnapshot);
   } catch {
-    localStorage.removeItem(SAVE_KEY);
+    safeLocalStorageRemove(SAVE_KEY);
     return new CribbageGame(SIMPLE_NETWORK_MODE ? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT);
   }
 }
 
 function saveGame(): void {
   const snapshot = localGame.snapshot();
-  localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot));
+  safeLocalStorageSet(SAVE_KEY, JSON.stringify(snapshot));
   syncAnalytics(snapshot.analyticsEvents ?? []);
 }
 
 let localGame = loadSavedGame();
 const simpleNetworkSessionValue = SIMPLE_NETWORK_OPPONENT;
 const simpleLoadedState = localGame.state();
-state.splashOpen = SIMPLE_NETWORK_MODE || FORCE_SPLASH;
+state.splashOpen = SIMPLE_NETWORK_MODE && !playerFirstName;
 state.hasResumableGame = SIMPLE_NETWORK_MODE && localGame.opponent === SIMPLE_NETWORK_OPPONENT && simpleLoadedState.phase !== "game_over";
 if (
   SIMPLE_NETWORK_MODE &&
   (
     localGame.opponent !== SIMPLE_NETWORK_OPPONENT ||
-    localStorage.getItem(SIMPLE_NETWORK_SESSION_KEY) !== simpleNetworkSessionValue ||
+    safeLocalStorageGet(SIMPLE_NETWORK_SESSION_KEY) !== simpleNetworkSessionValue ||
     simpleLoadedState.phase === "game_over"
   )
 ) {
@@ -349,9 +373,9 @@ if (
 }
 state.hasResumableGame = SIMPLE_NETWORK_MODE && localGame.opponent === SIMPLE_NETWORK_OPPONENT && localGame.state().phase !== "game_over";
 if (SIMPLE_NETWORK_MODE) {
-  localStorage.setItem(SIMPLE_NETWORK_SESSION_KEY, simpleNetworkSessionValue);
+  safeLocalStorageSet(SIMPLE_NETWORK_SESSION_KEY, simpleNetworkSessionValue);
 } else {
-  localStorage.removeItem(SIMPLE_NETWORK_SESSION_KEY);
+  safeLocalStorageRemove(SIMPLE_NETWORK_SESSION_KEY);
 }
 els.appVersion.textContent = displayAppVersion(__APP_VERSION__);
 buildBoard();
@@ -377,25 +401,33 @@ function applyAdminVisibility(): void {
 applySimpleNetworkMode();
 applyAdminVisibility();
 window.addEventListener("hashchange", applyAdminVisibility);
-saveGame();
-render(localGame.state());
+try {
+  saveGame();
+  render(localGame.state());
+} catch (error) {
+  console.warn("Initial game render failed", error);
+  state.splashOpen = SIMPLE_NETWORK_MODE && !playerFirstName;
+  document.body.dataset.splash = state.splashOpen ? "true" : "false";
+  els.splashPage.hidden = !state.splashOpen;
+  els.result.textContent = error instanceof Error ? error.message : "Startup failed";
+}
 
 function loadAnalytics(): AnalyticsStore {
   const fallback: AnalyticsStore = { version: 1, events: [] };
-  const saved = localStorage.getItem(ANALYTICS_KEY);
+  const saved = safeLocalStorageGet(ANALYTICS_KEY);
   if (!saved) return fallback;
   try {
     const parsed = JSON.parse(saved) as AnalyticsStore;
     if (parsed.version !== 1 || !Array.isArray(parsed.events)) return fallback;
     return parsed;
   } catch {
-    localStorage.removeItem(ANALYTICS_KEY);
+    safeLocalStorageRemove(ANALYTICS_KEY);
     return fallback;
   }
 }
 
 function saveAnalytics(store: AnalyticsStore): void {
-  localStorage.setItem(ANALYTICS_KEY, JSON.stringify(store));
+  safeLocalStorageSet(ANALYTICS_KEY, JSON.stringify(store));
 }
 
 let phoneGameDbPromise: Promise<IDBDatabase | null> | null = null;
@@ -404,7 +436,13 @@ function openPhoneGameDb(): Promise<IDBDatabase | null> {
   if (!("indexedDB" in window)) return Promise.resolve(null);
   if (phoneGameDbPromise) return phoneGameDbPromise;
   phoneGameDbPromise = new Promise((resolve) => {
-    const request = indexedDB.open(PHONE_GAME_DB_NAME, PHONE_GAME_DB_VERSION);
+    let request: IDBOpenDBRequest;
+    try {
+      request = indexedDB.open(PHONE_GAME_DB_NAME, PHONE_GAME_DB_VERSION);
+    } catch {
+      resolve(null);
+      return;
+    }
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains("events")) {
@@ -493,7 +531,7 @@ function saveSplashName(): boolean {
   }
   els.splashFirstName.setCustomValidity("");
   playerFirstName = name;
-  localStorage.setItem(PLAYER_FIRST_NAME_KEY, playerFirstName);
+  safeLocalStorageSet(PLAYER_FIRST_NAME_KEY, playerFirstName);
   return true;
 }
 
@@ -527,7 +565,7 @@ async function serverJson<T>(path: string, body: Record<string, unknown>): Promi
 
 function uploadedGameIds(): Set<string> {
   try {
-    const parsed = JSON.parse(localStorage.getItem(SERVER_UPLOAD_KEY) || "[]");
+    const parsed = JSON.parse(safeLocalStorageGet(SERVER_UPLOAD_KEY) || "[]");
     return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : []);
   } catch {
     return new Set();
@@ -537,7 +575,7 @@ function uploadedGameIds(): Set<string> {
 function markGameUploaded(gameId: string): void {
   const ids = uploadedGameIds();
   ids.add(gameId);
-  localStorage.setItem(SERVER_UPLOAD_KEY, JSON.stringify([...ids]));
+  safeLocalStorageSet(SERVER_UPLOAD_KEY, JSON.stringify([...ids]));
 }
 
 function uploadCompletedGame(gameId: string): void {
@@ -627,6 +665,10 @@ function syncAnalytics(events: AnalyticsEvent[]): void {
   for (const event of newEvents) {
     if (event.type === "game" && event.action === "end") uploadCompletedGame(event.gameId);
   }
+}
+
+function markAppReady(): void {
+  document.body.dataset.ready = "true";
 }
 
 function buildBoard(): void {
@@ -1339,25 +1381,25 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       return localGame.state();
     }
     if (path === "/api/play") {
-      await ensureOpponentResources(localGame.opponent as Opponent);
+      if (!usesRemoteAi()) await ensureOpponentResources(localGame.opponent as Opponent);
       localGame.play(body?.id as number);
       saveGame();
       return localGame.state();
     }
     if (path === "/api/play-human") {
-      await ensureOpponentResources(localGame.opponent as Opponent);
+      if (!usesRemoteAi()) await ensureOpponentResources(localGame.opponent as Opponent);
       localGame.playHumanPeggingCard(body?.id as number);
       saveGame();
       return localGame.state();
     }
     if (path === "/api/go") {
-      await ensureOpponentResources(localGame.opponent as Opponent);
+      if (!usesRemoteAi()) await ensureOpponentResources(localGame.opponent as Opponent);
       localGame.go();
       saveGame();
       return localGame.state();
     }
     if (path === "/api/go-human") {
-      await ensureOpponentResources(localGame.opponent as Opponent);
+      if (!usesRemoteAi()) await ensureOpponentResources(localGame.opponent as Opponent);
       localGame.humanPeggingGo();
       saveGame();
       return localGame.state();
@@ -1398,13 +1440,13 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       return localGame.state();
     }
     if (path === "/api/complete-decision-reviews") {
-      await ensureOpponentResources(DEFAULT_OPPONENT);
+      if (!usesRemoteAi()) await ensureOpponentResources(DEFAULT_OPPONENT);
       localGame.completePendingDecisionReviews();
       saveGame();
       return localGame.state();
     }
     if (path === "/api/continue-scoring") {
-      await ensureOpponentResources(localGame.opponent as Opponent);
+      if (!usesRemoteAi()) await ensureOpponentResources(localGame.opponent as Opponent);
       localGame.continueScoring();
       saveGame();
       return localGame.state();
@@ -3490,7 +3532,7 @@ els.gameLogOpponent.addEventListener("change", () => {
 
 els.parGuidesToggle.addEventListener("change", () => {
   state.parGuides = els.parGuidesToggle.checked;
-  localStorage.setItem("strong-cribbage.admin.parGuides", state.parGuides ? "1" : "0");
+  safeLocalStorageSet("strong-cribbage.admin.parGuides", state.parGuides ? "1" : "0");
   render(state.game);
 });
 
@@ -3514,6 +3556,7 @@ els.noticeForward.addEventListener("click", () => {
 
 els.opponent.addEventListener("change", async () => {
   if (state.pending) return;
+  if (usesRemoteAi()) return;
   try {
     await ensureOpponentResources(normalizeAnalyticsEngine(els.opponent.value));
   } catch (error) {
@@ -3727,11 +3770,12 @@ async function finishDiscardInBackground(): Promise<void> {
 api("/api/state")
   .then(async (game) => {
     render(game);
-    if (!usesRemoteAi()) await ensureOpponentResources(localGame.opponent as Opponent);
+    markAppReady();
     if (game.phase === "ai_discarding") finishDiscardInBackground();
     else await continuePeggingAfterRender(game);
     scheduleDecisionReviewCompletion();
   })
   .catch((error) => {
+    markAppReady();
     els.result.textContent = error instanceof Error ? error.message : "Request failed";
   });
