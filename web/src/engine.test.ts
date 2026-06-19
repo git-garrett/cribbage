@@ -130,6 +130,32 @@ describe("game state", () => {
     expect(game.state().canGo).toBe(false);
   });
 
+  test("keeps AI final scoring play before last-card message", () => {
+    const game = new CribbageGame();
+    game.phase = "pegging";
+    game.pone = game.human;
+    game.dealer = game.ai;
+    game.turn = 1;
+    game.human.score = 0;
+    game.ai.score = 0;
+    game.human.hand = [];
+    game.ai.hand = cardsFromString("10d");
+    game.human.table = cardsFromString("5d 2c 3h 4s");
+    game.ai.table = cardsFromString("Ad 6c 8h");
+    game.turnCard = cardsFromString("2d")[0];
+    game.plays = cardsFromString("5d");
+    game.playOwners = ["human"];
+    game.count = 5;
+    game.lastPlayer = game.human;
+
+    game.playAiPeggingCard(game.ai.hand[0].id);
+
+    expect(game.phase).toBe("pegging_complete");
+    expect(game.ai.score).toBe(3);
+    expect(game.state().result).toContain("AI played 10d: 15 and pegged 2.");
+    expect(game.state().result).toContain("AI pegged 1 for last card.");
+  });
+
   test("keeps user pegging score messages through automatic pegging continuations", () => {
     const game = new CribbageGame();
     game.phase = "pegging";

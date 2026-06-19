@@ -79,6 +79,8 @@ const state: {
   noticeText: string;
   noticeHistory: string[];
   noticeHistoryIndex: number | null;
+  noticeQueue: string[];
+  noticeResultLines: string[];
   noticeUpdatedAt: number;
   noticeTimer: number | null;
 } = {
@@ -104,6 +106,8 @@ const state: {
   noticeText: "",
   noticeHistory: [],
   noticeHistoryIndex: null,
+  noticeQueue: [],
+  noticeResultLines: [],
   noticeUpdatedAt: 0,
   noticeTimer: null,
 };
@@ -1503,43 +1507,71 @@ function renderScoring(scoring: GameState["scoring"]): void {
 
 function renderResult(game: GameState): void {
   if (game.phase === "game_over") {
-    updateNotice("");
+    state.noticeResultLines = [];
+    clearNoticeQueue();
+    applyNotice("");
     els.resultInline.innerHTML = "";
     return;
   }
   const lines = (state.resultOverride ?? (game.result.length ? game.result : [game.message])).filter(
     (line) => line !== "User turn.",
   );
-  updateNotice([...lines].reverse().find(Boolean) ?? "");
+  const commonPrefix = matchingPrefixLength(state.noticeResultLines, lines);
+  const newLines = lines.slice(commonPrefix).filter(Boolean);
+  state.noticeResultLines = [...lines];
+  enqueueNotices(newLines);
   els.resultInline.innerHTML = "";
   els.scoringResult.innerHTML = "";
 }
 
-function updateNotice(nextText: string): void {
-  if (state.noticeHistoryIndex !== null) {
-    if (nextText === state.noticeText) {
-      renderNoticeText(state.noticeHistory[state.noticeHistoryIndex] ?? "");
-      return;
-    }
-    state.noticeHistoryIndex = null;
-  }
-  if (nextText === state.noticeText) {
-    renderNoticeText(state.noticeText);
-    return;
-  }
+function matchingPrefixLength(left: string[], right: string[]): number {
+  let index = 0;
+  while (index < left.length && index < right.length && left[index] === right[index]) index += 1;
+  return index;
+}
+
+function clearNoticeQueue(): void {
+  state.noticeQueue = [];
   if (state.noticeTimer !== null) {
     window.clearTimeout(state.noticeTimer);
     state.noticeTimer = null;
   }
-  const elapsed = performance.now() - state.noticeUpdatedAt;
-  const apply = () => {
-    if (state.noticeText) {
-      state.noticeHistory.push(state.noticeText);
-      if (state.noticeHistory.length > 40) state.noticeHistory.shift();
-    }
-    state.noticeText = nextText;
-    state.noticeUpdatedAt = performance.now();
+}
+
+function enqueueNotices(lines: string[]): void {
+  if (!lines.length) {
+    renderNoticeText(state.noticeHistoryIndex === null ? state.noticeText : state.noticeHistory[state.noticeHistoryIndex] ?? "");
+    return;
+  }
+  if (state.noticeHistoryIndex !== null) {
+    state.noticeHistoryIndex = null;
+  }
+  state.noticeQueue.push(...lines);
+  drainNoticeQueue();
+}
+
+function drainNoticeQueue(): void {
+  if (state.noticeTimer !== null) return;
+  const nextText = state.noticeQueue.shift();
+  if (nextText === undefined) {
     renderNoticeText(state.noticeText);
+    return;
+  }
+  if (nextText === state.noticeText) {
+    renderNoticeText(state.noticeText);
+    drainNoticeQueue();
+    return;
+  }
+  const elapsed = performance.now() - state.noticeUpdatedAt;
+  const apply = (): void => {
+    state.noticeTimer = null;
+    applyNotice(nextText);
+    if (state.noticeQueue.length) {
+      state.noticeTimer = window.setTimeout(() => {
+        state.noticeTimer = null;
+        drainNoticeQueue();
+      }, NOTICE_MIN_MS);
+    }
   };
   if (!state.noticeText || elapsed >= NOTICE_MIN_MS) apply();
   else {
@@ -1548,6 +1580,16 @@ function updateNotice(nextText: string): void {
       apply();
     }, NOTICE_MIN_MS - elapsed);
   }
+}
+
+function applyNotice(nextText: string): void {
+  if (state.noticeText && state.noticeText !== nextText) {
+    state.noticeHistory.push(state.noticeText);
+    if (state.noticeHistory.length > 40) state.noticeHistory.shift();
+  }
+  state.noticeText = nextText;
+  state.noticeUpdatedAt = performance.now();
+  renderNoticeText(state.noticeText);
 }
 
 function renderNoticeText(text: string): void {
