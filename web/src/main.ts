@@ -1667,7 +1667,7 @@ function renderGameReportInto(
   const start = gameStartFor(events, end.gameId);
   const finalScores = end.finalScores ?? fallbackScores;
   const result = end.result && end.result !== "regular" ? `, ${end.result}` : "";
-  summary.textContent = `${shortDate(end.at)} vs ${engineName(start?.opponent ?? DEFAULT_OPPONENT)}. ${playerName(end.winner ?? "human")} won ${finalScores.human}-${finalScores.ai}${result}.`;
+  summary.textContent = `${shortDate(end.at)} vs AI. ${playerName(end.winner ?? "human")} won ${finalScores.human}-${finalScores.ai}${result}.`;
   const cards = document.createElement("div");
   cards.className = "single-game-report-cards";
   cards.append(analyticsTotalCard("User", report.human, "human", { showGames: false }));
@@ -1681,7 +1681,7 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   const title = document.createElement("h3");
   title.textContent = "Decision review";
   const model = document.createElement("p");
-  model.textContent = `Compared with ${engineName(DEFAULT_OPPONENT)}.`;
+  model.textContent = "Compared to AI analysis.";
   section.append(title, model);
 
   const mistakes = decisionMistakes(events, end.gameId);
@@ -1691,7 +1691,7 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   if (!mistakes.length) {
     const empty = document.createElement("div");
     empty.className = "decision-review-empty";
-    empty.textContent = "No user discards or peg plays were flagged by the model.";
+    empty.textContent = "No user discards or peg plays were flagged by AI analysis.";
     section.append(empty);
     return section;
   }
@@ -1975,7 +1975,7 @@ function decisionContext(event: DecisionReviewEvent, events: AnalyticsEvent[]): 
   if (event.type === "discard") {
     rows.push(["Your hand", (event.handBeforeDiscard ?? [...event.remainingHand, ...event.cards]).join(" ")]);
     rows.push(["You discarded", event.review.selected.join(" ")]);
-    rows.push(["Model preferred", event.review.recommended.join(" ")]);
+    rows.push(["AI advised", event.review.recommended.join(" ")]);
     rows.push(["Kept", event.remainingHand.join(" ")]);
     rows.push(["Crib after discard", event.cribAfterDiscard.join(" ") || "None"]);
   } else {
@@ -1987,7 +1987,7 @@ function decisionContext(event: DecisionReviewEvent, events: AnalyticsEvent[]): 
     rows.push(["Current count before play", String(event.countBefore ?? Math.max(0, event.count - cardValueFromLabel(event.card)))]);
     rows.push(["Already played", event.playedCards?.join(" ") || "None"]);
     rows.push(["You played", event.review.selected.join(" ")]);
-    rows.push(["Model preferred", event.review.recommended.join(" ")]);
+    rows.push(["AI advised", event.review.recommended.join(" ")]);
   }
   rows.push(["Your point EV", formatEv(event.review.selectedEv)]);
   rows.push(["Advised point EV", formatEv(event.review.recommendedEv)]);
@@ -2045,6 +2045,7 @@ function decisionSnapshotTable(event: DecisionReviewEvent, events: AnalyticsEven
   const root = document.createElement("div");
   root.className = "snapshot-table-view";
   root.append(snapshotScoreboard(score, dealer, event, firstDealer));
+  root.append(snapshotDecisionSummary(event));
 
   const table = document.createElement("div");
   table.className = "table snapshot-table-surface";
@@ -2129,6 +2130,29 @@ function snapshotStatus(label: string, value: string): HTMLElement {
   strong.textContent = value;
   item.append(`${label}: `, strong);
   return item;
+}
+
+function snapshotDecisionSummary(event: DecisionReviewEvent): HTMLElement {
+  const summary = document.createElement("div");
+  summary.className = "snapshot-decision-summary";
+  const yourMove = document.createElement("div");
+  const advisedMove = document.createElement("div");
+  const selectedLabel = event.type === "discard" ? "You discarded" : "You played";
+  const advisedLabel = event.type === "discard" ? "AI advised discarding" : "AI advised playing";
+  yourMove.append(labelValue(selectedLabel, event.review.selected.join(" ")));
+  advisedMove.append(labelValue(advisedLabel, event.review.recommended.join(" ")));
+  summary.append(yourMove, advisedMove);
+  return summary;
+}
+
+function labelValue(label: string, value: string): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+  const term = document.createElement("strong");
+  term.textContent = label;
+  const detail = document.createElement("span");
+  detail.textContent = value || "None";
+  fragment.append(term, detail);
+  return fragment;
 }
 
 function snapshotPlayedSection(event: DecisionReviewEvent): HTMLElement {
@@ -2258,12 +2282,12 @@ function decisionReviewText(event: DecisionReviewEvent): string {
   const delta = review.winProbabilityDelta !== undefined
     ? `; WP gain ${formatPercentagePointDelta(review.winProbabilityDelta)}; ${pointEv}`
     : review.delta !== 0
-      ? `; model gain ${formatEv(review.delta)}`
+      ? `; AI analysis gain ${formatEv(review.delta)}`
       : "";
   if (event.type === "discard") {
-    return `You discarded ${review.selected.join(" ")}; model preferred ${review.recommended.join(" ")}${delta}.`;
+    return `You discarded ${review.selected.join(" ")}; AI advised ${review.recommended.join(" ")}${delta}.`;
   }
-  return `You played ${review.selected.join(" ")}; model preferred ${review.recommended.join(" ")}${delta}.`;
+  return `You played ${review.selected.join(" ")}; AI advised ${review.recommended.join(" ")}${delta}.`;
 }
 
 function sameCards(left: string[], right: string[]): boolean {
@@ -2437,7 +2461,7 @@ function renderGameLog(): void {
     state.selectedLogGameId = filtered[0]?.gameId ?? null;
   }
 
-  els.gameLogSummary.textContent = `${filtered.length} completed game${filtered.length === 1 ? "" : "s"}${selectedOpponent ? ` vs ${engineName(selectedOpponent as Opponent)}` : ""}.`;
+  els.gameLogSummary.textContent = `${filtered.length} completed game${filtered.length === 1 ? "" : "s"}${selectedOpponent ? " vs AI" : ""}.`;
   els.gameLogList.innerHTML = "";
   if (!filtered.length) {
     const empty = document.createElement("p");
@@ -2457,7 +2481,7 @@ function renderGameLog(): void {
       : "Final score unavailable";
     button.innerHTML = "";
     const title = document.createElement("strong");
-    title.textContent = `${shortDate(game.end.at)} · ${engineName(game.opponent)}`;
+    title.textContent = `${shortDate(game.end.at)} · vs AI`;
     const meta = document.createElement("span");
     meta.textContent = `${playerName(game.end.winner)} won ${result}${game.end.result && game.end.result !== "regular" ? ` (${game.end.result})` : ""}`;
     const ev = document.createElement("span");
@@ -2488,7 +2512,7 @@ function renderDecisionReviewPage(): void {
     els.decisionReviewContent.append(empty);
     return;
   }
-  els.decisionReviewSummary.textContent = `${shortDate(selected.end.at)} vs ${engineName(selected.opponent)}.`;
+  els.decisionReviewSummary.textContent = `${shortDate(selected.end.at)} vs AI.`;
   renderGameReportInto(
     els.decisionReviewContent,
     events,
@@ -2592,7 +2616,7 @@ function syncGameLogFilter(games: GameLogRecord[]): void {
   for (const opponent of opponents) {
     const option = document.createElement("option");
     option.value = opponent;
-    option.textContent = engineName(opponent);
+    option.textContent = "AI";
     els.gameLogOpponent.append(option);
   }
   els.gameLogOpponent.value = opponents.includes(selected as Opponent) ? selected : "";
@@ -3037,54 +3061,9 @@ function playerName(player: PlayerKey | undefined): string {
 }
 
 function engineName(engine: string | undefined): string {
-  if (engine === "expert" || engine === "expert-1.1" || engine === "original-1.1") return "Original 1.1";
-  if (engine === "expert-peg-1.2" || engine === "original_exhaustive_peg-1.2") return "Original Exhaustive Peg 1.2";
-  if (
-    engine === "ras-table-1.0" ||
-    engine === "expert_ras-table-1.0" ||
-    engine === "expert_ras_table-2.0" ||
-    engine === "expert-2.0-ras-tables"
-  ) return "Ras Table 2.0";
-  if (
-    engine === "ras-table-peg-1.1" ||
-    engine === "expert_ras-table-peg-1.1" ||
-    engine === "expert_ras_table-peg-3.0" ||
-    engine === "expert-peg-2.1"
-  ) return "Ras Table + Peg 3.0";
-  if (
-    engine === "schell-table-peg-1.1" ||
-    engine === "expert_schell-table-peg-1.1" ||
-    engine === "expert_schell_table-peg-3.0" ||
-    engine === "expert-peg-2.2"
-  ) return "Schell Table + Peg 3.0";
-  if (
-    engine === "schell-table-peg_table-1.2" ||
-    engine === "expert_schell-table-peg_table-1.2" ||
-    engine === "expert_schell_table-peg_table-4.0" ||
-    engine === "expert-peg_table-1.3" ||
-    engine === "expert-peg_table-2.3"
-  ) {
-    return "Schell Table + Peg Table 4.0";
-  }
-  if (engine === "ras-table-peg_table-1.2" || engine === "expert-peg_table-2.2") return "Ras Table + Peg Table 4.0";
-  if (engine === "ras_table-2.0") return "Ras Table 2.0";
-  if (engine === "ras_table-peg-3.0") return "Ras Table + Peg 3.0";
-  if (engine === "ras_table-peg_table-4.0") return "Ras Table + Peg Table 4.0";
-  if (engine === "schell-table-1.0") return "Schell Table 2.0";
-  if (engine === "schell_table-2.0") return "Schell Table 2.0";
-  if (engine === "schell_table-peg-3.0") return "Schell Table + Peg 3.0";
-  if (engine === "schell_table-peg_table-4.0") return "Schell Table + Peg Table 4.0";
-  if (engine === "schell_table-peg_table-5.0") return "Schell Table + Peg Table 5.0";
-  if (engine === "schell_table-peg_table-6.0") return "Schell Table + Peg Table 6.0";
-  if (engine === "schell_table-peg_table-7.0") return "Schell Table + Peg Table 7.0";
-  if (engine === "schell_table-peg_table-8.0") return "Schell Table + Peg Table 8.0";
-  if (engine === "schell_table-peg_table-9.0") return "Schell Table + Peg Table 9.0";
-  if (engine === "schell_table-peg_table-10.0") return "Schell Table + Peg Table 10.0";
-  if (engine === "schell_table-peg_table-11.0") return "Schell Table + Peg Table 11.0";
-  if (engine === "schell_table-peg_table-11.1") return "Schell Table + Peg Table 11.1";
-  if (engine === "schell_table-peg_table-12.0") return "Schell Table + Peg Table 12.0";
-  if (engine === "schell_table-peg_table-13.0") return "Schell Table + Peg Table 13.0";
-  return engine || "-";
+  if (!engine) return "-";
+  const version = engine.match(/(\d+(?:\.\d+)?)$/)?.[1];
+  return version ? `AI ${version}` : "AI";
 }
 
 function normalizeAnalyticsEngine(engine: string | undefined): Opponent {

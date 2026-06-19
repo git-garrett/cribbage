@@ -1264,6 +1264,33 @@ button:disabled {
   max-width: none;
 }
 
+.snapshot-decision-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.snapshot-decision-summary > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.snapshot-decision-summary strong {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.snapshot-decision-summary span {
+  font-weight: 800;
+}
+
 .snapshot-table-surface {
   border-radius: 8px;
 }
