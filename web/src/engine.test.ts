@@ -154,7 +154,7 @@ describe("game state", () => {
     expect(game.ai.score).toBe(3);
     expect(game.state().result).toContain("AI played 10d: 15 and pegged 2.");
     expect(game.state().result).toContain("AI pegged 1 for last card.");
-    expect(game.state().peggingResetPending).toBe(true);
+    expect(game.state().peggingResetPending).toBe(false);
     expect(game.state().completedPlays.at(-1)?.map((card) => card.label)).toEqual(["5d", "10d"]);
   });
 
@@ -177,12 +177,52 @@ describe("game state", () => {
     game.playHumanPeggingCard(game.human.hand[0].id);
 
     expect(game.state().peggingResetPending).toBe(true);
-    expect(game.state().completedPlays.at(-1)?.map((card) => card.label)).toEqual(["5d", "6c", "10h", "10d"]);
+    expect(game.state().count).toBe(31);
+    expect(game.state().turn).toBe("User");
+    expect(game.state().plays.map((card) => card.label)).toEqual(["5d", "6c", "10h", "10d"]);
     expect(() => game.playHumanPeggingCard(game.human.hand[0].id)).toThrow(/Acknowledge/);
 
     game.acknowledgePeggingReset();
 
     expect(game.state().peggingResetPending).toBe(false);
+    expect(game.state().count).toBe(0);
+    expect(game.state().turn).toBe("AI");
+    expect(game.state().plays).toEqual([]);
+    expect(game.state().completedPlays.at(-1)?.map((card) => card.label)).toEqual(["5d", "6c", "10h", "10d"]);
+  });
+
+  test("pauses after go reset until acknowledged", () => {
+    const game = new CribbageGame();
+    game.phase = "pegging";
+    game.pone = game.human;
+    game.dealer = game.ai;
+    game.turn = 0;
+    game.human.score = 0;
+    game.ai.score = 0;
+    game.human.hand = cardsFromString("10d");
+    game.ai.hand = [];
+    game.turnCard = cardsFromString("2d")[0];
+    game.plays = cardsFromString("9d 8c 8h");
+    game.playOwners = ["human", "ai", "human"];
+    game.count = 25;
+    game.goPlayer = game.ai;
+    game.lastPlayer = game.human;
+
+    game.humanPeggingGo();
+
+    expect(game.state().peggingResetPending).toBe(true);
+    expect(game.state().count).toBe(25);
+    expect(game.state().turn).toBe("User");
+    expect(game.state().plays.map((card) => card.label)).toEqual(["9d", "8c", "8h"]);
+    expect(game.human.score).toBe(1);
+
+    game.acknowledgePeggingReset();
+
+    expect(game.state().peggingResetPending).toBe(false);
+    expect(game.state().count).toBe(0);
+    expect(game.state().turn).toBe("AI");
+    expect(game.state().plays).toEqual([]);
+    expect(game.state().completedPlays.at(-1)?.map((card) => card.label)).toEqual(["9d", "8c", "8h"]);
   });
 
   test("keeps user pegging score messages through automatic pegging continuations", () => {

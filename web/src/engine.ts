@@ -1032,6 +1032,14 @@ export class CribbageGame {
   acknowledgePeggingReset(): void {
     if (!this.peggingResetPending) return;
     this.peggingResetPending = false;
+    this.archivePlays();
+    this.plays = [];
+    this.playOwners = [];
+    this.count = 0;
+    this.goPlayer = null;
+    this.lastPlayer = null;
+    this.otherTurn();
+    this.completePeggingIfNoCards();
   }
 
   recommendAiPeggingAction(): { action: "go" } | { action: "play"; card: SerializedCard; cardId: number; ev?: number } {
@@ -1349,7 +1357,6 @@ export class CribbageGame {
       this.count = 0;
       this.goPlayer = null;
       this.lastPlayer = null;
-      this.peggingResetPending = true;
     }
   }
 
@@ -1524,27 +1531,20 @@ export class CribbageGame {
         (points ? ` and pegged ${points}.` : "."),
     );
     if (this.count === 31) {
-      this.archivePlays();
-      this.plays = [];
-      this.playOwners = [];
-      this.count = 0;
-      this.goPlayer = null;
-      this.lastPlayer = null;
       this.recordAnalytics({
         type: "pegging",
         action: "reset",
         handNumber: this.handNumber,
-        count: 0,
+        count: this.count,
         scores: { human: this.human.score, ai: this.ai.score },
         message: "Count hit 31 and resets.",
       });
       this.logEvent("Count hit 31 and resets.");
-      this.otherTurn();
       this.peggingResetPending = true;
     } else if (!this.goPlayer) {
       this.otherTurn();
     }
-    this.completePeggingIfNoCards();
+    if (!this.peggingResetPending) this.completePeggingIfNoCards();
   }
 
   private sayGo(player: PlayerState): void {
@@ -1562,24 +1562,16 @@ export class CribbageGame {
         this.peg(this.lastPlayer, 1);
         this.logEvent(`${this.name(this.lastPlayer)} pegged 1 for go.`);
       }
-      this.archivePlays();
-      this.plays = [];
-      this.playOwners = [];
-      this.count = 0;
-      this.goPlayer = null;
-      this.lastPlayer = null;
       this.recordAnalytics({
         type: "pegging",
         action: "reset",
         handNumber: this.handNumber,
-        count: 0,
+        count: this.count,
         scores: { human: this.human.score, ai: this.ai.score },
         message: "Count resets to 0.",
       });
       this.logEvent("Count resets to 0.");
-      this.otherTurn();
       this.peggingResetPending = true;
-      this.completePeggingIfNoCards();
     } else {
       this.goPlayer = player;
       this.recordAnalytics({
