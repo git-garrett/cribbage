@@ -103,6 +103,7 @@ select {
 
 .topbar {
   position: relative;
+  z-index: 80;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1292,7 +1293,7 @@ button:disabled {
   place-items: center;
   padding: 20px;
   background: rgba(8, 14, 11, 0.22);
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .thinking-overlay[hidden] {
