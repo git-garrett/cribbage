@@ -1937,7 +1937,7 @@ function formatEv(value: number): string {
 }
 
 function formatPercentagePointDelta(value: number): string {
-  return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)} pp`;
+  return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)} percentage points`;
 }
 
 function formatWinProbability(value: number): string {
