@@ -244,6 +244,7 @@ const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-13.0";
 const URL_PARAMS = new URLSearchParams(window.location.search);
 const FULL_APP_MODE = URL_PARAMS.get("full") === "1" || URL_PARAMS.get("mode") === "full";
 const SIMPLE_NETWORK_MODE = !FULL_APP_MODE;
+const FORCE_SPLASH = URL_PARAMS.get("splash") === "1";
 const SESSION_TAG = (URL_PARAMS.get("tag") || "").trim();
 const PLAYER_FIRST_NAME_KEY = "strong-cribbage.playerFirstName.v1";
 const SIMPLE_NETWORK_SESSION_KEY = "strong-cribbage.simpleNetworkSession";
@@ -347,7 +348,7 @@ function saveGame(): void {
 let localGame = loadSavedGame();
 const simpleNetworkSessionValue = SIMPLE_NETWORK_OPPONENT;
 const simpleLoadedState = localGame.state();
-state.splashOpen = SIMPLE_NETWORK_MODE;
+state.splashOpen = SIMPLE_NETWORK_MODE || FORCE_SPLASH;
 state.hasResumableGame = SIMPLE_NETWORK_MODE && localGame.opponent === SIMPLE_NETWORK_OPPONENT && simpleLoadedState.phase !== "game_over";
 if (
   SIMPLE_NETWORK_MODE &&
