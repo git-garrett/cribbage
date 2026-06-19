@@ -252,6 +252,7 @@ const REMOTE_AI_BASE = (URL_PARAMS.get("api") || "").replace(/\/$/, "");
 const REMOTE_AI_EXPLICIT = URL_PARAMS.has("api");
 const IS_VITE_DEV = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV);
 const SERVER_UPLOAD_KEY = "strong-cribbage.serverUploadedGames.v1";
+const ADMIN_HASH = "#strong-admin-13";
 
 let playerFirstName = (localStorage.getItem(PLAYER_FIRST_NAME_KEY) || "").trim();
 
@@ -379,7 +380,15 @@ function applySimpleNetworkMode(): void {
   els.modelLoading.hidden = true;
 }
 
+function applyAdminVisibility(): void {
+  const showAdmin = window.location.hash === ADMIN_HASH;
+  els.adminMenu.hidden = !showAdmin;
+  if (!showAdmin) els.adminMenu.removeAttribute("open");
+}
+
 applySimpleNetworkMode();
+applyAdminVisibility();
+window.addEventListener("hashchange", applyAdminVisibility);
 saveGame();
 render(localGame.state());
 
