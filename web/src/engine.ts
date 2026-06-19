@@ -235,6 +235,19 @@ export interface SerializedCard {
   owner?: string;
 }
 
+export interface AnalyticsScoreComponents {
+  total: number;
+  fifteens?: number;
+  thirtyOne?: number;
+  pairs?: number;
+  runs?: number;
+  flush?: number;
+  knobs?: number;
+  go?: number;
+  lastCard?: number;
+  heels?: number;
+}
+
 export interface GameState {
   phase: Phase;
   message: string;
@@ -264,6 +277,7 @@ export interface GameState {
     owner: string;
     cards: SerializedCard[];
     points: number;
+    components: AnalyticsScoreComponents;
     nextLabel: string;
   } | null;
   analyticsEvents: AnalyticsEvent[];
@@ -289,18 +303,6 @@ export interface AnalyticsDecisionReview {
     recommended: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
     delta: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
   };
-}
-export interface AnalyticsScoreComponents {
-  total: number;
-  fifteens?: number;
-  thirtyOne?: number;
-  pairs?: number;
-  runs?: number;
-  flush?: number;
-  knobs?: number;
-  go?: number;
-  lastCard?: number;
-  heels?: number;
 }
 export type AnalyticsEvComponents = Record<string, number>;
 export type AnalyticsEvent =
@@ -438,6 +440,7 @@ export interface GameSnapshot {
     owner: string;
     rawCards: number[];
     points: number;
+    components?: AnalyticsScoreComponents;
     nextLabel: string;
   } | null;
   phase: Phase;
@@ -720,6 +723,12 @@ export class CribbageGame {
           rawCards: snapshot.scoringReview.rawCards.map((id) => new Card(id)),
           cards: snapshot.scoringReview.rawCards.map((id) => game.serializeCard(new Card(id))),
           points: snapshot.scoringReview.points,
+          components: snapshot.scoringReview.components ??
+            scoreHandComponents(
+              snapshot.scoringReview.rawCards.map((id) => new Card(id)),
+              new Card(snapshot.turnCard),
+              snapshot.scoringReview.stage === "crib",
+            ),
           nextLabel: snapshot.scoringReview.nextLabel,
         }
       : null;
@@ -769,6 +778,7 @@ export class CribbageGame {
             owner: this.scoringReview.owner,
             rawCards: this.scoringReview.rawCards.map((card) => card.id),
             points: this.scoringReview.points,
+            components: this.scoringReview.components,
             nextLabel: this.scoringReview.nextLabel,
           }
         : null,
@@ -921,6 +931,7 @@ export class CribbageGame {
             owner: this.scoringReview.owner,
             cards: this.scoringReview.rawCards.map((card) => this.serializeCard(card)),
             points: this.scoringReview.points,
+            components: this.scoringReview.components,
             nextLabel: this.scoringReview.nextLabel,
           }
         : null,
@@ -1591,29 +1602,29 @@ export class CribbageGame {
     let points: number;
     let title: string;
     let nextLabel: string;
-    let scoreComponents: AnalyticsScoreComponents | undefined;
+    let scoreComponents: AnalyticsScoreComponents;
 
     if (stage === "pone") {
       player = this.pone;
       cards = this.pone.table;
-      scoreComponents = shouldLogScoreComponents() ? scoreHandComponents(cards, this.turnCard) : undefined;
-      points = scoreComponents?.total ?? scoreHand(cards, this.turnCard);
+      scoreComponents = scoreHandComponents(cards, this.turnCard);
+      points = scoreComponents.total;
       title = `${this.name(player)} hand`;
       nextLabel = "Show dealer hand";
       this.phase = "score_pone";
     } else if (stage === "dealer") {
       player = this.dealer;
       cards = this.dealer.table;
-      scoreComponents = shouldLogScoreComponents() ? scoreHandComponents(cards, this.turnCard) : undefined;
-      points = scoreComponents?.total ?? scoreHand(cards, this.turnCard);
+      scoreComponents = scoreHandComponents(cards, this.turnCard);
+      points = scoreComponents.total;
       title = `${this.name(player)} hand`;
       nextLabel = "Show crib";
       this.phase = "score_dealer";
     } else {
       player = this.dealer;
       cards = this.dealer.crib;
-      scoreComponents = shouldLogScoreComponents() ? scoreHandComponents(cards, this.turnCard, true) : undefined;
-      points = scoreComponents?.total ?? scoreHand(cards, this.turnCard, true);
+      scoreComponents = scoreHandComponents(cards, this.turnCard, true);
+      points = scoreComponents.total;
       title = `${this.name(player)} crib`;
       nextLabel = "Next hand";
       this.phase = "score_crib";
@@ -1626,9 +1637,18 @@ export class CribbageGame {
       rawCards: [...cards],
       cards: cards.map((card) => this.serializeCard(card)),
       points,
+      components: scoreComponents,
       nextLabel,
     };
-    this.recordScore(player, stage === "crib" ? "crib" : "hand", points, title, undefined, undefined, scoreComponents);
+    this.recordScore(
+      player,
+      stage === "crib" ? "crib" : "hand",
+      points,
+      title,
+      undefined,
+      undefined,
+      shouldLogScoreComponents() ? scoreComponents : undefined,
+    );
     this.peg(player, points);
     this.logEvent(`${title} scored ${points}.`);
   }

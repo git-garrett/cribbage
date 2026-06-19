@@ -172,9 +172,15 @@ body {
   padding: 0 13px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--surface);
   color: var(--ink);
+  caret-color: var(--ink);
   font-size: 17px;
+}
+
+.splash-name-row input::placeholder {
+  color: var(--muted);
+  opacity: 1;
 }
 
 .splash-name-row input:focus {
@@ -1553,6 +1559,9 @@ button:disabled {
 
 .scoring-result {
   margin-top: 0;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 14px;
+  font-weight: 650;
 }
 
 .played-archive {

@@ -1520,6 +1520,25 @@ function renderScoring(scoring: GameState["scoring"]): void {
   els.scoringPoints.textContent = `${scoring.points} point${scoring.points === 1 ? "" : "s"}`;
   els.continueScoring.textContent = scoring.nextLabel;
   renderCards(els.scoringCards, scoring.cards);
+  els.scoringResult.textContent = scoringBreakdownText(scoring);
+}
+
+function scoringBreakdownText(scoring: NonNullable<GameState["scoring"]>): string {
+  const parts: string[] = [];
+  const entries: Array<[keyof typeof scoring.components, string]> = [
+    ["fifteens", "fifteens"],
+    ["pairs", "pairs"],
+    ["runs", "runs"],
+    ["flush", "flush"],
+    ["knobs", "knobs"],
+  ];
+  for (const [key, label] of entries) {
+    const value = scoring.components[key];
+    if (typeof value === "number" && value > 0) parts.push(`${value} from ${label}`);
+  }
+  const pointLabel = scoring.points === 1 ? "point" : "points";
+  if (!parts.length) return `${scoring.points} ${pointLabel}.`;
+  return `${scoring.points} ${pointLabel}: ${parts.join(", ")}.`;
 }
 
 function renderResult(game: GameState): void {
@@ -1538,7 +1557,7 @@ function renderResult(game: GameState): void {
   state.noticeResultLines = [...lines];
   enqueueNotices(newLines);
   els.resultInline.innerHTML = "";
-  els.scoringResult.innerHTML = "";
+  if (!game.scoring) els.scoringResult.innerHTML = "";
 }
 
 function matchingPrefixLength(left: string[], right: string[]): number {
