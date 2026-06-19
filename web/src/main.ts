@@ -1646,6 +1646,14 @@ function renderGameOver(game: GameState): void {
 
 function renderSingleGameReport(game: GameState, end: GameEndEvent): void {
   els.singleGameReport.innerHTML = "";
+  const newGame = document.createElement("button");
+  newGame.type = "button";
+  newGame.className = "report-new-game";
+  newGame.textContent = "New game";
+  newGame.addEventListener("click", () => {
+    void startNewGameFromUi();
+  });
+  els.singleGameReport.append(newGame);
   renderGameReportInto(els.singleGameReport, game.analyticsEvents, end, "Game report", game.scores);
 }
 
@@ -1660,7 +1668,6 @@ function renderGameReportInto(
     (event): event is ScoreEvent => event.type === "score" && event.gameId === end.gameId,
   );
   const report = singleGameTotals(scoreEvents, end);
-  container.innerHTML = "";
   const title = document.createElement("h2");
   title.textContent = titleText;
   const summary = document.createElement("p");
