@@ -65,6 +65,7 @@ const state: {
   resultOverride: string[] | null;
   parGuides: boolean;
   analyticsOpen: boolean;
+  analyticsMode: "my" | "full";
   gameLogOpen: boolean;
   modelInfoOpen: boolean;
   decisionReviewOpen: boolean;
@@ -91,6 +92,7 @@ const state: {
   resultOverride: null,
   parGuides: localStorage.getItem("strong-cribbage.admin.parGuides") === "1",
   analyticsOpen: false,
+  analyticsMode: "my",
   gameLogOpen: false,
   modelInfoOpen: false,
   decisionReviewOpen: false,
@@ -141,11 +143,13 @@ const els = {
   adminMenu: document.querySelector("#admin-menu") as HTMLElement,
   parGuidesToggle: document.querySelector("#par-guides-toggle") as HTMLInputElement,
   appVersion: document.querySelector("#app-version") as HTMLElement,
+  myStatsOpen: document.querySelector("#my-stats-open") as HTMLButtonElement,
   analyticsOpen: document.querySelector("#analytics-open") as HTMLButtonElement,
   exportGameLog: document.querySelector("#export-game-log") as HTMLButtonElement,
   troubleGame: document.querySelector("#trouble-game") as HTMLButtonElement,
   analyticsClose: document.querySelector("#analytics-close") as HTMLButtonElement,
   analyticsPage: document.querySelector("#analytics-page") as HTMLElement,
+  analyticsTitle: document.querySelector("#analytics-title") as HTMLElement,
   analyticsSummary: document.querySelector("#analytics-summary") as HTMLElement,
   analyticsTotals: document.querySelector("#analytics-totals") as HTMLElement,
   analyticsGames: document.querySelector("#analytics-games") as HTMLElement,
@@ -369,11 +373,9 @@ function applySimpleNetworkMode(): void {
   els.opponent.value = SIMPLE_NETWORK_OPPONENT;
   els.opponent.disabled = true;
   els.opponent.closest("label")?.setAttribute("hidden", "");
-  els.analyticsOpen.hidden = true;
   els.gameLogOpen.hidden = true;
   els.modelInfoOpen.hidden = true;
   els.exportGameLog.hidden = true;
-  els.adminMenu.hidden = true;
   els.modelLoading.hidden = true;
 }
 
@@ -2279,6 +2281,12 @@ function renderAnalytics(): void {
     event.type === "pegging"
   );
 
+  if (state.analyticsMode === "my") {
+    renderMyStats(scoreEvents, gameEvents);
+    return;
+  }
+
+  els.analyticsTitle.textContent = "Analytics";
   const completedGames = gameEvents.filter((event) => event.action === "end").length;
   const startedHands = handEvents.filter((event) => event.action === "start").length;
   els.analyticsSummary.textContent = `${completedGames} completed game${completedGames === 1 ? "" : "s"}; ${startedHands} hand${startedHands === 1 ? "" : "s"} logged.`;
@@ -2320,6 +2328,56 @@ function renderAnalytics(): void {
       event.message,
     ]),
   );
+}
+
+function renderMyStats(scoreEvents: ScoreEvent[], gameEvents: Extract<AnalyticsEvent, { type: "game" }>[]): void {
+  const completedGames = gameEvents.filter((event) => event.action === "end").length;
+  const totals = playerAnalyticsTotals(scoreEvents, gameEvents);
+  els.analyticsTitle.textContent = "My Stats";
+  els.analyticsSummary.textContent = completedGames
+    ? `${completedGames} completed game${completedGames === 1 ? "" : "s"} recorded.`
+    : "No completed games yet.";
+  els.analyticsTotals.innerHTML = "";
+  els.analyticsTotals.append(simpleAnalyticsCard("User", totals.human, "human"));
+  els.analyticsTotals.append(simpleAnalyticsCard("AI", totals.ai, "ai"));
+  renderAnalyticsRows(els.analyticsGames, []);
+  renderAnalyticsRows(els.analyticsHands, []);
+  renderAnalyticsRows(els.analyticsScores, []);
+  renderAnalyticsRows(els.analyticsPegging, []);
+}
+
+function playerAnalyticsTotals(
+  scoreEvents: ScoreEvent[],
+  gameEvents: Extract<AnalyticsEvent, { type: "game" }>[],
+): { human: AnalyticsTotals; ai: AnalyticsTotals } {
+  const human = emptyAnalyticsTotals();
+  const ai = emptyAnalyticsTotals();
+  const opportunities = {
+    human: emptyOpportunitySets(),
+    ai: emptyOpportunitySets(),
+  };
+  for (const event of scoreEvents) {
+    const totals = event.player === "human" ? human : ai;
+    const sets = event.player === "human" ? opportunities.human : opportunities.ai;
+    const key = scoreKey(event.category, event.role);
+    totals[key] += event.points;
+    sets[key].add(`${event.gameId}:${event.handNumber}`);
+  }
+  for (const event of gameEvents) {
+    if (event.action !== "end" || !event.winner) continue;
+    human.games += 1;
+    ai.games += 1;
+    if (event.winner === "human") {
+      human.wins += 1;
+      ai.losses += 1;
+    } else {
+      ai.wins += 1;
+      human.losses += 1;
+    }
+  }
+  applyOpportunityCounts(human, opportunities.human);
+  applyOpportunityCounts(ai, opportunities.ai);
+  return { human, ai };
 }
 
 function renderGameLog(): void {
@@ -2860,6 +2918,32 @@ function analyticsTotalCard(
   return card;
 }
 
+function simpleAnalyticsCard(label: string, totals: AnalyticsTotals, kind: "human" | "ai"): HTMLElement {
+  const card = document.createElement("div");
+  card.className = `analytics-total ${kind}`;
+  const title = document.createElement("strong");
+  title.textContent = label;
+  card.append(title);
+  const add = (text: string, className = ""): void => {
+    const span = document.createElement("span");
+    if (className) span.className = className;
+    span.textContent = text;
+    card.append(span);
+  };
+  const pegging = totals.peggingDealer + totals.peggingPone;
+  const hands = totals.handDealer + totals.handPone;
+  const totalScoring = pegging + hands + totals.crib;
+  add(`Games: ${totals.games}`, "analytics-total-wide");
+  add(`Wins: ${totals.wins}`);
+  add(`Losses: ${totals.losses}`);
+  add(`Total scoring: ${totalScoring}`, "analytics-total-wide");
+  add(`Avg scoring: ${averageLabel(totalScoring, totals.games)}`);
+  add(`Pegging: ${pegging}`);
+  add(`Hands: ${hands}`);
+  add(`Crib: ${totals.crib}`);
+  return card;
+}
+
 function benchmarkLabel(source: string | undefined, games: number | undefined): string {
   if (source === "ras-v-schell-1000") return "1,000 Ras vs Schell";
   if (source === "three-way-ai-vs-ai-900") return "900 three-way AI vs AI";
@@ -3229,8 +3313,9 @@ document.addEventListener("pointerdown", (event) => {
   els.menuToggle.setAttribute("aria-expanded", "false");
 });
 
-els.analyticsOpen.addEventListener("click", () => {
+function openAnalytics(mode: "my" | "full"): void {
   closeDecisionSnapshot();
+  state.analyticsMode = mode;
   state.analyticsOpen = true;
   state.gameLogOpen = false;
   state.modelInfoOpen = false;
@@ -3238,6 +3323,14 @@ els.analyticsOpen.addEventListener("click", () => {
   els.settingsPanel.hidden = true;
   els.menuToggle.setAttribute("aria-expanded", "false");
   render(state.game);
+}
+
+els.myStatsOpen.addEventListener("click", () => {
+  openAnalytics("my");
+});
+
+els.analyticsOpen.addEventListener("click", () => {
+  openAnalytics("full");
 });
 
 els.analyticsClose.addEventListener("click", () => {

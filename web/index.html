@@ -61,12 +61,13 @@
             <span class="throbber" aria-hidden="true"></span>
             <span>Loading model</span>
           </div>
-          <button id="analytics-open" type="button">Analytics</button>
+          <button id="my-stats-open" type="button">My Stats</button>
           <button id="game-log-open" type="button">Game log</button>
           <button id="model-info-open" type="button">Model info</button>
           <button id="export-game-log" type="button">Export games</button>
           <details id="admin-menu" class="admin-menu">
             <summary>Administrator</summary>
+            <button id="analytics-open" type="button">Full analytics</button>
             <label class="toggle-row">
               <span>Par guides</span>
               <input id="par-guides-toggle" type="checkbox" role="switch">
@@ -162,7 +163,7 @@
       <section id="analytics-page" class="analytics-page" aria-label="Analytics" hidden>
         <div class="analytics-header">
           <div>
-            <h2>Analytics</h2>
+            <h2 id="analytics-title">Analytics</h2>
             <p id="analytics-summary">No gameplay recorded yet.</p>
           </div>
           <button id="analytics-close" type="button">Done</button>
