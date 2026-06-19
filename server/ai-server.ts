@@ -287,7 +287,7 @@ async function serveStatic(response: ServerResponse, pathname: string): Promise<
     response.writeHead(200, {
       "content-type": contentType(filePath),
       "content-length": stats.size,
-      "cache-control": filePath.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable",
+      "cache-control": filePath.endsWith(".html") ? "no-cache" : "public, max-age=31536000, immutable",
     });
     createReadStream(filePath).pipe(response);
   } catch {
