@@ -2058,7 +2058,6 @@ function decisionSnapshotTable(event: DecisionReviewEvent, events: AnalyticsEven
   const root = document.createElement("div");
   root.className = "snapshot-table-view";
   root.append(snapshotScoreboard(score, dealer, event, firstDealer));
-  root.append(snapshotDecisionSummary(event));
 
   const table = document.createElement("div");
   table.className = "table snapshot-table-surface";
@@ -2086,6 +2085,7 @@ function decisionSnapshotTable(event: DecisionReviewEvent, events: AnalyticsEven
     );
   }
   root.append(table);
+  root.append(snapshotDecisionSummary(event));
   return root;
 }
 
