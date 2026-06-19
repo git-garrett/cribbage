@@ -251,6 +251,7 @@ export interface GameState {
   turnCard: SerializedCard | null;
   plays: SerializedCard[];
   completedPlays: SerializedCard[][];
+  peggingResetPending: boolean;
   humanHand: SerializedCard[];
   aiHandCount: number;
   humanTable: SerializedCard[];
@@ -426,6 +427,7 @@ export interface GameSnapshot {
   playOwners: PlayerKey[];
   completedPlays: number[][];
   completedPlayOwners: PlayerKey[][];
+  peggingResetPending?: boolean;
   count: number;
   turn: 0 | 1;
   goPlayer: PlayerKey | null;
@@ -634,6 +636,7 @@ export class CribbageGame {
   turn: 0 | 1 = 0;
   goPlayer: PlayerState | null = null;
   lastPlayer: PlayerState | null = null;
+  peggingResetPending = false;
   scoringReview: ScoringReview | null = null;
   phase: Phase = "discard";
   message = "";
@@ -704,6 +707,7 @@ export class CribbageGame {
     game.playOwners = [...snapshot.playOwners];
     game.completedPlays = snapshot.completedPlays.map((group) => group.map((id) => new Card(id)));
     game.completedPlayOwners = snapshot.completedPlayOwners.map((group) => [...group]);
+    game.peggingResetPending = snapshot.peggingResetPending ?? false;
     game.count = snapshot.count;
     game.turn = snapshot.turn;
     game.goPlayer = snapshot.goPlayer ? game.playerByKey(snapshot.goPlayer) : null;
@@ -753,6 +757,7 @@ export class CribbageGame {
       playOwners: [...this.playOwners],
       completedPlays: this.completedPlays.map((group) => group.map((card) => card.id)),
       completedPlayOwners: this.completedPlayOwners.map((group) => [...group]),
+      peggingResetPending: this.peggingResetPending,
       count: this.count,
       turn: this.turn,
       goPlayer: this.goPlayer?.key ?? null,
@@ -808,6 +813,7 @@ export class CribbageGame {
     this.turn = 0;
     this.goPlayer = null;
     this.lastPlayer = null;
+    this.peggingResetPending = false;
     this.pegTableLeads = { human: null, ai: null };
     this.scoringReview = null;
     this.phase = "discard";
@@ -901,6 +907,7 @@ export class CribbageGame {
           this.serializeCard(card, null, this.completedPlayOwners[groupIndex]?.[cardIndex]),
         ),
       ),
+      peggingResetPending: this.peggingResetPending,
       humanHand: humanHand.map((card, index) => this.serializeCard(card, index)),
       aiHandCount: this.ai.hand.length,
       humanTable: this.human.table.map((card) => this.serializeCard(card)),
@@ -966,6 +973,7 @@ export class CribbageGame {
 
   play(cardId: number): void {
     this.beginInteraction();
+    if (this.peggingResetPending) throw new Error("Acknowledge the pegging reset before continuing.");
     if (this.phase !== "pegging" || this.currentPlayer() !== this.human) {
       throw new Error("It is not your turn to play.");
     }
@@ -983,6 +991,7 @@ export class CribbageGame {
 
   playHumanPeggingCard(cardId: number): void {
     this.beginInteraction();
+    if (this.peggingResetPending) throw new Error("Acknowledge the pegging reset before continuing.");
     if (this.phase !== "pegging" || this.currentPlayer() !== this.human) {
       throw new Error("It is not your turn to play.");
     }
@@ -998,6 +1007,7 @@ export class CribbageGame {
 
   go(): void {
     this.beginInteraction();
+    if (this.peggingResetPending) throw new Error("Acknowledge the pegging reset before continuing.");
     if (this.phase !== "pegging" || this.currentPlayer() !== this.human) {
       throw new Error("It is not your turn.");
     }
@@ -1007,6 +1017,7 @@ export class CribbageGame {
   }
 
   humanPeggingGo(): void {
+    if (this.peggingResetPending) throw new Error("Acknowledge the pegging reset before continuing.");
     if (this.phase !== "pegging" || this.currentPlayer() !== this.human) {
       throw new Error("It is not your turn.");
     }
@@ -1016,6 +1027,11 @@ export class CribbageGame {
 
   advancePeggingToHuman(): void {
     this.advanceUntilHuman();
+  }
+
+  acknowledgePeggingReset(): void {
+    if (!this.peggingResetPending) return;
+    this.peggingResetPending = false;
   }
 
   recommendAiPeggingAction(): { action: "go" } | { action: "play"; card: SerializedCard; cardId: number; ev?: number } {
@@ -1035,6 +1051,7 @@ export class CribbageGame {
   }
 
   playAiPeggingCard(cardId: number): void {
+    if (this.peggingResetPending) throw new Error("Acknowledge the pegging reset before continuing.");
     if (this.phase !== "pegging" || this.currentPlayer() !== this.ai) {
       throw new Error("It is not AI's turn to play.");
     }
@@ -1049,6 +1066,7 @@ export class CribbageGame {
   }
 
   aiPeggingGo(): void {
+    if (this.peggingResetPending) throw new Error("Acknowledge the pegging reset before continuing.");
     if (this.phase !== "pegging" || this.currentPlayer() !== this.ai) {
       throw new Error("It is not AI's turn.");
     }
@@ -1131,6 +1149,7 @@ export class CribbageGame {
         } else if (this.phase === "ai_discarding") {
           this.finishDiscard();
         } else if (this.phase === "pegging") {
+          if (this.peggingResetPending) this.acknowledgePeggingReset();
           this.autoPegging();
         } else if (
           this.phase === "pegging_complete" ||
@@ -1250,6 +1269,7 @@ export class CribbageGame {
 
   private beginPegging(): void {
     this.phase = "pegging";
+    this.peggingResetPending = false;
     this.dealer.crib = [...this.crib];
     this.logEvent(`Turn card is ${this.cardLabel(this.turnCard)}.`);
     if (this.turnCard.rankStr === "J") {
@@ -1270,6 +1290,7 @@ export class CribbageGame {
 
   private advanceUntilHuman(): void {
     while (this.phase === "pegging") {
+      if (this.peggingResetPending) return;
       if (this.dealer.hand.length + this.pone.hand.length === 0) {
         this.finishPegging();
         this.phase = "pegging_complete";
@@ -1294,6 +1315,7 @@ export class CribbageGame {
 
   private autoPegging(): void {
     while (this.phase === "pegging") {
+      if (this.peggingResetPending) return;
       if (this.dealer.hand.length + this.pone.hand.length === 0) {
         this.finishPegging();
         this.phase = "pegging_complete";
@@ -1517,6 +1539,7 @@ export class CribbageGame {
       });
       this.logEvent("Count hit 31 and resets.");
       this.otherTurn();
+      this.peggingResetPending = true;
     } else if (!this.goPlayer) {
       this.otherTurn();
     }
@@ -1554,6 +1577,7 @@ export class CribbageGame {
       });
       this.logEvent("Count resets to 0.");
       this.otherTurn();
+      this.peggingResetPending = true;
       this.completePeggingIfNoCards();
     } else {
       this.goPlayer = player;

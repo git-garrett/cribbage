@@ -156,6 +156,33 @@ describe("game state", () => {
     expect(game.state().result).toContain("AI pegged 1 for last card.");
   });
 
+  test("pauses after count reset until acknowledged", () => {
+    const game = new CribbageGame();
+    game.phase = "pegging";
+    game.pone = game.human;
+    game.dealer = game.ai;
+    game.turn = 0;
+    game.human.score = 0;
+    game.ai.score = 0;
+    game.human.hand = cardsFromString("10d 4c");
+    game.ai.hand = cardsFromString("2h");
+    game.turnCard = cardsFromString("2d")[0];
+    game.plays = cardsFromString("5d 6c 10h");
+    game.playOwners = ["human", "ai", "human"];
+    game.count = 21;
+    game.lastPlayer = game.ai;
+
+    game.playHumanPeggingCard(game.human.hand[0].id);
+
+    expect(game.state().peggingResetPending).toBe(true);
+    expect(game.state().completedPlays.at(-1)?.map((card) => card.label)).toEqual(["5d", "6c", "10h", "10d"]);
+    expect(() => game.playHumanPeggingCard(game.human.hand[0].id)).toThrow(/Acknowledge/);
+
+    game.acknowledgePeggingReset();
+
+    expect(game.state().peggingResetPending).toBe(false);
+  });
+
   test("keeps user pegging score messages through automatic pegging continuations", () => {
     const game = new CribbageGame();
     game.phase = "pegging";

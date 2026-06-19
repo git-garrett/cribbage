@@ -200,6 +200,7 @@ const els = {
   scoringCards: document.querySelector("#scoring-cards") as HTMLElement,
   scoringPoints: document.querySelector("#scoring-points") as HTMLElement,
   continueScoring: document.querySelector("#continue-scoring") as HTMLButtonElement,
+  acknowledgePeggingReset: document.querySelector("#acknowledge-pegging-reset") as HTMLButtonElement,
   continuePegging: document.querySelector("#continue-pegging") as HTMLButtonElement,
   gameOverAlert: document.querySelector("#game-over-alert") as HTMLElement,
   gameOverTitle: document.querySelector("#game-over-title") as HTMLElement,
@@ -1390,6 +1391,11 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       saveGame();
       return localGame.state();
     }
+    if (path === "/api/acknowledge-pegging-reset") {
+      localGame.acknowledgePeggingReset();
+      saveGame();
+      return localGame.state();
+    }
     if (path === "/api/complete-decision-reviews") {
       await ensureOpponentResources(DEFAULT_OPPONENT);
       localGame.completePendingDecisionReviews();
@@ -1470,7 +1476,12 @@ function renderCards(container: HTMLElement, cards: GameState["humanHand"], opti
   for (const card of cards) container.append(cardElement(card, options));
 }
 
-function renderPlayedCards(activeCards: GameState["plays"]): void {
+function renderPlayedCards(game: GameState): void {
+  const activeCards = game.plays.length
+    ? game.plays
+    : game.peggingResetPending
+      ? game.completedPlays.at(-1) ?? []
+      : [];
   els.plays.innerHTML = "";
   els.plays.hidden = activeCards.length === 0;
   if (!activeCards.length) return;
@@ -3214,41 +3225,48 @@ function render(game: GameState | null): void {
   const playTitle = playAreaTitle(game);
   els.playAreaTitle.textContent = playTitle;
   els.playAreaTitle.hidden = !playTitle;
-  els.userHandTitle.textContent = game.phase === "pegging" ? "Select card to play" : "User hand";
+  els.userHandTitle.textContent = game.peggingResetPending
+    ? "Press OK to continue"
+    : game.phase === "pegging"
+      ? "Select card to play"
+      : "User hand";
   if (game.phase === "discard") {
     renderCards(els.plays, game.humanHand, { clickable: true });
   } else if (game.scoring) {
     els.plays.innerHTML = "";
     els.plays.hidden = true;
   } else {
-    renderPlayedCards(game.plays);
+    renderPlayedCards(game);
   }
   renderCards(els.humanHand, game.humanHand, {
     clickable: game.phase !== "discard" && game.phase === "pegging" && game.turn === "User",
   });
 
   els.aiHand.innerHTML = "";
-  els.aiStrip.hidden = game.aiHandCount === 0;
+  els.aiStrip.hidden = game.aiHandCount === 0 && game.phase !== "pegging" && !game.peggingResetPending;
   for (let i = 0; i < game.aiHandCount; i += 1) els.aiHand.append(cardBack());
 
   const gameActive = game.phase !== "game_over";
   els.discard.hidden = !gameActive || game.phase !== "discard";
-  els.play.hidden = !gameActive || !(game.phase === "pegging" && game.turn === "User");
+  els.play.hidden = !gameActive || game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User");
   els.go.hidden = true;
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
-  els.play.disabled = !(game.phase === "pegging" && game.turn === "User" && selectedPlayableCard(game));
+  els.play.disabled = game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User" && selectedPlayableCard(game));
   els.go.disabled = !game.canGo;
   els.continueScoring.hidden = game.phase === "game_over";
   els.continueScoring.disabled = game.phase === "game_over" || !game.scoring;
-  els.continuePegging.hidden = game.phase !== "pegging_complete";
+  els.acknowledgePeggingReset.hidden = !game.peggingResetPending;
+  els.continuePegging.hidden = game.peggingResetPending || game.phase !== "pegging_complete";
   if (state.pending) {
     els.discard.disabled = true;
     els.play.disabled = true;
     els.go.disabled = true;
+    els.acknowledgePeggingReset.disabled = true;
     els.newGame.disabled = true;
     els.continueScoring.disabled = true;
     els.continuePegging.disabled = true;
   } else {
+    els.acknowledgePeggingReset.disabled = false;
     els.newGame.disabled = false;
     els.continuePegging.disabled = false;
   }
@@ -3256,11 +3274,11 @@ function render(game: GameState | null): void {
 }
 
 function shouldAdvancePeggingAi(game: GameState): boolean {
-  return game.phase === "pegging" && game.turn === "AI";
+  return game.phase === "pegging" && game.turn === "AI" && !game.peggingResetPending;
 }
 
 function shouldAutoHumanGo(game: GameState): boolean {
-  return game.phase === "pegging" && game.turn === "User" && game.canGo;
+  return game.phase === "pegging" && game.turn === "User" && game.canGo && !game.peggingResetPending;
 }
 
 function waitForPaint(): Promise<void> {
@@ -3528,6 +3546,21 @@ els.go.addEventListener("click", async () => {
   try {
     state.resultOverride = null;
     const next = await api("/api/go-human", {});
+    render(next);
+    await continuePeggingAfterRender(next);
+  } finally {
+    state.pending = false;
+    render(state.game);
+  }
+});
+
+els.acknowledgePeggingReset.addEventListener("click", async () => {
+  if (state.pending) return;
+  state.pending = true;
+  render(state.game);
+  try {
+    state.resultOverride = null;
+    const next = await api("/api/acknowledge-pegging-reset", {});
     render(next);
     await continuePeggingAfterRender(next);
   } finally {
