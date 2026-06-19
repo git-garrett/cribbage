@@ -74,8 +74,6 @@ const state: {
   snapshotEventId: string | null;
   dismissedGameOverId: string | null;
   aiThinking: boolean;
-  aiThinkingStartedAt: number | null;
-  aiThinkingTimer: number | null;
   modelLoading: boolean;
   completingReviews: boolean;
   noticeText: string;
@@ -101,8 +99,6 @@ const state: {
   snapshotEventId: null,
   dismissedGameOverId: null,
   aiThinking: false,
-  aiThinkingStartedAt: null,
-  aiThinkingTimer: null,
   modelLoading: false,
   completingReviews: false,
   noticeText: "",
@@ -114,20 +110,6 @@ const state: {
 
 function setAiThinking(active: boolean): void {
   state.aiThinking = active;
-  if (active) {
-    state.aiThinkingStartedAt = performance.now();
-    if (state.aiThinkingTimer === null) {
-      state.aiThinkingTimer = window.setInterval(() => {
-        if (state.aiThinking || state.modelLoading) render(state.game);
-      }, 250);
-    }
-    return;
-  }
-  state.aiThinkingStartedAt = null;
-  if (state.aiThinkingTimer !== null) {
-    window.clearInterval(state.aiThinkingTimer);
-    state.aiThinkingTimer = null;
-  }
 }
 
 const els = {
@@ -3176,12 +3158,11 @@ function render(game: GameState | null): void {
   const showModelLoadingUi = state.modelLoading && !SIMPLE_NETWORK_MODE;
   els.modelThinking.hidden = !state.aiThinking && !showModelLoadingUi;
   const thinkingLabel = els.modelThinking.querySelector(".thinking-label");
-  const thinkingElapsed = state.aiThinkingStartedAt === null ? "" : ` ${(Math.max(0, performance.now() - state.aiThinkingStartedAt) / 1000).toFixed(1)}s`;
   if (thinkingLabel) {
-    thinkingLabel.textContent = showModelLoadingUi ? "Loading model" : `AI thinking${thinkingElapsed}`;
+    thinkingLabel.textContent = showModelLoadingUi ? "Loading model" : "AI thinking";
   }
   els.thinkingOverlay.hidden = !state.aiThinking && !showModelLoadingUi;
-  els.thinkingOverlayLabel.textContent = showModelLoadingUi ? "Loading model" : `AI thinking${thinkingElapsed}`;
+  els.thinkingOverlayLabel.textContent = showModelLoadingUi ? "Loading model" : "AI thinking";
   els.modelLoading.hidden = !showModelLoadingUi;
   renderCutCard(game.turnCard);
   renderScoring(game.scoring);
