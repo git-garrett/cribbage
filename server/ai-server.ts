@@ -38,6 +38,9 @@ function jsonResponse(response: ServerResponse, status: number, payload: unknown
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(body),
     "cache-control": "no-store",
+    "access-control-allow-origin": "*",
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
   });
   response.end(body);
 }
@@ -47,8 +50,21 @@ function textResponse(response: ServerResponse, status: number, message: string)
     "content-type": "text/plain; charset=utf-8",
     "content-length": Buffer.byteLength(message),
     "cache-control": "no-store",
+    "access-control-allow-origin": "*",
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
   });
   response.end(message);
+}
+
+function optionsResponse(response: ServerResponse): void {
+  response.writeHead(204, {
+    "access-control-allow-origin": "*",
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-max-age": "86400",
+  });
+  response.end();
 }
 
 async function readRequestJson(request: IncomingMessage): Promise<JsonRecord> {
@@ -300,6 +316,10 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
 const server = createServer((request, response) => {
   void (async () => {
     const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
+    if (request.method === "OPTIONS") {
+      optionsResponse(response);
+      return;
+    }
     if (url.pathname === "/health" || url.pathname.startsWith("/api/")) {
       await handleApi(request, response, url.pathname);
       return;

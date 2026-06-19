@@ -235,6 +235,8 @@ const SESSION_TAG = (URL_PARAMS.get("tag") || "").trim();
 const SIMPLE_NETWORK_SESSION_KEY = "strong-cribbage.simpleNetworkSession";
 const REMOTE_AI_DISABLED = URL_PARAMS.get("local") === "1";
 const REMOTE_AI_BASE = (URL_PARAMS.get("api") || "").replace(/\/$/, "");
+const REMOTE_AI_EXPLICIT = URL_PARAMS.has("api");
+const IS_VITE_DEV = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV);
 const SERVER_UPLOAD_KEY = "strong-cribbage.serverUploadedGames.v1";
 
 els.parGuidesToggle.checked = state.parGuides;
@@ -453,20 +455,31 @@ function tagPhoneRecord<T extends object>(record: T): T & { tags?: string[]; ses
 }
 
 function usesRemoteAi(): boolean {
-  return SIMPLE_NETWORK_MODE && !REMOTE_AI_DISABLED;
+  return SIMPLE_NETWORK_MODE && !REMOTE_AI_DISABLED && (!IS_VITE_DEV || REMOTE_AI_EXPLICIT);
 }
 
 async function serverJson<T>(path: string, body: Record<string, unknown>): Promise<T> {
-  const response = await fetch(`${REMOTE_AI_BASE}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(text || `Server request failed with ${response.status}`);
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 120_000);
+  try {
+    const response = await fetch(`${REMOTE_AI_BASE}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const contentType = response.headers.get("content-type") || "";
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(text || `Server request failed with ${response.status}`);
+    }
+    if (!contentType.includes("application/json")) {
+      throw new Error(`Server returned ${contentType || "non-JSON"} instead of JSON.`);
+    }
+    return response.json() as Promise<T>;
+  } finally {
+    window.clearTimeout(timeout);
   }
-  return response.json() as Promise<T>;
 }
 
 function uploadedGameIds(): Set<string> {
@@ -1248,7 +1261,7 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       const opponent = SIMPLE_NETWORK_MODE
         ? SIMPLE_NETWORK_OPPONENT
         : (body?.opponent as Opponent) || DEFAULT_OPPONENT;
-      await ensureOpponentResources(opponent);
+      if (!usesRemoteAi()) await ensureOpponentResources(opponent);
       localGame = new CribbageGame(opponent);
       saveGame();
       return localGame.state();
@@ -1261,7 +1274,7 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       return localGame.state();
     }
     if (path === "/api/discard") {
-      await ensureOpponentResources(localGame.opponent as Opponent);
+      if (!usesRemoteAi()) await ensureOpponentResources(localGame.opponent as Opponent);
       localGame.discard((body?.ids as number[]) || []);
       saveGame();
       return localGame.state();
@@ -3439,7 +3452,7 @@ async function finishDiscardInBackground(): Promise<void> {
 api("/api/state")
   .then(async (game) => {
     render(game);
-    await ensureOpponentResources(localGame.opponent as Opponent);
+    if (!usesRemoteAi()) await ensureOpponentResources(localGame.opponent as Opponent);
     if (game.phase === "ai_discarding") finishDiscardInBackground();
     else await continuePeggingAfterRender(game);
     scheduleDecisionReviewCompletion();
