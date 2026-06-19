@@ -33,21 +33,52 @@ sudo dnf install -y caddy
 sudo systemctl enable --now caddy
 ```
 
-## 4. Deploy the App
+## 4. Build the App Off-Box
+
+Do not build this app on a 1 GB Nanode. The Vite/Rollup build loads large model artifacts and can be killed by the Linux OOM killer. Build on a laptop, workstation, or CI runner, then upload the generated artifacts.
+
+The easiest path is the deploy helper:
+
+```bash
+scripts/deploy-nanode.sh deploy
+```
+
+By default it targets `root@45.79.111.69` using `../2019.private`, builds locally, uploads the artifact, installs the systemd unit, writes the Caddy reverse proxy, restarts services, and checks health.
+
+On the build machine:
+
+```bash
+cd /path/to/cribbage
+git checkout server
+npm ci
+npm run build:deploy
+npm run package:server
+```
+
+This creates `cribbage-server-13.0.0.tgz` containing:
+
+- `dist/` static client
+- `server-dist/` Node server bundle
+- `package.json`
+- this setup document
+
+Upload it:
+
+```bash
+scp cribbage-server-13.0.0.tgz YOUR_USER@your-domain.example.com:/tmp/
+```
+
+## 5. Deploy the App
 
 ```bash
 sudo mkdir -p /opt/cribbage /var/lib/cribbage
 sudo chown -R "$USER":"$USER" /opt/cribbage /var/lib/cribbage
-git clone https://github.com/YOUR_ACCOUNT/YOUR_REPO.git /opt/cribbage
-cd /opt/cribbage
-git checkout server
-npm ci
-npm run build:deploy
+tar -xzf /tmp/cribbage-server-13.0.0.tgz -C /opt/cribbage
 ```
 
-Replace the repo URL with the actual repository remote.
+No `npm ci` or `npm run build:*` step is required on the Nanode for this artifact deploy. The server bundle uses Node built-ins and the bundled generated files.
 
-## 5. Configure systemd
+## 6. Configure systemd
 
 Create `/etc/systemd/system/cribbage.service`:
 
@@ -63,6 +94,7 @@ Environment=HOST=127.0.0.1
 Environment=PORT=8787
 Environment=CRIBBAGE_STATIC_DIR=/opt/cribbage/dist
 Environment=CRIBBAGE_DB_PATH=/var/lib/cribbage/cribbage-server.sqlite
+Environment=NODE_OPTIONS=--max-old-space-size=512
 ExecStart=/usr/bin/node --experimental-sqlite /opt/cribbage/server-dist/server.mjs
 Restart=always
 RestartSec=3
@@ -82,7 +114,7 @@ sudo systemctl status cribbage
 curl http://127.0.0.1:8787/health
 ```
 
-## 6. Configure Caddy
+## 7. Configure Caddy
 
 Set `/etc/caddy/Caddyfile`:
 
@@ -100,7 +132,7 @@ sudo systemctl reload caddy
 curl https://your-domain.example.com/health
 ```
 
-## 7. Operating Notes
+## 8. Operating Notes
 
 - The public app defaults to simple mode. Use `?full=1` or `?mode=full` to expose the full local app UI.
 - Use `?tag=anything` to attach an arbitrary tag to uploaded game logs.
@@ -109,13 +141,66 @@ curl https://your-domain.example.com/health
 - Server AI request logs are stored in the same SQLite database under `ai_requests`.
 - Back up `/var/lib/cribbage/cribbage-server.sqlite` and its WAL files.
 
-## 8. Updating
+## 9. Updating
+
+Use the helper:
 
 ```bash
-cd /opt/cribbage
+scripts/deploy-nanode.sh deploy
+```
+
+Or, if you already built and packaged locally:
+
+```bash
+scripts/deploy-nanode.sh deploy --skip-build
+```
+
+Manual equivalent on the build machine:
+
+```bash
+cd /path/to/cribbage
 git pull
 npm ci
 npm run build:deploy
-sudo systemctl restart cribbage
+npm run package:server
+scp cribbage-server-13.0.0.tgz YOUR_USER@your-domain.example.com:/tmp/
+```
+
+On the Nanode:
+
+```bash
+sudo systemctl stop cribbage
+sudo rm -rf /opt/cribbage/dist /opt/cribbage/server-dist /opt/cribbage/package.json
+tar -xzf /tmp/cribbage-server-13.0.0.tgz -C /opt/cribbage
+sudo systemctl start cribbage
 curl http://127.0.0.1:8787/health
+```
+
+## 10. Pulling Production Data Down
+
+To pull the production SQLite database and service health into a timestamped local folder:
+
+```bash
+scripts/deploy-nanode.sh pull
+```
+
+This writes to `production-pulls/<timestamp>/`, which is intentionally ignored by git.
+
+## 11. If You Must Build on the Nanode
+
+Prefer not to. If you have no other option, add temporary swap first and expect the build to be slow:
+
+```bash
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+free -h
+```
+
+Then try the build. Remove the swap file afterward if you do not want it to persist:
+
+```bash
+sudo swapoff /swapfile
+sudo rm /swapfile
 ```
