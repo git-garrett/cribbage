@@ -759,6 +759,11 @@ button:disabled {
   border-radius: 4px;
 }
 
+.ai-strip .card.placeholder {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .table {
   display: grid;
   gap: 12px;

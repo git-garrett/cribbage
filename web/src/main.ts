@@ -1449,6 +1449,11 @@ function cardBack(): HTMLElement {
   return card;
 }
 
+function aiCardSlots(game: GameState): number {
+  const needsStablePeggingSpace = game.phase === "pegging" || game.phase === "pegging_complete" || game.peggingResetPending;
+  return needsStablePeggingSpace ? Math.max(4, game.aiHandCount) : game.aiHandCount;
+}
+
 function onCardClick(card: GameState["humanHand"][number]): void {
   if (state.pending) return;
   const game = state.game;
@@ -3230,8 +3235,16 @@ function render(game: GameState | null): void {
   });
 
   els.aiHand.innerHTML = "";
-  els.aiStrip.hidden = game.aiHandCount === 0 && game.phase !== "pegging" && !game.peggingResetPending;
-  for (let i = 0; i < game.aiHandCount; i += 1) els.aiHand.append(cardBack());
+  els.aiStrip.hidden = game.phase === "game_over";
+  const aiSlots = aiCardSlots(game);
+  for (let i = 0; i < aiSlots; i += 1) {
+    const card = cardBack();
+    if (i >= game.aiHandCount) {
+      card.classList.add("placeholder");
+      card.setAttribute("aria-hidden", "true");
+    }
+    els.aiHand.append(card);
+  }
 
   const gameActive = game.phase !== "game_over";
   els.discard.hidden = !gameActive || game.phase !== "discard";
