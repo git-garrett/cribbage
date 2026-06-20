@@ -6,6 +6,10 @@ import cribScoreHistogramByDiscardCut from "./models/rank-crib-discard/crib-scor
 import handRankScoreByKeepCut from "./models/rank-crib-discard/hand-rank-score-by-keep-cut.json";
 import peggingPairwise12Manifest from "./models/schell_table-peg_table-12.0/pegging-outcome-pairwise.manifest.json";
 import peggingPairwise12Url from "./models/schell_table-peg_table-12.0/pegging-outcome-pairwise.bin?url";
+import model13HoldManifest from "./models/schell_table-peg_table-13.0/pegging-remaining-hand-distribution.manifest.json";
+import model13HoldUrl from "./models/schell_table-peg_table-13.0/pegging-remaining-hand-distribution.bin?url";
+import model13LeadManifest from "./models/schell_table-peg_table-13.0/pone-lead-frequency.manifest.json";
+import model13LeadUrl from "./models/schell_table-peg_table-13.0/pone-lead-frequency.bin?url";
 import peggingPairwise14Manifest from "./models/schell_table-peg_table-14.0/pegging-outcome-tripolicy-aligned.manifest.json";
 import peggingPairwise14Url from "./models/schell_table-peg_table-14.0/pegging-outcome-tripolicy-aligned.bin?url";
 import cribTripolicy14Manifest from "./models/schell_table-peg_table-14.0/crib-score-histogram-tripolicy-by-discard-cut.manifest.json";
@@ -2106,6 +2110,11 @@ type PeggingHoldTable = {
   ranks: string[];
   roles: Record<"dealer" | "pone", Record<string, { prefixes: Record<string, PeggingHoldPrefix | undefined> } | undefined>>;
 };
+type Model13HoldManifest = {
+  ranks: string[];
+  handKeys: string[];
+  prefixKeys: string[];
+};
 type PegSimulationState = {
   hands: Record<PlayerKey, RankCounts>;
   plays: number[];
@@ -2153,7 +2162,7 @@ type ScorePhaseStats = {
 };
 type BoardPositionStats = { global: Record<ScorePhase, ScorePhaseStats> };
 type PeggingOutcomeDistribution = {
-  outcomes: Map<string, number>;
+  outcomes: Map<number, number>;
   totalWeight: number;
 };
 type PeggingOutcomeSummary = {
@@ -2196,6 +2205,10 @@ type PoneLeadFrequencyTable = {
     order: Array<{ rank: string; count: number; probability: number }>;
   }>;
 };
+type Model13LeadManifest = {
+  ranks: string[];
+  keepKeys: string[];
+};
 
 const pegCardCache = Array.from({ length: 13 }, (_, rank) => new Card(rank));
 const PEG_TABLE_POLICIES: Partial<Record<Opponent, PegTablePolicy>> = {};
@@ -2208,6 +2221,8 @@ const DISCARD_WIN_BASE_OUTCOME_CACHE = new Map<string, DiscardWinBaseOutcome[]>(
 const DISCARD_WIN_BASE_OUTCOME_CACHE_LIMIT = 1500;
 const PAIRWISE_PEGGING_OUTCOME_CACHE = new Map<string, PeggingOutcomeSummary | null>();
 const PAIRWISE_PEGGING_OUTCOME_CACHE_LIMIT = 5000;
+const OPPONENT_RANK_HANDS_CACHE = new Map<string, WeightedRankHand[]>();
+const OPPONENT_RANK_HANDS_CACHE_LIMIT = 10000;
 const MODEL13_PEGGING_DECISION_CACHE = new Map<string, { cardId: number; ev: number }>();
 const MODEL13_PEGGING_DECISION_CACHE_LIMIT = 500;
 const MODEL13_OPTIMAL_PEGGING_TREE_CACHE = new Map<string, PeggingOutcomeDistribution>();
@@ -2251,9 +2266,9 @@ const PEGGING_HOLD_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Pegging
   "schell_table-peg_table-12.0": () =>
     import("./models/schell_table-peg_table-11.1/pegging-remaining-hand-distribution.json").then((module) => module.default as unknown as PeggingHoldTable),
   "schell_table-peg_table-13.0": () =>
-    import("./models/schell_table-peg_table-13.0/pegging-remaining-hand-distribution.json").then((module) => module.default as unknown as PeggingHoldTable),
+    loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
   "schell_table-peg_table-14.0": () =>
-    import("./models/schell_table-peg_table-13.0/pegging-remaining-hand-distribution.json").then((module) => module.default as unknown as PeggingHoldTable),
+    loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
 };
 const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<PeggingPairwiseTable>>> = {
   "schell_table-peg_table-12.0": () =>
@@ -2265,9 +2280,9 @@ const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Peg
 };
 const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLeadFrequencyTable>>> = {
   "schell_table-peg_table-13.0": () =>
-    import("./models/schell_table-peg_table-13.0/pone-lead-frequency.json").then((module) => module.default as unknown as PoneLeadFrequencyTable),
+    loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
   "schell_table-peg_table-14.0": () =>
-    import("./models/schell_table-peg_table-13.0/pone-lead-frequency.json").then((module) => module.default as unknown as PoneLeadFrequencyTable),
+    loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
 };
 const CRIB_TRIPOLICY_LOADERS: Partial<Record<Opponent, () => Promise<CribTripolicyTable>>> = {
   "schell_table-peg_table-14.0": () =>
@@ -2547,6 +2562,94 @@ async function loadTripolicyCribTable(url: string, manifest: CribTripolicyManife
     directoryRecordBytes,
     opponentRecordBytes,
     entryCount,
+  };
+}
+
+async function loadModel13LeadTable(url: string, manifest: Model13LeadManifest): Promise<PoneLeadFrequencyTable> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Unable to load 13.0 lead table: ${response.status}`);
+  const buffer = await response.arrayBuffer();
+  const view = new DataView(buffer);
+  const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  if (magic !== "P13L") throw new Error(`Unexpected 13.0 lead table magic: ${magic}`);
+  const version = view.getUint16(4, true);
+  const recordBytes = view.getUint16(6, true);
+  const entryCount = view.getUint32(8, true);
+  const recordsOffset = view.getUint32(12, true);
+  if (version !== 1 || recordBytes !== 18 || entryCount !== manifest.keepKeys.length) {
+    throw new Error(`Invalid 13.0 lead table header: v${version}, ${recordBytes} bytes, ${entryCount} entries`);
+  }
+  const table: PoneLeadFrequencyTable["table"] = {};
+  for (let index = 0; index < entryCount; index += 1) {
+    const offset = recordsOffset + (index * recordBytes);
+    const samples = view.getUint32(offset, true);
+    const count = view.getUint8(offset + 4);
+    const order: Array<{ rank: string; count: number; probability: number }> = [];
+    for (let orderIndex = 0; orderIndex < Math.min(13, count); orderIndex += 1) {
+      const rank = view.getUint8(offset + 5 + orderIndex);
+      if (rank < manifest.ranks.length) order.push({ rank: manifest.ranks[rank], count: 0, probability: 0 });
+    }
+    table[manifest.keepKeys[index]] = { samples, order };
+  }
+  return {
+    version: 1,
+    ranks: manifest.ranks,
+    totals: {
+      compactHandsSeen: 0,
+      poneHandsSeen: 0,
+      poneHandsWithLead: 0,
+      keepBuckets: entryCount,
+    },
+    table,
+  };
+}
+
+async function loadModel13HoldTable(url: string, manifest: Model13HoldManifest): Promise<PeggingHoldTable> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Unable to load 13.0 hold table: ${response.status}`);
+  const buffer = await response.arrayBuffer();
+  const view = new DataView(buffer);
+  const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  if (magic !== "P13H") throw new Error(`Unexpected 13.0 hold table magic: ${magic}`);
+  const version = view.getUint16(4, true);
+  const contextBytes = view.getUint16(6, true);
+  const contextCount = view.getUint32(8, true);
+  const recordCount = view.getUint32(12, true);
+  const contextOffset = view.getUint32(16, true);
+  const recordsOffset = view.getUint32(20, true);
+  const recordBytes = view.getUint16(24, true);
+  if (version !== 1 || contextBytes !== 16 || recordBytes !== 6) {
+    throw new Error(`Invalid 13.0 hold table header: v${version}, ${contextBytes}/${recordBytes}`);
+  }
+  const roles: PeggingHoldTable["roles"] = {
+    dealer: {},
+    pone: {},
+  };
+  for (const role of ["dealer", "pone"] as const) {
+    for (const length of ["0", "1", "2", "3"]) roles[role][length] = { prefixes: {} };
+  }
+  for (let index = 0; index < contextCount; index += 1) {
+    const offset = contextOffset + (index * contextBytes);
+    const role = view.getUint8(offset) === 0 ? "dealer" : "pone";
+    const prefixLength = String(view.getUint8(offset + 1));
+    const prefixKey = manifest.prefixKeys[view.getUint16(offset + 2, true)] ?? "";
+    const samples = view.getUint32(offset + 4, true);
+    const firstRecord = view.getUint32(offset + 8, true);
+    const contextRecordCount = view.getUint16(offset + 12, true);
+    const remainingHands: Record<string, number> = {};
+    for (let recordIndex = 0; recordIndex < contextRecordCount; recordIndex += 1) {
+      const recordOffset = recordsOffset + ((firstRecord + recordIndex) * recordBytes);
+      if (firstRecord + recordIndex >= recordCount) break;
+      const handKey = manifest.handKeys[view.getUint16(recordOffset, true)];
+      if (!handKey) continue;
+      remainingHands[handKey] = view.getUint32(recordOffset + 2, true);
+    }
+    roles[role][prefixLength] ??= { prefixes: {} };
+    roles[role][prefixLength]!.prefixes[prefixKey] = { samples, remainingHands };
+  }
+  return {
+    ranks: manifest.ranks,
+    roles,
   };
 }
 
@@ -2934,13 +3037,22 @@ function opponentRankHandsForEngine(
   opponentRole: "dealer" | "pone",
   engine: Opponent,
 ): WeightedRankHand[] {
-  const hands = enumerateRankHands(available, size);
-  const holdTable = PEGGING_HOLD_TABLES[engine];
-  if (!holdTable || hands.length === 0) return hands;
   const prefixRanks = opponent.table.slice(0, 3).map((card) => card.rank);
   const prefixKey = rankPrefixKey(prefixRanks);
+  const cacheKey = `${engine}:${opponentRole}:${size}:${available.join("")}:${prefixRanks.length}:${prefixKey}`;
+  const cached = OPPONENT_RANK_HANDS_CACHE.get(cacheKey);
+  if (cached) return cached;
+  const hands = enumerateRankHands(available, size);
+  const holdTable = PEGGING_HOLD_TABLES[engine];
+  if (!holdTable || hands.length === 0) {
+    boundedCacheSet(OPPONENT_RANK_HANDS_CACHE, cacheKey, hands, OPPONENT_RANK_HANDS_CACHE_LIMIT);
+    return hands;
+  }
   const context = holdTable.roles[opponentRole]?.[String(prefixRanks.length)]?.prefixes[prefixKey];
-  if (!context) return hands;
+  if (!context) {
+    boundedCacheSet(OPPONENT_RANK_HANDS_CACHE, cacheKey, hands, OPPONENT_RANK_HANDS_CACHE_LIMIT);
+    return hands;
+  }
 
   const empiricalHands = hands
     .map((hand) => ({
@@ -2948,6 +3060,7 @@ function opponentRankHandsForEngine(
       weight: context.remainingHands[rankCountKey(hand.ranks)] ?? 0,
     }))
     .filter((hand) => hand.weight > 0);
+  boundedCacheSet(OPPONENT_RANK_HANDS_CACHE, cacheKey, empiricalHands, OPPONENT_RANK_HANDS_CACHE_LIMIT);
   return empiricalHands;
 }
 
@@ -3545,7 +3658,7 @@ function peggingOutcomeDistributionForCandidate(
   const immediateScore = scoreCount([...game.plays, card]);
   const countAfterPlay = game.count + card.value;
   const memo = new Map<string, PeggingOutcomeDistribution>();
-  const outcomes = new Map<string, number>();
+  const outcomes = new Map<number, number>();
   let totalWeight = 0;
 
   for (const possibleOpponentHand of opponentHands) {
@@ -3582,7 +3695,7 @@ function optimalPeggingOutcomeDistributionForCandidate(
   const immediateScore = scoreCount([...game.plays, card]);
   const countAfterPlay = game.count + card.value;
   const rootScores = { human: game.human.score, ai: game.ai.score };
-  const outcomes = new Map<string, number>();
+  const outcomes = new Map<number, number>();
   let totalWeight = 0;
 
   if (rootScores[player.key] + immediateScore >= 121) {
@@ -3688,7 +3801,7 @@ function simulateOptimalPeggingDistribution(state: OptimalPegSimulationState): P
       bestPointEv = pointEv;
     }
   }
-  const result = best ?? { outcomes: new Map([["0,0", 1]]), totalWeight: 1 };
+  const result = best ?? { outcomes: new Map([[outcomeKey(0, 0), 1]]), totalWeight: 1 };
   cacheModel13OptimalPeggingTree(key, result);
   return result;
 }
@@ -3736,7 +3849,10 @@ function outcomeFromScores(
 ): PeggingOutcomeDistribution {
   const opponent = otherPlayerKey(perspective);
   return {
-    outcomes: new Map([[`${Math.max(0, scores[perspective] - rootScores[perspective])},${Math.max(0, scores[opponent] - rootScores[opponent])}`, 1]]),
+    outcomes: new Map([[outcomeKey(
+      Math.max(0, scores[perspective] - rootScores[perspective]),
+      Math.max(0, scores[opponent] - rootScores[opponent]),
+    ), 1]]),
     totalWeight: 1,
   };
 }
@@ -3803,7 +3919,7 @@ function simulatePeggingDistribution(
 
   const remainingCards = rankCountTotal(state.hands.human) + rankCountTotal(state.hands.ai);
   if (remainingCards === 0) {
-    const outcomes = new Map<string, number>();
+    const outcomes = new Map<number, number>();
     if (state.lastPlayer && state.count !== 0) {
       addOutcomeForPlayer(outcomes, state.perspective, state.lastPlayer, 1, 1);
     } else {
@@ -3825,7 +3941,7 @@ function simulatePeggingDistribution(
         goPlayer: null,
         lastPlayer: null,
       }, memo);
-      const outcomes = new Map<string, number>();
+      const outcomes = new Map<number, number>();
       const goPlayer = state.lastPlayer && state.count !== 31 ? state.lastPlayer : null;
       for (const [futureKey, weight] of future.outcomes) {
         const [my, opponent] = parseOutcomeKey(futureKey);
@@ -3849,7 +3965,7 @@ function simulatePeggingDistribution(
     return result;
   }
 
-  const outcomes = new Map<string, number>();
+  const outcomes = new Map<number, number>();
   let totalWeight = 0;
   for (const rank of legalRanks) {
     const branchWeight = state.hands[state.current][rank];
@@ -4090,13 +4206,17 @@ function erf(value: number): number {
   return sign * y;
 }
 
-function addOutcome(outcomes: Map<string, number>, my: number, opponent: number, weight: number): void {
-  const key = `${my},${opponent}`;
+function outcomeKey(my: number, opponent: number): number {
+  return (Math.max(0, Math.round(my)) * 64) + Math.max(0, Math.round(opponent));
+}
+
+function addOutcome(outcomes: Map<number, number>, my: number, opponent: number, weight: number): void {
+  const key = outcomeKey(my, opponent);
   outcomes.set(key, (outcomes.get(key) ?? 0) + weight);
 }
 
 function addOutcomeForPlayer(
-  outcomes: Map<string, number>,
+  outcomes: Map<number, number>,
   perspective: PlayerKey,
   player: PlayerKey,
   points: number,
@@ -4105,9 +4225,8 @@ function addOutcomeForPlayer(
   addOutcome(outcomes, player === perspective ? points : 0, player === perspective ? 0 : points, weight);
 }
 
-function parseOutcomeKey(key: string): [number, number] {
-  const [my, opponent] = key.split(",").map((value) => Number.parseInt(value, 10));
-  return [my, opponent];
+function parseOutcomeKey(key: number): [number, number] {
+  return [Math.floor(key / 64), key % 64];
 }
 
 function expectedCribScore(

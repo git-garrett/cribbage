@@ -21,6 +21,7 @@
     "build:tripolicy-crib-discard-table": "node scripts/build-tripolicy-crib-discard-table.cjs",
     "pack:tripolicy-crib-discard-table": "node scripts/pack-tripolicy-crib-discard-asset.cjs",
     "align:tripolicy-pegging-table": "node scripts/align-tripolicy-pegging-asset.cjs",
+    "pack:model13-support-assets": "node scripts/pack-model13-support-assets.cjs",
     "analyze:ai-run": "node --no-warnings scripts/analyze-ai-run.cjs",
     "import:ai-game-logs": "node scripts/import-ai-game-logs.cjs",
     "compact:ai-games": "node scripts/compact-existing-ai-games.cjs",
