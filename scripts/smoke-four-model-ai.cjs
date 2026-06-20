@@ -22,6 +22,7 @@ const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
 const rankIndex = new Map(ranks.map((rank, index) => [rank, index]));
 
 const currentModels = [
+  "schell_table-peg_table-14.0",
   "schell_table-peg_table-13.0",
   "schell_table-peg_table-12.0",
   "schell_table-peg_table-11.1",
@@ -56,6 +57,7 @@ const labels = {
   "schell_table-peg_table-11.1": "Schell Table + Peg Table 11.1",
   "schell_table-peg_table-12.0": "Schell Table + Peg Table 12.0",
   "schell_table-peg_table-13.0": "Schell Table + Peg Table 13.0",
+  "schell_table-peg_table-14.0": "Schell Table + Peg Table 14.0",
   "schell_table-peg_table-6.0": "Schell Table + Peg Table 6.0",
   "ras_table-peg_table-4.0": "Ras Table + Peg Table 4.0",
   "schell_table-peg-3.0": "Schell Table + Peg 3.0",
@@ -206,6 +208,18 @@ function patchEngineAssetImports(source) {
       const assetPath = path.join(path.dirname(enginePath), "models", "schell_table-peg_table-12.0", "pegging-outcome-pairwise.bin");
       return `const peggingPairwise12Url = ${JSON.stringify(pathToFileURL(assetPath).href)};`;
     },
+  ).replace(
+    /import\s+peggingPairwise14Url\s+from\s+"\.\/models\/schell_table-peg_table-14\.0\/pegging-outcome-tripolicy-packed\.bin\?url";/,
+    () => {
+      const assetPath = path.join(path.dirname(enginePath), "models", "schell_table-peg_table-14.0", "pegging-outcome-tripolicy-packed.bin");
+      return `const peggingPairwise14Url = ${JSON.stringify(pathToFileURL(assetPath).href)};`;
+    },
+  ).replace(
+    /import\s+cribTripolicy14Url\s+from\s+"\.\/models\/schell_table-peg_table-14\.0\/crib-score-histogram-tripolicy-by-discard-cut\.json\?url";/,
+    () => {
+      const assetPath = path.join(path.dirname(enginePath), "models", "schell_table-peg_table-14.0", "crib-score-histogram-tripolicy-by-discard-cut.json");
+      return `const cribTripolicy14Url = ${JSON.stringify(pathToFileURL(assetPath).href)};`;
+    },
   );
 }
 
@@ -221,6 +235,8 @@ function installLocalAssetFetch() {
         ok: true,
         status: 200,
         arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+        json: async () => JSON.parse(bytes.toString("utf8")),
+        text: async () => bytes.toString("utf8"),
       };
     }
     if (!nativeFetch) throw new Error(`No fetch implementation available for ${url}`);

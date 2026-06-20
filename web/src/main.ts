@@ -216,6 +216,7 @@ const els = {
   humanHand: document.querySelector("#human-hand") as HTMLElement,
   aiHand: document.querySelector("#ai-hand") as HTMLElement,
   discard: document.querySelector("#discard") as HTMLButtonElement,
+  cutForDeal: document.querySelector("#cut-for-deal") as HTMLButtonElement,
   play: document.querySelector("#play") as HTMLButtonElement,
   go: document.querySelector("#go") as HTMLButtonElement,
   newGame: document.querySelector("#new-game") as HTMLButtonElement,
@@ -341,12 +342,12 @@ interface DecisionErrorAverages {
 
 function loadSavedGame(): CribbageGame {
   const saved = safeLocalStorageGet(SAVE_KEY);
-  if (!saved) return new CribbageGame(SIMPLE_NETWORK_MODE ? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT);
+  if (!saved) return new CribbageGame(SIMPLE_NETWORK_MODE ? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT, undefined, { dealMode: "cut" });
   try {
     return CribbageGame.restore(JSON.parse(saved) as GameSnapshot);
   } catch {
     safeLocalStorageRemove(SAVE_KEY);
-    return new CribbageGame(SIMPLE_NETWORK_MODE ? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT);
+    return new CribbageGame(SIMPLE_NETWORK_MODE ? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT, undefined, { dealMode: "cut" });
   }
 }
 
@@ -369,7 +370,7 @@ if (
     simpleLoadedState.phase === "game_over"
   )
 ) {
-  localGame = new CribbageGame(SIMPLE_NETWORK_OPPONENT);
+  localGame = new CribbageGame(SIMPLE_NETWORK_OPPONENT, undefined, { dealMode: "cut" });
 }
 state.hasResumableGame = SIMPLE_NETWORK_MODE && localGame.opponent === SIMPLE_NETWORK_OPPONENT && localGame.state().phase !== "game_over";
 if (SIMPLE_NETWORK_MODE) {
@@ -1347,7 +1348,12 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
         ? SIMPLE_NETWORK_OPPONENT
         : (body?.opponent as Opponent) || DEFAULT_OPPONENT;
       if (!usesRemoteAi()) await ensureOpponentResources(opponent);
-      localGame = new CribbageGame(opponent);
+      localGame = new CribbageGame(opponent, undefined, { dealMode: "cut" });
+      saveGame();
+      return localGame.state();
+    }
+    if (path === "/api/cut-for-deal") {
+      localGame.cutForDeal();
       saveGame();
       return localGame.state();
     }
@@ -1537,6 +1543,31 @@ function renderPlayedCards(game: GameState): void {
   active.className = "cards played-active pegging-row";
   for (const card of activeCards) active.append(cardElement(card));
   els.plays.append(active);
+}
+
+function renderDealCut(game: GameState): void {
+  els.plays.innerHTML = "";
+  els.plays.hidden = false;
+  const row = document.createElement("div");
+  row.className = "cards played-active pegging-row deal-cut-row";
+  row.append(cardBack());
+  if (game.cutForDeal?.human) {
+    const human = document.createElement("div");
+    human.className = "cut-result";
+    const label = document.createElement("span");
+    label.textContent = "User";
+    human.append(label, cardElement(game.cutForDeal.human));
+    row.append(human);
+  }
+  if (game.cutForDeal?.ai) {
+    const ai = document.createElement("div");
+    ai.className = "cut-result";
+    const label = document.createElement("span");
+    label.textContent = "AI";
+    ai.append(label, cardElement(game.cutForDeal.ai));
+    row.append(ai);
+  }
+  els.plays.append(row);
 }
 
 function renderCutCard(card: GameState["turnCard"]): void {
@@ -2877,6 +2908,7 @@ function sortedAnalyticsEngines(
 
 function analyticsEngineSortKey(engine: Opponent): number {
   return [
+    "schell_table-peg_table-14.0",
     "schell_table-peg_table-13.0",
     "schell_table-peg_table-12.0",
     "schell_table-peg_table-11.1",
@@ -3209,6 +3241,7 @@ function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
     engine === "schell_table-peg_table-11.1" ||
     engine === "schell_table-peg_table-12.0" ||
     engine === "schell_table-peg_table-13.0" ||
+    engine === "schell_table-peg_table-14.0" ||
     engine === "schell_table-2.0"
   ) {
     return engine;
@@ -3230,6 +3263,7 @@ function shortDate(value: string): string {
 }
 
 function playAreaTitle(game: GameState): string {
+  if (game.phase === "cut_for_deal") return game.cutForDeal?.prompt || "Tap the deck to cut for first deal";
   if (game.phase === "discard") {
     return game.cribOwner === "User"
       ? "Select two cards to discard to your crib"
@@ -3298,10 +3332,14 @@ function render(game: GameState | null): void {
   els.playAreaTitle.hidden = !playTitle;
   els.userHandTitle.textContent = game.peggingResetPending
     ? "Press OK to continue"
-    : game.phase === "pegging"
+    : game.phase === "cut_for_deal"
+      ? "Cut for deal"
+      : game.phase === "pegging"
       ? "Select card to play"
       : "User hand";
-  if (game.phase === "discard") {
+  if (game.phase === "cut_for_deal") {
+    renderDealCut(game);
+  } else if (game.phase === "discard") {
     renderCards(els.plays, game.humanHand, { clickable: true });
   } else if (game.scoring) {
     els.plays.innerHTML = "";
@@ -3326,10 +3364,12 @@ function render(game: GameState | null): void {
   }
 
   const gameActive = game.phase !== "game_over";
+  els.cutForDeal.hidden = !gameActive || game.phase !== "cut_for_deal";
   els.discard.hidden = !gameActive || game.phase !== "discard";
   els.play.hidden = !gameActive || game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User");
   els.go.hidden = true;
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
+  els.cutForDeal.disabled = game.phase !== "cut_for_deal";
   els.play.disabled = game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User" && selectedPlayableCard(game));
   els.go.disabled = !game.canGo;
   els.continueScoring.hidden = game.phase === "game_over";
@@ -3338,6 +3378,7 @@ function render(game: GameState | null): void {
   els.continuePegging.hidden = game.peggingResetPending || game.phase !== "pegging_complete";
   if (state.pending) {
     els.discard.disabled = true;
+    els.cutForDeal.disabled = true;
     els.play.disabled = true;
     els.go.disabled = true;
     els.acknowledgePeggingReset.disabled = true;
@@ -3367,7 +3408,10 @@ function waitForPaint(): Promise<void> {
 }
 
 async function prepareModel13Pegging(game: GameState): Promise<void> {
-  if (game.phase !== "pegging" || localGame.opponent !== "schell_table-peg_table-13.0") return;
+  if (
+    game.phase !== "pegging" ||
+    (localGame.opponent !== "schell_table-peg_table-13.0" && localGame.opponent !== "schell_table-peg_table-14.0")
+  ) return;
   setAiThinking(true);
   render(game);
   await waitForPaint();
@@ -3568,6 +3612,22 @@ els.gameOverClose.addEventListener("click", () => {
   const end = state.game ? latestGameEnd(state.game) : null;
   state.dismissedGameOverId = end?.gameId ?? null;
   render(state.game);
+});
+
+els.cutForDeal.addEventListener("click", async () => {
+  if (state.pending) return;
+  state.pending = true;
+  render(state.game);
+  await waitForPaint();
+  try {
+    state.resultOverride = null;
+    const next = await api("/api/cut-for-deal", {});
+    state.selected.clear();
+    render(next);
+  } finally {
+    state.pending = false;
+    render(state.game);
+  }
 });
 
 els.discard.addEventListener("click", async () => {

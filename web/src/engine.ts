@@ -6,6 +6,9 @@ import cribScoreHistogramByDiscardCut from "./models/rank-crib-discard/crib-scor
 import handRankScoreByKeepCut from "./models/rank-crib-discard/hand-rank-score-by-keep-cut.json";
 import peggingPairwise12Manifest from "./models/schell_table-peg_table-12.0/pegging-outcome-pairwise.manifest.json";
 import peggingPairwise12Url from "./models/schell_table-peg_table-12.0/pegging-outcome-pairwise.bin?url";
+import peggingPairwise14Manifest from "./models/schell_table-peg_table-14.0/pegging-outcome-tripolicy-packed.manifest.json";
+import peggingPairwise14Url from "./models/schell_table-peg_table-14.0/pegging-outcome-tripolicy-packed.bin?url";
+import cribTripolicy14Url from "./models/schell_table-peg_table-14.0/crib-score-histogram-tripolicy-by-discard-cut.json?url";
 
 export type PlayerKey = "human" | "ai";
 export type Opponent =
@@ -26,6 +29,7 @@ export type Opponent =
   | "schell_table-peg_table-11.1"
   | "schell_table-peg_table-12.0"
   | "schell_table-peg_table-13.0"
+  | "schell_table-peg_table-14.0"
   | "schell_table-2.0";
 type LegacyOpponent =
   | "ras-table-1.0"
@@ -54,6 +58,7 @@ type LegacyOpponent =
 type StoredOpponent = Opponent | LegacyOpponent;
 export const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-12.0";
 export type Phase =
+  | "cut_for_deal"
   | "discard"
   | "ai_discarding"
   | "pegging"
@@ -88,6 +93,7 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "schell_table-peg_table-11.1": "Schell Table + Peg Table 11.1",
   "schell_table-peg_table-12.0": "Schell Table + Peg Table 12.0",
   "schell_table-peg_table-13.0": "Schell Table + Peg Table 13.0",
+  "schell_table-peg_table-14.0": "Schell Table + Peg Table 14.0",
 };
 const CRIB_FLUSH_BONUS_BY_SUIT_COUNT = cribFlushBonusBySuitCount as number[];
 const HAND_RANK_SCORE_BY_KEEP_CUT = (handRankScoreByKeepCut as {
@@ -100,6 +106,18 @@ type CribHistogramEntry = {
   totalWeight: number;
   histogram: Record<string, number>;
   opponentDiscards: Array<{ ranks: string; weight: number; rankScore: number }>;
+};
+type CribPolicy = "ev" | "on" | "off";
+type CribTripolicyEntry = {
+  candidateHands: number;
+  totalRankWeight: number;
+  policies: Record<CribPolicy, CribHistogramEntry & {
+    average: number;
+    components: [number, number, number];
+  }>;
+};
+type CribTripolicyTable = {
+  table: Record<"dealer" | "pone", Record<string, Array<CribTripolicyEntry | null>>>;
 };
 const CRIB_SCORE_HISTOGRAM_BY_DISCARD_CUT = (cribScoreHistogramByDiscardCut as unknown as {
   table: Record<"dealer" | "pone", Record<string, Array<CribHistogramEntry | null>>>;
@@ -189,6 +207,7 @@ DISCARD_TABLES["schell_table-peg_table-11.0"] = DISCARD_TABLES["schell_table-2.0
 DISCARD_TABLES["schell_table-peg_table-11.1"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-12.0"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-13.0"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-14.0"] = DISCARD_TABLES["schell_table-2.0"];
 
 export class WinGame extends Error {}
 
@@ -279,6 +298,11 @@ export interface GameState {
     points: number;
     components: AnalyticsScoreComponents;
     nextLabel: string;
+  } | null;
+  cutForDeal: {
+    human: SerializedCard | null;
+    ai: SerializedCard | null;
+    prompt: string;
   } | null;
   analyticsEvents: AnalyticsEvent[];
 }
@@ -425,6 +449,11 @@ export interface GameSnapshot {
   ai: PlayerSnapshot;
   turnCard: number;
   crib: number[];
+  cutDeck?: number[];
+  cutCards?: {
+    human?: number | null;
+    ai?: number | null;
+  };
   plays: number[];
   playOwners: PlayerKey[];
   completedPlays: number[][];
@@ -629,6 +658,8 @@ export class CribbageGame {
   dealer!: PlayerState;
   pone!: PlayerState;
   turnCard!: Card;
+  cutDeck: Card[] = [];
+  cutCards: Partial<Record<PlayerKey, Card | null>> = {};
   crib: Card[] = [];
   plays: Card[] = [];
   playOwners: PlayerKey[] = [];
@@ -662,7 +693,11 @@ export class CribbageGame {
   };
   pendingPeggingReviews: PendingPeggingReview[] = [];
 
-  constructor(opponent: StoredOpponent = DEFAULT_OPPONENT, humanEngine: StoredOpponent = opponent) {
+  constructor(
+    opponent: StoredOpponent = DEFAULT_OPPONENT,
+    humanEngine: StoredOpponent = opponent,
+    options: { dealMode?: "random" | "cut" } = {},
+  ) {
     this.opponent = normalizeOpponent(opponent);
     this.playerEngines = {
       human: normalizeOpponent(humanEngine),
@@ -672,12 +707,14 @@ export class CribbageGame {
     this.ai = { key: "ai", name: "AI", hand: [], table: [], crib: [], score: 0 };
     this.deal = Math.random() < 0.5 ? 0 : 1;
     this.firstDeal = this.deal;
+    this.turnCard = new Card(0);
     this.recordAnalytics({
       type: "game",
       action: "start",
       opponent: this.opponent,
     });
-    this.startHand();
+    if (options.dealMode === "cut") this.startDealCut();
+    else this.startHand();
   }
 
   static restore(snapshot: GameSnapshot): CribbageGame {
@@ -693,6 +730,11 @@ export class CribbageGame {
     };
     game.deal = snapshot.deal;
     game.firstDeal = snapshot.firstDeal;
+    game.cutDeck = (snapshot.cutDeck ?? []).map((id) => new Card(id));
+    game.cutCards = {
+      human: snapshot.cutCards?.human === undefined || snapshot.cutCards.human === null ? null : new Card(snapshot.cutCards.human),
+      ai: snapshot.cutCards?.ai === undefined || snapshot.cutCards.ai === null ? null : new Card(snapshot.cutCards.ai),
+    };
     game.human.hand = snapshot.human.hand.map((id) => new Card(id));
     game.human.table = snapshot.human.table.map((id) => new Card(id));
     game.human.crib = snapshot.human.crib.map((id) => new Card(id));
@@ -762,6 +804,11 @@ export class CribbageGame {
       ai: this.playerSnapshot(this.ai),
       turnCard: this.turnCard.id,
       crib: this.crib.map((card) => card.id),
+      cutDeck: this.cutDeck.map((card) => card.id),
+      cutCards: {
+        human: this.cutCards.human?.id ?? null,
+        ai: this.cutCards.ai?.id ?? null,
+      },
       plays: this.plays.map((card) => card.id),
       playOwners: [...this.playOwners],
       completedPlays: this.completedPlays.map((group) => group.map((card) => card.id)),
@@ -842,6 +889,51 @@ export class CribbageGame {
     });
   }
 
+  startDealCut(): void {
+    this.phase = "cut_for_deal";
+    this.cutDeck = shuffledDeck();
+    this.cutCards = { human: null, ai: null };
+    this.human.hand = [];
+    this.ai.hand = [];
+    this.human.table = [];
+    this.ai.table = [];
+    this.human.crib = [];
+    this.ai.crib = [];
+    this.crib = [];
+    this.plays = [];
+    this.playOwners = [];
+    this.completedPlays = [];
+    this.completedPlayOwners = [];
+    this.count = 0;
+    this.turn = 0;
+    this.goPlayer = null;
+    this.lastPlayer = null;
+    this.peggingResetPending = false;
+    this.scoringReview = null;
+    this.message = "Tap the deck to cut for first deal. Low card deals.";
+    this.log = [this.message];
+    this.result = [this.message];
+  }
+
+  cutForDeal(): void {
+    if (this.phase !== "cut_for_deal") throw new Error("It is not time to cut for deal.");
+    if (this.cutDeck.length < 2) this.cutDeck = shuffledDeck();
+    const humanCut = this.cutDeck.shift()!;
+    const aiCut = this.cutDeck.shift()!;
+    this.cutCards = { human: humanCut, ai: aiCut };
+    if (humanCut.rank === aiCut.rank) {
+      this.message = `User cut ${this.cardLabel(humanCut)}. AI cut ${this.cardLabel(aiCut)}. Tie. Tap to cut again.`;
+      this.logEvent(this.message);
+      this.cutDeck = shuffledDeck();
+      return;
+    }
+    this.deal = humanCut.rank < aiCut.rank ? 0 : 1;
+    this.firstDeal = this.deal;
+    this.message = `User cut ${this.cardLabel(humanCut)}. AI cut ${this.cardLabel(aiCut)}. ${this.name([this.human, this.ai][this.deal])} deals first.`;
+    this.logEvent(this.message);
+    this.startHand();
+  }
+
   startTroublePeggingPosition(): void {
     this.opponent = "schell_table-peg_table-13.0";
     this.playerEngines = { human: "schell_table-peg_table-13.0", ai: "schell_table-peg_table-13.0" };
@@ -903,12 +995,12 @@ export class CribbageGame {
       handNumber: this.handNumber,
       scores: { human: this.human.score, ai: this.ai.score },
       pegPositions: this.pegPositions,
-      dealer: this.name(this.dealer),
-      firstDealer: this.name([this.human, this.ai][this.firstDeal]),
-      cribOwner: this.name(this.dealer),
+      dealer: this.phase === "cut_for_deal" ? "-" : this.name(this.dealer),
+      firstDealer: this.phase === "cut_for_deal" ? "-" : this.name([this.human, this.ai][this.firstDeal]),
+      cribOwner: this.phase === "cut_for_deal" ? "-" : this.name(this.dealer),
       turn: current ? this.name(current) : null,
       count: this.count,
-      turnCard: this.phase === "discard" || this.phase === "ai_discarding"
+      turnCard: this.phase === "cut_for_deal" || this.phase === "discard" || this.phase === "ai_discarding"
         ? null
         : this.serializeCard(this.turnCard),
       plays: this.plays.map((card, index) => this.serializeCard(card, null, this.playOwners[index])),
@@ -933,6 +1025,13 @@ export class CribbageGame {
             points: this.scoringReview.points,
             components: this.scoringReview.components,
             nextLabel: this.scoringReview.nextLabel,
+          }
+        : null,
+      cutForDeal: this.phase === "cut_for_deal"
+        ? {
+            human: this.cutCards.human ? this.serializeCard(this.cutCards.human) : null,
+            ai: this.cutCards.ai ? this.serializeCard(this.cutCards.ai) : null,
+            prompt: this.message || "Tap the deck to cut for first deal. Low card deals.",
           }
         : null,
       analyticsEvents: [...this.analyticsEvents],
@@ -1089,8 +1188,19 @@ export class CribbageGame {
   }
 
   prepareModel13Pegging(): void {
-    if (this.opponent !== "schell_table-peg_table-13.0" || this.phase !== "pegging") return;
+    const engine = normalizeOpponent(this.opponent);
+    if (!usesModel13LivePegging(engine) || this.phase !== "pegging") return;
     if (this.currentPlayer() === this.ai) {
+      if (
+        engine === "schell_table-peg_table-14.0" &&
+        this.ai === this.pone &&
+        this.turn === 0 &&
+        this.count === 0 &&
+        this.plays.length === 0 &&
+        this.ai.hand.length === 4
+      ) {
+        return;
+      }
       const legal = this.legalCards(this.ai);
       if (legal.length) this.chooseExhaustivePegPlay(this.ai, legal);
       return;
@@ -1104,7 +1214,7 @@ export class CribbageGame {
     ) {
       return;
     }
-    for (const lead of orderedModel13PoneLeadCards(this.human.hand, this.legalCards(this.human))) {
+    for (const lead of orderedModel13PoneLeadCards(this.human.hand, this.legalCards(this.human), engine)) {
       const warmGame = CribbageGame.restore(this.snapshot());
       try {
         warmGame.playHumanPeggingCard(lead.id);
@@ -1417,7 +1527,7 @@ export class CribbageGame {
   private chooseExhaustivePegPlay(player: PlayerState, legal: Card[]): { card: Card; ev: number } {
     const opponent = player === this.human ? this.ai : this.human;
     const engine = this.playerEngines[player.key];
-    const cacheKey = engine === "schell_table-peg_table-13.0"
+    const cacheKey = usesModel13LivePegging(engine)
       ? model13PeggingDecisionCacheKey(this, player)
       : null;
     const cached = cacheKey ? MODEL13_PEGGING_DECISION_CACHE.get(cacheKey) : null;
@@ -1999,6 +2109,19 @@ type OptimalPegSimulationState = PegSimulationState & {
   scores: Record<PlayerKey, number>;
   rootScores: Record<PlayerKey, number>;
   perspectiveRole: "dealer" | "pone";
+  postPeggingContext: PostPeggingWinContext;
+};
+type ScoreDistribution = Array<[number, number]>;
+type DiscardWinBaseOutcome = [number, number, number];
+type PostPeggingWinContext = {
+  key: string;
+  perspectiveRole: "dealer" | "pone";
+  poneIsPerspective: boolean;
+  dealerIsPerspective: boolean;
+  poneHand: ScoreDistribution;
+  dealerHand: ScoreDistribution;
+  crib: ScoreDistribution;
+  memo: Map<string, number>;
 };
 type WeightedScore = { total: number; weight: number };
 type WeightedPegComponents = { components: AnalyticsEvComponents; weight: number };
@@ -2029,17 +2152,22 @@ type PeggingOutcomeSummary = {
   opponentEv: number;
   hist: Array<[number, number, number]>;
 };
+type PeggingOutcomePolicy = "ev" | "on" | "off";
 type PeggingPairwiseManifest = {
   keepKeys: string[];
 };
 type PeggingPairwiseTable = {
+  format: "word32" | "packed49";
   keepKeys: string[];
   keepRanks: RankCounts[];
   keepIdByKey: Map<string, number>;
   dealerOffsets: Uint32Array;
   poneOffsets: Uint32Array;
-  dealerRecords: Uint32Array;
-  poneRecords: Uint32Array;
+  dealerRecords?: Uint32Array;
+  poneRecords?: Uint32Array;
+  dealerPackedRecords?: Uint8Array;
+  ponePackedRecords?: Uint8Array;
+  recordBits: number;
 };
 type PoneLeadFrequencyTable = {
   version: number;
@@ -2061,6 +2189,7 @@ const PEG_TABLE_POLICIES: Partial<Record<Opponent, PegTablePolicy>> = {};
 const PEGGING_HOLD_TABLES: Partial<Record<Opponent, PeggingHoldTable>> = {};
 const PEGGING_PAIRWISE_TABLES: Partial<Record<Opponent, PeggingPairwiseTable>> = {};
 const PONE_LEAD_FREQUENCY_TABLES: Partial<Record<Opponent, PoneLeadFrequencyTable>> = {};
+const CRIB_TRIPOLICY_TABLES: Partial<Record<Opponent, CribTripolicyTable["table"]>> = {};
 const MODEL13_PEGGING_DECISION_CACHE = new Map<string, { cardId: number; ev: number }>();
 const MODEL13_PEGGING_DECISION_CACHE_LIMIT = 500;
 const MODEL13_OPTIMAL_PEGGING_TREE_CACHE = new Map<string, PeggingOutcomeDistribution>();
@@ -2105,16 +2234,30 @@ const PEGGING_HOLD_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Pegging
     import("./models/schell_table-peg_table-11.1/pegging-remaining-hand-distribution.json").then((module) => module.default as unknown as PeggingHoldTable),
   "schell_table-peg_table-13.0": () =>
     import("./models/schell_table-peg_table-13.0/pegging-remaining-hand-distribution.json").then((module) => module.default as unknown as PeggingHoldTable),
+  "schell_table-peg_table-14.0": () =>
+    import("./models/schell_table-peg_table-13.0/pegging-remaining-hand-distribution.json").then((module) => module.default as unknown as PeggingHoldTable),
 };
 const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<PeggingPairwiseTable>>> = {
   "schell_table-peg_table-12.0": () =>
     loadPairwisePeggingTable(peggingPairwise12Url, peggingPairwise12Manifest as PeggingPairwiseManifest),
   "schell_table-peg_table-13.0": () =>
     loadPairwisePeggingTable(peggingPairwise12Url, peggingPairwise12Manifest as PeggingPairwiseManifest),
+  "schell_table-peg_table-14.0": () =>
+    loadPairwisePeggingTable(peggingPairwise14Url, peggingPairwise14Manifest as PeggingPairwiseManifest),
 };
 const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLeadFrequencyTable>>> = {
   "schell_table-peg_table-13.0": () =>
     import("./models/schell_table-peg_table-13.0/pone-lead-frequency.json").then((module) => module.default as unknown as PoneLeadFrequencyTable),
+  "schell_table-peg_table-14.0": () =>
+    import("./models/schell_table-peg_table-13.0/pone-lead-frequency.json").then((module) => module.default as unknown as PoneLeadFrequencyTable),
+};
+const CRIB_TRIPOLICY_LOADERS: Partial<Record<Opponent, () => Promise<CribTripolicyTable["table"]>>> = {
+  "schell_table-peg_table-14.0": async () => {
+    const response = await fetch(cribTripolicy14Url);
+    if (!response.ok) throw new Error(`Failed to load 14.0 crib table: ${response.status}`);
+    const data = await response.json() as CribTripolicyTable;
+    return data.table;
+  },
 };
 
 export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
@@ -2123,7 +2266,8 @@ export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
   const hasHoldTable = !PEGGING_HOLD_TABLE_LOADERS[engine] || Boolean(PEGGING_HOLD_TABLES[engine]);
   const hasOutcomeTable = !PEGGING_PAIRWISE_TABLE_LOADERS[engine] || Boolean(PEGGING_PAIRWISE_TABLES[engine]);
   const hasLeadTable = !PONE_LEAD_FREQUENCY_LOADERS[engine] || Boolean(PONE_LEAD_FREQUENCY_TABLES[engine]);
-  return hasPegTable && hasHoldTable && hasOutcomeTable && hasLeadTable;
+  const hasCribTripolicyTable = !CRIB_TRIPOLICY_LOADERS[engine] || Boolean(CRIB_TRIPOLICY_TABLES[engine]);
+  return hasPegTable && hasHoldTable && hasOutcomeTable && hasLeadTable && hasCribTripolicyTable;
 }
 
 export async function loadOpponentResources(opponent: StoredOpponent): Promise<void> {
@@ -2136,6 +2280,7 @@ export async function loadOpponentResources(opponent: StoredOpponent): Promise<v
   const holdTableLoader = PEGGING_HOLD_TABLE_LOADERS[engine];
   const outcomeTableLoader = PEGGING_PAIRWISE_TABLE_LOADERS[engine];
   const leadTableLoader = PONE_LEAD_FREQUENCY_LOADERS[engine];
+  const cribTripolicyLoader = CRIB_TRIPOLICY_LOADERS[engine];
   const loadPegTable = loader && !PEG_TABLE_POLICIES[engine]
     ? loader().then((policy) => {
         PEG_TABLE_POLICIES[engine] = policy;
@@ -2157,7 +2302,12 @@ export async function loadOpponentResources(opponent: StoredOpponent): Promise<v
         PONE_LEAD_FREQUENCY_TABLES[engine] = table;
       })
     : Promise.resolve();
-  await Promise.all([loadPegTable, loadHoldTable, loadOutcomeTable, loadLeadTable]);
+  const loadCribTripolicyTable = cribTripolicyLoader && !CRIB_TRIPOLICY_TABLES[engine]
+    ? cribTripolicyLoader().then((table) => {
+        CRIB_TRIPOLICY_TABLES[engine] = table;
+      })
+    : Promise.resolve();
+  await Promise.all([loadPegTable, loadHoldTable, loadOutcomeTable, loadLeadTable, loadCribTripolicyTable]);
 }
 
 function sharedPegTablePolicyEngine(engine: Opponent): Opponent | null {
@@ -2184,7 +2334,7 @@ function usesCribFlushAdjustment(engine: Opponent): boolean {
     engine === "schell_table-peg_table-11.0" ||
     engine === "schell_table-peg_table-11.1" ||
     engine === "schell_table-peg_table-12.0" ||
-    engine === "schell_table-peg_table-13.0";
+    usesModel13LivePegging(engine);
 }
 
 function usesWinProbabilityPegging(engine: Opponent): boolean {
@@ -2192,25 +2342,34 @@ function usesWinProbabilityPegging(engine: Opponent): boolean {
     engine === "schell_table-peg_table-11.0" ||
     engine === "schell_table-peg_table-11.1" ||
     engine === "schell_table-peg_table-12.0" ||
-    engine === "schell_table-peg_table-13.0";
+    engine === "schell_table-peg_table-13.0" ||
+    engine === "schell_table-peg_table-14.0";
 }
 
 function usesRankCutDiscardTables(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-11.0" ||
     engine === "schell_table-peg_table-11.1" ||
     engine === "schell_table-peg_table-12.0" ||
-    engine === "schell_table-peg_table-13.0";
+    engine === "schell_table-peg_table-13.0" ||
+    engine === "schell_table-peg_table-14.0";
 }
 
 function usesDiscardWinProbability(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-11.1" ||
     engine === "schell_table-peg_table-12.0" ||
-    engine === "schell_table-peg_table-13.0";
+    engine === "schell_table-peg_table-13.0" ||
+    engine === "schell_table-peg_table-14.0";
 }
 
 function usesPeggingOutcomeTables(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-12.0" ||
-    engine === "schell_table-peg_table-13.0";
+    engine === "schell_table-peg_table-13.0" ||
+    engine === "schell_table-peg_table-14.0";
+}
+
+function usesModel13LivePegging(engine: Opponent): boolean {
+  return engine === "schell_table-peg_table-13.0" ||
+    engine === "schell_table-peg_table-14.0";
 }
 
 function pegTableEv(
@@ -2277,12 +2436,13 @@ async function loadPairwisePeggingTable(url: string, manifest: PeggingPairwiseMa
   const buffer = await response.arrayBuffer();
   const view = new DataView(buffer);
   const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
-  if (magic !== "P12P") throw new Error(`Unexpected pairwise pegging table magic: ${magic}`);
+  if (magic !== "P12P" && magic !== "P13P" && magic !== "P14C") throw new Error(`Unexpected pairwise pegging table magic: ${magic}`);
   const version = view.getUint16(4, true);
   if (version !== 1) throw new Error(`Unsupported pairwise pegging table version: ${version}`);
   const keepCount = view.getUint16(6, true);
   const dealerRecordCount = view.getUint32(8, true);
   const poneRecordCount = view.getUint32(12, true);
+  const recordBits = magic === "P14C" ? view.getUint16(16, true) : 32;
   if (keepCount !== manifest.keepKeys.length) {
     throw new Error(`Pairwise pegging table keep count mismatch: ${keepCount} vs ${manifest.keepKeys.length}`);
   }
@@ -2291,16 +2451,35 @@ async function loadPairwisePeggingTable(url: string, manifest: PeggingPairwiseMa
   offset += (keepCount + 1) * 4;
   const poneOffsets = new Uint32Array(buffer, offset, (keepCount * 13) + 1);
   offset += ((keepCount * 13) + 1) * 4;
-  const dealerRecords = new Uint32Array(buffer, offset, dealerRecordCount);
-  offset += dealerRecordCount * 4;
-  const poneRecords = new Uint32Array(buffer, offset, poneRecordCount);
   const keepRanks = manifest.keepKeys.map((key) => key.split("").map((digit) => Number.parseInt(digit, 10)) as RankCounts);
-  return {
+  const base = {
     keepKeys: manifest.keepKeys,
     keepRanks,
     keepIdByKey: new Map(manifest.keepKeys.map((key, index) => [key, index])),
     dealerOffsets,
     poneOffsets,
+    recordBits,
+  };
+  if (magic === "P14C") {
+    if (recordBits !== 49) throw new Error(`Unsupported P14C record width: ${recordBits}`);
+    const dealerBytes = Math.ceil((dealerRecordCount * recordBits) / 8);
+    const dealerPackedRecords = new Uint8Array(buffer, offset, dealerBytes);
+    offset += dealerBytes;
+    const poneBytes = Math.ceil((poneRecordCount * recordBits) / 8);
+    const ponePackedRecords = new Uint8Array(buffer, offset, poneBytes);
+    return {
+      ...base,
+      format: "packed49",
+      dealerPackedRecords,
+      ponePackedRecords,
+    };
+  }
+  const dealerRecords = new Uint32Array(buffer, offset, dealerRecordCount);
+  offset += dealerRecordCount * 4;
+  const poneRecords = new Uint32Array(buffer, offset, poneRecordCount);
+  return {
+    ...base,
+    format: "word32",
     dealerRecords,
     poneRecords,
   };
@@ -2329,6 +2508,50 @@ function peggingOutcomeHistogram(
   knownCards: Card[],
 ): Array<[number, number, number]> | null {
   return bestPeggingOutcomeSummary(keep, role, engine, knownCards)?.hist ?? null;
+}
+
+function peggingOutcomeDiscardOptions(
+  keep: Card[],
+  role: "dealer" | "pone",
+  engine: Opponent,
+  knownCards: Card[],
+): Array<PegTableEv & {
+  hist: Array<[number, number, number]> | null;
+  policy: PeggingOutcomePolicy | "fallback";
+}> {
+  if (engine === "schell_table-peg_table-14.0" && PEGGING_PAIRWISE_TABLES[engine]) {
+    const options: Array<PegTableEv & { hist: Array<[number, number, number]>; policy: PeggingOutcomePolicy }> = [];
+    for (const policy of ["ev", "on", "off"] as PeggingOutcomePolicy[]) {
+      if (role === "dealer") {
+        const summary = aggregatePairwisePeggingOutcomes(keep, "dealer", engine, knownCards, null, policy);
+        if (summary) options.push(peggingOptionFromSummary(summary, null, policy));
+        continue;
+      }
+      for (const lead of legalPegRanks(rankCountsForCards(keep), 0)) {
+        const summary = aggregatePairwisePeggingOutcomes(keep, "pone", engine, knownCards, lead, policy);
+        if (summary) options.push(peggingOptionFromSummary(summary, lead, policy));
+      }
+    }
+    if (options.length) return options;
+  }
+  const summary = bestPeggingOutcomeSummary(keep, role, engine, knownCards);
+  if (summary) return [peggingOptionFromSummary(summary, summary.bestLead, "ev")];
+  return [];
+}
+
+function peggingOptionFromSummary(
+  summary: PeggingOutcomeSummary,
+  bestLead: number | null,
+  policy: PeggingOutcomePolicy,
+): PegTableEv & { hist: Array<[number, number, number]>; policy: PeggingOutcomePolicy } {
+  return {
+    myPeggingEv: summary.myEv,
+    opponentPeggingEv: summary.opponentEv,
+    netPeggingEv: summary.myEv - summary.opponentEv,
+    bestLead,
+    hist: summary.hist,
+    policy,
+  };
 }
 
 function bestPeggingOutcomeSummary(
@@ -2365,6 +2588,7 @@ function aggregatePairwisePeggingOutcomes(
   engine: Opponent,
   knownCards: Card[],
   leadRank: number | null,
+  policy: PeggingOutcomePolicy = "ev",
 ): PeggingOutcomeSummary | null {
   const table = PEGGING_PAIRWISE_TABLES[engine];
   if (!table) return null;
@@ -2372,6 +2596,7 @@ function aggregatePairwisePeggingOutcomes(
   const keepId = table.keepIdByKey.get(keepKey);
   if (keepId === undefined) return null;
   const records = role === "dealer" ? table.dealerRecords : table.poneRecords;
+  const packedRecords = role === "dealer" ? table.dealerPackedRecords : table.ponePackedRecords;
   const start = role === "dealer"
     ? table.dealerOffsets[keepId]
     : table.poneOffsets[(keepId * 13) + (leadRank ?? 0)];
@@ -2385,7 +2610,9 @@ function aggregatePairwisePeggingOutcomes(
   let myTotal = 0;
   let opponentTotal = 0;
   for (let index = start; index < end; index += 1) {
-    const record = unpackPairwiseRecord(records[index]);
+    const record = table.format === "packed49"
+      ? unpackPackedPairwiseRecord(packedRecords, index, policy)
+      : unpackPairwiseRecord(records?.[index] ?? 0);
     const opponentRanks = table.keepRanks[record.opponentKeepId];
     const weight = opponentKeepWeight(available, opponentRanks);
     if (!weight) continue;
@@ -2418,6 +2645,35 @@ function unpackPairwiseRecord(record: number): { opponentKeepId: number; myPeggi
   };
 }
 
+function unpackPackedPairwiseRecord(
+  records: Uint8Array | undefined,
+  index: number,
+  policy: PeggingOutcomePolicy,
+): { opponentKeepId: number; myPegging: number; opponentPegging: number; weight: number } {
+  if (!records) return { opponentKeepId: 0, myPegging: 0, opponentPegging: 0, weight: 0 };
+  const value = readPackedBits(records, BigInt(index) * 49n, 49);
+  const opponentKeepId = Number(value & 0x7ffn);
+  const weight = Number((value >> 11n) & 0xffn) + 1;
+  const offset = policy === "ev" ? 19n : policy === "on" ? 29n : 39n;
+  return {
+    opponentKeepId,
+    myPegging: Number((value >> offset) & 0x1fn),
+    opponentPegging: Number((value >> (offset + 5n)) & 0x1fn),
+    weight,
+  };
+}
+
+function readPackedBits(records: Uint8Array, bitOffset: bigint, bitLength: number): bigint {
+  let value = 0n;
+  for (let bit = 0n; bit < BigInt(bitLength); bit += 1n) {
+    const absolute = bitOffset + bit;
+    const byteIndex = Number(absolute >> 3n);
+    const bitIndex = Number(absolute & 7n);
+    if (records[byteIndex] & (1 << bitIndex)) value |= 1n << bit;
+  }
+  return value;
+}
+
 function opponentKeepWeight(available: RankCounts, opponentRanks: RankCounts): number {
   let weight = 1;
   for (let rank = 0; rank < 13; rank += 1) {
@@ -2436,7 +2692,7 @@ function choosePeggingOutcomeLead(
   engine: Opponent,
 ): { card: Card; ev: number } | null {
   if (
-    engine === "schell_table-peg_table-13.0" ||
+    (usesModel13LivePegging(engine) && engine !== "schell_table-peg_table-14.0") ||
     !usesPeggingOutcomeTables(engine) ||
     player !== game.pone ||
     game.count !== 0 ||
@@ -2455,17 +2711,22 @@ function choosePeggingOutcomeLead(
   ];
   let best: { card: Card; ev: number; score: number } | null = null;
   for (const card of legal) {
-    const summary = aggregatePairwisePeggingOutcomes(player.hand, "pone", engine, knownCards, card.rank);
-    if (!summary) continue;
-    const score = peggingOutcomeWinProbability(game, player, summary.hist);
-    const ev = summary.myEv - summary.opponentEv;
-    if (
-      !best ||
-      score > best.score ||
-      (score === best.score && ev > best.ev) ||
-      (score === best.score && ev === best.ev && VALUES[card.rank] < VALUES[best.card.rank])
-    ) {
-      best = { card, ev, score };
+    const policies = engine === "schell_table-peg_table-14.0"
+      ? ["ev", "on", "off"] as PeggingOutcomePolicy[]
+      : ["ev"] as PeggingOutcomePolicy[];
+    for (const policy of policies) {
+      const summary = aggregatePairwisePeggingOutcomes(player.hand, "pone", engine, knownCards, card.rank, policy);
+      if (!summary) continue;
+      const score = peggingOutcomeWinProbability(game, player, summary.hist);
+      const ev = summary.myEv - summary.opponentEv;
+      if (
+        !best ||
+        score > best.score ||
+        (score === best.score && ev > best.ev) ||
+        (score === best.score && ev === best.ev && VALUES[card.rank] < VALUES[best.card.rank])
+      ) {
+        best = { card, ev, score };
+      }
     }
   }
   return best ? { card: best.card, ev: best.ev } : null;
@@ -2570,6 +2831,160 @@ function opponentRankHandsForEngine(
   return empiricalHands;
 }
 
+function postPeggingWinContext(game: CribbageGame, perspective: PlayerState, engine: Opponent): PostPeggingWinContext {
+  const poneHand = upcomingHandScoreDistribution(game, perspective, game.pone, engine);
+  const dealerHand = upcomingHandScoreDistribution(game, perspective, game.dealer, engine);
+  const crib = upcomingCribScoreDistribution(game);
+  return {
+    key: [
+      engine,
+      perspective.key,
+      perspective === game.pone ? "pone" : "dealer",
+      game.turnCard.id,
+      idsKey(game.crib),
+      idsKey(game.pone.table),
+      idsKey(game.pone.hand),
+      idsKey(game.dealer.table),
+      idsKey(game.dealer.hand),
+      scoreDistributionKey(poneHand),
+      scoreDistributionKey(dealerHand),
+      scoreDistributionKey(crib),
+    ].join("|"),
+    perspectiveRole: perspective === game.pone ? "pone" : "dealer",
+    poneIsPerspective: game.pone === perspective,
+    dealerIsPerspective: game.dealer === perspective,
+    poneHand,
+    dealerHand,
+    crib,
+    memo: new Map(),
+  };
+}
+
+function upcomingHandScoreDistribution(
+  game: CribbageGame,
+  perspective: PlayerState,
+  scorer: PlayerState,
+  engine: Opponent,
+): ScoreDistribution {
+  if (scorer === perspective) {
+    return [[scoreHand([...scorer.table, ...scorer.hand], game.turnCard), 1]];
+  }
+  const knownCards = [
+    ...perspective.hand,
+    ...perspective.table,
+    ...scorer.table,
+    ...game.crib,
+    game.turnCard,
+  ];
+  const knownIds = cardIds(knownCards);
+  const availableCards = fullDeck().filter((card) => !knownIds.has(card.id));
+  const rankCounts = remainingRankCounts(knownCards);
+  const opponentHands = opponentRankHandsForEngine(
+    rankCounts,
+    scorer.hand.length,
+    scorer,
+    scorer === game.dealer ? "dealer" : "pone",
+    engine,
+  );
+  const outcomes = new Map<number, number>();
+  let totalWeight = 0;
+  const suitedHandCache = new Map<string, Card[][]>();
+  for (const hand of opponentHands) {
+    const key = rankCountKey(hand.ranks);
+    let suitedHands = suitedHandCache.get(key);
+    if (!suitedHands) {
+      suitedHands = cardsForRankCounts(availableCards, hand.ranks);
+      suitedHandCache.set(key, suitedHands);
+    }
+    if (!suitedHands.length) continue;
+    const suitedWeight = hand.weight / suitedHands.length;
+    for (const suitedHand of suitedHands) {
+      const score = scoreHand([...scorer.table, ...suitedHand], game.turnCard);
+      outcomes.set(score, (outcomes.get(score) ?? 0) + suitedWeight);
+      totalWeight += suitedWeight;
+    }
+  }
+  if (!totalWeight) {
+    return [[scorePhaseAverage(scorer === game.dealer ? "handDealer" : "handPone"), 1]];
+  }
+  return [...outcomes.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([score, weight]) => [score, weight / totalWeight]);
+}
+
+function scorePhaseAverage(phase: ScorePhase): number {
+  return BOARD_POSITION_STATS.global[phase]?.average ?? 0;
+}
+
+function upcomingCribScoreDistribution(game: CribbageGame): ScoreDistribution {
+  const crib = game.dealer.crib.length === 4 ? game.dealer.crib : game.crib;
+  if (crib.length === 4) return [[scoreHand(crib, game.turnCard, true), 1]];
+  return SCORE_PHASE_DISTRIBUTIONS.crib ?? [[scorePhaseAverage("crib"), 1]];
+}
+
+function scoreDistributionKey(distribution: ScoreDistribution): string {
+  return distribution.map(([score, weight]) => `${score}:${Math.round(weight * 1_000_000)}`).join(",");
+}
+
+function postPeggingWinProbability(
+  context: PostPeggingWinContext,
+  myScore: number,
+  opponentScore: number,
+): number {
+  if (myScore >= 121) return 1;
+  if (opponentScore >= 121) return 0;
+  const key = `${Math.round(myScore)}:${Math.round(opponentScore)}`;
+  const cached = context.memo.get(key);
+  if (cached !== undefined) return cached;
+  let total = 0;
+  let totalWeight = 0;
+  for (const [poneScore, poneWeight] of context.poneHand) {
+    const afterPoneMy = myScore + (context.poneIsPerspective ? poneScore : 0);
+    const afterPoneOpponent = opponentScore + (context.poneIsPerspective ? 0 : poneScore);
+    if (afterPoneMy >= 121) {
+      total += poneWeight;
+      totalWeight += poneWeight;
+      continue;
+    }
+    if (afterPoneOpponent >= 121) {
+      totalWeight += poneWeight;
+      continue;
+    }
+    for (const [dealerScore, dealerWeight] of context.dealerHand) {
+      const afterDealerMy = afterPoneMy + (context.dealerIsPerspective ? dealerScore : 0);
+      const afterDealerOpponent = afterPoneOpponent + (context.dealerIsPerspective ? 0 : dealerScore);
+      if (afterDealerMy >= 121) {
+        total += poneWeight * dealerWeight;
+        totalWeight += poneWeight * dealerWeight;
+        continue;
+      }
+      if (afterDealerOpponent >= 121) {
+        totalWeight += poneWeight * dealerWeight;
+        continue;
+      }
+      for (const [cribScore, cribWeight] of context.crib) {
+        const afterCribMy = afterDealerMy + (context.dealerIsPerspective ? cribScore : 0);
+        const afterCribOpponent = afterDealerOpponent + (context.dealerIsPerspective ? 0 : cribScore);
+        const weight = poneWeight * dealerWeight * cribWeight;
+        if (afterCribMy >= 121) {
+          total += weight;
+        } else if (afterCribOpponent < 121) {
+          total += weight * approximateFutureWinProbability(
+            afterCribMy,
+            afterCribOpponent,
+            nextPerspectiveRole(context.perspectiveRole, "crib"),
+            nextScorePhase("crib"),
+          );
+        }
+        totalWeight += weight;
+      }
+    }
+  }
+  const probability = totalWeight ? total / totalWeight : approximateFutureWinProbability(myScore, opponentScore, context.perspectiveRole, "handPone");
+  context.memo.set(key, probability);
+  return probability;
+}
+
 function model13PeggingDecisionCacheKey(game: CribbageGame, player: PlayerState): string {
   const opponent = player === game.human ? game.ai : game.human;
   return [
@@ -2618,8 +3033,8 @@ function trimModel13PeggingDecisionCache(): void {
   }
 }
 
-function orderedModel13PoneLeadCards(hand: Card[], legal: Card[]): Card[] {
-  const table = PONE_LEAD_FREQUENCY_TABLES["schell_table-peg_table-13.0"];
+function orderedModel13PoneLeadCards(hand: Card[], legal: Card[], engine: Opponent = "schell_table-peg_table-13.0"): Card[] {
+  const table = PONE_LEAD_FREQUENCY_TABLES[engine] ?? PONE_LEAD_FREQUENCY_TABLES["schell_table-peg_table-13.0"];
   const entry = table?.table[rankCountsForCards(hand).join("")];
   if (!entry) return [...legal];
   const rankOrder = new Map(entry.order.map((item, index) => [RANKS.indexOf(item.rank), index]));
@@ -2900,7 +3315,7 @@ function exhaustivePeggingCandidateScore(
   opponentHands: WeightedRankHand[],
   engine: Opponent,
 ): { choiceScore: number; pointEv: number } {
-  if (engine === "schell_table-peg_table-13.0") {
+  if (usesModel13LivePegging(engine)) {
     const distribution = optimalPeggingOutcomeDistributionForCandidate(game, player, card, opponentHands);
     return {
       choiceScore: expectedWinProbabilityAfterPegging(game, player, distribution),
@@ -3041,6 +3456,8 @@ function optimalPeggingOutcomeDistributionForCandidate(
   opponentHands: WeightedRankHand[],
 ): PeggingOutcomeDistribution {
   const opponent = player === game.human ? game.ai : game.human;
+  const engine = game.playerEngines[player.key];
+  const winContext = postPeggingWinContext(game, player, engine);
   const ownRanks = ranksAfterPlaying(player.hand, card);
   const immediateScore = scoreCount([...game.plays, card]);
   const countAfterPlay = game.count + card.value;
@@ -3071,6 +3488,7 @@ function optimalPeggingOutcomeDistributionForCandidate(
       scores,
       rootScores,
       perspectiveRole: player === game.pone ? "pone" : "dealer",
+      postPeggingContext: winContext,
     });
     for (const [key, weight] of result.outcomes) {
       const [my, opponentPoints] = parseOutcomeKey(key);
@@ -3138,6 +3556,7 @@ function simulateOptimalPeggingDistribution(state: OptimalPegSimulationState): P
       state.perspective,
       state.perspectiveRole,
       candidate,
+      state.postPeggingContext,
     );
     const pointEv = peggingDistributionPointEv(candidate);
     const isBetter = state.current === state.perspective
@@ -3207,18 +3626,18 @@ function expectedWinProbabilityForDistribution(
   perspective: PlayerKey,
   perspectiveRole: "dealer" | "pone",
   distribution: PeggingOutcomeDistribution,
+  postPeggingContext?: PostPeggingWinContext,
 ): number {
   if (!distribution.totalWeight) return 0;
   const opponent = otherPlayerKey(perspective);
   let total = 0;
   for (const [outcomeKey, weight] of distribution.outcomes) {
     const [myPegging, opponentPegging] = parseOutcomeKey(outcomeKey);
-    total += weight * approximateFutureWinProbability(
-      rootScores[perspective] + myPegging,
-      rootScores[opponent] + opponentPegging,
-      perspectiveRole,
-      "handPone",
-    );
+    const myScore = rootScores[perspective] + myPegging;
+    const opponentScore = rootScores[opponent] + opponentPegging;
+    total += weight * (postPeggingContext
+      ? postPeggingWinProbability(postPeggingContext, myScore, opponentScore)
+      : approximateFutureWinProbability(myScore, opponentScore, perspectiveRole, "handPone"));
   }
   return total / distribution.totalWeight;
 }
@@ -3241,6 +3660,7 @@ function optimalPegSimulationKey(state: OptimalPegSimulationState): string {
     state.rootScores.human,
     state.rootScores.ai,
     state.perspectiveRole,
+    state.postPeggingContext.key,
   ].join("|");
 }
 
@@ -3366,13 +3786,13 @@ function expectedWinProbabilityAfterPegging(
 ): number {
   if (!distribution.totalWeight) return 0;
   const opponent = player === game.human ? game.ai : game.human;
-  const perspectiveRole = player === game.pone ? "pone" : "dealer";
+  const winContext = postPeggingWinContext(game, player, game.playerEngines[player.key]);
   let total = 0;
   for (const [key, weight] of distribution.outcomes) {
     const [myPegging, opponentPegging] = parseOutcomeKey(key);
     const myScore = player.score + myPegging;
     const opponentScore = opponent.score + opponentPegging;
-    total += weight * approximateFutureWinProbability(myScore, opponentScore, perspectiveRole, "handPone");
+    total += weight * postPeggingWinProbability(winContext, myScore, opponentScore);
   }
   return total / distribution.totalWeight;
 }
@@ -3438,10 +3858,10 @@ function peggingPlayReviewValues(
     opponent === game.dealer ? "dealer" : "pone",
     engine,
   );
-  const distribution = engine === "schell_table-peg_table-13.0"
+  const distribution = usesModel13LivePegging(engine)
     ? optimalPeggingOutcomeDistributionForCandidate(game, player, card, opponentHands)
     : peggingOutcomeDistributionForCandidate(game, player, card, opponentHands);
-  const pointEv = engine === "schell_table-peg_table-13.0"
+  const pointEv = usesModel13LivePegging(engine)
     ? peggingDistributionPointEv(distribution)
     : exhaustivePeggingPointEv(game, player, card, opponentHands);
   return {
@@ -3686,7 +4106,27 @@ function rankCutHandScore(keep: Card[], cut: Card): number {
   return HAND_RANK_SCORE_BY_KEEP_CUT[keepKey]?.[cut.rank] ?? scoreHandRankOnly(keep, cut);
 }
 
-function rankCutCribScore(discard: Card[], role: "dealer" | "pone", cut: Card): number {
+function tripolicyCribEntry(
+  discard: Card[],
+  role: "dealer" | "pone",
+  cut: Card,
+  engine: Opponent,
+): CribTripolicyEntry | null {
+  if (engine !== "schell_table-peg_table-14.0") return null;
+  const discardKey = rankCountsForCards(discard).join("");
+  return CRIB_TRIPOLICY_TABLES[engine]?.[role]?.[discardKey]?.[cut.rank] ?? null;
+}
+
+function rankCutCribScore(
+  discard: Card[],
+  role: "dealer" | "pone",
+  cut: Card,
+  engine: Opponent = DEFAULT_OPPONENT,
+  policy: CribPolicy = "ev",
+): number {
+  const tripolicyEntry = tripolicyCribEntry(discard, role, cut, engine);
+  const tripolicyScore = tripolicyEntry?.policies?.[policy]?.average;
+  if (typeof tripolicyScore === "number" && Number.isFinite(tripolicyScore)) return tripolicyScore;
   const discardKey = rankCountsForCards(discard).join("");
   return CRIB_RANK_SCORE_BY_DISCARD_CUT[role]?.[discardKey]?.[cut.rank] ?? 0;
 }
@@ -3731,11 +4171,14 @@ function cribScoreOutcomesForCut(
   role: "dealer" | "pone",
   seenCards: Card[],
   suitedDiscardCache: Map<string, Card[][]>,
+  engine: Opponent = DEFAULT_OPPONENT,
+  policy: CribPolicy = "ev",
 ): Array<[number, number]> {
   const discardKey = rankCountsForCards(discard).join("");
-  const entry = CRIB_SCORE_HISTOGRAM_BY_DISCARD_CUT[role]?.[discardKey]?.[cut.rank];
+  const entry = tripolicyCribEntry(discard, role, cut, engine)?.policies?.[policy] ??
+    CRIB_SCORE_HISTOGRAM_BY_DISCARD_CUT[role]?.[discardKey]?.[cut.rank];
   if (!entry) {
-    const fallback = rankCutCribScore(discard, role, cut) + scoreFlushAndRightJack(discard, cut, true);
+    const fallback = rankCutCribScore(discard, role, cut, engine, policy) + scoreFlushAndRightJack(discard, cut, true);
     return [[fallback, 1]];
   }
   const seen = cardIds(seenCards);
@@ -3760,7 +4203,7 @@ function cribScoreOutcomesForCut(
     }
   }
   if (!totalWeight) {
-    const fallback = rankCutCribScore(discard, role, cut) + scoreFlushAndRightJack(discard, cut, true);
+    const fallback = rankCutCribScore(discard, role, cut, engine, policy) + scoreFlushAndRightJack(discard, cut, true);
     return [[fallback, 1]];
   }
   return [...outcomes.entries()]
@@ -3778,12 +4221,14 @@ function rankCutDiscardScores(
   deck: Card[],
   role: "dealer" | "pone",
   cribFlushBonusBySuit: number[] | null,
+  engine: Opponent = DEFAULT_OPPONENT,
+  cribPolicy: CribPolicy = "ev",
 ): { handScore: number; cribScore: number } {
   let handTotal = 0;
   let cribTotal = 0;
   for (const cut of deck) {
     handTotal += rankCutHandScore(keep, cut) + scoreFlushAndRightJack(keep, cut, false);
-    cribTotal += rankCutCribScore(discard, role, cut);
+    cribTotal += rankCutCribScore(discard, role, cut, engine, cribPolicy);
   }
   const count = deck.length || 1;
   return {
@@ -3803,6 +4248,8 @@ function discardCandidateWinProbability(
   pegging: PegTableEv,
   peggingHist: Array<[number, number, number]> | null,
   suitedDiscardCache: Map<string, Card[][]>,
+  cribPolicy: CribPolicy = "ev",
+  baseOutcomeCache?: Map<string, DiscardWinBaseOutcome[]>,
 ): number {
   const opponent = player === game.human ? game.ai : game.human;
   const opponentHandPhase: ScorePhase = myCrib ? "handPone" : "handDealer";
@@ -3814,27 +4261,48 @@ function discardCandidateWinProbability(
     ? peggingHist
     : [[pegging.myPeggingEv, pegging.opponentPeggingEv, 1] as [number, number, number]];
   const peggingWeightTotal = peggingOutcomes.reduce((sum, outcome) => sum + outcome[2], 0) || 1;
-  for (const cut of deck) {
-    const ownHandScore = rankCutHandScore(keep, cut) + scoreFlushAndRightJack(keep, cut, false);
-    const cribOutcomes = cribScoreOutcomesForCut(discard, cut, myCrib ? "dealer" : "pone", [...fullHand, cut], suitedDiscardCache);
-    const cutWeight = 1 / (deck.length || 1);
-    for (const [myPegging, opponentPegging, peggingWeight] of peggingOutcomes) {
-      const normalizedPeggingWeight = peggingWeight / peggingWeightTotal;
+  const cacheKey = baseOutcomeCache
+    ? `${cardSetKey(discard)}:${cribPolicy}:${deck.map((card) => card.id).join(",")}`
+    : "";
+  let baseOutcomes = cacheKey ? baseOutcomeCache?.get(cacheKey) : undefined;
+  if (!baseOutcomes) {
+    const baseMap = new Map<string, number>();
+    for (const cut of deck) {
+      const ownHandScore = rankCutHandScore(keep, cut) + scoreFlushAndRightJack(keep, cut, false);
+      const cribOutcomes = cribScoreOutcomesForCut(
+        discard,
+        cut,
+        myCrib ? "dealer" : "pone",
+        [...fullHand, cut],
+        suitedDiscardCache,
+        game.playerEngines[player.key],
+        cribPolicy,
+      );
+      const cutWeight = 1 / (deck.length || 1);
       for (const [cribScore, cribWeight] of cribOutcomes) {
         for (const [opponentHandScore, opponentHandWeight] of opponentHandDistribution) {
-          const myScore = player.score +
-            myPegging +
-            ownHandScore +
-            (myCrib ? cribScore : 0);
-          const opponentScore = opponent.score +
-            opponentPegging +
-            opponentHandScore +
-            (myCrib ? 0 : cribScore);
-          const weight = cutWeight * normalizedPeggingWeight * cribWeight * opponentHandWeight;
-          total += weight * approximateFutureWinProbability(myScore, opponentScore, nextRole, "peggingPone");
-          totalWeight += weight;
+          const myBase = ownHandScore + (myCrib ? cribScore : 0);
+          const opponentBase = opponentHandScore + (myCrib ? 0 : cribScore);
+          const weight = cutWeight * cribWeight * opponentHandWeight;
+          const key = `${Math.round(myBase)}:${Math.round(opponentBase)}`;
+          baseMap.set(key, (baseMap.get(key) ?? 0) + weight);
         }
       }
+    }
+    baseOutcomes = [...baseMap.entries()].map(([key, weight]) => {
+      const [myBase, opponentBase] = key.split(":").map(Number);
+      return [myBase, opponentBase, weight] as DiscardWinBaseOutcome;
+    });
+    if (cacheKey) baseOutcomeCache?.set(cacheKey, baseOutcomes);
+  }
+  for (const [myPegging, opponentPegging, peggingWeight] of peggingOutcomes) {
+    const normalizedPeggingWeight = peggingWeight / peggingWeightTotal;
+    for (const [myBase, opponentBase, baseWeight] of baseOutcomes) {
+      const myScore = player.score + myPegging + myBase;
+      const opponentScore = opponent.score + opponentPegging + opponentBase;
+      const weight = normalizedPeggingWeight * baseWeight;
+      total += weight * approximateFutureWinProbability(myScore, opponentScore, nextRole, "peggingPone");
+      totalWeight += weight;
     }
   }
   return totalWeight ? total / totalWeight : 0.5;
@@ -3872,39 +4340,84 @@ function analyzeDiscardChoice(
   const selectedKey = cardSetKey(selected);
   const cribFlushBonusBySuit = usesCribFlushAdjustment(engine) ? cribFlushBonusesBySuit(hand) : null;
   const suitedDiscardCache = new Map<string, Card[][]>();
+  const discardWinBaseOutcomeCache = new Map<string, DiscardWinBaseOutcome[]>();
 
   for (const discard of combinations(hand, 2, 2)) {
     const keep = hand.filter((card) => !discard.includes(card));
-    const cutJoinedScores = usesRankCutDiscardTables(engine)
-      ? rankCutDiscardScores(keep, discard, deck, role, cribFlushBonusBySuit)
+    const cribPolicies = engine === "schell_table-peg_table-14.0" && CRIB_TRIPOLICY_TABLES[engine]
+      ? ["ev", "on", "off"] as CribPolicy[]
+      : ["ev"] as CribPolicy[];
+    const baseCutJoinedScores = usesRankCutDiscardTables(engine)
+      ? rankCutDiscardScores(keep, discard, deck, role, cribFlushBonusBySuit, engine, "ev")
       : null;
-    const handScore = cutJoinedScores?.handScore ?? mean(deck.map((cut) => scoreHand(keep, cut)));
-    const cribScore = cutJoinedScores?.cribScore ?? expectedCribScore(discard, deck, myCrib, engine, cribFlushBonusBySuit);
-    const pegging = peggingOutcomeTableEv(keep, role, engine, hand) ?? pegTableEv(hand, discard, role, engine);
-    const peggingHist = peggingOutcomeHistogram(keep, role, engine, hand);
-    const total = (myCrib ? handScore + cribScore : handScore - cribScore) + pegging.netPeggingEv;
-    const components: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>> = {
-      [myCrib ? "handDealer" : "handPone"]: handScore,
-      [myCrib ? "peggingDealer" : "peggingPone"]: pegging.netPeggingEv,
-      crib: myCrib ? cribScore : -cribScore,
-    };
-    const winProbability = usesDiscardWinProbability(engine) && context
-      ? discardCandidateWinProbability(context.game, context.player, hand, keep, discard, deck, myCrib, pegging, peggingHist, suitedDiscardCache)
-      : undefined;
-    const choiceScore = winProbability ?? total;
-    if (cardSetKey(discard) === selectedKey) {
-      selectedEv = total;
-      selectedWinProbability = winProbability;
-      selectedPegTableLead = pegging.bestLead;
-      selectedComponents = components;
+    const handScore = baseCutJoinedScores?.handScore ?? mean(deck.map((cut) => scoreHand(keep, cut)));
+    const peggingOptions = peggingOutcomeDiscardOptions(keep, role, engine, hand);
+    if (!peggingOptions.length) peggingOptions.push({ ...pegTableEv(hand, discard, role, engine), hist: null, policy: "fallback" });
+    let bestDiscardOption: {
+      pegging: PegTableEv & { hist: Array<[number, number, number]> | null; policy: PeggingOutcomePolicy | "fallback" };
+      cribPolicy: CribPolicy;
+      total: number;
+      winProbability?: number;
+      choiceScore: number;
+      components: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
+    } | null = null;
+    for (const cribPolicy of cribPolicies) {
+      const cutJoinedScores = cribPolicy === "ev"
+        ? baseCutJoinedScores
+        : usesRankCutDiscardTables(engine)
+          ? rankCutDiscardScores(keep, discard, deck, role, cribFlushBonusBySuit, engine, cribPolicy)
+          : null;
+      const cribScore = cutJoinedScores?.cribScore ?? expectedCribScore(discard, deck, myCrib, engine, cribFlushBonusBySuit);
+      for (const pegging of peggingOptions) {
+        const total = (myCrib ? handScore + cribScore : handScore - cribScore) + pegging.netPeggingEv;
+        const components: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>> = {
+          [myCrib ? "handDealer" : "handPone"]: handScore,
+          [myCrib ? "peggingDealer" : "peggingPone"]: pegging.netPeggingEv,
+          crib: myCrib ? cribScore : -cribScore,
+        };
+        const winProbability = usesDiscardWinProbability(engine) && context
+          ? discardCandidateWinProbability(
+              context.game,
+              context.player,
+              hand,
+              keep,
+              discard,
+              deck,
+              myCrib,
+              pegging,
+              pegging.hist,
+              suitedDiscardCache,
+              cribPolicy,
+              discardWinBaseOutcomeCache,
+            )
+          : undefined;
+        const choiceScore = winProbability ?? total;
+        if (
+          !bestDiscardOption ||
+          choiceScore > bestDiscardOption.choiceScore ||
+          (choiceScore === bestDiscardOption.choiceScore && total > bestDiscardOption.total)
+        ) {
+          bestDiscardOption = { pegging, cribPolicy, total, winProbability, choiceScore, components };
+        }
+      }
     }
-    if (choiceScore > recommendedScore || (choiceScore === recommendedScore && total > recommendedEv)) {
-      recommendedEv = total;
-      recommendedScore = choiceScore;
-      recommendedWinProbability = winProbability;
+    if (!bestDiscardOption) continue;
+    if (cardSetKey(discard) === selectedKey) {
+      selectedEv = bestDiscardOption.total;
+      selectedWinProbability = bestDiscardOption.winProbability;
+      selectedPegTableLead = bestDiscardOption.pegging.bestLead;
+      selectedComponents = bestDiscardOption.components;
+    }
+    if (
+      bestDiscardOption.choiceScore > recommendedScore ||
+      (bestDiscardOption.choiceScore === recommendedScore && bestDiscardOption.total > recommendedEv)
+    ) {
+      recommendedEv = bestDiscardOption.total;
+      recommendedScore = bestDiscardOption.choiceScore;
+      recommendedWinProbability = bestDiscardOption.winProbability;
       recommended = discard;
-      recommendedPegTableLead = pegging.bestLead;
-      recommendedComponents = components;
+      recommendedPegTableLead = bestDiscardOption.pegging.bestLead;
+      recommendedComponents = bestDiscardOption.components;
     }
   }
 
@@ -4032,6 +4545,7 @@ function normalizeOpponent(opponent: StoredOpponent): Opponent {
     opponent === "expert_schell-table-peg_table-1.2" ||
     opponent === "expert_schell_table-peg_table-4.0"
   ) return "schell_table-peg_table-4.0";
+  if (opponent === "schell_table-peg_table-14.0") return "schell_table-peg_table-14.0";
   if (opponent === "schell_table-peg_table-13.0") return "schell_table-peg_table-13.0";
   if (opponent === "schell_table-peg_table-12.0") return "schell_table-peg_table-12.0";
   if (opponent === "schell_table-peg_table-11.1") return "schell_table-peg_table-11.1";

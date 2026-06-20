@@ -1619,6 +1619,26 @@ button:disabled {
   margin-left: -24px;
 }
 
+.deal-cut-row {
+  align-items: center;
+  gap: 12px;
+  padding-left: 0;
+}
+
+.deal-cut-row .card,
+.played-active.deal-cut-row .card {
+  margin-left: 0;
+}
+
+.cut-result {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .pegging-row .card:first-child {
   margin-left: 0;
 }
@@ -2163,6 +2183,7 @@ button.card {
   }
 }
 
+.app[data-phase="cut_for_deal"] .actions,
 .app[data-phase="discard"] .actions,
 .app[data-phase="ai_discarding"] .actions,
 .app[data-phase="pegging_complete"] .actions,
@@ -2173,16 +2194,19 @@ button.card {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.app[data-phase="cut_for_deal"] .status,
 .app[data-phase="discard"] .status,
 .app[data-phase="ai_discarding"] .status {
   display: none;
 }
 
+.app[data-phase="cut_for_deal"] .table,
 .app[data-phase="discard"] .table,
 .app[data-phase="ai_discarding"] .table {
   gap: 8px;
 }
 
+.app[data-phase="cut_for_deal"] .played,
 .app[data-phase="discard"] .played,
 .app[data-phase="ai_discarding"] .played {
   min-height: auto;
