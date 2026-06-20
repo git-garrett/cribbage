@@ -215,9 +215,9 @@ function patchEngineAssetImports(source) {
       return `const peggingPairwise14Url = ${JSON.stringify(pathToFileURL(assetPath).href)};`;
     },
   ).replace(
-    /import\s+cribTripolicy14Url\s+from\s+"\.\/models\/schell_table-peg_table-14\.0\/crib-score-histogram-tripolicy-by-discard-cut\.json\?url";/,
+    /import\s+cribTripolicy14Url\s+from\s+"\.\/models\/schell_table-peg_table-14\.0\/crib-score-histogram-tripolicy-by-discard-cut\.bin\?url";/,
     () => {
-      const assetPath = path.join(path.dirname(enginePath), "models", "schell_table-peg_table-14.0", "crib-score-histogram-tripolicy-by-discard-cut.json");
+      const assetPath = path.join(path.dirname(enginePath), "models", "schell_table-peg_table-14.0", "crib-score-histogram-tripolicy-by-discard-cut.bin");
       return `const cribTripolicy14Url = ${JSON.stringify(pathToFileURL(assetPath).href)};`;
     },
   );

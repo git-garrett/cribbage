@@ -8,7 +8,8 @@ import peggingPairwise12Manifest from "./models/schell_table-peg_table-12.0/pegg
 import peggingPairwise12Url from "./models/schell_table-peg_table-12.0/pegging-outcome-pairwise.bin?url";
 import peggingPairwise14Manifest from "./models/schell_table-peg_table-14.0/pegging-outcome-tripolicy-packed.manifest.json";
 import peggingPairwise14Url from "./models/schell_table-peg_table-14.0/pegging-outcome-tripolicy-packed.bin?url";
-import cribTripolicy14Url from "./models/schell_table-peg_table-14.0/crib-score-histogram-tripolicy-by-discard-cut.json?url";
+import cribTripolicy14Manifest from "./models/schell_table-peg_table-14.0/crib-score-histogram-tripolicy-by-discard-cut.manifest.json";
+import cribTripolicy14Url from "./models/schell_table-peg_table-14.0/crib-score-histogram-tripolicy-by-discard-cut.bin?url";
 
 export type PlayerKey = "human" | "ai";
 export type Opponent =
@@ -108,16 +109,25 @@ type CribHistogramEntry = {
   opponentDiscards: Array<{ ranks: string; weight: number; rankScore: number }>;
 };
 type CribPolicy = "ev" | "on" | "off";
-type CribTripolicyEntry = {
-  candidateHands: number;
-  totalRankWeight: number;
-  policies: Record<CribPolicy, CribHistogramEntry & {
-    average: number;
-    components: [number, number, number];
-  }>;
+type CribTripolicyPolicyEntry = {
+  average: number;
+  opponentDiscards: Array<{ ranks: string; weight: number; rankScore: number }>;
 };
 type CribTripolicyTable = {
-  table: Record<"dealer" | "pone", Record<string, Array<CribTripolicyEntry | null>>>;
+  pairKeys: string[];
+  pairIndexByKey: Map<string, number>;
+  directory: DataView;
+  records: DataView;
+  directoryRecordBytes: number;
+  opponentRecordBytes: number;
+  entryCount: number;
+};
+type CribTripolicyManifest = {
+  pairKeys: string[];
+  binaryFormat?: {
+    magic?: string;
+    policies?: CribPolicy[];
+  };
 };
 const CRIB_SCORE_HISTOGRAM_BY_DISCARD_CUT = (cribScoreHistogramByDiscardCut as unknown as {
   table: Record<"dealer" | "pone", Record<string, Array<CribHistogramEntry | null>>>;
@@ -2189,7 +2199,10 @@ const PEG_TABLE_POLICIES: Partial<Record<Opponent, PegTablePolicy>> = {};
 const PEGGING_HOLD_TABLES: Partial<Record<Opponent, PeggingHoldTable>> = {};
 const PEGGING_PAIRWISE_TABLES: Partial<Record<Opponent, PeggingPairwiseTable>> = {};
 const PONE_LEAD_FREQUENCY_TABLES: Partial<Record<Opponent, PoneLeadFrequencyTable>> = {};
-const CRIB_TRIPOLICY_TABLES: Partial<Record<Opponent, CribTripolicyTable["table"]>> = {};
+const CRIB_TRIPOLICY_TABLES: Partial<Record<Opponent, CribTripolicyTable>> = {};
+const CRIB_TRIPOLICY_POLICY_INDEX: Record<CribPolicy, number> = { ev: 0, on: 1, off: 2 };
+const DISCARD_WIN_BASE_OUTCOME_CACHE = new Map<string, DiscardWinBaseOutcome[]>();
+const DISCARD_WIN_BASE_OUTCOME_CACHE_LIMIT = 1500;
 const MODEL13_PEGGING_DECISION_CACHE = new Map<string, { cardId: number; ev: number }>();
 const MODEL13_PEGGING_DECISION_CACHE_LIMIT = 500;
 const MODEL13_OPTIMAL_PEGGING_TREE_CACHE = new Map<string, PeggingOutcomeDistribution>();
@@ -2251,13 +2264,9 @@ const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLe
   "schell_table-peg_table-14.0": () =>
     import("./models/schell_table-peg_table-13.0/pone-lead-frequency.json").then((module) => module.default as unknown as PoneLeadFrequencyTable),
 };
-const CRIB_TRIPOLICY_LOADERS: Partial<Record<Opponent, () => Promise<CribTripolicyTable["table"]>>> = {
-  "schell_table-peg_table-14.0": async () => {
-    const response = await fetch(cribTripolicy14Url);
-    if (!response.ok) throw new Error(`Failed to load 14.0 crib table: ${response.status}`);
-    const data = await response.json() as CribTripolicyTable;
-    return data.table;
-  },
+const CRIB_TRIPOLICY_LOADERS: Partial<Record<Opponent, () => Promise<CribTripolicyTable>>> = {
+  "schell_table-peg_table-14.0": () =>
+    loadTripolicyCribTable(cribTripolicy14Url, cribTripolicy14Manifest as CribTripolicyManifest),
 };
 
 export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
@@ -2482,6 +2491,41 @@ async function loadPairwisePeggingTable(url: string, manifest: PeggingPairwiseMa
     format: "word32",
     dealerRecords,
     poneRecords,
+  };
+}
+
+async function loadTripolicyCribTable(url: string, manifest: CribTripolicyManifest): Promise<CribTripolicyTable> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Unable to load 14.0 crib table: ${response.status}`);
+  const buffer = await response.arrayBuffer();
+  const view = new DataView(buffer);
+  const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  if (magic !== "C14B") throw new Error(`Unexpected 14.0 crib table magic: ${magic}`);
+  const version = view.getUint16(4, true);
+  if (version !== 1) throw new Error(`Unsupported 14.0 crib table version: ${version}`);
+  const pairCount = view.getUint16(6, true);
+  const entryCount = view.getUint32(8, true);
+  const directoryOffset = view.getUint32(16, true);
+  const recordsOffset = view.getUint32(20, true);
+  const directoryRecordBytes = view.getUint16(24, true);
+  const opponentRecordBytes = view.getUint16(26, true);
+  if (pairCount !== manifest.pairKeys.length) {
+    throw new Error(`14.0 crib table pair count mismatch: ${pairCount} vs ${manifest.pairKeys.length}`);
+  }
+  if (entryCount !== 2 * pairCount * 13 * 3) {
+    throw new Error(`14.0 crib table entry count mismatch: ${entryCount}`);
+  }
+  if (directoryRecordBytes !== 10 || opponentRecordBytes !== 9) {
+    throw new Error(`Unsupported 14.0 crib record widths: ${directoryRecordBytes}/${opponentRecordBytes}`);
+  }
+  return {
+    pairKeys: manifest.pairKeys,
+    pairIndexByKey: new Map(manifest.pairKeys.map((key, index) => [key, index])),
+    directory: new DataView(buffer, directoryOffset, recordsOffset - directoryOffset),
+    records: new DataView(buffer, recordsOffset),
+    directoryRecordBytes,
+    opponentRecordBytes,
+    entryCount,
   };
 }
 
@@ -4106,15 +4150,38 @@ function rankCutHandScore(keep: Card[], cut: Card): number {
   return HAND_RANK_SCORE_BY_KEEP_CUT[keepKey]?.[cut.rank] ?? scoreHandRankOnly(keep, cut);
 }
 
-function tripolicyCribEntry(
+function tripolicyCribPolicyEntry(
   discard: Card[],
   role: "dealer" | "pone",
   cut: Card,
   engine: Opponent,
-): CribTripolicyEntry | null {
+  policy: CribPolicy,
+): CribTripolicyPolicyEntry | null {
   if (engine !== "schell_table-peg_table-14.0") return null;
+  const table = CRIB_TRIPOLICY_TABLES[engine];
+  if (!table) return null;
   const discardKey = rankCountsForCards(discard).join("");
-  return CRIB_TRIPOLICY_TABLES[engine]?.[role]?.[discardKey]?.[cut.rank] ?? null;
+  const pairIndex = table.pairIndexByKey.get(discardKey);
+  if (pairIndex === undefined) return null;
+  const roleIndex = role === "dealer" ? 0 : 1;
+  const policyIndex = CRIB_TRIPOLICY_POLICY_INDEX[policy];
+  const entryIndex = ((roleIndex * table.pairKeys.length + pairIndex) * 13 + cut.rank) * 3 + policyIndex;
+  if (entryIndex < 0 || entryIndex >= table.entryCount) return null;
+  const directoryOffset = entryIndex * table.directoryRecordBytes;
+  const average = table.directory.getFloat32(directoryOffset, true);
+  const recordOffset = table.directory.getUint32(directoryOffset + 4, true);
+  const recordCount = table.directory.getUint16(directoryOffset + 8, true);
+  const opponentDiscards: CribTripolicyPolicyEntry["opponentDiscards"] = [];
+  for (let index = 0; index < recordCount; index += 1) {
+    const offset = (recordOffset + index) * table.opponentRecordBytes;
+    const opponentPairIndex = table.records.getUint8(offset);
+    opponentDiscards.push({
+      ranks: table.pairKeys[opponentPairIndex],
+      weight: table.records.getUint32(offset + 1, true),
+      rankScore: table.records.getFloat32(offset + 5, true),
+    });
+  }
+  return { average, opponentDiscards };
 }
 
 function rankCutCribScore(
@@ -4124,8 +4191,7 @@ function rankCutCribScore(
   engine: Opponent = DEFAULT_OPPONENT,
   policy: CribPolicy = "ev",
 ): number {
-  const tripolicyEntry = tripolicyCribEntry(discard, role, cut, engine);
-  const tripolicyScore = tripolicyEntry?.policies?.[policy]?.average;
+  const tripolicyScore = tripolicyCribPolicyEntry(discard, role, cut, engine, policy)?.average;
   if (typeof tripolicyScore === "number" && Number.isFinite(tripolicyScore)) return tripolicyScore;
   const discardKey = rankCountsForCards(discard).join("");
   return CRIB_RANK_SCORE_BY_DISCARD_CUT[role]?.[discardKey]?.[cut.rank] ?? 0;
@@ -4175,7 +4241,7 @@ function cribScoreOutcomesForCut(
   policy: CribPolicy = "ev",
 ): Array<[number, number]> {
   const discardKey = rankCountsForCards(discard).join("");
-  const entry = tripolicyCribEntry(discard, role, cut, engine)?.policies?.[policy] ??
+  const entry = tripolicyCribPolicyEntry(discard, role, cut, engine, policy) ??
     CRIB_SCORE_HISTOGRAM_BY_DISCARD_CUT[role]?.[discardKey]?.[cut.rank];
   if (!entry) {
     const fallback = rankCutCribScore(discard, role, cut, engine, policy) + scoreFlushAndRightJack(discard, cut, true);
@@ -4262,7 +4328,15 @@ function discardCandidateWinProbability(
     : [[pegging.myPeggingEv, pegging.opponentPeggingEv, 1] as [number, number, number]];
   const peggingWeightTotal = peggingOutcomes.reduce((sum, outcome) => sum + outcome[2], 0) || 1;
   const cacheKey = baseOutcomeCache
-    ? `${cardSetKey(discard)}:${cribPolicy}:${deck.map((card) => card.id).join(",")}`
+    ? [
+        game.playerEngines[player.key],
+        myCrib ? "dealer" : "pone",
+        cardSetKey(fullHand),
+        cardSetKey(keep),
+        cardSetKey(discard),
+        cribPolicy,
+        deck.map((card) => card.id).join(","),
+      ].join(":")
     : "";
   let baseOutcomes = cacheKey ? baseOutcomeCache?.get(cacheKey) : undefined;
   if (!baseOutcomes) {
@@ -4293,7 +4367,9 @@ function discardCandidateWinProbability(
       const [myBase, opponentBase] = key.split(":").map(Number);
       return [myBase, opponentBase, weight] as DiscardWinBaseOutcome;
     });
-    if (cacheKey) baseOutcomeCache?.set(cacheKey, baseOutcomes);
+    if (cacheKey && baseOutcomeCache) {
+      boundedCacheSet(baseOutcomeCache, cacheKey, baseOutcomes, DISCARD_WIN_BASE_OUTCOME_CACHE_LIMIT);
+    }
   }
   for (const [myPegging, opponentPegging, peggingWeight] of peggingOutcomes) {
     const normalizedPeggingWeight = peggingWeight / peggingWeightTotal;
@@ -4340,11 +4416,10 @@ function analyzeDiscardChoice(
   const selectedKey = cardSetKey(selected);
   const cribFlushBonusBySuit = usesCribFlushAdjustment(engine) ? cribFlushBonusesBySuit(hand) : null;
   const suitedDiscardCache = new Map<string, Card[][]>();
-  const discardWinBaseOutcomeCache = new Map<string, DiscardWinBaseOutcome[]>();
 
   for (const discard of combinations(hand, 2, 2)) {
     const keep = hand.filter((card) => !discard.includes(card));
-    const cribPolicies = engine === "schell_table-peg_table-14.0" && CRIB_TRIPOLICY_TABLES[engine]
+    const strategyPolicies = engine === "schell_table-peg_table-14.0" && CRIB_TRIPOLICY_TABLES[engine]
       ? ["ev", "on", "off"] as CribPolicy[]
       : ["ev"] as CribPolicy[];
     const baseCutJoinedScores = usesRankCutDiscardTables(engine)
@@ -4361,14 +4436,17 @@ function analyzeDiscardChoice(
       choiceScore: number;
       components: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
     } | null = null;
-    for (const cribPolicy of cribPolicies) {
-      const cutJoinedScores = cribPolicy === "ev"
+    for (const strategyPolicy of strategyPolicies) {
+      const cutJoinedScores = strategyPolicy === "ev"
         ? baseCutJoinedScores
         : usesRankCutDiscardTables(engine)
-          ? rankCutDiscardScores(keep, discard, deck, role, cribFlushBonusBySuit, engine, cribPolicy)
+          ? rankCutDiscardScores(keep, discard, deck, role, cribFlushBonusBySuit, engine, strategyPolicy)
           : null;
       const cribScore = cutJoinedScores?.cribScore ?? expectedCribScore(discard, deck, myCrib, engine, cribFlushBonusBySuit);
-      for (const pegging of peggingOptions) {
+      const strategyPeggingOptions = engine === "schell_table-peg_table-14.0"
+        ? peggingOptions.filter((option) => option.policy === strategyPolicy || option.policy === "fallback")
+        : peggingOptions;
+      for (const pegging of strategyPeggingOptions) {
         const total = (myCrib ? handScore + cribScore : handScore - cribScore) + pegging.netPeggingEv;
         const components: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>> = {
           [myCrib ? "handDealer" : "handPone"]: handScore,
@@ -4387,8 +4465,8 @@ function analyzeDiscardChoice(
               pegging,
               pegging.hist,
               suitedDiscardCache,
-              cribPolicy,
-              discardWinBaseOutcomeCache,
+              strategyPolicy,
+              DISCARD_WIN_BASE_OUTCOME_CACHE,
             )
           : undefined;
         const choiceScore = winProbability ?? total;
@@ -4397,7 +4475,7 @@ function analyzeDiscardChoice(
           choiceScore > bestDiscardOption.choiceScore ||
           (choiceScore === bestDiscardOption.choiceScore && total > bestDiscardOption.total)
         ) {
-          bestDiscardOption = { pegging, cribPolicy, total, winProbability, choiceScore, components };
+          bestDiscardOption = { pegging, cribPolicy: strategyPolicy, total, winProbability, choiceScore, components };
         }
       }
     }
@@ -4477,6 +4555,16 @@ function bestImmediatePegPlay(plays: Card[], legal: Card[]): Card {
 
 function cardSetKey(cards: Card[]): string {
   return cards.map((card) => card.id).sort((a, b) => a - b).join(",");
+}
+
+function boundedCacheSet<K, V>(cache: Map<K, V>, key: K, value: V, limit: number): void {
+  if (cache.has(key)) cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > limit) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
 }
 
 function roundEv(value: number): number {
