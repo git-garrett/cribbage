@@ -2212,6 +2212,18 @@ button.card {
   min-height: auto;
 }
 
+.app[data-phase="cut_for_deal"] .deal-cut-row {
+  justify-content: center;
+  overflow: visible;
+  padding-inline: 8px;
+}
+
+.app[data-phase="cut_for_deal"] .deal-cut-row .card,
+.app[data-phase="cut_for_deal"] .played-active.deal-cut-row .card,
+.app[data-phase="cut_for_deal"] .deal-cut-row .card:first-child {
+  margin-left: 0;
+}
+
 .app[data-phase="discard"] #plays {
   display: flex;
   flex-wrap: wrap;
