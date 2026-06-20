@@ -2908,6 +2908,7 @@ function sortedAnalyticsEngines(
 
 function analyticsEngineSortKey(engine: Opponent): number {
   return [
+    "schell_table-peg_table-14.1",
     "schell_table-peg_table-14.0",
     "schell_table-peg_table-13.0",
     "schell_table-peg_table-12.0",
@@ -3242,6 +3243,7 @@ function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
     engine === "schell_table-peg_table-12.0" ||
     engine === "schell_table-peg_table-13.0" ||
     engine === "schell_table-peg_table-14.0" ||
+    engine === "schell_table-peg_table-14.1" ||
     engine === "schell_table-2.0"
   ) {
     return engine;
@@ -3410,7 +3412,11 @@ function waitForPaint(): Promise<void> {
 async function prepareModel13Pegging(game: GameState): Promise<void> {
   if (
     game.phase !== "pegging" ||
-    (localGame.opponent !== "schell_table-peg_table-13.0" && localGame.opponent !== "schell_table-peg_table-14.0")
+    (
+      localGame.opponent !== "schell_table-peg_table-13.0" &&
+      localGame.opponent !== "schell_table-peg_table-14.0" &&
+      localGame.opponent !== "schell_table-peg_table-14.1"
+    )
   ) return;
   setAiThinking(true);
   render(game);
