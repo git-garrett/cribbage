@@ -209,9 +209,9 @@ function patchEngineAssetImports(source) {
       return `const peggingPairwise12Url = ${JSON.stringify(pathToFileURL(assetPath).href)};`;
     },
   ).replace(
-    /import\s+peggingPairwise14Url\s+from\s+"\.\/models\/schell_table-peg_table-14\.0\/pegging-outcome-tripolicy-packed\.bin\?url";/,
+    /import\s+peggingPairwise14Url\s+from\s+"\.\/models\/schell_table-peg_table-14\.0\/pegging-outcome-tripolicy-aligned\.bin\?url";/,
     () => {
-      const assetPath = path.join(path.dirname(enginePath), "models", "schell_table-peg_table-14.0", "pegging-outcome-tripolicy-packed.bin");
+      const assetPath = path.join(path.dirname(enginePath), "models", "schell_table-peg_table-14.0", "pegging-outcome-tripolicy-aligned.bin");
       return `const peggingPairwise14Url = ${JSON.stringify(pathToFileURL(assetPath).href)};`;
     },
   ).replace(

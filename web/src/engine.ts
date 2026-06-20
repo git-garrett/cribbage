@@ -6,8 +6,8 @@ import cribScoreHistogramByDiscardCut from "./models/rank-crib-discard/crib-scor
 import handRankScoreByKeepCut from "./models/rank-crib-discard/hand-rank-score-by-keep-cut.json";
 import peggingPairwise12Manifest from "./models/schell_table-peg_table-12.0/pegging-outcome-pairwise.manifest.json";
 import peggingPairwise12Url from "./models/schell_table-peg_table-12.0/pegging-outcome-pairwise.bin?url";
-import peggingPairwise14Manifest from "./models/schell_table-peg_table-14.0/pegging-outcome-tripolicy-packed.manifest.json";
-import peggingPairwise14Url from "./models/schell_table-peg_table-14.0/pegging-outcome-tripolicy-packed.bin?url";
+import peggingPairwise14Manifest from "./models/schell_table-peg_table-14.0/pegging-outcome-tripolicy-aligned.manifest.json";
+import peggingPairwise14Url from "./models/schell_table-peg_table-14.0/pegging-outcome-tripolicy-aligned.bin?url";
 import cribTripolicy14Manifest from "./models/schell_table-peg_table-14.0/crib-score-histogram-tripolicy-by-discard-cut.manifest.json";
 import cribTripolicy14Url from "./models/schell_table-peg_table-14.0/crib-score-histogram-tripolicy-by-discard-cut.bin?url";
 
@@ -2167,7 +2167,7 @@ type PeggingPairwiseManifest = {
   keepKeys: string[];
 };
 type PeggingPairwiseTable = {
-  format: "word32" | "packed49";
+  format: "word32" | "packed49" | "aligned7";
   keepKeys: string[];
   keepRanks: RankCounts[];
   keepIdByKey: Map<string, number>;
@@ -2177,7 +2177,10 @@ type PeggingPairwiseTable = {
   poneRecords?: Uint32Array;
   dealerPackedRecords?: Uint8Array;
   ponePackedRecords?: Uint8Array;
+  dealerAlignedRecords?: Uint8Array;
+  poneAlignedRecords?: Uint8Array;
   recordBits: number;
+  recordBytes: number;
 };
 type PoneLeadFrequencyTable = {
   version: number;
@@ -2203,6 +2206,8 @@ const CRIB_TRIPOLICY_TABLES: Partial<Record<Opponent, CribTripolicyTable>> = {};
 const CRIB_TRIPOLICY_POLICY_INDEX: Record<CribPolicy, number> = { ev: 0, on: 1, off: 2 };
 const DISCARD_WIN_BASE_OUTCOME_CACHE = new Map<string, DiscardWinBaseOutcome[]>();
 const DISCARD_WIN_BASE_OUTCOME_CACHE_LIMIT = 1500;
+const PAIRWISE_PEGGING_OUTCOME_CACHE = new Map<string, PeggingOutcomeSummary | null>();
+const PAIRWISE_PEGGING_OUTCOME_CACHE_LIMIT = 5000;
 const MODEL13_PEGGING_DECISION_CACHE = new Map<string, { cardId: number; ev: number }>();
 const MODEL13_PEGGING_DECISION_CACHE_LIMIT = 500;
 const MODEL13_OPTIMAL_PEGGING_TREE_CACHE = new Map<string, PeggingOutcomeDistribution>();
@@ -2445,13 +2450,14 @@ async function loadPairwisePeggingTable(url: string, manifest: PeggingPairwiseMa
   const buffer = await response.arrayBuffer();
   const view = new DataView(buffer);
   const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
-  if (magic !== "P12P" && magic !== "P13P" && magic !== "P14C") throw new Error(`Unexpected pairwise pegging table magic: ${magic}`);
+  if (magic !== "P12P" && magic !== "P13P" && magic !== "P14C" && magic !== "P14A") throw new Error(`Unexpected pairwise pegging table magic: ${magic}`);
   const version = view.getUint16(4, true);
   if (version !== 1) throw new Error(`Unsupported pairwise pegging table version: ${version}`);
   const keepCount = view.getUint16(6, true);
   const dealerRecordCount = view.getUint32(8, true);
   const poneRecordCount = view.getUint32(12, true);
   const recordBits = magic === "P14C" ? view.getUint16(16, true) : 32;
+  const recordBytes = magic === "P14A" ? view.getUint16(16, true) : 4;
   if (keepCount !== manifest.keepKeys.length) {
     throw new Error(`Pairwise pegging table keep count mismatch: ${keepCount} vs ${manifest.keepKeys.length}`);
   }
@@ -2468,6 +2474,7 @@ async function loadPairwisePeggingTable(url: string, manifest: PeggingPairwiseMa
     dealerOffsets,
     poneOffsets,
     recordBits,
+    recordBytes,
   };
   if (magic === "P14C") {
     if (recordBits !== 49) throw new Error(`Unsupported P14C record width: ${recordBits}`);
@@ -2481,6 +2488,20 @@ async function loadPairwisePeggingTable(url: string, manifest: PeggingPairwiseMa
       format: "packed49",
       dealerPackedRecords,
       ponePackedRecords,
+    };
+  }
+  if (magic === "P14A") {
+    if (recordBytes !== 7) throw new Error(`Unsupported P14A record width: ${recordBytes}`);
+    const dealerBytes = dealerRecordCount * recordBytes;
+    const dealerAlignedRecords = new Uint8Array(buffer, offset, dealerBytes);
+    offset += dealerBytes;
+    const poneBytes = poneRecordCount * recordBytes;
+    const poneAlignedRecords = new Uint8Array(buffer, offset, poneBytes);
+    return {
+      ...base,
+      format: "aligned7",
+      dealerAlignedRecords,
+      poneAlignedRecords,
     };
   }
   const dealerRecords = new Uint32Array(buffer, offset, dealerRecordCount);
@@ -2639,24 +2660,34 @@ function aggregatePairwisePeggingOutcomes(
   const keepKey = rankCountsForCards(keep).join("");
   const keepId = table.keepIdByKey.get(keepKey);
   if (keepId === undefined) return null;
+  const available = remainingRankCounts(knownCards);
+  const cacheKey = `${engine}:${role}:${leadRank ?? "-"}:${policy}:${keepKey}:${available.join("")}`;
+  if (PAIRWISE_PEGGING_OUTCOME_CACHE.has(cacheKey)) {
+    return PAIRWISE_PEGGING_OUTCOME_CACHE.get(cacheKey) ?? null;
+  }
   const records = role === "dealer" ? table.dealerRecords : table.poneRecords;
   const packedRecords = role === "dealer" ? table.dealerPackedRecords : table.ponePackedRecords;
+  const alignedRecords = role === "dealer" ? table.dealerAlignedRecords : table.poneAlignedRecords;
   const start = role === "dealer"
     ? table.dealerOffsets[keepId]
     : table.poneOffsets[(keepId * 13) + (leadRank ?? 0)];
   const end = role === "dealer"
     ? table.dealerOffsets[keepId + 1]
     : table.poneOffsets[(keepId * 13) + (leadRank ?? 0) + 1];
-  if (end <= start) return null;
-  const available = remainingRankCounts(knownCards);
+  if (end <= start) {
+    boundedCacheSet(PAIRWISE_PEGGING_OUTCOME_CACHE, cacheKey, null, PAIRWISE_PEGGING_OUTCOME_CACHE_LIMIT);
+    return null;
+  }
   const hist = new Map<string, number>();
   let totalWeight = 0;
   let myTotal = 0;
   let opponentTotal = 0;
   for (let index = start; index < end; index += 1) {
-    const record = table.format === "packed49"
-      ? unpackPackedPairwiseRecord(packedRecords, index, policy)
-      : unpackPairwiseRecord(records?.[index] ?? 0);
+    const record = table.format === "aligned7"
+      ? unpackAlignedPairwiseRecord(alignedRecords, index, policy)
+      : table.format === "packed49"
+        ? unpackPackedPairwiseRecord(packedRecords, index, policy)
+        : unpackPairwiseRecord(records?.[index] ?? 0);
     const opponentRanks = table.keepRanks[record.opponentKeepId];
     const weight = opponentKeepWeight(available, opponentRanks);
     if (!weight) continue;
@@ -2666,8 +2697,11 @@ function aggregatePairwisePeggingOutcomes(
     myTotal += record.myPegging * weight;
     opponentTotal += record.opponentPegging * weight;
   }
-  if (!totalWeight) return null;
-  return {
+  if (!totalWeight) {
+    boundedCacheSet(PAIRWISE_PEGGING_OUTCOME_CACHE, cacheKey, null, PAIRWISE_PEGGING_OUTCOME_CACHE_LIMIT);
+    return null;
+  }
+  const summary = {
     totalWeight,
     myEv: myTotal / totalWeight,
     opponentEv: opponentTotal / totalWeight,
@@ -2678,6 +2712,8 @@ function aggregatePairwisePeggingOutcomes(
       })
       .sort((a, b) => a[0] - b[0] || a[1] - b[1]),
   };
+  boundedCacheSet(PAIRWISE_PEGGING_OUTCOME_CACHE, cacheKey, summary, PAIRWISE_PEGGING_OUTCOME_CACHE_LIMIT);
+  return summary;
 }
 
 function unpackPairwiseRecord(record: number): { opponentKeepId: number; myPegging: number; opponentPegging: number; weight: number } {
@@ -2704,6 +2740,46 @@ function unpackPackedPairwiseRecord(
     myPegging: Number((value >> offset) & 0x1fn),
     opponentPegging: Number((value >> (offset + 5n)) & 0x1fn),
     weight,
+  };
+}
+
+function unpackAlignedPairwiseRecord(
+  records: Uint8Array | undefined,
+  index: number,
+  policy: PeggingOutcomePolicy,
+): { opponentKeepId: number; myPegging: number; opponentPegging: number; weight: number } {
+  if (!records) return { opponentKeepId: 0, myPegging: 0, opponentPegging: 0, weight: 0 };
+  const offset = index * 7;
+  const lo = (records[offset] |
+    (records[offset + 1] << 8) |
+    (records[offset + 2] << 16) |
+    (records[offset + 3] << 24)) >>> 0;
+  const hi = records[offset + 4] |
+    (records[offset + 5] << 8) |
+    (records[offset + 6] << 16);
+  const opponentKeepId = lo & 0x7ff;
+  const weight = ((lo >>> 11) & 0xff) + 1;
+  if (policy === "ev") {
+    return {
+      opponentKeepId,
+      weight,
+      myPegging: (lo >>> 19) & 0x1f,
+      opponentPegging: (lo >>> 24) & 0x1f,
+    };
+  }
+  if (policy === "on") {
+    return {
+      opponentKeepId,
+      weight,
+      myPegging: ((lo >>> 29) & 0x7) | ((hi & 0x3) << 3),
+      opponentPegging: (hi >>> 2) & 0x1f,
+    };
+  }
+  return {
+    opponentKeepId,
+    weight,
+    myPegging: (hi >>> 7) & 0x1f,
+    opponentPegging: (hi >>> 12) & 0x1f,
   };
 }
 
