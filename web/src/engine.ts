@@ -2131,7 +2131,7 @@ type OptimalPegSimulationState = PegSimulationState & {
   scores: Record<PlayerKey, number>;
   rootScores: Record<PlayerKey, number>;
   perspectiveRole: "dealer" | "pone";
-  postPeggingContext: PostPeggingWinContext;
+  postPeggingContext?: PostPeggingWinContext;
 };
 type ScoreDistribution = Array<[number, number]>;
 type DiscardWinBaseOutcome = [number, number, number];
@@ -2426,6 +2426,11 @@ function usesTripolicyDiscardModel(engine: Opponent): boolean {
 
 function usesCorrectedDiscardWinProbability(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-14.1";
+}
+
+function usesKnownCardPostPeggingWinProbability(engine: Opponent): boolean {
+  return engine === "schell_table-peg_table-14.0" ||
+    engine === "schell_table-peg_table-14.1";
 }
 
 function pegTableEv(
@@ -3728,7 +3733,9 @@ function optimalPeggingOutcomeDistributionForCandidate(
 ): PeggingOutcomeDistribution {
   const opponent = player === game.human ? game.ai : game.human;
   const engine = game.playerEngines[player.key];
-  const winContext = postPeggingWinContext(game, player, engine);
+  const winContext = usesKnownCardPostPeggingWinProbability(engine)
+    ? postPeggingWinContext(game, player, engine)
+    : undefined;
   const ownRanks = ranksAfterPlaying(player.hand, card);
   const immediateScore = scoreCount([...game.plays, card]);
   const countAfterPlay = game.count + card.value;
@@ -3934,7 +3941,7 @@ function optimalPegSimulationKey(state: OptimalPegSimulationState): string {
     state.rootScores.human,
     state.rootScores.ai,
     state.perspectiveRole,
-    state.postPeggingContext.key,
+    state.postPeggingContext?.key ?? "historic-phase",
   ].join("|");
 }
 
@@ -4060,13 +4067,23 @@ function expectedWinProbabilityAfterPegging(
 ): number {
   if (!distribution.totalWeight) return 0;
   const opponent = player === game.human ? game.ai : game.human;
-  const winContext = postPeggingWinContext(game, player, game.playerEngines[player.key]);
+  const engine = game.playerEngines[player.key];
+  const winContext = usesKnownCardPostPeggingWinProbability(engine)
+    ? postPeggingWinContext(game, player, engine)
+    : undefined;
   let total = 0;
   for (const [key, weight] of distribution.outcomes) {
     const [myPegging, opponentPegging] = parseOutcomeKey(key);
     const myScore = player.score + myPegging;
     const opponentScore = opponent.score + opponentPegging;
-    total += weight * postPeggingWinProbability(winContext, myScore, opponentScore);
+    total += weight * (winContext
+      ? postPeggingWinProbability(winContext, myScore, opponentScore)
+      : approximateFutureWinProbability(
+        myScore,
+        opponentScore,
+        player === game.pone ? "pone" : "dealer",
+        "handPone",
+      ));
   }
   return total / distribution.totalWeight;
 }

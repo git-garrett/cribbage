@@ -19,7 +19,11 @@ It reuses 14.0's tripolicy pegging and crib assets:
 
 ## Pegging
 
-Actual pegging play remains the same 13.0/14.0 live pegging layer, with the same 14.0 tripolicy lead shortcut.
+Actual pegging play uses the 14.x live pegging layer:
+
+- It keeps the model-13 exact-hand minimax tree over possible opponent rank hands.
+- Unlike historic 13.0, post-pegging win probability uses the current known-card hand/crib context before handing off to future phase distributions.
+- It also uses the 14.0 tripolicy lead shortcut for opening pone leads.
 
 ## Difference From 14.0
 

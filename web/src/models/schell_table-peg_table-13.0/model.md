@@ -13,6 +13,7 @@ Experimental pegging model built on 12.0.
 - Uses live exact-hand exhaustive pegging evaluation instead of the shipped pairwise lead shortcut.
 - Weights possible opponent remaining rank hands with empirical 7.0+ game data, including prefix length 0 before the opponent has played a pegging card.
 - Uses win-probability scoring for pegging decisions rather than raw pegging EV when that path is available.
+- Historic 13.0 hands off to the general phase distributions after pegging; it does not use the later 14.x known-card post-pegging hand/crib context.
 
 ## New Assets
 
