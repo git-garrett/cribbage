@@ -1580,13 +1580,26 @@ function renderTurnCut(game: GameState): void {
   els.plays.hidden = false;
   const row = document.createElement("div");
   row.className = "cards played-active pegging-row turn-cut-row";
+  const emptySlot = document.createElement("div");
+  emptySlot.className = "cut-slot cut-slot-human";
+  const cutSlot = document.createElement("div");
+  cutSlot.className = "cut-slot cut-slot-ai";
   const deck = cardBack();
   deck.classList.add("turn-cut-deck");
-  const userCanAct = state.turnCutRevealStage === "user-cut" || state.turnCutRevealStage === "user-turn";
+  const userCanAct = state.turnCutRevealStage === "user-cut" ||
+    state.turnCutRevealStage === "user-turn" ||
+    state.turnCutRevealStage === "revealed";
   if (userCanAct) {
     deck.setAttribute("role", "button");
     deck.tabIndex = 0;
-    deck.setAttribute("aria-label", state.turnCutRevealStage === "user-cut" ? "Cut deck" : "Turn cut card");
+    deck.setAttribute(
+      "aria-label",
+      state.turnCutRevealStage === "revealed"
+        ? "Continue to pegging"
+        : state.turnCutRevealStage === "user-cut"
+          ? "Cut deck"
+          : "Turn cut card",
+    );
     deck.addEventListener("click", completeTurnCutInteraction);
     deck.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
@@ -1604,15 +1617,26 @@ function renderTurnCut(game: GameState): void {
 
   const showCutCard = state.turnCutRevealStage === "ai-turn" ||
     state.turnCutRevealStage === "revealed";
-  row.append(deck);
   if (showCutCard && game.turnCard) {
     const cut = document.createElement("div");
     cut.className = "cut-result turn-card-reveal";
     const cutLabel = document.createElement("span");
     cutLabel.textContent = "Cut";
     cut.append(cutLabel, cardElement(game.turnCard));
-    row.append(cut);
+    if (state.turnCutRevealStage === "revealed") {
+      cut.setAttribute("role", "button");
+      cut.tabIndex = 0;
+      cut.setAttribute("aria-label", "Continue to pegging");
+      cut.addEventListener("click", completeTurnCutInteraction);
+      cut.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        completeTurnCutInteraction();
+      });
+    }
+    cutSlot.append(cut);
   }
+  row.append(emptySlot, deck, cutSlot);
   els.plays.append(label, row);
 }
 
@@ -3447,18 +3471,20 @@ function render(game: GameState | null): void {
   }
 
   const gameActive = game.phase !== "game_over";
-  const waitingForTurnCutClick = state.turnCutRevealStage === "user-cut" || state.turnCutRevealStage === "user-turn";
+  const waitingForTurnCutClick = state.turnCutRevealStage === "user-cut" ||
+    state.turnCutRevealStage === "user-turn" ||
+    state.turnCutRevealStage === "revealed";
   const waitingForDealCutOk = Boolean(state.dealCutResolve);
   els.cutForDeal.hidden = !gameActive || (game.phase !== "cut_for_deal" && !waitingForTurnCutClick && !waitingForDealCutOk);
-  els.discard.hidden = !gameActive || Boolean(state.dealAnimation) || waitingForDealCutOk || game.phase !== "discard";
-  els.play.hidden = !gameActive || Boolean(state.dealAnimation) || waitingForDealCutOk || game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User");
+  els.discard.hidden = !gameActive || Boolean(state.dealAnimation) || waitingForDealCutOk || Boolean(state.turnCutRevealStage) || game.phase !== "discard";
+  els.play.hidden = !gameActive || Boolean(state.dealAnimation) || waitingForDealCutOk || Boolean(state.turnCutRevealStage) || game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User");
   els.go.hidden = true;
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
   els.cutForDeal.textContent = state.turnCutRevealStage === "user-turn"
     ? "Turn cut card"
     : state.turnCutRevealStage === "user-cut"
       ? "Cut deck"
-      : waitingForDealCutOk
+      : state.turnCutRevealStage === "revealed" || waitingForDealCutOk
         ? "OK"
         : "Cut deck";
   els.cutForDeal.disabled = game.phase !== "cut_for_deal" && !waitingForTurnCutClick && !waitingForDealCutOk;
@@ -3470,7 +3496,7 @@ function render(game: GameState | null): void {
   els.continuePegging.hidden = game.peggingResetPending || game.phase !== "pegging_complete";
   if (state.pending) {
     els.discard.disabled = true;
-    els.cutForDeal.disabled = !waitingForDealCutOk;
+    els.cutForDeal.disabled = !(waitingForDealCutOk || waitingForTurnCutClick);
     els.play.disabled = true;
     els.go.disabled = true;
     els.acknowledgePeggingReset.disabled = true;
@@ -3576,9 +3602,10 @@ async function playTurnCardReveal(game: GameState): Promise<void> {
   }
   state.turnCutRevealStage = "revealed";
   state.resultOverride = [`Cut card is ${cutCardText(game.turnCard)}.`];
+  const confirmed = waitForTurnCutInteraction();
   render(game);
   await waitForPaint();
-  await waitMs(850);
+  await confirmed;
   state.turnCutRevealStage = null;
   state.turnCutResolve = null;
   state.resultOverride = null;
@@ -3634,9 +3661,10 @@ async function finishTurnCardReveal(game: GameState, startStage: "ai-turn" | "re
   }
   state.turnCutRevealStage = "revealed";
   state.resultOverride = [`Cut card is ${cutCardText(game.turnCard)}.`];
+  const confirmed = waitForTurnCutInteraction();
   render(game);
   await waitForPaint();
-  await waitMs(850);
+  await confirmed;
   state.turnCutRevealStage = null;
   state.turnCutResolve = null;
   state.resultOverride = null;

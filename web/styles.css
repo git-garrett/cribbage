@@ -1659,11 +1659,15 @@ button:disabled {
 }
 
 .turn-cut-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(86px, auto) minmax(0, 1fr);
   align-items: center;
-  justify-content: center;
-  gap: 18px;
+  justify-content: stretch;
+  width: 100%;
+  min-height: 154px;
+  column-gap: 8px;
   overflow: visible;
-  padding: 10px 8px;
+  padding: 2px 6px;
 }
 
 .turn-cut-label {
@@ -1760,8 +1764,10 @@ button:disabled {
 
 .pegging-row .turn-cut-deck,
 .played-active.pegging-row .turn-cut-deck {
-  width: clamp(96px, 28vw, 144px);
-  height: clamp(134px, 39vw, 202px);
+  grid-column: 2;
+  justify-self: center;
+  width: clamp(82px, 22vw, 112px);
+  height: clamp(115px, 31vw, 157px);
   margin-left: 0;
   border-radius: 10px;
   cursor: pointer;
@@ -1791,11 +1797,25 @@ button:disabled {
 
 .pegging-row .turn-card-reveal .card,
 .played-active.pegging-row .turn-card-reveal .card {
-  width: clamp(72px, 19vw, 96px);
-  height: clamp(101px, 27vw, 135px);
+  width: clamp(56px, 16vw, 74px);
+  height: clamp(78px, 22vw, 104px);
   margin-left: 0;
   border-radius: 8px;
   animation: cut-card-flip 0.42s ease-out both;
+}
+
+.turn-cut-row .cut-slot-human {
+  grid-column: 1;
+  justify-self: end;
+}
+
+.turn-cut-row .cut-slot-ai {
+  grid-column: 3;
+  justify-self: start;
+}
+
+.turn-cut-row .turn-card-reveal[role="button"] {
+  cursor: pointer;
 }
 
 @keyframes deck-cut-slide {
