@@ -1511,6 +1511,8 @@ function renderDealCut(game: GameState, revealStage: "human" | "ai" | null = nul
   els.plays.hidden = false;
   const row = document.createElement("div");
   row.className = "cards played-active pegging-row deal-cut-row";
+  const showHumanCut = Boolean(game.cutForDeal?.human && (!revealStage || revealStage === "human" || revealStage === "ai"));
+  const showAiCut = Boolean(game.cutForDeal?.ai && (!revealStage || revealStage === "ai"));
   const deck = cardBack();
   deck.classList.add("cut-deck");
   deck.setAttribute("role", "button");
@@ -1532,25 +1534,27 @@ function renderDealCut(game: GameState, revealStage: "human" | "ai" | null = nul
     }
     void cutForDeal();
   });
-  row.append(deck);
-  const showHumanCut = Boolean(game.cutForDeal?.human && (!revealStage || revealStage === "human" || revealStage === "ai"));
-  const showAiCut = Boolean(game.cutForDeal?.ai && (!revealStage || revealStage === "ai"));
+  const humanSlot = document.createElement("div");
+  humanSlot.className = "cut-slot cut-slot-human";
   if (showHumanCut && game.cutForDeal?.human) {
     const human = document.createElement("div");
     human.className = "cut-result cut-result-human cut-card-reveal";
     const label = document.createElement("span");
     label.textContent = "User";
     human.append(label, cardElement(game.cutForDeal.human));
-    row.append(human);
+    humanSlot.append(human);
   }
+  const aiSlot = document.createElement("div");
+  aiSlot.className = "cut-slot cut-slot-ai";
   if (showAiCut && game.cutForDeal?.ai) {
     const ai = document.createElement("div");
     ai.className = "cut-result cut-result-ai cut-card-reveal";
     const label = document.createElement("span");
     label.textContent = "AI";
     ai.append(label, cardElement(game.cutForDeal.ai));
-    row.append(ai);
+    aiSlot.append(ai);
   }
+  row.append(humanSlot, deck, aiSlot);
   els.plays.append(row);
 }
 
@@ -1624,11 +1628,11 @@ function renderDealAnimation(): void {
   for (let index = 0; index < 6; index += 1) {
     const poneCard = cardBack();
     poneCard.classList.add("deal-animation-card");
-    poneCard.style.animationDelay = `${index * 160}ms`;
+    poneCard.style.animationDelay = `${index * 235}ms`;
     pone.append(poneCard);
     const dealerCard = cardBack();
     dealerCard.classList.add("deal-animation-card");
-    dealerCard.style.animationDelay = `${(index * 160) + 80}ms`;
+    dealerCard.style.animationDelay = `${(index * 235) + 115}ms`;
     dealer.append(dealerCard);
   }
   shell.append(pone, dealer);
@@ -3347,6 +3351,7 @@ function render(game: GameState | null): void {
   els.splashNameRow.hidden = Boolean(playerFirstName);
   els.splashFirstName.value = playerFirstName || els.splashFirstName.value;
   els.app.dataset.phase = game.phase;
+  els.app.dataset.cutConfirming = state.dealCutResolve ? "true" : "false";
   els.app.dataset.view = state.analyticsOpen
     ? "analytics"
     : state.gameLogOpen
@@ -3435,8 +3440,8 @@ function render(game: GameState | null): void {
   const waitingForTurnCutClick = state.turnCutRevealStage === "user-cut" || state.turnCutRevealStage === "user-turn";
   const waitingForDealCutOk = Boolean(state.dealCutResolve);
   els.cutForDeal.hidden = !gameActive || (game.phase !== "cut_for_deal" && !waitingForTurnCutClick && !waitingForDealCutOk);
-  els.discard.hidden = !gameActive || Boolean(state.dealAnimation) || game.phase !== "discard";
-  els.play.hidden = !gameActive || Boolean(state.dealAnimation) || game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User");
+  els.discard.hidden = !gameActive || Boolean(state.dealAnimation) || waitingForDealCutOk || game.phase !== "discard";
+  els.play.hidden = !gameActive || Boolean(state.dealAnimation) || waitingForDealCutOk || game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User");
   els.go.hidden = true;
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
   els.cutForDeal.textContent = state.turnCutRevealStage === "user-turn"
@@ -3519,7 +3524,7 @@ async function playDealAnimationIfNeeded(game: GameState): Promise<void> {
   state.resultOverride = [`Dealing hand ${game.handNumber}.`];
   render(game);
   await waitForPaint();
-  await waitMs(1240);
+  await waitMs(1840);
   state.dealAnimation = null;
   state.resultOverride = null;
   render(game);
