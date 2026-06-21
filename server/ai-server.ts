@@ -5,6 +5,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import {
   CribbageGame,
+  WinGame,
   hasLoadedOpponentResources,
   loadOpponentResources,
   type GameSnapshot,
@@ -87,6 +88,89 @@ async function ensureModel(): Promise<void> {
     modelPromise = null;
   });
   await modelPromise;
+}
+
+async function ensureOpponentModel(opponent: Opponent): Promise<void> {
+  if (hasLoadedOpponentResources(opponent)) return;
+  await loadOpponentResources(opponent);
+}
+
+function gamePayload(game: CribbageGame): JsonRecord {
+  return {
+    state: game.state(),
+    snapshot: game.snapshot(),
+  };
+}
+
+async function handleGameAction(requestBody: JsonRecord): Promise<JsonRecord> {
+  const action = String(requestBody.action || "");
+  const payload = (requestBody.payload && typeof requestBody.payload === "object"
+    ? requestBody.payload
+    : {}) as JsonRecord;
+  let game: CribbageGame;
+  try {
+    if (action === "new") {
+      const opponent = (typeof payload.opponent === "string" ? payload.opponent : MODEL) as Opponent;
+      game = new CribbageGame(opponent, undefined, { dealMode: "cut" });
+      return gamePayload(game);
+    }
+    if (action === "trouble-game") {
+      game = new CribbageGame(MODEL);
+      game.startTroublePeggingPosition();
+      return gamePayload(game);
+    }
+    if (!requestBody.snapshot) throw new Error("Missing game snapshot.");
+    game = CribbageGame.restore(requestBody.snapshot as GameSnapshot);
+    switch (action) {
+      case "state":
+        break;
+      case "cut-for-deal":
+        game.cutForDeal();
+        break;
+      case "discard":
+        game.discard((payload.ids as number[]) || []);
+        break;
+      case "finish-discard":
+        await ensureOpponentModel(game.opponent as Opponent);
+        game.finishDiscard();
+        break;
+      case "play":
+        game.play(payload.id as number);
+        break;
+      case "play-human":
+        game.playHumanPeggingCard(payload.id as number);
+        break;
+      case "go":
+        game.go();
+        break;
+      case "go-human":
+        game.humanPeggingGo();
+        break;
+      case "advance-pegging": {
+        const startedAt = performance.now();
+        await ensureOpponentModel(game.opponent as Opponent);
+        game.advancePeggingToHuman();
+        game.recordAiPeggingThinkTime(performance.now() - startedAt);
+        break;
+      }
+      case "acknowledge-pegging-reset":
+        game.acknowledgePeggingReset();
+        break;
+      case "complete-decision-reviews":
+        await ensureModel();
+        game.completePendingDecisionReviews();
+        break;
+      case "continue-scoring":
+        game.continueScoring();
+        break;
+      default:
+        throw new Error(`Unknown game action: ${action}`);
+    }
+    return gamePayload(game);
+  } catch (error) {
+    if (error instanceof WinGame && game!) return gamePayload(game);
+    throw error;
+  }
 }
 
 async function ensureDatabase(): Promise<DatabaseSyncLike | null> {
@@ -235,6 +319,11 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, pat
 
   const requestBody = await readRequestJson(request);
   const startedAt = performance.now();
+  if (pathname === "/api/game/action") {
+    const payload = await handleGameAction(requestBody);
+    jsonResponse(response, 200, payload);
+    return;
+  }
   if (pathname === "/api/ai/discard") {
     await ensureModel();
     const game = CribbageGame.restore(requestBody.snapshot as GameSnapshot);
@@ -275,6 +364,10 @@ function contentType(filePath: string): string {
 
 async function serveStatic(response: ServerResponse, pathname: string): Promise<void> {
   const decodedPath = decodeURIComponent(pathname);
+  if (/\/assets\/.*(peg-table|pegging|crib-score-histogram|discard-cut|remaining-hand|pone-lead|\.bin)/i.test(decodedPath)) {
+    textResponse(response, 404, "Not found");
+    return;
+  }
   const requestedPath = decodedPath === "/" ? "/index.html" : decodedPath;
   const filePath = normalize(join(STATIC_DIR, requestedPath));
   if (!filePath.startsWith(STATIC_DIR)) {

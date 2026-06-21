@@ -1,22 +1,17 @@
-import {
-  CribbageGame,
-  DEFAULT_OPPONENT,
-  approximateFutureWinProbability,
-  hasLoadedOpponentResources,
-  loadOpponentResources,
-  type AnalyticsDecisionReview,
-  type AnalyticsEvent,
-  type AnalyticsScoreCategory,
-  type AnalyticsRole,
-  type GameSnapshot,
-  type GameState,
-  type Opponent,
-  type PlayerKey,
-  type ScorePhase,
-  WinGame,
+import type {
+  AnalyticsDecisionReview,
+  AnalyticsEvent,
+  AnalyticsScoreCategory,
+  AnalyticsRole,
+  GameSnapshot,
+  GameState,
+  Opponent,
+  PlayerKey,
+  ScorePhase,
 } from "./engine";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
-import { MODEL_DOCS, MODEL_INFO_ORDER } from "./models/model-info";
+
+const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-14.2";
 
 type BaselineScoreTotals = Pick<
   AnalyticsTotals,
@@ -342,39 +337,54 @@ interface DecisionErrorAverages {
   hands: number;
 }
 
-function loadSavedGame(): CribbageGame {
+interface SavedGameRecord {
+  version: 1;
+  snapshot: GameSnapshot;
+  state: GameState;
+}
+
+function loadSavedGame(): SavedGameRecord | null {
   const saved = safeLocalStorageGet(SAVE_KEY);
-  if (!saved) return new CribbageGame(SIMPLE_NETWORK_MODE ? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT, undefined, { dealMode: "cut" });
+  if (!saved) return null;
   try {
-    return CribbageGame.restore(JSON.parse(saved) as GameSnapshot);
+    const parsed = JSON.parse(saved) as Partial<SavedGameRecord>;
+    if (parsed.version !== 1 || !parsed.snapshot || !parsed.state) return null;
+    return parsed as SavedGameRecord;
   } catch {
     safeLocalStorageRemove(SAVE_KEY);
-    return new CribbageGame(SIMPLE_NETWORK_MODE ? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT, undefined, { dealMode: "cut" });
+    return null;
   }
 }
 
 function saveGame(): void {
-  const snapshot = localGame.snapshot();
-  safeLocalStorageSet(SAVE_KEY, JSON.stringify(snapshot));
-  syncAnalytics(snapshot.analyticsEvents ?? []);
+  if (!currentSnapshot || !state.game) return;
+  safeLocalStorageSet(SAVE_KEY, JSON.stringify({ version: 1, snapshot: currentSnapshot, state: state.game }));
+  syncAnalytics(currentSnapshot.analyticsEvents ?? state.game.analyticsEvents ?? []);
 }
 
-let localGame = loadSavedGame();
+let currentSnapshot: GameSnapshot | null = null;
 const simpleNetworkSessionValue = SIMPLE_NETWORK_OPPONENT;
-const simpleLoadedState = localGame.state();
+const savedGame = loadSavedGame();
+if (savedGame) {
+  currentSnapshot = savedGame.snapshot;
+  state.game = savedGame.state;
+}
+const simpleLoadedState = state.game;
 state.splashOpen = SIMPLE_NETWORK_MODE && !playerFirstName;
-state.hasResumableGame = SIMPLE_NETWORK_MODE && localGame.opponent === SIMPLE_NETWORK_OPPONENT && simpleLoadedState.phase !== "game_over";
+state.hasResumableGame = SIMPLE_NETWORK_MODE && currentSnapshot?.opponent === SIMPLE_NETWORK_OPPONENT && simpleLoadedState?.phase !== "game_over";
 if (
   SIMPLE_NETWORK_MODE &&
   (
-    localGame.opponent !== SIMPLE_NETWORK_OPPONENT ||
+    currentSnapshot?.opponent !== SIMPLE_NETWORK_OPPONENT ||
     safeLocalStorageGet(SIMPLE_NETWORK_SESSION_KEY) !== simpleNetworkSessionValue ||
-    simpleLoadedState.phase === "game_over"
+    simpleLoadedState?.phase === "game_over"
   )
 ) {
-  localGame = new CribbageGame(SIMPLE_NETWORK_OPPONENT, undefined, { dealMode: "cut" });
+  currentSnapshot = null;
+  state.game = null;
+  safeLocalStorageRemove(SAVE_KEY);
 }
-state.hasResumableGame = SIMPLE_NETWORK_MODE && localGame.opponent === SIMPLE_NETWORK_OPPONENT && localGame.state().phase !== "game_over";
+state.hasResumableGame = SIMPLE_NETWORK_MODE && currentSnapshot?.opponent === SIMPLE_NETWORK_OPPONENT && state.game?.phase !== "game_over";
 if (SIMPLE_NETWORK_MODE) {
   safeLocalStorageSet(SIMPLE_NETWORK_SESSION_KEY, simpleNetworkSessionValue);
 } else {
@@ -405,8 +415,7 @@ applySimpleNetworkMode();
 applyAdminVisibility();
 window.addEventListener("hashchange", applyAdminVisibility);
 try {
-  saveGame();
-  render(localGame.state());
+  if (state.game) render(state.game);
 } catch (error) {
   console.warn("Initial game render failed", error);
   state.splashOpen = SIMPLE_NETWORK_MODE && !playerFirstName;
@@ -593,7 +602,7 @@ function uploadCompletedGame(gameId: string): void {
     appVersion: __APP_VERSION__,
     model: SIMPLE_NETWORK_OPPONENT,
     finalResult: endEvent ?? null,
-    snapshot: localGame.gameId === gameId ? localGame.snapshot() : null,
+    snapshot: currentSnapshot?.gameId === gameId ? currentSnapshot : null,
     events,
   }).then(() => {
     markGameUploaded(gameId);
@@ -1094,9 +1103,13 @@ function winProbabilityPhaseForGame(game: GameState): ScorePhase {
   return "peggingPone";
 }
 
+function approximateDisplayWinProbability(myScore: number, opponentScore: number): number {
+  return Math.max(0.01, Math.min(0.99, 0.5 + ((myScore - opponentScore) / 90)));
+}
+
 function renderScorePace(game: GameState): void {
   const firstDealerPlayer = game.firstDealer === "User" ? "human" : "ai";
-  const winProbabilityPhase = winProbabilityPhaseForGame(game);
+  void winProbabilityPhaseForGame(game);
   for (const player of ["human", "ai"] as const) {
     const pace = player === "human" ? els.humanPace : els.aiPace;
     const final = player === "human" ? els.humanFinal : els.aiFinal;
@@ -1117,12 +1130,8 @@ function renderScorePace(game: GameState): void {
     parLine.textContent = `${delta >= 0 ? "+" : ""}${delta} Par ${targetHole}`;
     const opponent = player === "human" ? "ai" : "human";
     const role = roleForHand(player, firstDealerPlayer, game.handNumber);
-    const winProbability = approximateFutureWinProbability(
-      game.scores[player],
-      game.scores[opponent],
-      role,
-      winProbabilityPhase,
-    );
+    void role;
+    const winProbability = approximateDisplayWinProbability(game.scores[player], game.scores[opponent]);
     const winDelta = winProbability - 0.5;
     const winLine = document.createElement("span");
     winLine.className = `score-win-prob ${winDelta >= 0 ? "ahead" : "behind"}`;
@@ -1330,142 +1339,78 @@ function cumulativeForecastParThroughHand(
 }
 
 async function ensureOpponentResources(opponent: Opponent): Promise<void> {
-  if (hasLoadedOpponentResources(opponent)) return;
-  state.modelLoading = true;
-  render(state.game);
-  await waitForPaint();
-  try {
-    await loadOpponentResources(opponent);
-  } finally {
-    state.modelLoading = false;
-    render(state.game);
-  }
+  void opponent;
+}
+
+interface ServerGameActionResponse {
+  state: GameState;
+  snapshot: GameSnapshot;
+}
+
+async function serverGameAction(action: string, payload: Record<string, unknown> | null = null): Promise<GameState> {
+  const response = await serverJson<ServerGameActionResponse>("/api/game/action", {
+    action,
+    payload: payload ?? {},
+    snapshot: currentSnapshot,
+    tag: currentSessionTag() || null,
+  });
+  currentSnapshot = response.snapshot;
+  state.game = response.state;
+  saveGame();
+  return response.state;
 }
 
 async function api(path: string, body: Record<string, unknown> | null = null): Promise<GameState> {
   try {
-    if (path === "/api/state") return localGame.state();
+    if (path === "/api/state") {
+      if (state.game) return state.game;
+      return serverGameAction("new", { opponent: SIMPLE_NETWORK_MODE ? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT });
+    }
     if (path === "/api/new") {
       const opponent = SIMPLE_NETWORK_MODE
         ? SIMPLE_NETWORK_OPPONENT
         : (body?.opponent as Opponent) || DEFAULT_OPPONENT;
-      if (!usesRemoteAi()) await ensureOpponentResources(opponent);
-      localGame = new CribbageGame(opponent, undefined, { dealMode: "cut" });
-      saveGame();
-      return localGame.state();
+      return serverGameAction("new", { opponent });
     }
     if (path === "/api/cut-for-deal") {
-      localGame.cutForDeal();
-      saveGame();
-      return localGame.state();
+      return serverGameAction("cut-for-deal");
     }
     if (path === "/api/trouble-game") {
-      await ensureOpponentResources(SIMPLE_NETWORK_OPPONENT);
-      localGame = new CribbageGame(SIMPLE_NETWORK_OPPONENT);
-      localGame.startTroublePeggingPosition();
-      saveGame();
-      return localGame.state();
+      return serverGameAction("trouble-game");
     }
     if (path === "/api/discard") {
-      if (!usesRemoteAi()) await ensureOpponentResources(localGame.opponent as Opponent);
-      localGame.discard((body?.ids as number[]) || []);
-      saveGame();
-      return localGame.state();
+      return serverGameAction("discard", { ids: (body?.ids as number[]) || [] });
     }
     if (path === "/api/finish-discard") {
-      if (usesRemoteAi()) {
-        const response = await serverJson<ServerDiscardResponse>("/api/ai/discard", {
-          tag: currentSessionTag() || null,
-          model: SIMPLE_NETWORK_OPPONENT,
-          snapshot: localGame.snapshot(),
-        });
-        const cardIds = response.cardIds ?? response.cards?.map((card) => card.id) ?? [];
-        localGame.finishDiscardWithAiCards(cardIds);
-      } else {
-        await ensureOpponentResources(localGame.opponent as Opponent);
-        localGame.finishDiscard();
-      }
-      saveGame();
-      return localGame.state();
+      return serverGameAction("finish-discard");
     }
     if (path === "/api/play") {
-      if (!usesRemoteAi()) await ensureOpponentResources(localGame.opponent as Opponent);
-      localGame.play(body?.id as number);
-      saveGame();
-      return localGame.state();
+      return serverGameAction("play", { id: body?.id as number });
     }
     if (path === "/api/play-human") {
-      if (!usesRemoteAi()) await ensureOpponentResources(localGame.opponent as Opponent);
-      localGame.playHumanPeggingCard(body?.id as number);
-      saveGame();
-      return localGame.state();
+      return serverGameAction("play-human", { id: body?.id as number });
     }
     if (path === "/api/go") {
-      if (!usesRemoteAi()) await ensureOpponentResources(localGame.opponent as Opponent);
-      localGame.go();
-      saveGame();
-      return localGame.state();
+      return serverGameAction("go");
     }
     if (path === "/api/go-human") {
-      if (!usesRemoteAi()) await ensureOpponentResources(localGame.opponent as Opponent);
-      localGame.humanPeggingGo();
-      saveGame();
-      return localGame.state();
+      return serverGameAction("go-human");
     }
     if (path === "/api/advance-pegging") {
-      const startedAt = performance.now();
-      if (usesRemoteAi()) {
-        for (let guard = 0; guard < 16; guard += 1) {
-          const current = localGame.state();
-          if (current.peggingResetPending) break;
-          if (current.phase !== "pegging" || current.turn !== "AI") break;
-          const response = await serverJson<ServerPeggingResponse>("/api/ai/peg", {
-            tag: currentSessionTag() || null,
-            model: SIMPLE_NETWORK_OPPONENT,
-            snapshot: localGame.snapshot(),
-          });
-          if (response.action === "go") {
-            localGame.aiPeggingGo();
-          } else if (response.action === "play") {
-            const cardId = response.cardId ?? response.card?.id;
-            if (typeof cardId !== "number") throw new Error("Server did not return an AI pegging card.");
-            localGame.playAiPeggingCard(cardId);
-          } else {
-            throw new Error("Server did not return a valid AI pegging action.");
-          }
-        }
-      } else {
-        await ensureOpponentResources(localGame.opponent as Opponent);
-        localGame.advancePeggingToHuman();
-      }
-      localGame.recordAiPeggingThinkTime(performance.now() - startedAt);
-      saveGame();
-      return localGame.state();
+      return serverGameAction("advance-pegging");
     }
     if (path === "/api/acknowledge-pegging-reset") {
-      localGame.acknowledgePeggingReset();
-      saveGame();
-      return localGame.state();
+      return serverGameAction("acknowledge-pegging-reset");
     }
     if (path === "/api/complete-decision-reviews") {
-      if (!usesRemoteAi()) await ensureOpponentResources(DEFAULT_OPPONENT);
-      localGame.completePendingDecisionReviews();
-      saveGame();
-      return localGame.state();
+      return serverGameAction("complete-decision-reviews");
     }
     if (path === "/api/continue-scoring") {
-      if (!usesRemoteAi()) await ensureOpponentResources(localGame.opponent as Opponent);
-      localGame.continueScoring();
-      saveGame();
-      return localGame.state();
+      return serverGameAction("continue-scoring");
     }
     throw new Error("Unknown local action.");
   } catch (error) {
-    if (error instanceof WinGame) {
-      saveGame();
-      return localGame.state();
-    }
-    render(localGame.state());
+    render(state.game);
     throw error;
   }
 }
@@ -2667,22 +2612,9 @@ function renderDecisionReviewPage(): void {
 }
 
 function renderModelInfoPage(): void {
-  if (!MODEL_DOCS[state.selectedModelInfo]) state.selectedModelInfo = DEFAULT_OPPONENT;
   els.modelInfoSummary.textContent = `Current default: ${engineName(DEFAULT_OPPONENT)}.`;
   els.modelInfoList.innerHTML = "";
-  for (const model of MODEL_INFO_ORDER) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "model-info-item";
-    button.classList.toggle("selected", model === state.selectedModelInfo);
-    button.textContent = engineName(model);
-    button.addEventListener("click", () => {
-      state.selectedModelInfo = model;
-      renderModelInfoPage();
-    });
-    els.modelInfoList.append(button);
-  }
-  els.modelInfoContent.innerHTML = markdownSummary(MODEL_DOCS[state.selectedModelInfo]);
+  els.modelInfoContent.textContent = "Model details are server-side only in production.";
 }
 
 function markdownSummary(markdown: string): string {
@@ -3441,29 +3373,7 @@ function waitMs(ms: number): Promise<void> {
 }
 
 async function prepareModel13Pegging(game: GameState): Promise<void> {
-  if (
-    game.phase !== "pegging" ||
-    (
-      localGame.opponent !== "schell_table-peg_table-13.0" &&
-      localGame.opponent !== "schell_table-peg_table-14.0" &&
-      localGame.opponent !== "schell_table-peg_table-14.1" &&
-      localGame.opponent !== "schell_table-peg_table-14.2"
-    )
-  ) return;
-  setAiThinking(true);
-  render(game);
-  await waitForPaint();
-  await new Promise<void>((resolve) => {
-    window.setTimeout(() => {
-      try {
-        localGame.prepareModel13Pegging();
-      } catch (error) {
-        console.warn("Model 13 pegging preparation failed", error);
-      } finally {
-        resolve();
-      }
-    }, 0);
-  });
+  void game;
 }
 
 async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
