@@ -1081,20 +1081,23 @@ export class CribbageGame {
     this.beginPegging();
   }
 
-  recommendAiDiscard(): { cards: SerializedCard[]; cardIds: number[] } {
-    if (this.phase !== "ai_discarding") throw new Error("AI is not waiting to discard.");
+  recommendAiDiscard(): { cards: SerializedCard[]; cardIds: number[]; bestLead: number | null } {
+    if (this.phase !== "discard" && this.phase !== "ai_discarding") throw new Error("AI is not waiting to discard.");
+    if (this.ai.hand.length !== 6) throw new Error("AI does not have a discard decision available.");
     const discards = this.chooseDiscards(this.ai, this.dealer === this.ai);
     return {
       cards: discards.map((card) => this.serializeCard(card)),
       cardIds: discards.map((card) => card.id),
+      bestLead: this.pegTableLeads.ai,
     };
   }
 
-  finishDiscardWithAiCards(ids: number[]): void {
+  finishDiscardWithAiCards(ids: number[], bestLead: number | null = null): void {
     if (this.phase !== "ai_discarding") throw new Error("AI is not waiting to discard.");
     const handBeforeDiscard = [...this.ai.hand];
     const discards = this.selectedCards(this.ai.hand, ids, 2);
     removeCards(this.ai.hand, discards);
+    this.pegTableLeads.ai = bestLead;
     this.crib.push(...discards);
     this.recordDiscard(this.ai, discards, handBeforeDiscard);
     this.logEvent("AI discarded two cards to the crib.");

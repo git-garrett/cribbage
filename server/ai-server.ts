@@ -131,9 +131,22 @@ async function handleGameAction(requestBody: JsonRecord): Promise<JsonRecord> {
       case "discard":
         game.discard((payload.ids as number[]) || []);
         break;
+      case "prepare-ai-discard": {
+        await ensureOpponentModel(game.opponent as Opponent);
+        const recommendation = game.recommendAiDiscard();
+        return {
+          state: game.state(),
+          snapshot: game.snapshot(),
+          recommendation,
+        };
+      }
       case "finish-discard":
         await ensureOpponentModel(game.opponent as Opponent);
         game.finishDiscard();
+        break;
+      case "finish-discard-with-cards":
+        await ensureOpponentModel(game.opponent as Opponent);
+        game.finishDiscardWithAiCards((payload.ids as number[]) || [], typeof payload.bestLead === "number" ? payload.bestLead : null);
         break;
       case "play":
         game.play(payload.id as number);

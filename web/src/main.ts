@@ -109,6 +109,7 @@ const state: {
   animatedDealKeys: Set<string>;
   turnCutRevealStage: "user-cut" | "ai-cut" | "user-turn" | "ai-turn" | "revealed" | null;
   turnCutResolve: (() => void) | null;
+  aiDiscardPreparation: { key: string; promise: Promise<AiDiscardPreparationResult> } | null;
 } = {
   game: null,
   selected: new Set(),
@@ -142,6 +143,7 @@ const state: {
   animatedDealKeys: new Set(),
   turnCutRevealStage: null,
   turnCutResolve: null,
+  aiDiscardPreparation: null,
 };
 
 function setAiThinking(active: boolean): void {
@@ -1357,6 +1359,18 @@ interface ServerGameActionResponse {
   snapshot: GameSnapshot;
 }
 
+interface AiDiscardPreparationResult {
+  cardIds: number[];
+  bestLead: number | null;
+}
+
+interface ServerAiDiscardPreparationResponse extends ServerGameActionResponse {
+  recommendation: {
+    cardIds: number[];
+    bestLead: number | null;
+  };
+}
+
 async function serverGameAction(action: string, payload: Record<string, unknown> | null = null): Promise<GameState> {
   const response = await serverJson<ServerGameActionResponse>("/api/game/action", {
     action,
@@ -1367,7 +1381,38 @@ async function serverGameAction(action: string, payload: Record<string, unknown>
   currentSnapshot = response.snapshot;
   state.game = response.state;
   saveGame();
+  startAiDiscardPreparation(response.state);
   return response.state;
+}
+
+function aiDiscardPreparationKey(game: GameState): string | null {
+  if (!currentSnapshot || game.phase !== "discard" || game.aiHandCount !== 6) return null;
+  return `${currentSnapshot.gameId ?? "game"}:${game.handNumber}:${game.dealer}`;
+}
+
+function startAiDiscardPreparation(game: GameState): void {
+  const key = aiDiscardPreparationKey(game);
+  if (!key) return;
+  if (state.aiDiscardPreparation?.key === key) return;
+  const snapshot = currentSnapshot;
+  if (!snapshot) return;
+  const promise = serverJson<ServerAiDiscardPreparationResponse>("/api/game/action", {
+    action: "prepare-ai-discard",
+    payload: {},
+    snapshot,
+    tag: currentSessionTag() || null,
+  }).then((response) => ({
+    cardIds: response.recommendation.cardIds,
+    bestLead: response.recommendation.bestLead,
+  }));
+  void promise.catch(() => {});
+  state.aiDiscardPreparation = { key, promise };
+}
+
+function preparedAiDiscardFor(game: GameState | null): Promise<AiDiscardPreparationResult> | null {
+  if (!game || !currentSnapshot) return null;
+  const key = `${currentSnapshot.gameId ?? "game"}:${game.handNumber}:${game.dealer}`;
+  return state.aiDiscardPreparation?.key === key ? state.aiDiscardPreparation.promise : null;
 }
 
 async function api(path: string, body: Record<string, unknown> | null = null): Promise<GameState> {
@@ -1393,6 +1438,12 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
     }
     if (path === "/api/finish-discard") {
       return serverGameAction("finish-discard");
+    }
+    if (path === "/api/finish-discard-with-cards") {
+      return serverGameAction("finish-discard-with-cards", {
+        ids: (body?.ids as number[]) || [],
+        bestLead: typeof body?.bestLead === "number" ? body.bestLead : null,
+      });
     }
     if (path === "/api/play") {
       return serverGameAction("play", { id: body?.id as number });
@@ -4096,7 +4147,19 @@ async function finishDiscardInBackground(): Promise<void> {
   let failed = false;
   try {
     state.resultOverride = null;
-    const finish = api("/api/finish-discard", {});
+    const preparedDiscard = preparedAiDiscardFor(state.game);
+    const finish = (async () => {
+      if (!preparedDiscard) return api("/api/finish-discard", {});
+      try {
+        const prepared = await preparedDiscard;
+        return api("/api/finish-discard-with-cards", {
+          ids: prepared.cardIds,
+          bestLead: prepared.bestLead,
+        });
+      } catch {
+        return api("/api/finish-discard", {});
+      }
+    })();
     const startStage = await playTurnCutWhileFinishingDiscard(state.game);
     setAiThinking(true);
     state.resultOverride = ["Waiting for AI to discard."];
@@ -4123,6 +4186,7 @@ async function finishDiscardInBackground(): Promise<void> {
 
 api("/api/state")
   .then(async (game) => {
+    startAiDiscardPreparation(game);
     render(game);
     markAppReady();
     if (game.phase === "ai_discarding") finishDiscardInBackground();
