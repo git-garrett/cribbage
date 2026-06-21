@@ -4090,7 +4090,7 @@ els.troubleGame.addEventListener("click", async () => {
 window.addEventListener("resize", () => render(state.game));
 
 async function finishDiscardInBackground(): Promise<void> {
-  setAiThinking(true);
+  setAiThinking(false);
   render(state.game);
   await waitForPaint();
   let failed = false;
@@ -4098,11 +4098,14 @@ async function finishDiscardInBackground(): Promise<void> {
     state.resultOverride = null;
     const finish = api("/api/finish-discard", {});
     const startStage = await playTurnCutWhileFinishingDiscard(state.game);
+    setAiThinking(true);
     state.resultOverride = ["Waiting for AI to discard."];
     render(state.game);
     await waitForPaint();
     const next = await finish;
+    setAiThinking(false);
     await finishTurnCardReveal(next, startStage);
+    setAiThinking(true);
     await prepareModel13Pegging(next);
     await continuePeggingAfterRender(next);
   } catch (error) {
