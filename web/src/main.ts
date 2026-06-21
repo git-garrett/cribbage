@@ -108,6 +108,7 @@ const state: {
   noticeResultLines: string[];
   noticeUpdatedAt: number;
   noticeTimer: number | null;
+  dealCutRevealStage: "human" | "ai" | null;
 } = {
   game: null,
   selected: new Set(),
@@ -135,6 +136,7 @@ const state: {
   noticeResultLines: [],
   noticeUpdatedAt: 0,
   noticeTimer: null,
+  dealCutRevealStage: null,
 };
 
 function setAiThinking(active: boolean): void {
@@ -253,7 +255,7 @@ const ANALYTICS_KEY = "strong-cribbage.analytics.v1";
 const PHONE_GAME_DB_NAME = "cribbage-game-log";
 const PHONE_GAME_DB_VERSION = 1;
 const NOTICE_MIN_MS = 600;
-const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-13.0";
+const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-14.2";
 const URL_PARAMS = new URLSearchParams(window.location.search);
 const FULL_APP_MODE = URL_PARAMS.get("full") === "1" || URL_PARAMS.get("mode") === "full";
 const SIMPLE_NETWORK_MODE = !FULL_APP_MODE;
@@ -1358,8 +1360,8 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       return localGame.state();
     }
     if (path === "/api/trouble-game") {
-      await ensureOpponentResources("schell_table-peg_table-13.0");
-      localGame = new CribbageGame("schell_table-peg_table-13.0");
+      await ensureOpponentResources(SIMPLE_NETWORK_OPPONENT);
+      localGame = new CribbageGame(SIMPLE_NETWORK_OPPONENT);
       localGame.startTroublePeggingPosition();
       saveGame();
       return localGame.state();
@@ -1545,23 +1547,42 @@ function renderPlayedCards(game: GameState): void {
   els.plays.append(active);
 }
 
-function renderDealCut(game: GameState): void {
+function cutCardText(card: NonNullable<GameState["cutForDeal"]>["human"]): string {
+  return card ? `${card.rank}${card.symbol}` : "";
+}
+
+function renderDealCut(game: GameState, revealStage: "human" | "ai" | null = null): void {
   els.plays.innerHTML = "";
   els.plays.hidden = false;
   const row = document.createElement("div");
   row.className = "cards played-active pegging-row deal-cut-row";
-  row.append(cardBack());
-  if (game.cutForDeal?.human) {
+  const deck = cardBack();
+  deck.classList.add("cut-deck");
+  deck.setAttribute("role", "button");
+  deck.setAttribute("aria-label", "Cut deck for deal");
+  deck.tabIndex = state.pending ? -1 : 0;
+  deck.addEventListener("click", () => {
+    void cutForDeal();
+  });
+  deck.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    void cutForDeal();
+  });
+  row.append(deck);
+  const showHumanCut = Boolean(game.cutForDeal?.human && (!revealStage || revealStage === "human" || revealStage === "ai"));
+  const showAiCut = Boolean(game.cutForDeal?.ai && (!revealStage || revealStage === "ai"));
+  if (showHumanCut && game.cutForDeal?.human) {
     const human = document.createElement("div");
-    human.className = "cut-result";
+    human.className = "cut-result cut-result-human cut-card-reveal";
     const label = document.createElement("span");
     label.textContent = "User";
     human.append(label, cardElement(game.cutForDeal.human));
     row.append(human);
   }
-  if (game.cutForDeal?.ai) {
+  if (showAiCut && game.cutForDeal?.ai) {
     const ai = document.createElement("div");
-    ai.className = "cut-result";
+    ai.className = "cut-result cut-result-ai cut-card-reveal";
     const label = document.createElement("span");
     label.textContent = "AI";
     ai.append(label, cardElement(game.cutForDeal.ai));
@@ -3341,7 +3362,9 @@ function render(game: GameState | null): void {
       : game.phase === "pegging"
       ? "Select card to play"
       : "User hand";
-  if (game.phase === "cut_for_deal") {
+  if (state.dealCutRevealStage && game.cutForDeal) {
+    renderDealCut(game, state.dealCutRevealStage);
+  } else if (game.phase === "cut_for_deal") {
     renderDealCut(game);
   } else if (game.phase === "discard") {
     renderCards(els.plays, game.humanHand, { clickable: true });
@@ -3408,6 +3431,12 @@ function shouldAutoHumanGo(game: GameState): boolean {
 function waitForPaint(): Promise<void> {
   return new Promise((resolve) => {
     requestAnimationFrame(() => resolve());
+  });
+}
+
+function waitMs(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
   });
 }
 
@@ -3623,7 +3652,7 @@ els.gameOverClose.addEventListener("click", () => {
   render(state.game);
 });
 
-els.cutForDeal.addEventListener("click", async () => {
+async function cutForDeal(): Promise<void> {
   if (state.pending) return;
   state.pending = true;
   render(state.game);
@@ -3632,11 +3661,32 @@ els.cutForDeal.addEventListener("click", async () => {
     state.resultOverride = null;
     const next = await api("/api/cut-for-deal", {});
     state.selected.clear();
-    render(next);
+    if (next.cutForDeal?.human && next.cutForDeal.ai) {
+      state.dealCutRevealStage = "human";
+      state.resultOverride = [`User cut ${cutCardText(next.cutForDeal.human)}.`];
+      render(next);
+      await waitForPaint();
+      await waitMs(650);
+      state.dealCutRevealStage = "ai";
+      state.resultOverride = [next.cutForDeal.prompt];
+      render(next);
+      await waitForPaint();
+      await waitMs(900);
+      state.dealCutRevealStage = null;
+      state.resultOverride = null;
+      render(next);
+    } else {
+      render(next);
+    }
   } finally {
+    state.dealCutRevealStage = null;
     state.pending = false;
     render(state.game);
   }
+}
+
+els.cutForDeal.addEventListener("click", () => {
+  void cutForDeal();
 });
 
 els.discard.addEventListener("click", async () => {
@@ -3803,7 +3853,7 @@ els.troubleGame.addEventListener("click", async () => {
   try {
     state.resultOverride = null;
     state.dismissedGameOverId = null;
-    els.opponent.value = "schell_table-peg_table-13.0";
+    els.opponent.value = SIMPLE_NETWORK_OPPONENT;
     const next = await api("/api/trouble-game", {});
     els.settingsPanel.hidden = true;
     els.menuToggle.setAttribute("aria-expanded", "false");

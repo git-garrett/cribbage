@@ -1639,6 +1639,28 @@ button:disabled {
   font-weight: 700;
 }
 
+.cut-card-reveal .card {
+  animation: cut-card-flip 0.42s ease-out both;
+  backface-visibility: hidden;
+  transform-origin: center;
+}
+
+.cut-result-ai .card {
+  animation-delay: 0.04s;
+}
+
+@keyframes cut-card-flip {
+  0% {
+    opacity: 0;
+    transform: rotateY(88deg) scale(0.96);
+  }
+
+  100% {
+    opacity: 1;
+    transform: rotateY(0deg) scale(1);
+  }
+}
+
 .pegging-row .card:first-child {
   margin-left: 0;
 }
@@ -2214,6 +2236,7 @@ button.card {
 
 .app[data-phase="cut_for_deal"] .deal-cut-row {
   justify-content: center;
+  align-items: center;
   overflow: visible;
   padding-inline: 8px;
 }
@@ -2222,6 +2245,36 @@ button.card {
 .app[data-phase="cut_for_deal"] .played-active.deal-cut-row .card,
 .app[data-phase="cut_for_deal"] .deal-cut-row .card:first-child {
   margin-left: 0;
+}
+
+.app[data-phase="cut_for_deal"] .deal-cut-row .cut-deck {
+  width: clamp(96px, 28vw, 144px);
+  height: clamp(134px, 39vw, 202px);
+  border-radius: 10px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.app[data-phase="cut_for_deal"] .deal-cut-row .cut-result .card,
+.deal-cut-row .cut-result .card {
+  width: clamp(72px, 19vw, 96px);
+  height: clamp(101px, 27vw, 135px);
+  border-radius: 8px;
+}
+
+.app[data-phase="cut_for_deal"] .deal-cut-row .cut-result .card .rank,
+.deal-cut-row .cut-result .card .rank {
+  font-size: clamp(26px, 7vw, 34px);
+}
+
+.app[data-phase="cut_for_deal"] .deal-cut-row .cut-result .card .suit,
+.deal-cut-row .cut-result .card .suit {
+  font-size: clamp(21px, 5.5vw, 28px);
+}
+
+.app[data-phase="cut_for_deal"] .deal-cut-row .cut-deck:focus-visible {
+  outline: 3px solid var(--human);
+  outline-offset: 4px;
 }
 
 .app[data-phase="discard"] #plays {

@@ -1047,7 +1047,7 @@ export class CribbageGame {
             nextLabel: this.scoringReview.nextLabel,
           }
         : null,
-      cutForDeal: this.phase === "cut_for_deal"
+      cutForDeal: this.phase === "cut_for_deal" || this.cutCards.human || this.cutCards.ai
         ? {
             human: this.cutCards.human ? this.serializeCard(this.cutCards.human) : null,
             ai: this.cutCards.ai ? this.serializeCard(this.cutCards.ai) : null,
