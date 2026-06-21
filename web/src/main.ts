@@ -104,6 +104,11 @@ const state: {
   noticeUpdatedAt: number;
   noticeTimer: number | null;
   dealCutRevealStage: "human" | "ai" | null;
+  dealCutResolve: (() => void) | null;
+  dealAnimation: { key: string; dealer: string; pone: string } | null;
+  animatedDealKeys: Set<string>;
+  turnCutRevealStage: "user-cut" | "ai-cut" | "user-turn" | "ai-turn" | "revealed" | null;
+  turnCutResolve: (() => void) | null;
 } = {
   game: null,
   selected: new Set(),
@@ -132,6 +137,11 @@ const state: {
   noticeUpdatedAt: 0,
   noticeTimer: null,
   dealCutRevealStage: null,
+  dealCutResolve: null,
+  dealAnimation: null,
+  animatedDealKeys: new Set(),
+  turnCutRevealStage: null,
+  turnCutResolve: null,
 };
 
 function setAiThinking(active: boolean): void {
@@ -1504,14 +1514,22 @@ function renderDealCut(game: GameState, revealStage: "human" | "ai" | null = nul
   const deck = cardBack();
   deck.classList.add("cut-deck");
   deck.setAttribute("role", "button");
-  deck.setAttribute("aria-label", "Cut deck for deal");
+  deck.setAttribute("aria-label", state.dealCutResolve ? "Continue to deal" : "Cut deck for deal");
   deck.tabIndex = state.pending ? -1 : 0;
   deck.addEventListener("click", () => {
+    if (state.dealCutResolve) {
+      completeDealCutReveal();
+      return;
+    }
     void cutForDeal();
   });
   deck.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
+    if (state.dealCutResolve) {
+      completeDealCutReveal();
+      return;
+    }
     void cutForDeal();
   });
   row.append(deck);
@@ -1534,6 +1552,87 @@ function renderDealCut(game: GameState, revealStage: "human" | "ai" | null = nul
     row.append(ai);
   }
   els.plays.append(row);
+}
+
+function completeTurnCutInteraction(): void {
+  const resolve = state.turnCutResolve;
+  if (!resolve) return;
+  state.turnCutResolve = null;
+  resolve();
+}
+
+function renderTurnCut(game: GameState): void {
+  els.plays.innerHTML = "";
+  els.plays.hidden = false;
+  const row = document.createElement("div");
+  row.className = "cards played-active pegging-row turn-cut-row";
+  const deck = cardBack();
+  deck.classList.add("turn-cut-deck");
+  const userCanAct = state.turnCutRevealStage === "user-cut" || state.turnCutRevealStage === "user-turn";
+  if (userCanAct) {
+    deck.setAttribute("role", "button");
+    deck.tabIndex = 0;
+    deck.setAttribute("aria-label", state.turnCutRevealStage === "user-cut" ? "Cut deck" : "Turn cut card");
+    deck.addEventListener("click", completeTurnCutInteraction);
+    deck.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      completeTurnCutInteraction();
+    });
+  }
+  const label = document.createElement("div");
+  label.className = "turn-cut-label";
+  if (state.turnCutRevealStage === "user-cut") label.textContent = "Cut the deck";
+  else if (state.turnCutRevealStage === "ai-cut") label.textContent = "AI cuts the deck";
+  else if (state.turnCutRevealStage === "user-turn") label.textContent = "Turn the cut card";
+  else if (state.turnCutRevealStage === "ai-turn") label.textContent = "AI turns the cut card";
+  else label.textContent = "Cut card";
+
+  const showCutCard = state.turnCutRevealStage === "ai-turn" ||
+    state.turnCutRevealStage === "revealed";
+  row.append(deck);
+  if (showCutCard && game.turnCard) {
+    const cut = document.createElement("div");
+    cut.className = "cut-result turn-card-reveal";
+    const cutLabel = document.createElement("span");
+    cutLabel.textContent = "Cut";
+    cut.append(cutLabel, cardElement(game.turnCard));
+    row.append(cut);
+  }
+  els.plays.append(label, row);
+}
+
+function renderDealAnimation(): void {
+  if (!state.dealAnimation) return;
+  els.plays.innerHTML = "";
+  els.plays.hidden = false;
+  const shell = document.createElement("div");
+  shell.className = "deal-animation";
+  const deck = cardBack();
+  deck.classList.add("deal-animation-deck");
+  shell.append(deck);
+  const pone = document.createElement("div");
+  pone.className = "deal-animation-hand deal-animation-pone";
+  const dealer = document.createElement("div");
+  dealer.className = "deal-animation-hand deal-animation-dealer";
+  const poneLabel = document.createElement("span");
+  poneLabel.textContent = `${state.dealAnimation.pone} hand`;
+  const dealerLabel = document.createElement("span");
+  dealerLabel.textContent = `${state.dealAnimation.dealer} hand`;
+  pone.append(poneLabel);
+  dealer.append(dealerLabel);
+  for (let index = 0; index < 6; index += 1) {
+    const poneCard = cardBack();
+    poneCard.classList.add("deal-animation-card");
+    poneCard.style.animationDelay = `${index * 160}ms`;
+    pone.append(poneCard);
+    const dealerCard = cardBack();
+    dealerCard.classList.add("deal-animation-card");
+    dealerCard.style.animationDelay = `${(index * 160) + 80}ms`;
+    dealer.append(dealerCard);
+  }
+  shell.append(pone, dealer);
+  els.plays.append(shell);
 }
 
 function renderCutCard(card: GameState["turnCard"]): void {
@@ -3220,6 +3319,11 @@ function shortDate(value: string): string {
 }
 
 function playAreaTitle(game: GameState): string {
+  if (state.turnCutRevealStage === "user-cut") return "Cut the deck for AI";
+  if (state.turnCutRevealStage === "ai-cut") return "AI cuts the deck";
+  if (state.turnCutRevealStage === "user-turn") return "Turn the cut card";
+  if (state.turnCutRevealStage === "ai-turn") return "AI turns the cut card";
+  if (state.turnCutRevealStage === "revealed") return "Cut card";
   if (game.phase === "cut_for_deal") return game.cutForDeal?.prompt || "Tap the deck to cut for first deal";
   if (game.phase === "discard") {
     return game.cribOwner === "User"
@@ -3279,7 +3383,7 @@ function render(game: GameState | null): void {
   els.thinkingOverlay.hidden = !state.aiThinking && !showModelLoadingUi;
   els.thinkingOverlayLabel.textContent = showModelLoadingUi ? "Loading model" : "AI thinking";
   els.modelLoading.hidden = !showModelLoadingUi;
-  renderCutCard(game.turnCard);
+  renderCutCard(state.turnCutRevealStage ? null : game.turnCard);
   renderScoring(game.scoring);
   renderResult(game);
   renderGameOver(game);
@@ -3294,7 +3398,11 @@ function render(game: GameState | null): void {
       : game.phase === "pegging"
       ? "Select card to play"
       : "User hand";
-  if (state.dealCutRevealStage && game.cutForDeal) {
+  if (state.dealAnimation) {
+    renderDealAnimation();
+  } else if (state.turnCutRevealStage) {
+    renderTurnCut(game);
+  } else if (state.dealCutRevealStage && game.cutForDeal) {
     renderDealCut(game, state.dealCutRevealStage);
   } else if (game.phase === "cut_for_deal") {
     renderDealCut(game);
@@ -3306,13 +3414,14 @@ function render(game: GameState | null): void {
   } else {
     renderPlayedCards(game);
   }
-  renderCards(els.humanHand, game.humanHand, {
-    clickable: game.phase !== "discard" && game.phase === "pegging" && game.turn === "User",
+  const hideHandsForInterstitial = Boolean(state.dealAnimation || state.dealCutRevealStage);
+  renderCards(els.humanHand, hideHandsForInterstitial ? [] : game.humanHand, {
+    clickable: !hideHandsForInterstitial && game.phase !== "discard" && game.phase === "pegging" && game.turn === "User",
   });
 
   els.aiHand.innerHTML = "";
   els.aiStrip.hidden = game.phase === "game_over";
-  const aiSlots = aiCardSlots(game);
+  const aiSlots = hideHandsForInterstitial ? 0 : aiCardSlots(game);
   for (let i = 0; i < aiSlots; i += 1) {
     const card = cardBack();
     if (i >= game.aiHandCount) {
@@ -3323,12 +3432,21 @@ function render(game: GameState | null): void {
   }
 
   const gameActive = game.phase !== "game_over";
-  els.cutForDeal.hidden = !gameActive || game.phase !== "cut_for_deal";
-  els.discard.hidden = !gameActive || game.phase !== "discard";
-  els.play.hidden = !gameActive || game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User");
+  const waitingForTurnCutClick = state.turnCutRevealStage === "user-cut" || state.turnCutRevealStage === "user-turn";
+  const waitingForDealCutOk = Boolean(state.dealCutResolve);
+  els.cutForDeal.hidden = !gameActive || (game.phase !== "cut_for_deal" && !waitingForTurnCutClick && !waitingForDealCutOk);
+  els.discard.hidden = !gameActive || Boolean(state.dealAnimation) || game.phase !== "discard";
+  els.play.hidden = !gameActive || Boolean(state.dealAnimation) || game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User");
   els.go.hidden = true;
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
-  els.cutForDeal.disabled = game.phase !== "cut_for_deal";
+  els.cutForDeal.textContent = state.turnCutRevealStage === "user-turn"
+    ? "Turn cut card"
+    : state.turnCutRevealStage === "user-cut"
+      ? "Cut deck"
+      : waitingForDealCutOk
+        ? "OK"
+        : "Cut deck";
+  els.cutForDeal.disabled = game.phase !== "cut_for_deal" && !waitingForTurnCutClick && !waitingForDealCutOk;
   els.play.disabled = game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User" && selectedPlayableCard(game));
   els.go.disabled = !game.canGo;
   els.continueScoring.hidden = game.phase === "game_over";
@@ -3337,7 +3455,7 @@ function render(game: GameState | null): void {
   els.continuePegging.hidden = game.peggingResetPending || game.phase !== "pegging_complete";
   if (state.pending) {
     els.discard.disabled = true;
-    els.cutForDeal.disabled = true;
+    els.cutForDeal.disabled = !waitingForDealCutOk;
     els.play.disabled = true;
     els.go.disabled = true;
     els.acknowledgePeggingReset.disabled = true;
@@ -3370,6 +3488,144 @@ function waitMs(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
   });
+}
+
+function completeDealCutReveal(): void {
+  const resolve = state.dealCutResolve;
+  if (!resolve) return;
+  state.dealCutResolve = null;
+  resolve();
+}
+
+function waitForDealCutOk(): Promise<void> {
+  return new Promise((resolve) => {
+    state.dealCutResolve = resolve;
+  });
+}
+
+function dealAnimationKey(game: GameState): string | null {
+  if (game.phase !== "discard") return null;
+  const gameId = currentSnapshot?.gameId ?? "game";
+  return `${gameId}:${game.handNumber}`;
+}
+
+async function playDealAnimationIfNeeded(game: GameState): Promise<void> {
+  const key = dealAnimationKey(game);
+  if (!key || state.animatedDealKeys.has(key)) return;
+  const dealer = game.dealer;
+  const pone = dealer === "User" ? "AI" : "User";
+  state.animatedDealKeys.add(key);
+  state.dealAnimation = { key, dealer, pone };
+  state.resultOverride = [`Dealing hand ${game.handNumber}.`];
+  render(game);
+  await waitForPaint();
+  await waitMs(1240);
+  state.dealAnimation = null;
+  state.resultOverride = null;
+  render(game);
+}
+
+function waitForTurnCutInteraction(): Promise<void> {
+  return new Promise((resolve) => {
+    state.turnCutResolve = resolve;
+  });
+}
+
+async function playTurnCardReveal(game: GameState): Promise<void> {
+  if (game.phase !== "pegging" || !game.turnCard) {
+    render(game);
+    return;
+  }
+  if (game.dealer === "AI") {
+    state.turnCutRevealStage = "user-cut";
+    state.resultOverride = ["Cut the deck for AI."];
+    render(game);
+    await waitForPaint();
+    await waitForTurnCutInteraction();
+    state.turnCutRevealStage = "ai-turn";
+    state.resultOverride = ["AI turns the cut card."];
+    render(game);
+    await waitForPaint();
+    await waitMs(750);
+  } else {
+    state.turnCutRevealStage = "ai-cut";
+    state.resultOverride = ["AI cuts the deck."];
+    render(game);
+    await waitForPaint();
+    await waitMs(650);
+    state.turnCutRevealStage = "user-turn";
+    state.resultOverride = ["Turn the cut card."];
+    render(game);
+    await waitForPaint();
+    await waitForTurnCutInteraction();
+  }
+  state.turnCutRevealStage = "revealed";
+  state.resultOverride = [`Cut card is ${cutCardText(game.turnCard)}.`];
+  render(game);
+  await waitForPaint();
+  await waitMs(850);
+  state.turnCutRevealStage = null;
+  state.turnCutResolve = null;
+  state.resultOverride = null;
+  render(game);
+}
+
+async function playTurnCutWhileFinishingDiscard(game: GameState | null): Promise<"ai-turn" | "revealed" | null> {
+  if (!game || game.phase !== "ai_discarding") return null;
+  if (game.dealer === "AI") {
+    state.turnCutRevealStage = "user-cut";
+    state.resultOverride = ["Cut the deck for AI."];
+    render(game);
+    await waitForPaint();
+    await waitForTurnCutInteraction();
+    state.turnCutRevealStage = "ai-turn";
+    state.resultOverride = ["AI turns the cut card."];
+    render(game);
+    await waitForPaint();
+    await waitMs(450);
+    return "ai-turn";
+  }
+  state.turnCutRevealStage = "ai-cut";
+  state.resultOverride = ["AI cuts the deck."];
+  render(game);
+  await waitForPaint();
+  await waitMs(650);
+  state.turnCutRevealStage = "user-turn";
+  state.resultOverride = ["Turn the cut card."];
+  render(game);
+  await waitForPaint();
+  await waitForTurnCutInteraction();
+  return "revealed";
+}
+
+async function finishTurnCardReveal(game: GameState, startStage: "ai-turn" | "revealed" | null): Promise<void> {
+  if (game.phase !== "pegging" || !game.turnCard) {
+    state.turnCutRevealStage = null;
+    state.turnCutResolve = null;
+    state.resultOverride = null;
+    render(game);
+    return;
+  }
+  if (!startStage) {
+    await playTurnCardReveal(game);
+    return;
+  }
+  if (startStage === "ai-turn") {
+    state.turnCutRevealStage = "ai-turn";
+    state.resultOverride = ["AI turns the cut card."];
+    render(game);
+    await waitForPaint();
+    await waitMs(700);
+  }
+  state.turnCutRevealStage = "revealed";
+  state.resultOverride = [`Cut card is ${cutCardText(game.turnCard)}.`];
+  render(game);
+  await waitForPaint();
+  await waitMs(850);
+  state.turnCutRevealStage = null;
+  state.turnCutResolve = null;
+  state.resultOverride = null;
+  render(game);
 }
 
 async function prepareModel13Pegging(game: GameState): Promise<void> {
@@ -3576,26 +3832,36 @@ async function cutForDeal(): Promise<void> {
       state.resultOverride = [`User cut ${cutCardText(next.cutForDeal.human)}.`];
       render(next);
       await waitForPaint();
-      await waitMs(650);
+      await waitMs(800);
       state.dealCutRevealStage = "ai";
       state.resultOverride = [next.cutForDeal.prompt];
       render(next);
       await waitForPaint();
-      await waitMs(900);
+      await waitForDealCutOk();
       state.dealCutRevealStage = null;
       state.resultOverride = null;
       render(next);
+      await playDealAnimationIfNeeded(next);
     } else {
       render(next);
     }
   } finally {
     state.dealCutRevealStage = null;
+    state.dealCutResolve = null;
     state.pending = false;
     render(state.game);
   }
 }
 
 els.cutForDeal.addEventListener("click", () => {
+  if (state.dealCutResolve) {
+    completeDealCutReveal();
+    return;
+  }
+  if (state.turnCutResolve) {
+    completeTurnCutInteraction();
+    return;
+  }
   void cutForDeal();
 });
 
@@ -3687,6 +3953,7 @@ els.continueScoring.addEventListener("click", async () => {
     const next = await api("/api/continue-scoring", {});
     state.selected.clear();
     render(next);
+    await playDealAnimationIfNeeded(next);
   } finally {
     state.pending = false;
     render(state.game);
@@ -3779,18 +4046,22 @@ els.troubleGame.addEventListener("click", async () => {
 window.addEventListener("resize", () => render(state.game));
 
 async function finishDiscardInBackground(): Promise<void> {
-  setAiThinking(true);
   render(state.game);
   await waitForPaint();
   try {
     state.resultOverride = null;
-    const next = await api("/api/finish-discard", {});
-    render(next);
+    const finish = api("/api/finish-discard", {});
+    const startStage = await playTurnCutWhileFinishingDiscard(state.game);
+    const next = await finish;
+    await finishTurnCardReveal(next, startStage);
     await prepareModel13Pegging(next);
     await continuePeggingAfterRender(next);
   } catch (error) {
     els.result.textContent = error instanceof Error ? error.message : "Request failed";
   } finally {
+    state.turnCutRevealStage = null;
+    state.turnCutResolve = null;
+    state.resultOverride = null;
     setAiThinking(false);
     render(state.game);
   }

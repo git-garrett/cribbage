@@ -1620,9 +1620,113 @@ button:disabled {
 }
 
 .deal-cut-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
+  width: 100%;
   gap: 12px;
   padding-left: 0;
+}
+
+.deal-cut-row .cut-result-human {
+  grid-column: 1;
+  justify-self: end;
+}
+
+.deal-cut-row .cut-deck {
+  grid-column: 2;
+  justify-self: center;
+}
+
+.deal-cut-row .cut-result-ai {
+  grid-column: 3;
+  justify-self: start;
+}
+
+.turn-cut-row {
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  overflow: visible;
+  padding: 10px 8px;
+}
+
+.turn-cut-label {
+  grid-column: 1 / -1;
+  justify-self: center;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.deal-animation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 146px;
+  padding: 8px;
+}
+
+.deal-animation-deck {
+  grid-column: 2;
+  grid-row: 1;
+  width: 58px;
+  height: 82px;
+  border-radius: 7px;
+}
+
+.deal-animation-hand {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.deal-animation-hand > span {
+  flex: 0 0 auto;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.deal-animation-pone {
+  grid-column: 1;
+  grid-row: 1;
+  justify-content: flex-end;
+}
+
+.deal-animation-dealer {
+  grid-column: 3;
+  grid-row: 1;
+  justify-content: flex-start;
+}
+
+.deal-animation-card.card,
+.pegging-row .deal-animation-card.card,
+.played-active.pegging-row .deal-animation-card.card {
+  width: 34px;
+  height: 48px;
+  margin-left: -18px;
+  border-radius: 5px;
+  opacity: 0;
+  animation: deal-card-arrive 0.26s ease-out both;
+}
+
+.deal-animation-hand > span + .deal-animation-card.card {
+  margin-left: 7px;
+}
+
+@keyframes deal-card-arrive {
+  0% {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.9) rotate(-4deg);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
 }
 
 .deal-cut-row .card,
@@ -1637,6 +1741,56 @@ button:disabled {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+.pegging-row .turn-cut-deck,
+.played-active.pegging-row .turn-cut-deck {
+  width: clamp(96px, 28vw, 144px);
+  height: clamp(134px, 39vw, 202px);
+  margin-left: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.pegging-row .turn-cut-deck::after,
+.played-active.pegging-row .turn-cut-deck::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: inherit;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.2) 25%, transparent 25%) 0 0 / 12px 12px,
+    linear-gradient(135deg, transparent 75%, rgba(255, 255, 255, 0.2) 75%) 0 0 / 12px 12px,
+    #315f9c;
+  box-shadow: 0 10px 16px rgba(18, 35, 28, 0.22);
+  animation: deck-cut-slide 0.58s ease both;
+}
+
+.pegging-row .turn-cut-deck:focus-visible,
+.played-active.pegging-row .turn-cut-deck:focus-visible {
+  outline: 3px solid var(--human);
+  outline-offset: 4px;
+}
+
+.pegging-row .turn-card-reveal .card,
+.played-active.pegging-row .turn-card-reveal .card {
+  width: clamp(72px, 19vw, 96px);
+  height: clamp(101px, 27vw, 135px);
+  margin-left: 0;
+  border-radius: 8px;
+  animation: cut-card-flip 0.42s ease-out both;
+}
+
+@keyframes deck-cut-slide {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+
+  100% {
+    transform: translate(18px, -12px) rotate(4deg);
+  }
 }
 
 .cut-card-reveal .card {
@@ -2275,6 +2429,46 @@ button.card {
 .app[data-phase="cut_for_deal"] .deal-cut-row .cut-deck:focus-visible {
   outline: 3px solid var(--human);
   outline-offset: 4px;
+}
+
+.deal-cut-row.played-active.pegging-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(86px, auto) minmax(0, 1fr);
+  min-height: 154px;
+  width: 100%;
+  align-items: center;
+  justify-content: stretch;
+  overflow: visible;
+  column-gap: 8px;
+  padding: 2px 6px;
+}
+
+.deal-cut-row.played-active.pegging-row .cut-deck {
+  grid-column: 2;
+  justify-self: center;
+  width: clamp(82px, 22vw, 112px);
+  height: clamp(115px, 31vw, 157px);
+  margin-left: 0;
+}
+
+.deal-cut-row.played-active.pegging-row .cut-result-human {
+  grid-column: 1;
+  justify-self: end;
+}
+
+.deal-cut-row.played-active.pegging-row .cut-result-ai {
+  grid-column: 3;
+  justify-self: start;
+}
+
+.deal-cut-row.played-active.pegging-row .cut-result .card {
+  width: clamp(56px, 16vw, 74px);
+  height: clamp(78px, 22vw, 104px);
+  margin-left: 0;
+}
+
+.deal-cut-row.played-active.pegging-row .cut-result {
+  align-self: center;
 }
 
 .app[data-phase="discard"] #plays {
