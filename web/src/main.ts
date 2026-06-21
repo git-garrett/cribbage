@@ -1506,6 +1506,14 @@ function cutCardText(card: NonNullable<GameState["cutForDeal"]>["human"]): strin
   return card ? `${card.rank}${card.symbol}` : "";
 }
 
+function appendCutDealerBadge(label: HTMLElement, game: GameState, player: "User" | "AI", showAiCut: boolean): void {
+  if (!showAiCut || game.phase === "cut_for_deal" || game.dealer !== player) return;
+  const badge = document.createElement("span");
+  badge.className = "dealer-button cut-dealer-badge";
+  badge.textContent = "Crib";
+  label.append(badge);
+}
+
 function renderDealCut(game: GameState, revealStage: "human" | "ai" | null = null): void {
   els.plays.innerHTML = "";
   els.plays.hidden = false;
@@ -1541,6 +1549,7 @@ function renderDealCut(game: GameState, revealStage: "human" | "ai" | null = nul
     human.className = "cut-result cut-result-human cut-card-reveal";
     const label = document.createElement("span");
     label.textContent = "User";
+    appendCutDealerBadge(label, game, "User", showAiCut);
     human.append(label, cardElement(game.cutForDeal.human));
     humanSlot.append(human);
   }
@@ -1551,6 +1560,7 @@ function renderDealCut(game: GameState, revealStage: "human" | "ai" | null = nul
     ai.className = "cut-result cut-result-ai cut-card-reveal";
     const label = document.createElement("span");
     label.textContent = "AI";
+    appendCutDealerBadge(label, game, "AI", showAiCut);
     ai.append(label, cardElement(game.cutForDeal.ai));
     aiSlot.append(ai);
   }
@@ -3840,9 +3850,10 @@ async function cutForDeal(): Promise<void> {
       await waitMs(800);
       state.dealCutRevealStage = "ai";
       state.resultOverride = [next.cutForDeal.prompt];
+      const confirmed = waitForDealCutOk();
       render(next);
       await waitForPaint();
-      await waitForDealCutOk();
+      await confirmed;
       state.dealCutRevealStage = null;
       state.resultOverride = null;
       render(next);

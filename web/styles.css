@@ -218,6 +218,11 @@ select {
   font: inherit;
 }
 
+[hidden],
+.actions button[hidden] {
+  display: none !important;
+}
+
 .app {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
