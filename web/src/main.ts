@@ -4060,9 +4060,9 @@ els.discard.addEventListener("click", async () => {
         throw error;
       }
       if (epoch !== interactionEpoch) return;
-      render(next);
       const startStage = await cutInteraction;
       if (epoch !== interactionEpoch) return;
+      render(next);
       await finishDiscardInBackground(epoch, startStage);
       return;
     }

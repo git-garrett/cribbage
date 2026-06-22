@@ -1542,11 +1542,13 @@ button:disabled {
 
 #plays {
   display: grid;
+  grid-column: 1;
   gap: 2px;
   min-width: 0;
 }
 
 .played > .score-cut {
+  grid-column: 2;
   align-self: start;
 }
 
