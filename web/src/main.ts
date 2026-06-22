@@ -107,6 +107,7 @@ const state: {
   dealCutResolve: (() => void) | null;
   dealAnimation: { key: string; dealer: string; pone: string } | null;
   animatedDealKeys: Set<string>;
+  animatedTurnCutCardKeys: Set<string>;
   turnCutRevealStage: "user-cut" | "ai-cut" | "user-turn" | "ai-turn" | "revealed" | null;
   turnCutResolve: (() => void) | null;
   cutForDealPreparation: { key: string; promise: Promise<ServerCutForDealPreparationResponse> } | null;
@@ -143,6 +144,7 @@ const state: {
   dealCutResolve: null,
   dealAnimation: null,
   animatedDealKeys: new Set(),
+  animatedTurnCutCardKeys: new Set(),
   turnCutRevealStage: null,
   turnCutResolve: null,
   cutForDealPreparation: null,
@@ -174,6 +176,7 @@ function resetTransientGameUi(): void {
   state.dealCutResolve = null;
   state.dealAnimation = null;
   state.animatedDealKeys = new Set();
+  state.animatedTurnCutCardKeys = new Set();
   state.turnCutRevealStage = null;
   if (state.turnCutResolve) state.turnCutResolve();
   state.turnCutResolve = null;
@@ -1792,6 +1795,15 @@ function completeTurnCutInteraction(): void {
   resolve();
 }
 
+function shouldAnimateTurnCutCard(game: GameState): boolean {
+  if (!game.turnCard) return false;
+  const gameKey = currentSnapshot?.gameId ?? "active";
+  const key = `${gameKey}:${game.handNumber}:${game.turnCard.id}`;
+  if (state.animatedTurnCutCardKeys.has(key)) return false;
+  state.animatedTurnCutCardKeys.add(key);
+  return true;
+}
+
 function renderTurnCut(game: GameState): void {
   els.plays.innerHTML = "";
   els.plays.hidden = false;
@@ -1836,7 +1848,7 @@ function renderTurnCut(game: GameState): void {
     state.turnCutRevealStage === "revealed";
   if (showCutCard && game.turnCard) {
     const cut = document.createElement("div");
-    cut.className = "cut-result turn-card-reveal";
+    cut.className = `cut-result turn-card-reveal${shouldAnimateTurnCutCard(game) ? " turn-card-reveal-animated" : ""}`;
     const cutLabel = document.createElement("span");
     cutLabel.textContent = "Cut";
     cut.append(cutLabel, cardElement(game.turnCard));

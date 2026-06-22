@@ -1803,6 +1803,10 @@ button:disabled {
   height: clamp(78px, 22vw, 104px);
   margin-left: 0;
   border-radius: 8px;
+}
+
+.pegging-row .turn-card-reveal-animated .card,
+.played-active.pegging-row .turn-card-reveal-animated .card {
   animation: cut-card-flip 0.42s ease-out both;
 }
 
