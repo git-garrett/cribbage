@@ -4507,7 +4507,9 @@ async function finishDiscardInBackground(
 
 api("/api/state")
   .then(async (game) => {
+    startCutForDealPreparation(game);
     startAiDiscardPreparation(game);
+    startNextHandPreparation(game);
     render(game);
     markAppReady();
     if (game.phase === "ai_discarding") finishDiscardInBackground(interactionEpoch);
