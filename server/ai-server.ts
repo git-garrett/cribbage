@@ -21,7 +21,7 @@ const STATIC_DIR = resolve(process.env.CRIBBAGE_STATIC_DIR || join(ROOT, "dist")
 const DATA_DIR = resolve(process.env.CRIBBAGE_DATA_DIR || join(ROOT, "data"));
 const DB_PATH = resolve(process.env.CRIBBAGE_DB_PATH || join(DATA_DIR, "cribbage-server.sqlite"));
 const PROTECTED_MODEL_ASSET_DIR = resolve(ROOT, "web/src/models");
-const MODEL: Opponent = "schell_table-peg_table-14.2";
+const MODEL: Opponent = "schell_table-peg_table-13.0";
 const MARKETING_HOSTS = new Set(["strongcribbage.com"]);
 
 type JsonRecord = Record<string, unknown>;

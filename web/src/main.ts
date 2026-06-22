@@ -11,7 +11,7 @@ import type {
 } from "./engine";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 
-const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-14.2";
+const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-13.0";
 
 type BaselineScoreTotals = Pick<
   AnalyticsTotals,
@@ -307,7 +307,7 @@ const ANALYTICS_KEY = "strong-cribbage.analytics.v1";
 const PHONE_GAME_DB_NAME = "cribbage-game-log";
 const PHONE_GAME_DB_VERSION = 1;
 const NOTICE_MIN_MS = 600;
-const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-14.2";
+const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-13.0";
 const URL_PARAMS = new URLSearchParams(window.location.search);
 const FULL_APP_MODE = URL_PARAMS.get("full") === "1" || URL_PARAMS.get("mode") === "full";
 const SIMPLE_NETWORK_MODE = !FULL_APP_MODE;
