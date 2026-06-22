@@ -109,6 +109,7 @@ const state: {
   animatedDealKeys: Set<string>;
   turnCutRevealStage: "user-cut" | "ai-cut" | "user-turn" | "ai-turn" | "revealed" | null;
   turnCutResolve: (() => void) | null;
+  cutForDealPreparation: { key: string; promise: Promise<ServerCutForDealPreparationResponse> } | null;
   aiDiscardPreparation: { key: string; promise: Promise<AiDiscardPreparationResult> } | null;
   nextHandPreparation: { key: string; promise: Promise<ServerAiDiscardPreparationResponse> } | null;
 } = {
@@ -144,6 +145,7 @@ const state: {
   animatedDealKeys: new Set(),
   turnCutRevealStage: null,
   turnCutResolve: null,
+  cutForDealPreparation: null,
   aiDiscardPreparation: null,
   nextHandPreparation: null,
 };
@@ -175,6 +177,7 @@ function resetTransientGameUi(): void {
   state.turnCutRevealStage = null;
   if (state.turnCutResolve) state.turnCutResolve();
   state.turnCutResolve = null;
+  state.cutForDealPreparation = null;
   state.aiDiscardPreparation = null;
   state.nextHandPreparation = null;
   failedNextHandPreparationKeys.clear();
@@ -1410,6 +1413,13 @@ interface ServerAiDiscardPreparationResponse extends ServerGameActionResponse {
   };
 }
 
+interface ServerCutForDealPreparationResponse extends ServerGameActionResponse {
+  recommendation?: {
+    cardIds: number[];
+    bestLead: number | null;
+  } | null;
+}
+
 async function serverGameAction(action: string, payload: Record<string, unknown> | null = null): Promise<GameState> {
   const response = await serverJson<ServerGameActionResponse>("/api/game/action", {
     action,
@@ -1420,8 +1430,61 @@ async function serverGameAction(action: string, payload: Record<string, unknown>
   currentSnapshot = response.snapshot;
   state.game = response.state;
   saveGame();
+  startCutForDealPreparation(response.state);
   startAiDiscardPreparation(response.state);
   startNextHandPreparation(response.state);
+  return response.state;
+}
+
+function cutForDealPreparationKey(game: GameState): string | null {
+  if (!currentSnapshot || game.phase !== "cut_for_deal") return null;
+  return `${currentSnapshot.gameId ?? "game"}:${currentSnapshot.cutDeck?.join(",") ?? ""}`;
+}
+
+function storePreparedAiDiscard(game: GameState, recommendation?: AiDiscardPreparationResult | null): void {
+  if (!recommendation) return;
+  const key = aiDiscardPreparationKey(game);
+  if (!key) return;
+  state.aiDiscardPreparation = {
+    key,
+    promise: Promise.resolve({
+      cardIds: recommendation.cardIds,
+      bestLead: recommendation.bestLead,
+    }),
+  };
+}
+
+function startCutForDealPreparation(game: GameState): void {
+  const key = cutForDealPreparationKey(game);
+  if (!key) return;
+  if (state.cutForDealPreparation?.key === key) return;
+  const snapshot = currentSnapshot;
+  if (!snapshot) return;
+  const promise = serverJson<ServerCutForDealPreparationResponse>("/api/game/action", {
+    action: "prepare-cut-for-deal",
+    payload: {},
+    snapshot,
+    tag: currentSessionTag() || null,
+  });
+  void promise.catch(() => {
+    if (state.cutForDealPreparation?.key === key) state.cutForDealPreparation = null;
+  });
+  state.cutForDealPreparation = { key, promise };
+}
+
+function preparedCutForDealFor(game: GameState | null): Promise<ServerCutForDealPreparationResponse> | null {
+  if (!game) return null;
+  const key = cutForDealPreparationKey(game);
+  return key && state.cutForDealPreparation?.key === key ? state.cutForDealPreparation.promise : null;
+}
+
+function applyPreparedCutForDeal(response: ServerCutForDealPreparationResponse): GameState {
+  currentSnapshot = response.snapshot;
+  state.game = response.state;
+  saveGame();
+  state.cutForDealPreparation = null;
+  storePreparedAiDiscard(response.state, response.recommendation ?? null);
+  if (response.state.phase === "cut_for_deal") startCutForDealPreparation(response.state);
   return response.state;
 }
 
@@ -1496,18 +1559,9 @@ function applyPreparedNextHand(response: ServerAiDiscardPreparationResponse): Ga
   currentSnapshot = response.snapshot;
   state.game = response.state;
   saveGame();
-  const key = aiDiscardPreparationKey(response.state);
-  if (key) {
-    state.aiDiscardPreparation = {
-      key,
-      promise: Promise.resolve({
-        cardIds: response.recommendation.cardIds,
-        bestLead: response.recommendation.bestLead,
-      }),
-    };
-  }
+  storePreparedAiDiscard(response.state, response.recommendation);
   state.nextHandPreparation = null;
-  failedNextHandPreparationKeys.delete(key ?? "");
+  failedNextHandPreparationKeys.delete(nextHandPreparationKey(response.state) ?? "");
   return response.state;
 }
 
@@ -4087,7 +4141,18 @@ async function cutForDeal(): Promise<void> {
   await waitForPaint();
   try {
     state.resultOverride = null;
-    const next = await api("/api/cut-for-deal", {});
+    const preparedCut = preparedCutForDealFor(state.game);
+    let next: GameState;
+    if (preparedCut) {
+      try {
+        next = applyPreparedCutForDeal(await preparedCut);
+      } catch {
+        state.cutForDealPreparation = null;
+        next = await api("/api/cut-for-deal", {});
+      }
+    } else {
+      next = await api("/api/cut-for-deal", {});
+    }
     state.selected.clear();
     if (next.cutForDeal?.human && next.cutForDeal.ai) {
       state.dealCutRevealStage = "human";

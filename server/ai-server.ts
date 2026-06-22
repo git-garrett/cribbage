@@ -128,6 +128,20 @@ async function handleGameAction(requestBody: JsonRecord): Promise<JsonRecord> {
       case "cut-for-deal":
         game.cutForDeal();
         break;
+      case "prepare-cut-for-deal": {
+        if (game.phase !== "cut_for_deal") throw new Error("It is not time to cut for deal.");
+        game.cutForDeal();
+        let recommendation: { cards: unknown[]; cardIds: number[]; bestLead: number | null } | null = null;
+        if (game.phase === "discard") {
+          await ensureOpponentModel(game.opponent as Opponent);
+          recommendation = game.recommendAiDiscard();
+        }
+        return {
+          state: game.state(),
+          snapshot: game.snapshot(),
+          recommendation,
+        };
+      }
       case "discard":
         game.discard((payload.ids as number[]) || []);
         break;
