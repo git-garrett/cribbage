@@ -4271,7 +4271,6 @@ els.play.addEventListener("click", async () => {
   const card = state.game ? selectedPlayableCard(state.game) : null;
   if (!card) return;
   state.pending = true;
-  setAiThinking(true);
   render(state.game);
   await waitForPaint();
   try {
@@ -4279,7 +4278,11 @@ els.play.addEventListener("click", async () => {
     const next = await api("/api/play-human", { id: card.id });
     state.selected.clear();
     render(next);
+    await waitForPaint();
     await continuePeggingAfterRender(next);
+  } catch (error) {
+    state.resultOverride = [error instanceof Error ? error.message : "Play failed"];
+    render(state.game);
   } finally {
     setAiThinking(false);
     state.pending = false;
