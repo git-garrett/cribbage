@@ -146,6 +146,8 @@ const state: {
   aiDiscardPreparation: null,
 };
 
+type TurnCutProgress = "ai-turn" | "revealed" | "confirmed" | null;
+
 let interactionEpoch = 0;
 
 function resetTransientGameUi(): void {
@@ -3732,7 +3734,7 @@ async function playTurnCardReveal(game: GameState): Promise<void> {
   render(game);
 }
 
-async function playTurnCutWhileFinishingDiscard(game: GameState | null): Promise<"ai-turn" | "revealed" | null> {
+async function playTurnCutWhileFinishingDiscard(game: GameState | null): Promise<TurnCutProgress> {
   if (!game || game.phase !== "ai_discarding") return null;
   if (game.dealer === "AI") {
     state.turnCutRevealStage = "user-cut";
@@ -3745,7 +3747,13 @@ async function playTurnCutWhileFinishingDiscard(game: GameState | null): Promise
     render(game);
     await waitForPaint();
     await waitMs(450);
-    return "ai-turn";
+    state.turnCutRevealStage = "revealed";
+    state.resultOverride = [`Cut card is ${cutCardText(game.turnCard)}.`];
+    const confirmed = waitForTurnCutInteraction();
+    render(game);
+    await waitForPaint();
+    await confirmed;
+    return "confirmed";
   }
   state.turnCutRevealStage = "ai-cut";
   state.resultOverride = ["AI cuts the deck."];
@@ -3757,10 +3765,23 @@ async function playTurnCutWhileFinishingDiscard(game: GameState | null): Promise
   render(game);
   await waitForPaint();
   await waitForTurnCutInteraction();
-  return "revealed";
+  state.turnCutRevealStage = "revealed";
+  state.resultOverride = [`Cut card is ${cutCardText(game.turnCard)}.`];
+  const confirmed = waitForTurnCutInteraction();
+  render(game);
+  await waitForPaint();
+  await confirmed;
+  return "confirmed";
 }
 
-async function finishTurnCardReveal(game: GameState, startStage: "ai-turn" | "revealed" | null): Promise<void> {
+async function finishTurnCardReveal(game: GameState, startStage: TurnCutProgress): Promise<void> {
+  if (startStage === "confirmed") {
+    state.turnCutRevealStage = null;
+    state.turnCutResolve = null;
+    state.resultOverride = null;
+    render(game);
+    return;
+  }
   if (game.phase !== "pegging" || !game.turnCard) {
     state.turnCutRevealStage = null;
     state.turnCutResolve = null;
@@ -4245,7 +4266,7 @@ window.addEventListener("resize", () => render(state.game));
 
 async function finishDiscardInBackground(
   epoch = interactionEpoch,
-  preplayedStartStage?: "ai-turn" | "revealed" | null,
+  preplayedStartStage?: TurnCutProgress,
 ): Promise<void> {
   const isCurrent = (): boolean => epoch === interactionEpoch;
   setAiThinking(false);
