@@ -141,8 +141,18 @@ async function handleGameAction(requestBody: JsonRecord): Promise<JsonRecord> {
         };
       }
       case "prepare-next-hand-ai-discard": {
-        if (game.phase !== "score_crib") throw new Error("The next hand is not ready to prepare.");
-        game.continueScoring();
+        if (!["score_pone", "score_dealer", "score_crib"].includes(game.phase)) {
+          throw new Error("The next hand is not ready to prepare.");
+        }
+        while (game.phase !== "discard" && game.phase !== "game_over") {
+          try {
+            game.continueScoring();
+          } catch (error) {
+            if (error instanceof WinGame) break;
+            throw error;
+          }
+        }
+        if (game.phase === "game_over") throw new Error("Game ends before the next hand.");
         await ensureOpponentModel(game.opponent as Opponent);
         const recommendation = game.recommendAiDiscard();
         return {

@@ -151,6 +151,7 @@ const state: {
 type TurnCutProgress = "ai-turn" | "revealed" | "confirmed" | null;
 
 let interactionEpoch = 0;
+const failedNextHandPreparationKeys = new Set<string>();
 
 function resetTransientGameUi(): void {
   interactionEpoch += 1;
@@ -176,6 +177,7 @@ function resetTransientGameUi(): void {
   state.turnCutResolve = null;
   state.aiDiscardPreparation = null;
   state.nextHandPreparation = null;
+  failedNextHandPreparationKeys.clear();
   closeDecisionSnapshot();
   state.analyticsOpen = false;
   state.gameLogOpen = false;
@@ -1454,7 +1456,13 @@ function preparedAiDiscardFor(game: GameState | null): Promise<AiDiscardPreparat
 }
 
 function nextHandPreparationKey(game: GameState): string | null {
-  if (!currentSnapshot || game.phase !== "score_crib" || game.scoring?.stage !== "crib") return null;
+  if (
+    !currentSnapshot ||
+    !game.scoring ||
+    !["score_pone", "score_dealer", "score_crib"].includes(game.phase)
+  ) {
+    return null;
+  }
   return `${currentSnapshot.gameId ?? "game"}:${game.handNumber}:next`;
 }
 
@@ -1462,6 +1470,7 @@ function startNextHandPreparation(game: GameState): void {
   const key = nextHandPreparationKey(game);
   if (!key) return;
   if (state.nextHandPreparation?.key === key) return;
+  if (failedNextHandPreparationKeys.has(key)) return;
   const snapshot = currentSnapshot;
   if (!snapshot) return;
   const promise = serverJson<ServerAiDiscardPreparationResponse>("/api/game/action", {
@@ -1470,12 +1479,15 @@ function startNextHandPreparation(game: GameState): void {
     snapshot,
     tag: currentSessionTag() || null,
   });
-  void promise.catch(() => {});
+  void promise.catch(() => {
+    failedNextHandPreparationKeys.add(key);
+    if (state.nextHandPreparation?.key === key) state.nextHandPreparation = null;
+  });
   state.nextHandPreparation = { key, promise };
 }
 
 function preparedNextHandFor(game: GameState | null): Promise<ServerAiDiscardPreparationResponse> | null {
-  if (!game) return null;
+  if (!game || game.phase !== "score_crib" || game.scoring?.stage !== "crib") return null;
   const key = nextHandPreparationKey(game);
   return key && state.nextHandPreparation?.key === key ? state.nextHandPreparation.promise : null;
 }
@@ -1495,6 +1507,7 @@ function applyPreparedNextHand(response: ServerAiDiscardPreparationResponse): Ga
     };
   }
   state.nextHandPreparation = null;
+  failedNextHandPreparationKeys.delete(key ?? "");
   return response.state;
 }
 
