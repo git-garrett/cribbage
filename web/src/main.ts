@@ -4085,6 +4085,10 @@ async function startNewGameFromUi(): Promise<void> {
     els.settingsPanel.hidden = true;
     els.menuToggle.setAttribute("aria-expanded", "false");
     render(next);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "New game failed";
+    state.resultOverride = [message];
+    els.result.textContent = message;
   } finally {
     state.pending = false;
     render(state.game);
