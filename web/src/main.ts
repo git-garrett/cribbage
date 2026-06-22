@@ -1657,6 +1657,13 @@ function completeTurnCutInteraction(): void {
   const resolve = state.turnCutResolve;
   if (!resolve) return;
   state.turnCutResolve = null;
+  const wasConfirmingCut = state.turnCutRevealStage === "revealed";
+  if (wasConfirmingCut) {
+    state.turnCutRevealStage = null;
+    state.resultOverride = ["Waiting for AI to play."];
+    setAiThinking(true);
+    render(state.game);
+  }
   resolve();
 }
 
@@ -4047,6 +4054,7 @@ els.cutForDeal.addEventListener("click", () => {
     completeTurnCutInteraction();
     return;
   }
+  if (state.turnCutRevealStage) return;
   void cutForDeal();
 });
 
