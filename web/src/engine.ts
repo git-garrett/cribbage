@@ -1020,7 +1020,7 @@ export class CribbageGame {
       cribOwner: this.phase === "cut_for_deal" ? "-" : this.name(this.dealer),
       turn: current ? this.name(current) : null,
       count: this.count,
-      turnCard: this.phase === "cut_for_deal" || this.phase === "discard" || this.phase === "ai_discarding"
+      turnCard: this.phase === "cut_for_deal" || this.phase === "discard"
         ? null
         : this.serializeCard(this.turnCard),
       plays: this.plays.map((card, index) => this.serializeCard(card, null, this.playOwners[index])),

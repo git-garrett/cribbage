@@ -146,6 +146,38 @@ const state: {
   aiDiscardPreparation: null,
 };
 
+let interactionEpoch = 0;
+
+function resetTransientGameUi(): void {
+  interactionEpoch += 1;
+  state.selected.clear();
+  state.resultOverride = null;
+  state.dismissedGameOverId = null;
+  state.aiThinking = false;
+  state.modelLoading = false;
+  state.completingReviews = false;
+  state.noticeText = "";
+  state.noticeHistory = [];
+  state.noticeHistoryIndex = null;
+  state.noticeResultLines = [];
+  clearNoticeQueue();
+  renderNoticeText("");
+  state.dealCutRevealStage = null;
+  if (state.dealCutResolve) state.dealCutResolve();
+  state.dealCutResolve = null;
+  state.dealAnimation = null;
+  state.animatedDealKeys = new Set();
+  state.turnCutRevealStage = null;
+  if (state.turnCutResolve) state.turnCutResolve();
+  state.turnCutResolve = null;
+  state.aiDiscardPreparation = null;
+  closeDecisionSnapshot();
+  state.analyticsOpen = false;
+  state.gameLogOpen = false;
+  state.modelInfoOpen = false;
+  state.decisionReviewOpen = false;
+}
+
 function setAiThinking(active: boolean): void {
   state.aiThinking = active;
 }
@@ -3977,7 +4009,7 @@ els.discard.addEventListener("click", async () => {
       state.pending = false;
       render(state.game);
       await waitForPaint();
-      finishDiscardInBackground();
+      finishDiscardInBackground(interactionEpoch);
       return;
     }
     await prepareModel13Pegging(next);
@@ -4073,12 +4105,10 @@ els.continuePegging.addEventListener("click", async () => {
 async function startNewGameFromUi(): Promise<void> {
   if (state.pending) return;
   if (state.splashOpen && !saveSplashName()) return;
+  resetTransientGameUi();
   state.pending = true;
-  state.selected.clear();
   render(state.game);
   try {
-    state.resultOverride = null;
-    state.dismissedGameOverId = null;
     const next = await api("/api/new", { opponent: els.opponent.value });
     state.splashOpen = false;
     state.hasResumableGame = true;
@@ -4144,10 +4174,12 @@ els.troubleGame.addEventListener("click", async () => {
 
 window.addEventListener("resize", () => render(state.game));
 
-async function finishDiscardInBackground(): Promise<void> {
+async function finishDiscardInBackground(epoch = interactionEpoch): Promise<void> {
+  const isCurrent = (): boolean => epoch === interactionEpoch;
   setAiThinking(false);
   render(state.game);
   await waitForPaint();
+  if (!isCurrent()) return;
   let failed = false;
   try {
     state.resultOverride = null;
@@ -4165,21 +4197,27 @@ async function finishDiscardInBackground(): Promise<void> {
       }
     })();
     const startStage = await playTurnCutWhileFinishingDiscard(state.game);
+    if (!isCurrent()) return;
     setAiThinking(true);
     state.resultOverride = ["Waiting for AI to discard."];
     render(state.game);
     await waitForPaint();
     const next = await finish;
+    if (!isCurrent()) return;
     setAiThinking(false);
     await finishTurnCardReveal(next, startStage);
+    if (!isCurrent()) return;
     setAiThinking(true);
     await prepareModel13Pegging(next);
+    if (!isCurrent()) return;
     await continuePeggingAfterRender(next);
   } catch (error) {
+    if (!isCurrent()) return;
     failed = true;
     state.resultOverride = [error instanceof Error ? error.message : "Request failed"];
     render(state.game);
   } finally {
+    if (!isCurrent()) return;
     state.turnCutRevealStage = null;
     state.turnCutResolve = null;
     if (!failed) state.resultOverride = null;
@@ -4193,7 +4231,7 @@ api("/api/state")
     startAiDiscardPreparation(game);
     render(game);
     markAppReady();
-    if (game.phase === "ai_discarding") finishDiscardInBackground();
+    if (game.phase === "ai_discarding") finishDiscardInBackground(interactionEpoch);
     else await continuePeggingAfterRender(game);
     scheduleDecisionReviewCompletion();
   })
