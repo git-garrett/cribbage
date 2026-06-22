@@ -110,6 +110,7 @@ const state: {
   turnCutRevealStage: "user-cut" | "ai-cut" | "user-turn" | "ai-turn" | "revealed" | null;
   turnCutResolve: (() => void) | null;
   aiDiscardPreparation: { key: string; promise: Promise<AiDiscardPreparationResult> } | null;
+  nextHandPreparation: { key: string; promise: Promise<ServerAiDiscardPreparationResponse> } | null;
 } = {
   game: null,
   selected: new Set(),
@@ -144,6 +145,7 @@ const state: {
   turnCutRevealStage: null,
   turnCutResolve: null,
   aiDiscardPreparation: null,
+  nextHandPreparation: null,
 };
 
 type TurnCutProgress = "ai-turn" | "revealed" | "confirmed" | null;
@@ -173,6 +175,7 @@ function resetTransientGameUi(): void {
   if (state.turnCutResolve) state.turnCutResolve();
   state.turnCutResolve = null;
   state.aiDiscardPreparation = null;
+  state.nextHandPreparation = null;
   closeDecisionSnapshot();
   state.analyticsOpen = false;
   state.gameLogOpen = false;
@@ -1416,6 +1419,7 @@ async function serverGameAction(action: string, payload: Record<string, unknown>
   state.game = response.state;
   saveGame();
   startAiDiscardPreparation(response.state);
+  startNextHandPreparation(response.state);
   return response.state;
 }
 
@@ -1447,6 +1451,51 @@ function preparedAiDiscardFor(game: GameState | null): Promise<AiDiscardPreparat
   if (!game || !currentSnapshot) return null;
   const key = `${currentSnapshot.gameId ?? "game"}:${game.handNumber}:${game.dealer}`;
   return state.aiDiscardPreparation?.key === key ? state.aiDiscardPreparation.promise : null;
+}
+
+function nextHandPreparationKey(game: GameState): string | null {
+  if (!currentSnapshot || game.phase !== "score_crib" || game.scoring?.stage !== "crib") return null;
+  return `${currentSnapshot.gameId ?? "game"}:${game.handNumber}:next`;
+}
+
+function startNextHandPreparation(game: GameState): void {
+  const key = nextHandPreparationKey(game);
+  if (!key) return;
+  if (state.nextHandPreparation?.key === key) return;
+  const snapshot = currentSnapshot;
+  if (!snapshot) return;
+  const promise = serverJson<ServerAiDiscardPreparationResponse>("/api/game/action", {
+    action: "prepare-next-hand-ai-discard",
+    payload: {},
+    snapshot,
+    tag: currentSessionTag() || null,
+  });
+  void promise.catch(() => {});
+  state.nextHandPreparation = { key, promise };
+}
+
+function preparedNextHandFor(game: GameState | null): Promise<ServerAiDiscardPreparationResponse> | null {
+  if (!game) return null;
+  const key = nextHandPreparationKey(game);
+  return key && state.nextHandPreparation?.key === key ? state.nextHandPreparation.promise : null;
+}
+
+function applyPreparedNextHand(response: ServerAiDiscardPreparationResponse): GameState {
+  currentSnapshot = response.snapshot;
+  state.game = response.state;
+  saveGame();
+  const key = aiDiscardPreparationKey(response.state);
+  if (key) {
+    state.aiDiscardPreparation = {
+      key,
+      promise: Promise.resolve({
+        cardIds: response.recommendation.cardIds,
+        bestLead: response.recommendation.bestLead,
+      }),
+    };
+  }
+  state.nextHandPreparation = null;
+  return response.state;
 }
 
 async function api(path: string, body: Record<string, unknown> | null = null): Promise<GameState> {
@@ -1499,6 +1548,15 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
     }
     if (path === "/api/complete-decision-reviews") {
       return serverGameAction("complete-decision-reviews");
+    }
+    if (path === "/api/prepare-next-hand-ai-discard") {
+      const response = await serverJson<ServerAiDiscardPreparationResponse>("/api/game/action", {
+        action: "prepare-next-hand-ai-discard",
+        payload: {},
+        snapshot: currentSnapshot,
+        tag: currentSessionTag() || null,
+      });
+      return applyPreparedNextHand(response);
     }
     if (path === "/api/continue-scoring") {
       return serverGameAction("continue-scoring");
@@ -4175,11 +4233,27 @@ els.continueScoring.addEventListener("click", async () => {
   render(state.game);
   try {
     state.resultOverride = null;
-    const next = await api("/api/continue-scoring", {});
+    const preparedNext = preparedNextHandFor(state.game);
+    if (preparedNext) {
+      setAiThinking(true);
+      render(state.game);
+    }
+    let next: GameState;
+    if (preparedNext) {
+      try {
+        next = applyPreparedNextHand(await preparedNext);
+      } catch {
+        state.nextHandPreparation = null;
+        next = await api("/api/continue-scoring", {});
+      }
+    } else {
+      next = await api("/api/continue-scoring", {});
+    }
     state.selected.clear();
     render(next);
     await playDealAnimationIfNeeded(next);
   } finally {
+    setAiThinking(false);
     state.pending = false;
     render(state.game);
   }

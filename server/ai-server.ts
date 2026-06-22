@@ -140,6 +140,17 @@ async function handleGameAction(requestBody: JsonRecord): Promise<JsonRecord> {
           recommendation,
         };
       }
+      case "prepare-next-hand-ai-discard": {
+        if (game.phase !== "score_crib") throw new Error("The next hand is not ready to prepare.");
+        game.continueScoring();
+        await ensureOpponentModel(game.opponent as Opponent);
+        const recommendation = game.recommendAiDiscard();
+        return {
+          state: game.state(),
+          snapshot: game.snapshot(),
+          recommendation,
+        };
+      }
       case "finish-discard":
         await ensureOpponentModel(game.opponent as Opponent);
         game.finishDiscard();
