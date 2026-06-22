@@ -2535,6 +2535,43 @@ function cardFromLabel(label: string, index: number): GameState["humanHand"][num
   };
 }
 
+function cardFromId(id: number, index: number | null = null): GameState["humanHand"][number] {
+  const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+  const suits = [
+    { key: "d", suit: "diamonds", symbol: "♦" },
+    { key: "c", suit: "clubs", symbol: "♣" },
+    { key: "h", suit: "hearts", symbol: "♥" },
+    { key: "s", suit: "spades", symbol: "♠" },
+  ];
+  const rank = ranks[id % 13] ?? "?";
+  const suit = suits[Math.floor(id / 13)] ?? suits[0];
+  const label = `${rank}${suit.key}`;
+  return {
+    index,
+    id,
+    rank,
+    suit: suit.suit,
+    symbol: suit.symbol,
+    value: cardValueFromLabel(label),
+    label,
+  };
+}
+
+function optimisticAiDiscardingState(game: GameState | null, discardedIds: number[]): GameState | null {
+  const turnCardId = currentSnapshot?.turnCard;
+  if (!game || game.phase !== "discard" || typeof turnCardId !== "number" || game.aiHandCount !== 6) return null;
+  const discarded = new Set(discardedIds);
+  return {
+    ...game,
+    phase: "ai_discarding",
+    message: "Waiting for AI to discard.",
+    result: [...game.result, "User discarded two cards to the crib.", "Waiting for AI to discard."],
+    turnCard: cardFromId(turnCardId),
+    humanHand: game.humanHand.filter((card) => !discarded.has(card.id)),
+    legalCardIds: [],
+  };
+}
+
 function handStartFor(events: AnalyticsEvent[], gameId: string, handNumber: number): Extract<AnalyticsEvent, { type: "hand" }> | undefined {
   return events.find(
     (event): event is Extract<AnalyticsEvent, { type: "hand" }> =>
@@ -3994,13 +4031,42 @@ els.cutForDeal.addEventListener("click", () => {
 
 els.discard.addEventListener("click", async () => {
   if (state.pending) return;
+  const selectedIds = Array.from(state.selected);
+  const optimisticNext = optimisticAiDiscardingState(state.game, selectedIds);
+  const epoch = interactionEpoch;
   state.pending = true;
   render(state.game);
   await waitForPaint();
   let handoffToBackground = false;
   try {
     state.resultOverride = null;
-    const next = await api("/api/discard", { ids: Array.from(state.selected) });
+    const discardRequest = api("/api/discard", { ids: selectedIds });
+    if (optimisticNext) {
+      handoffToBackground = true;
+      state.selected.clear();
+      state.pending = false;
+      render(optimisticNext);
+      await waitForPaint();
+      const cutInteraction = playTurnCutWhileFinishingDiscard(optimisticNext);
+      let next: GameState;
+      try {
+        next = await discardRequest;
+      } catch (error) {
+        if (epoch === interactionEpoch) {
+          state.turnCutRevealStage = null;
+          if (state.turnCutResolve) state.turnCutResolve();
+          state.turnCutResolve = null;
+        }
+        throw error;
+      }
+      if (epoch !== interactionEpoch) return;
+      render(next);
+      const startStage = await cutInteraction;
+      if (epoch !== interactionEpoch) return;
+      await finishDiscardInBackground(epoch, startStage);
+      return;
+    }
+    const next = await discardRequest;
     state.selected.clear();
     render(next);
     await waitForPaint();
@@ -4013,6 +4079,9 @@ els.discard.addEventListener("click", async () => {
       return;
     }
     await prepareModel13Pegging(next);
+  } catch (error) {
+    state.resultOverride = [error instanceof Error ? error.message : "Discard failed"];
+    render(state.game);
   } finally {
     if (!handoffToBackground) setAiThinking(false);
     state.pending = false;
@@ -4174,7 +4243,10 @@ els.troubleGame.addEventListener("click", async () => {
 
 window.addEventListener("resize", () => render(state.game));
 
-async function finishDiscardInBackground(epoch = interactionEpoch): Promise<void> {
+async function finishDiscardInBackground(
+  epoch = interactionEpoch,
+  preplayedStartStage?: "ai-turn" | "revealed" | null,
+): Promise<void> {
   const isCurrent = (): boolean => epoch === interactionEpoch;
   setAiThinking(false);
   render(state.game);
@@ -4196,7 +4268,9 @@ async function finishDiscardInBackground(epoch = interactionEpoch): Promise<void
         return api("/api/finish-discard", {});
       }
     })();
-    const startStage = await playTurnCutWhileFinishingDiscard(state.game);
+    const startStage = preplayedStartStage === undefined
+      ? await playTurnCutWhileFinishingDiscard(state.game)
+      : preplayedStartStage;
     if (!isCurrent()) return;
     setAiThinking(true);
     state.resultOverride = ["Waiting for AI to discard."];
