@@ -3977,7 +3977,7 @@ async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
       try {
         current = await api("/api/advance-pegging", {});
         render(current);
-        scheduleDecisionReviewCompletion();
+        scheduleDecisionReviewCompletion(current);
       } finally {
         setAiThinking(false);
         render(state.game);
@@ -3989,8 +3989,17 @@ async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
   throw new Error("Pegging continuation did not settle.");
 }
 
-function scheduleDecisionReviewCompletion(): void {
+function scheduleDecisionReviewCompletion(game = state.game): void {
   if (state.completingReviews) return;
+  if (
+    !game ||
+    game.phase !== "pegging" ||
+    game.turn !== "User" ||
+    game.peggingResetPending ||
+    state.pending
+  ) {
+    return;
+  }
   state.completingReviews = true;
   window.setTimeout(() => {
     api("/api/complete-decision-reviews", {})
@@ -4503,7 +4512,7 @@ api("/api/state")
     markAppReady();
     if (game.phase === "ai_discarding") finishDiscardInBackground(interactionEpoch);
     else await continuePeggingAfterRender(game);
-    scheduleDecisionReviewCompletion();
+    scheduleDecisionReviewCompletion(game);
   })
   .catch((error) => {
     markAppReady();
