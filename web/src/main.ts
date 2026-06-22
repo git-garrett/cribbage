@@ -1525,7 +1525,8 @@ function nextHandPreparationKey(game: GameState): string | null {
   if (
     !currentSnapshot ||
     !game.scoring ||
-    !["score_pone", "score_dealer", "score_crib"].includes(game.phase)
+    game.phase !== "score_crib" ||
+    game.scoring.stage !== "crib"
   ) {
     return null;
   }
