@@ -22,6 +22,7 @@ const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
 const rankIndex = new Map(ranks.map((rank, index) => [rank, index]));
 
 const currentModels = [
+  "schell_table-peg_table-14.3",
   "schell_table-peg_table-14.2",
   "schell_table-peg_table-14.1",
   "schell_table-peg_table-14.0",
@@ -62,6 +63,7 @@ const labels = {
   "schell_table-peg_table-14.0": "Schell Table + Peg Table 14.0",
   "schell_table-peg_table-14.1": "Schell Table + Peg Table 14.1",
   "schell_table-peg_table-14.2": "Schell Table + Peg Table 14.2",
+  "schell_table-peg_table-14.3": "Schell Table + Peg Table 14.3",
   "schell_table-peg_table-6.0": "Schell Table + Peg Table 6.0",
   "ras_table-peg_table-4.0": "Ras Table + Peg Table 4.0",
   "schell_table-peg-3.0": "Schell Table + Peg 3.0",

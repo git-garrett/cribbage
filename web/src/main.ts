@@ -11,7 +11,7 @@ import type {
 } from "./engine";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 
-const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-13.0";
+const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-14.3";
 
 type BaselineScoreTotals = Pick<
   AnalyticsTotals,
@@ -307,7 +307,7 @@ const ANALYTICS_KEY = "strong-cribbage.analytics.v1";
 const PHONE_GAME_DB_NAME = "cribbage-game-log";
 const PHONE_GAME_DB_VERSION = 1;
 const NOTICE_MIN_MS = 600;
-const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-13.0";
+const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-14.3";
 const URL_PARAMS = new URLSearchParams(window.location.search);
 const FULL_APP_MODE = URL_PARAMS.get("full") === "1" || URL_PARAMS.get("mode") === "full";
 const SIMPLE_NETWORK_MODE = !FULL_APP_MODE;
@@ -3265,6 +3265,7 @@ function sortedAnalyticsEngines(
 
 function analyticsEngineSortKey(engine: Opponent): number {
   return [
+    "schell_table-peg_table-14.3",
     "schell_table-peg_table-14.2",
     "schell_table-peg_table-14.1",
     "schell_table-peg_table-14.0",
@@ -3603,6 +3604,7 @@ function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
     engine === "schell_table-peg_table-14.0" ||
     engine === "schell_table-peg_table-14.1" ||
     engine === "schell_table-peg_table-14.2" ||
+    engine === "schell_table-peg_table-14.3" ||
     engine === "schell_table-2.0"
   ) {
     return engine;

@@ -37,6 +37,7 @@ export type Opponent =
   | "schell_table-peg_table-14.0"
   | "schell_table-peg_table-14.1"
   | "schell_table-peg_table-14.2"
+  | "schell_table-peg_table-14.3"
   | "schell_table-2.0";
 type LegacyOpponent =
   | "ras-table-1.0"
@@ -63,7 +64,7 @@ type LegacyOpponent =
   | "expert-peg-2.2"
   | "expert-peg_table-2.3";
 type StoredOpponent = Opponent | LegacyOpponent;
-export const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-13.0";
+export const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-14.3";
 export type Phase =
   | "cut_for_deal"
   | "discard"
@@ -103,6 +104,7 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "schell_table-peg_table-14.0": "Schell Table + Peg Table 14.0",
   "schell_table-peg_table-14.1": "Schell Table + Peg Table 14.1",
   "schell_table-peg_table-14.2": "Schell Table + Peg Table 14.2",
+  "schell_table-peg_table-14.3": "Schell Table + Peg Table 14.3",
 };
 const CRIB_FLUSH_BONUS_BY_SUIT_COUNT = cribFlushBonusBySuitCount as number[];
 const HAND_RANK_SCORE_BY_KEEP_CUT = (handRankScoreByKeepCut as {
@@ -228,6 +230,7 @@ DISCARD_TABLES["schell_table-peg_table-13.0"] = DISCARD_TABLES["schell_table-2.0
 DISCARD_TABLES["schell_table-peg_table-14.0"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-14.1"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-14.2"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-14.3"] = DISCARD_TABLES["schell_table-2.0"];
 
 export class WinGame extends Error {}
 
@@ -2290,6 +2293,8 @@ const PEGGING_HOLD_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Pegging
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
   "schell_table-peg_table-14.2": () =>
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
+  "schell_table-peg_table-14.3": () =>
+    loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
 };
 const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<PeggingPairwiseTable>>> = {
   "schell_table-peg_table-12.0": () =>
@@ -2302,6 +2307,8 @@ const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Peg
     loadPairwisePeggingTable(peggingPairwise14Url, peggingPairwise14Manifest as PeggingPairwiseManifest),
   "schell_table-peg_table-14.2": () =>
     loadPairwisePeggingTable(peggingPairwise14Url, peggingPairwise14Manifest as PeggingPairwiseManifest),
+  "schell_table-peg_table-14.3": () =>
+    loadPairwisePeggingTable(peggingPairwise14Url, peggingPairwise14Manifest as PeggingPairwiseManifest),
 };
 const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLeadFrequencyTable>>> = {
   "schell_table-peg_table-13.0": () =>
@@ -2312,6 +2319,8 @@ const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLe
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
   "schell_table-peg_table-14.2": () =>
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
+  "schell_table-peg_table-14.3": () =>
+    loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
 };
 const CRIB_TRIPOLICY_LOADERS: Partial<Record<Opponent, () => Promise<CribTripolicyTable>>> = {
   "schell_table-peg_table-14.0": () =>
@@ -2319,6 +2328,8 @@ const CRIB_TRIPOLICY_LOADERS: Partial<Record<Opponent, () => Promise<CribTripoli
   "schell_table-peg_table-14.1": () =>
     loadTripolicyCribTable(cribTripolicy14Url, cribTripolicy14Manifest as CribTripolicyManifest),
   "schell_table-peg_table-14.2": () =>
+    loadTripolicyCribTable(cribTripolicy14Url, cribTripolicy14Manifest as CribTripolicyManifest),
+  "schell_table-peg_table-14.3": () =>
     loadTripolicyCribTable(cribTripolicy14Url, cribTripolicy14Manifest as CribTripolicyManifest),
 };
 
@@ -2407,7 +2418,8 @@ function usesWinProbabilityPegging(engine: Opponent): boolean {
     engine === "schell_table-peg_table-13.0" ||
     engine === "schell_table-peg_table-14.0" ||
     engine === "schell_table-peg_table-14.1" ||
-    engine === "schell_table-peg_table-14.2";
+    engine === "schell_table-peg_table-14.2" ||
+    engine === "schell_table-peg_table-14.3";
 }
 
 function usesRankCutDiscardTables(engine: Opponent): boolean {
@@ -2417,7 +2429,8 @@ function usesRankCutDiscardTables(engine: Opponent): boolean {
     engine === "schell_table-peg_table-13.0" ||
     engine === "schell_table-peg_table-14.0" ||
     engine === "schell_table-peg_table-14.1" ||
-    engine === "schell_table-peg_table-14.2";
+    engine === "schell_table-peg_table-14.2" ||
+    engine === "schell_table-peg_table-14.3";
 }
 
 function usesDiscardWinProbability(engine: Opponent): boolean {
@@ -2426,7 +2439,8 @@ function usesDiscardWinProbability(engine: Opponent): boolean {
     engine === "schell_table-peg_table-13.0" ||
     engine === "schell_table-peg_table-14.0" ||
     engine === "schell_table-peg_table-14.1" ||
-    engine === "schell_table-peg_table-14.2";
+    engine === "schell_table-peg_table-14.2" ||
+    engine === "schell_table-peg_table-14.3";
 }
 
 function usesPeggingOutcomeTables(engine: Opponent): boolean {
@@ -2434,39 +2448,45 @@ function usesPeggingOutcomeTables(engine: Opponent): boolean {
     engine === "schell_table-peg_table-13.0" ||
     engine === "schell_table-peg_table-14.0" ||
     engine === "schell_table-peg_table-14.1" ||
-    engine === "schell_table-peg_table-14.2";
+    engine === "schell_table-peg_table-14.2" ||
+    engine === "schell_table-peg_table-14.3";
 }
 
 function usesModel13LivePegging(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-13.0" ||
     engine === "schell_table-peg_table-14.0" ||
     engine === "schell_table-peg_table-14.1" ||
-    engine === "schell_table-peg_table-14.2";
+    engine === "schell_table-peg_table-14.2" ||
+    engine === "schell_table-peg_table-14.3";
 }
 
 function usesTripolicyDiscardModel(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-14.0" ||
     engine === "schell_table-peg_table-14.1" ||
-    engine === "schell_table-peg_table-14.2";
+    engine === "schell_table-peg_table-14.2" ||
+    engine === "schell_table-peg_table-14.3";
 }
 
 function usesNineWayTripolicyDiscardModel(engine: Opponent): boolean {
-  return engine === "schell_table-peg_table-14.2";
+  return engine === "schell_table-peg_table-14.2" ||
+    engine === "schell_table-peg_table-14.3";
 }
 
 function usesCorrectedDiscardWinProbability(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-14.1" ||
-    engine === "schell_table-peg_table-14.2";
+    engine === "schell_table-peg_table-14.2" ||
+    engine === "schell_table-peg_table-14.3";
 }
 
 function usesRankOnlyDiscardWinProbabilityApproximation(engine: Opponent): boolean {
-  return engine === "schell_table-peg_table-14.2";
+  return engine === "schell_table-peg_table-14.3";
 }
 
 function usesKnownCardPostPeggingWinProbability(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-14.0" ||
     engine === "schell_table-peg_table-14.1" ||
-    engine === "schell_table-peg_table-14.2";
+    engine === "schell_table-peg_table-14.2" ||
+    engine === "schell_table-peg_table-14.3";
 }
 
 function pegTableEv(
@@ -5235,6 +5255,7 @@ function normalizeOpponent(opponent: StoredOpponent): Opponent {
     opponent === "expert_schell-table-peg_table-1.2" ||
     opponent === "expert_schell_table-peg_table-4.0"
   ) return "schell_table-peg_table-4.0";
+  if (opponent === "schell_table-peg_table-14.3") return "schell_table-peg_table-14.3";
   if (opponent === "schell_table-peg_table-14.2") return "schell_table-peg_table-14.2";
   if (opponent === "schell_table-peg_table-14.1") return "schell_table-peg_table-14.1";
   if (opponent === "schell_table-peg_table-14.0") return "schell_table-peg_table-14.0";
