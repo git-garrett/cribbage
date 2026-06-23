@@ -4337,10 +4337,6 @@ els.continueScoring.addEventListener("click", async () => {
   try {
     state.resultOverride = null;
     const preparedNext = preparedNextHandFor(state.game);
-    if (preparedNext) {
-      setAiThinking(true);
-      render(state.game);
-    }
     let next: GameState;
     if (preparedNext) {
       try {
@@ -4356,7 +4352,6 @@ els.continueScoring.addEventListener("click", async () => {
     render(next);
     await playDealAnimationIfNeeded(next);
   } finally {
-    setAiThinking(false);
     state.pending = false;
     render(state.game);
   }
