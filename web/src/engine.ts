@@ -2141,6 +2141,12 @@ type OptimalPegSimulationState = PegSimulationState & {
 };
 type ScoreDistribution = Array<[number, number]>;
 type DiscardWinBaseOutcome = [number, number, number];
+type CutRankOption = {
+  rank: number;
+  card: Card;
+  cards: Card[];
+  weight: number;
+};
 type PostPeggingWinContext = {
   key: string;
   perspectiveRole: "dealer" | "pone";
@@ -2451,6 +2457,10 @@ function usesNineWayTripolicyDiscardModel(engine: Opponent): boolean {
 function usesCorrectedDiscardWinProbability(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-14.1" ||
     engine === "schell_table-peg_table-14.2";
+}
+
+function usesRankOnlyDiscardWinProbabilityApproximation(engine: Opponent): boolean {
+  return engine === "schell_table-peg_table-14.2";
 }
 
 function usesKnownCardPostPeggingWinProbability(engine: Opponent): boolean {
@@ -4497,6 +4507,114 @@ function cardsForRankCounts(available: Card[], ranks: RankCounts): Card[][] {
   return hands;
 }
 
+function cardsForRankCountsForScoring(ranks: RankCounts): Card[] {
+  const cards: Card[] = [];
+  ranks.forEach((count, rank) => {
+    for (let index = 0; index < count; index += 1) cards.push(pegCardCache[rank]);
+  });
+  return cards;
+}
+
+function cutRankOptions(deck: Card[]): CutRankOption[] {
+  const byRank = Array.from({ length: 13 }, () => [] as Card[]);
+  for (const card of deck) byRank[card.rank].push(card);
+  const total = deck.length || 1;
+  return byRank
+    .map((cards, rank) => ({ rank, card: pegCardCache[rank], cards, weight: cards.length / total }))
+    .filter((option) => option.cards.length > 0);
+}
+
+function suitProbability(cards: Card[], suit: number): number {
+  if (!cards.length) return 0;
+  return cards.filter((card) => card.suit === suit).length / cards.length;
+}
+
+function expectedKnownHandSuitBonusForCutRank(hand: Card[], cut: CutRankOption, crib = false): number {
+  let points = 0;
+  for (const card of hand) {
+    if (card.rankStr === "J") points += suitProbability(cut.cards, card.suit);
+  }
+  const handSuits = new Set(hand.map((card) => card.suit));
+  if (handSuits.size === 1) {
+    const suit = hand[0]?.suit;
+    const matchProbability = suitProbability(cut.cards, suit);
+    if (crib) points += 5 * matchProbability;
+    else points += 4 + matchProbability;
+  }
+  return points;
+}
+
+function rankSuitCountsExcluding(availableCards: Card[], excluded: Card): number[][] {
+  const counts = Array.from({ length: 13 }, () => Array.from({ length: 4 }, () => 0));
+  for (const card of availableCards) {
+    if (card.id === excluded.id) continue;
+    counts[card.rank][card.suit] += 1;
+  }
+  return counts;
+}
+
+function rankTotalsFromSuitCounts(counts: number[][]): RankCounts {
+  return counts.map((suits) => suits.reduce((sum, count) => sum + count, 0));
+}
+
+function sameSuitRankHandProbability(ranks: RankCounts, suit: number, suitCounts: number[][], rankTotals: RankCounts): number {
+  let probability = 1;
+  for (let rank = 0; rank < ranks.length; rank += 1) {
+    const count = ranks[rank];
+    if (!count) continue;
+    if (count > 1) return 0;
+    const total = rankTotals[rank] || 0;
+    if (!total) return 0;
+    probability *= (suitCounts[rank][suit] || 0) / total;
+  }
+  return probability;
+}
+
+function expectedRankHandSuitBonusForCutRank(ranks: RankCounts, cut: CutRankOption, availableCards: Card[]): number {
+  let total = 0;
+  for (const cutCard of cut.cards) {
+    const suitCounts = rankSuitCountsExcluding(availableCards, cutCard);
+    const rankTotals = rankTotalsFromSuitCounts(suitCounts);
+    let points = 0;
+    const jackCount = ranks[10] || 0;
+    if (jackCount) {
+      points += jackCount * ((suitCounts[10][cutCard.suit] || 0) / (rankTotals[10] || 1));
+    }
+    for (let suit = 0; suit < 4; suit += 1) {
+      const flushProbability = sameSuitRankHandProbability(ranks, suit, suitCounts, rankTotals);
+      points += flushProbability * (suit === cutCard.suit ? 5 : 4);
+    }
+    total += points;
+  }
+  return total / (cut.cards.length || 1);
+}
+
+function expectedCribSuitBonusForCutRank(
+  discard: Card[],
+  opponentRanks: RankCounts,
+  cut: CutRankOption,
+  availableCards: Card[],
+): number {
+  let total = 0;
+  for (const cutCard of cut.cards) {
+    const suitCounts = rankSuitCountsExcluding(availableCards, cutCard);
+    const rankTotals = rankTotalsFromSuitCounts(suitCounts);
+    let points = 0;
+    for (const card of discard) {
+      if (card.rankStr === "J" && card.suit === cutCard.suit) points += 1;
+    }
+    const opponentJackCount = opponentRanks[10] || 0;
+    if (opponentJackCount) {
+      points += opponentJackCount * ((suitCounts[10][cutCard.suit] || 0) / (rankTotals[10] || 1));
+    }
+    if (discard.length === 2 && discard[0].suit === cutCard.suit && discard[1].suit === cutCard.suit) {
+      points += 5 * sameSuitRankHandProbability(opponentRanks, cutCard.suit, suitCounts, rankTotals);
+    }
+    total += points;
+  }
+  return total / (cut.cards.length || 1);
+}
+
 function cribSuitBonus(discard: Card[], opponentDiscard: Card[], cut: Card): number {
   const crib = [...discard, ...opponentDiscard];
   let points = 0;
@@ -4550,6 +4668,50 @@ function cribScoreOutcomesForCut(
   }
   if (!totalWeight) {
     const fallback = rankCutCribScore(discard, role, cut, engine, policy) + scoreFlushAndRightJack(discard, cut, true);
+    return [[fallback, 1]];
+  }
+  return [...outcomes.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([score, weight]) => [score, weight / totalWeight]);
+}
+
+function cribScoreOutcomesForCutRank(
+  discard: Card[],
+  cut: CutRankOption,
+  role: "dealer" | "pone",
+  seenCards: Card[],
+  engine: Opponent = DEFAULT_OPPONENT,
+  policy: CribPolicy = "ev",
+): Array<[number, number]> {
+  const discardKey = rankCountsForCards(discard).join("");
+  const entry = tripolicyCribPolicyEntry(discard, role, cut.card, engine, policy) ??
+    CRIB_SCORE_HISTOGRAM_BY_DISCARD_CUT[role]?.[discardKey]?.[cut.rank];
+  if (!entry) {
+    const fallback = rankCutCribScore(discard, role, cut.card, engine, policy) +
+      expectedKnownHandSuitBonusForCutRank(discard, cut, true);
+    return [[fallback, 1]];
+  }
+  const seen = cardIds(seenCards);
+  const availableCards = fullDeck().filter((card) => !seen.has(card.id));
+  const availableRanks = remainingRankCounts(seenCards);
+  availableRanks[cut.rank] = Math.max(0, availableRanks[cut.rank] - 1);
+  const outcomes = new Map<number, number>();
+  let totalWeight = 0;
+  for (const opponentDiscard of entry.opponentDiscards) {
+    const ranks = opponentDiscard.ranks.split("").map((digit) => Number.parseInt(digit, 10));
+    const availabilityScale = usesCorrectedDiscardWinProbability(engine)
+      ? rankCombinationCount(ranks, availableRanks) / (fullDeckRankCombinationCount(ranks) || 1)
+      : 1;
+    const adjustedWeight = opponentDiscard.weight * availabilityScale;
+    if (adjustedWeight <= 0) continue;
+    const score = opponentDiscard.rankScore +
+      expectedCribSuitBonusForCutRank(discard, ranks, cut, availableCards);
+    outcomes.set(score, (outcomes.get(score) ?? 0) + adjustedWeight);
+    totalWeight += adjustedWeight;
+  }
+  if (!totalWeight) {
+    const fallback = rankCutCribScore(discard, role, cut.card, engine, policy) +
+      expectedKnownHandSuitBonusForCutRank(discard, cut, true);
     return [[fallback, 1]];
   }
   return [...outcomes.entries()]
@@ -4649,6 +4811,65 @@ function opponentUpcomingHandScoreDistributionForDiscard(
   return distribution;
 }
 
+function opponentUpcomingHandScoreDistributionForDiscardRank(
+  fullHand: Card[],
+  cut: CutRankOption,
+  opponentRole: "dealer" | "pone",
+  engine: Opponent,
+): ScoreDistribution {
+  if (!usesCorrectedDiscardWinProbability(engine) || !PEGGING_HOLD_TABLES[engine]) {
+    return SCORE_PHASE_DISTRIBUTIONS[opponentRole === "dealer" ? "handDealer" : "handPone"] ??
+      [[scorePhaseAverage(opponentRole === "dealer" ? "handDealer" : "handPone"), 1]];
+  }
+  const cacheKey = [
+    "rank-cut",
+    engine,
+    opponentRole,
+    cardSetKey(fullHand),
+    cut.rank,
+    cut.cards.map((card) => card.id).join(","),
+  ].join(":");
+  const cached = DISCARD_OPPONENT_HAND_SCORE_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const knownIds = cardIds(fullHand);
+  const availableCards = fullDeck().filter((card) => !knownIds.has(card.id));
+  const rankCounts = remainingRankCounts(fullHand);
+  rankCounts[cut.rank] = Math.max(0, rankCounts[cut.rank] - 1);
+  const prefixFreeOpponent: PlayerState = {
+    key: "ai",
+    name: "opponent",
+    hand: [],
+    table: [],
+    crib: [],
+    score: 0,
+  };
+  const opponentHands = opponentRankHandsForEngine(rankCounts, 4, prefixFreeOpponent, opponentRole, engine);
+  const outcomes = new Map<number, number>();
+  let totalWeight = 0;
+
+  for (const hand of opponentHands) {
+    const rankOnlyHand = cardsForRankCountsForScoring(hand.ranks);
+    const score = scoreHandRankOnly(rankOnlyHand, cut.card) +
+      expectedRankHandSuitBonusForCutRank(hand.ranks, cut, availableCards);
+    outcomes.set(score, (outcomes.get(score) ?? 0) + hand.weight);
+    totalWeight += hand.weight;
+  }
+
+  const distribution = totalWeight
+    ? [...outcomes.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([score, weight]) => [score, weight / totalWeight] as [number, number])
+    : [[scorePhaseAverage(opponentRole === "dealer" ? "handDealer" : "handPone"), 1] as [number, number]];
+  boundedCacheSet(
+    DISCARD_OPPONENT_HAND_SCORE_CACHE,
+    cacheKey,
+    distribution,
+    DISCARD_OPPONENT_HAND_SCORE_CACHE_LIMIT,
+  );
+  return distribution;
+}
+
 function discardCandidateWinProbability(
   game: CribbageGame,
   player: PlayerState,
@@ -4686,31 +4907,61 @@ function discardCandidateWinProbability(
   let baseOutcomes = cacheKey ? baseOutcomeCache?.get(cacheKey) : undefined;
   if (!baseOutcomes) {
     const baseMap = new Map<string, number>();
-    for (const cut of deck) {
-      const ownHandScore = rankCutHandScore(keep, cut) + scoreFlushAndRightJack(keep, cut, false);
-      const opponentHandDistribution = opponentUpcomingHandScoreDistributionForDiscard(
-        fullHand,
-        cut,
-        opponentRole,
-        game.playerEngines[player.key],
-      );
-      const cribOutcomes = cribScoreOutcomesForCut(
-        discard,
-        cut,
-        myCrib ? "dealer" : "pone",
-        [...fullHand, cut],
-        suitedDiscardCache,
-        game.playerEngines[player.key],
-        cribPolicy,
-      );
-      const cutWeight = 1 / (deck.length || 1);
-      for (const [cribScore, cribWeight] of cribOutcomes) {
-        for (const [opponentHandScore, opponentHandWeight] of opponentHandDistribution) {
-          const myBase = ownHandScore + (myCrib ? cribScore : 0);
-          const opponentBase = opponentHandScore + (myCrib ? 0 : cribScore);
-          const weight = cutWeight * cribWeight * opponentHandWeight;
-          const key = `${Math.round(myBase)}:${Math.round(opponentBase)}`;
-          baseMap.set(key, (baseMap.get(key) ?? 0) + weight);
+    if (usesRankOnlyDiscardWinProbabilityApproximation(game.playerEngines[player.key])) {
+      for (const cut of cutRankOptions(deck)) {
+        const ownHandScore = rankCutHandScore(keep, cut.card) +
+          expectedKnownHandSuitBonusForCutRank(keep, cut, false);
+        const opponentHandDistribution = opponentUpcomingHandScoreDistributionForDiscardRank(
+          fullHand,
+          cut,
+          opponentRole,
+          game.playerEngines[player.key],
+        );
+        const cribOutcomes = cribScoreOutcomesForCutRank(
+          discard,
+          cut,
+          myCrib ? "dealer" : "pone",
+          fullHand,
+          game.playerEngines[player.key],
+          cribPolicy,
+        );
+        for (const [cribScore, cribWeight] of cribOutcomes) {
+          for (const [opponentHandScore, opponentHandWeight] of opponentHandDistribution) {
+            const myBase = ownHandScore + (myCrib ? cribScore : 0);
+            const opponentBase = opponentHandScore + (myCrib ? 0 : cribScore);
+            const weight = cut.weight * cribWeight * opponentHandWeight;
+            const key = `${Math.round(myBase)}:${Math.round(opponentBase)}`;
+            baseMap.set(key, (baseMap.get(key) ?? 0) + weight);
+          }
+        }
+      }
+    } else {
+      for (const cut of deck) {
+        const ownHandScore = rankCutHandScore(keep, cut) + scoreFlushAndRightJack(keep, cut, false);
+        const opponentHandDistribution = opponentUpcomingHandScoreDistributionForDiscard(
+          fullHand,
+          cut,
+          opponentRole,
+          game.playerEngines[player.key],
+        );
+        const cribOutcomes = cribScoreOutcomesForCut(
+          discard,
+          cut,
+          myCrib ? "dealer" : "pone",
+          [...fullHand, cut],
+          suitedDiscardCache,
+          game.playerEngines[player.key],
+          cribPolicy,
+        );
+        const cutWeight = 1 / (deck.length || 1);
+        for (const [cribScore, cribWeight] of cribOutcomes) {
+          for (const [opponentHandScore, opponentHandWeight] of opponentHandDistribution) {
+            const myBase = ownHandScore + (myCrib ? cribScore : 0);
+            const opponentBase = opponentHandScore + (myCrib ? 0 : cribScore);
+            const weight = cutWeight * cribWeight * opponentHandWeight;
+            const key = `${Math.round(myBase)}:${Math.round(opponentBase)}`;
+            baseMap.set(key, (baseMap.get(key) ?? 0) + weight);
+          }
         }
       }
     }
