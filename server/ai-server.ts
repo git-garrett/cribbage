@@ -3,14 +3,8 @@ import { mkdir, readFile, stat, appendFile } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import {
-  CribbageGame,
-  WinGame,
-  hasLoadedOpponentResources,
-  loadOpponentResources,
-  type GameSnapshot,
-  type Opponent,
-} from "../web/src/engine";
+import { Worker } from "node:worker_threads";
+import { MODEL } from "./ai-constants";
 
 declare const __APP_VERSION__: string;
 
@@ -20,11 +14,11 @@ const ROOT = process.cwd();
 const STATIC_DIR = resolve(process.env.CRIBBAGE_STATIC_DIR || join(ROOT, "dist"));
 const DATA_DIR = resolve(process.env.CRIBBAGE_DATA_DIR || join(ROOT, "data"));
 const DB_PATH = resolve(process.env.CRIBBAGE_DB_PATH || join(DATA_DIR, "cribbage-server.sqlite"));
-const PROTECTED_MODEL_ASSET_DIR = resolve(ROOT, "web/src/models");
-const MODEL: Opponent = "schell_table-peg_table-14.3";
 const MARKETING_HOSTS = new Set(["strongcribbage.com"]);
+const AI_QUEUE_MAX_WAITING = Number(process.env.AI_QUEUE_MAX_WAITING || 4);
 
 type JsonRecord = Record<string, unknown>;
+type AiJobKind = "game-action" | "ai-discard" | "ai-peg" | "model-status";
 type DatabaseSyncLike = {
   exec(sql: string): void;
   prepare(sql: string): {
@@ -33,7 +27,10 @@ type DatabaseSyncLike = {
 };
 
 let databasePromise: Promise<DatabaseSyncLike | null> | null = null;
-let modelPromise: Promise<void> | null = null;
+let aiWorker: Worker | null = null;
+let nextAiJobId = 1;
+let activeAiJob: QueuedAiJob | null = null;
+const aiJobQueue: QueuedAiJob[] = [];
 
 function jsonResponse(response: ServerResponse, status: number, payload: unknown): void {
   const body = `${JSON.stringify(payload)}\n`;
@@ -83,143 +80,80 @@ async function readRequestJson(request: IncomingMessage): Promise<JsonRecord> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as JsonRecord;
 }
 
-async function ensureModel(): Promise<void> {
-  if (hasLoadedOpponentResources(MODEL)) return;
-  modelPromise ??= loadOpponentResources(MODEL).finally(() => {
-    modelPromise = null;
-  });
-  await modelPromise;
-}
-
-async function ensureOpponentModel(opponent: Opponent): Promise<void> {
-  if (hasLoadedOpponentResources(opponent)) return;
-  await loadOpponentResources(opponent);
-}
-
-function gamePayload(game: CribbageGame): JsonRecord {
-  return {
-    state: game.state(),
-    snapshot: game.snapshot(),
-  };
-}
-
-async function handleGameAction(requestBody: JsonRecord): Promise<JsonRecord> {
-  const action = String(requestBody.action || "");
-  const payload = (requestBody.payload && typeof requestBody.payload === "object"
-    ? requestBody.payload
-    : {}) as JsonRecord;
-  let game: CribbageGame;
-  try {
-    if (action === "new") {
-      const opponent = (typeof payload.opponent === "string" ? payload.opponent : MODEL) as Opponent;
-      game = new CribbageGame(opponent, undefined, { dealMode: "cut" });
-      return gamePayload(game);
-    }
-    if (action === "trouble-game") {
-      game = new CribbageGame(MODEL);
-      game.startTroublePeggingPosition();
-      return gamePayload(game);
-    }
-    if (!requestBody.snapshot) throw new Error("Missing game snapshot.");
-    game = CribbageGame.restore(requestBody.snapshot as GameSnapshot);
-    switch (action) {
-      case "state":
-        break;
-      case "cut-for-deal":
-        game.cutForDeal();
-        break;
-      case "prepare-cut-for-deal": {
-        if (game.phase !== "cut_for_deal") throw new Error("It is not time to cut for deal.");
-        game.cutForDeal();
-        let recommendation: { cards: unknown[]; cardIds: number[]; bestLead: number | null } | null = null;
-        if (game.phase === "discard") {
-          await ensureOpponentModel(game.opponent as Opponent);
-          recommendation = game.recommendAiDiscard();
-        }
-        return {
-          state: game.state(),
-          snapshot: game.snapshot(),
-          recommendation,
-        };
-      }
-      case "discard":
-        game.discard((payload.ids as number[]) || []);
-        break;
-      case "prepare-ai-discard": {
-        await ensureOpponentModel(game.opponent as Opponent);
-        const recommendation = game.recommendAiDiscard();
-        return {
-          state: game.state(),
-          snapshot: game.snapshot(),
-          recommendation,
-        };
-      }
-      case "prepare-next-hand-ai-discard": {
-        if (!["score_pone", "score_dealer", "score_crib"].includes(game.phase)) {
-          throw new Error("The next hand is not ready to prepare.");
-        }
-        while (game.phase !== "discard" && game.phase !== "game_over") {
-          try {
-            game.continueScoring();
-          } catch (error) {
-            if (error instanceof WinGame) break;
-            throw error;
-          }
-        }
-        if (game.phase === "game_over") throw new Error("Game ends before the next hand.");
-        await ensureOpponentModel(game.opponent as Opponent);
-        const recommendation = game.recommendAiDiscard();
-        return {
-          state: game.state(),
-          snapshot: game.snapshot(),
-          recommendation,
-        };
-      }
-      case "finish-discard":
-        await ensureOpponentModel(game.opponent as Opponent);
-        game.finishDiscard();
-        break;
-      case "finish-discard-with-cards":
-        await ensureOpponentModel(game.opponent as Opponent);
-        game.finishDiscardWithAiCards((payload.ids as number[]) || [], typeof payload.bestLead === "number" ? payload.bestLead : null);
-        break;
-      case "play":
-        game.play(payload.id as number);
-        break;
-      case "play-human":
-        game.playHumanPeggingCard(payload.id as number);
-        break;
-      case "go":
-        game.go();
-        break;
-      case "go-human":
-        game.humanPeggingGo();
-        break;
-      case "advance-pegging": {
-        const startedAt = performance.now();
-        await ensureOpponentModel(game.opponent as Opponent);
-        game.advancePeggingToHuman();
-        game.recordAiPeggingThinkTime(performance.now() - startedAt);
-        break;
-      }
-      case "acknowledge-pegging-reset":
-        game.acknowledgePeggingReset();
-        break;
-      case "complete-decision-reviews":
-        await ensureModel();
-        game.completePendingDecisionReviews();
-        break;
-      case "continue-scoring":
-        game.continueScoring();
-        break;
-      default:
-        throw new Error(`Unknown game action: ${action}`);
-    }
-    return gamePayload(game);
-  } catch (error) {
-    if (error instanceof WinGame && game!) return gamePayload(game);
-    throw error;
+class ServerBusyError extends Error {
+  constructor(message = "Server Busy") {
+    super(message);
+    this.name = "ServerBusyError";
   }
+}
+
+interface QueuedAiJob {
+  id: number;
+  kind: AiJobKind;
+  requestBody: JsonRecord;
+  resolve: (value: JsonRecord) => void;
+  reject: (error: Error) => void;
+}
+
+function getAiWorker(): Worker {
+  if (aiWorker) return aiWorker;
+  aiWorker = new Worker(new URL("./ai-worker.mjs", import.meta.url));
+  aiWorker.on("message", (message: { id: number; ok: boolean; payload?: JsonRecord; error?: string; stack?: string | null }) => {
+    const job = activeAiJob;
+    if (!job || message.id !== job.id) return;
+    activeAiJob = null;
+    if (message.ok) {
+      job.resolve(message.payload ?? {});
+    } else {
+      const error = new Error(message.error || "AI worker failed.");
+      if (message.stack) error.stack = message.stack;
+      job.reject(error);
+    }
+    processAiQueue();
+  });
+  aiWorker.on("error", (error) => {
+    failActiveAndQueued(error);
+  });
+  aiWorker.on("exit", (code) => {
+    aiWorker = null;
+    if (activeAiJob || aiJobQueue.length || code !== 0) {
+      failActiveAndQueued(new Error(`AI worker exited with code ${code}.`));
+    }
+  });
+  return aiWorker;
+}
+
+function failActiveAndQueued(error: Error): void {
+  const active = activeAiJob;
+  activeAiJob = null;
+  if (active) active.reject(error);
+  const queued = aiJobQueue.splice(0);
+  for (const job of queued) job.reject(error);
+}
+
+function processAiQueue(): void {
+  if (activeAiJob || !aiJobQueue.length) return;
+  activeAiJob = aiJobQueue.shift() ?? null;
+  if (!activeAiJob) return;
+  getAiWorker().postMessage({
+    id: activeAiJob.id,
+    kind: activeAiJob.kind,
+    requestBody: activeAiJob.requestBody,
+  });
+}
+
+function runAiJob(kind: AiJobKind, requestBody: JsonRecord): Promise<JsonRecord> {
+  if (aiJobQueue.length >= AI_QUEUE_MAX_WAITING) throw new ServerBusyError();
+  return new Promise((resolve, reject) => {
+    aiJobQueue.push({
+      id: nextAiJobId++,
+      kind,
+      requestBody,
+      resolve,
+      reject,
+    });
+    processAiQueue();
+  });
 }
 
 async function ensureDatabase(): Promise<DatabaseSyncLike | null> {
@@ -357,7 +291,12 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, pat
     jsonResponse(response, 200, {
       appVersion: __APP_VERSION__,
       model: MODEL,
-      loaded: hasLoadedOpponentResources(MODEL),
+      loaded: null,
+      queue: {
+        active: Boolean(activeAiJob),
+        waiting: aiJobQueue.length,
+        maxWaiting: AI_QUEUE_MAX_WAITING,
+      },
     });
     return;
   }
@@ -369,24 +308,18 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, pat
   const requestBody = await readRequestJson(request);
   const startedAt = performance.now();
   if (pathname === "/api/game/action") {
-    const payload = await handleGameAction(requestBody);
+    const payload = await runAiJob("game-action", requestBody);
     jsonResponse(response, 200, payload);
     return;
   }
   if (pathname === "/api/ai/discard") {
-    await ensureModel();
-    const game = CribbageGame.restore(requestBody.snapshot as GameSnapshot);
-    const recommendation = game.recommendAiDiscard();
-    const payload: JsonRecord = { ...recommendation, model: MODEL };
+    const payload = await runAiJob("ai-discard", requestBody);
     await persistAiRequest("discard", requestBody, payload, performance.now() - startedAt);
     jsonResponse(response, 200, payload);
     return;
   }
   if (pathname === "/api/ai/peg") {
-    await ensureModel();
-    const game = CribbageGame.restore(requestBody.snapshot as GameSnapshot);
-    const action = game.recommendAiPeggingAction();
-    const payload: JsonRecord = { ...action, model: MODEL };
+    const payload = await runAiJob("ai-peg", requestBody);
     await persistAiRequest("peg", requestBody, payload, performance.now() - startedAt);
     jsonResponse(response, 200, payload);
     return;
@@ -452,44 +385,6 @@ function requestHost(request: IncomingMessage): string {
   return String(request.headers.host || "").split(":")[0].toLowerCase();
 }
 
-const nativeFetch = globalThis.fetch.bind(globalThis);
-function protectedModelAssetPath(assetUrl: string): string | null {
-  const assetName = assetUrl.split("/").pop() || "";
-  if (!assetName.endsWith(".bin")) return null;
-  const modelByAsset: Record<string, string> = {
-    "pegging-outcome-pairwise.bin": "schell_table-peg_table-12.0",
-    "pegging-remaining-hand-distribution.bin": "schell_table-peg_table-13.0",
-    "pone-lead-frequency.bin": "schell_table-peg_table-13.0",
-    "pegging-outcome-tripolicy-aligned.bin": "schell_table-peg_table-14.0",
-    "crib-score-histogram-tripolicy-by-discard-cut.bin": "schell_table-peg_table-14.0",
-  };
-  const sourceName = Object.keys(modelByAsset).find((name) => {
-    const prefix = name.slice(0, -".bin".length);
-    return assetName === name || assetName.startsWith(`${prefix}-`);
-  });
-  if (!sourceName) return null;
-  const modelDir = modelByAsset[sourceName];
-  if (!modelDir) return null;
-  const filePath = normalize(join(PROTECTED_MODEL_ASSET_DIR, modelDir, sourceName));
-  return filePath.startsWith(PROTECTED_MODEL_ASSET_DIR) ? filePath : null;
-}
-
-globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-  const value = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-  if (value.startsWith("/assets/")) {
-    const protectedPath = protectedModelAssetPath(value);
-    if (protectedPath) {
-      const body = await readFile(protectedPath);
-      return new Response(body);
-    }
-    const filePath = normalize(join(STATIC_DIR, value));
-    if (!filePath.startsWith(STATIC_DIR)) return new Response("Forbidden", { status: 403 });
-    const body = await readFile(filePath);
-    return new Response(body);
-  }
-  return nativeFetch(input, init);
-};
-
 const server = createServer((request, response) => {
   void (async () => {
     const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
@@ -508,7 +403,11 @@ const server = createServer((request, response) => {
     await serveStatic(response, url.pathname);
   })().catch((error) => {
     console.error(error);
-    if (!response.headersSent) jsonResponse(response, 500, { error: error instanceof Error ? error.message : "Server error" });
+    if (!response.headersSent && error instanceof ServerBusyError) {
+      jsonResponse(response, 503, { error: "Server Busy" });
+    } else if (!response.headersSent) {
+      jsonResponse(response, 500, { error: error instanceof Error ? error.message : "Server error" });
+    }
     else response.end();
   });
 });

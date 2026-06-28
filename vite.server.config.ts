@@ -8,13 +8,17 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(packageJson.version || "0.0.0"),
   },
   build: {
-    ssr: "server/ai-server.ts",
+    ssr: true,
     outDir: "server-dist",
     emptyOutDir: true,
     target: "node22",
     rollupOptions: {
+      input: {
+        server: "server/ai-server.ts",
+        "ai-worker": "server/ai-worker.ts",
+      },
       output: {
-        entryFileNames: "server.mjs",
+        entryFileNames: "[name].mjs",
       },
     },
   },
