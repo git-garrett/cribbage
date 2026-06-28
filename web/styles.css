@@ -807,6 +807,7 @@ button:disabled {
 
 .analytics-page,
 .game-log-page,
+.leaderboard-page,
 .model-info-page,
 .decision-review-page {
   display: grid;
@@ -819,6 +820,7 @@ button:disabled {
 
 .analytics-page[hidden],
 .game-log-page[hidden],
+.leaderboard-page[hidden],
 .model-info-page[hidden],
 .decision-review-page[hidden] {
   display: none;
@@ -828,6 +830,8 @@ button:disabled {
 .app[data-view="analytics"] .table,
 .app[data-view="game-log"] .scoreboard,
 .app[data-view="game-log"] .table,
+.app[data-view="leaderboard"] .scoreboard,
+.app[data-view="leaderboard"] .table,
 .app[data-view="model-info"] .scoreboard,
 .app[data-view="model-info"] .table,
 .app[data-view="decision-review"] .scoreboard,
@@ -2298,6 +2302,11 @@ button.card {
   }
 
   .game-log-page {
+    padding: 12px;
+    border-radius: 7px;
+  }
+
+  .leaderboard-page {
     padding: 12px;
     border-radius: 7px;
   }

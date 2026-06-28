@@ -10,6 +10,7 @@ import type {
   ScorePhase,
 } from "./engine";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
+import leaderboardSummary from "./leaderboard-summary.json";
 
 const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-14.3";
 
@@ -51,6 +52,25 @@ interface AiBenchmarkSummarySource {
   }>;
 }
 
+interface LeaderboardPlayer {
+  player: string;
+  games: number;
+  wins: number;
+  losses: number;
+  skunks: number;
+  skunked: number;
+  winRate: number;
+  avgMargin: number;
+}
+
+interface LeaderboardSummarySource {
+  generatedAt: string;
+  games: number;
+  playerStats: LeaderboardPlayer[];
+  bestWinRate: LeaderboardPlayer[];
+  mostSkunks: LeaderboardPlayer[];
+}
+
 type ServerBusyRetry = () => void | Promise<void>;
 
 function safeLocalStorageGet(key: string): string | null {
@@ -90,6 +110,7 @@ const state: {
   analyticsOpen: boolean;
   analyticsMode: "my" | "full";
   gameLogOpen: boolean;
+  leaderboardOpen: boolean;
   modelInfoOpen: boolean;
   decisionReviewOpen: boolean;
   selectedModelInfo: Opponent;
@@ -128,6 +149,7 @@ const state: {
   analyticsOpen: false,
   analyticsMode: "my",
   gameLogOpen: false,
+  leaderboardOpen: false,
   modelInfoOpen: false,
   decisionReviewOpen: false,
   selectedModelInfo: DEFAULT_OPPONENT,
@@ -192,6 +214,7 @@ function resetTransientGameUi(): void {
   closeDecisionSnapshot();
   state.analyticsOpen = false;
   state.gameLogOpen = false;
+  state.leaderboardOpen = false;
   state.modelInfoOpen = false;
   state.decisionReviewOpen = false;
 }
@@ -232,6 +255,12 @@ const els = {
   gameLogSummary: document.querySelector("#game-log-summary") as HTMLElement,
   gameLogOpponent: document.querySelector("#game-log-opponent") as HTMLSelectElement,
   gameLogList: document.querySelector("#game-log-list") as HTMLElement,
+  leaderboardOpen: document.querySelector("#leaderboard-open") as HTMLButtonElement,
+  leaderboardClose: document.querySelector("#leaderboard-close") as HTMLButtonElement,
+  leaderboardPage: document.querySelector("#leaderboard-page") as HTMLElement,
+  leaderboardSummary: document.querySelector("#leaderboard-summary") as HTMLElement,
+  leaderboardHighlights: document.querySelector("#leaderboard-highlights") as HTMLElement,
+  leaderboardList: document.querySelector("#leaderboard-list") as HTMLElement,
   modelInfoOpen: document.querySelector("#model-info-open") as HTMLButtonElement,
   modelInfoClose: document.querySelector("#model-info-close") as HTMLButtonElement,
   modelInfoPage: document.querySelector("#model-info-page") as HTMLElement,
@@ -497,6 +526,7 @@ function applySimpleNetworkMode(): void {
   els.opponent.disabled = true;
   els.opponent.closest("label")?.setAttribute("hidden", "");
   els.gameLogOpen.hidden = true;
+  els.leaderboardOpen.hidden = false;
   els.modelInfoOpen.hidden = true;
   els.exportGameLog.hidden = true;
   els.modelLoading.hidden = true;
@@ -3043,6 +3073,72 @@ function renderGameLog(): void {
   }
 }
 
+function percentage(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+function renderLeaderboard(): void {
+  const summary = leaderboardSummary as LeaderboardSummarySource;
+  const players = summary.playerStats ?? [];
+  els.leaderboardSummary.textContent = `${summary.games} completed production game${summary.games === 1 ? "" : "s"} recorded.`;
+  els.leaderboardHighlights.innerHTML = "";
+  const best = summary.bestWinRate?.length ? summary.bestWinRate : players.slice(0, 1);
+  const skunks = summary.mostSkunks?.length ? summary.mostSkunks : [];
+  els.leaderboardHighlights.append(
+    leaderboardCard(
+      "Best win rate",
+      best.length
+        ? best.map((player) => `${player.player} ${percentage(player.winRate)} (${player.wins}-${player.losses})`).join(", ")
+        : "No games yet",
+    ),
+    leaderboardCard(
+      "Most skunks",
+      skunks.length
+        ? skunks.map((player) => `${player.player} ${player.skunks}`).join(", ")
+        : "No skunks yet",
+    ),
+  );
+  els.leaderboardList.innerHTML = "";
+  if (!players.length) {
+    const empty = document.createElement("p");
+    empty.className = "analytics-empty";
+    empty.textContent = "No leaderboard data yet.";
+    els.leaderboardList.append(empty);
+    return;
+  }
+  for (const player of players) {
+    const row = document.createElement("div");
+    row.className = "analytics-row leaderboard-row";
+    row.append(
+      leaderboardCell(player.player),
+      leaderboardCell(`${player.wins}-${player.losses} (${percentage(player.winRate)})`),
+      leaderboardCell(`Skunks ${player.skunks}; margin ${formatSigned(player.avgMargin)}`),
+    );
+    els.leaderboardList.append(row);
+  }
+}
+
+function leaderboardCard(label: string, value: string): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "analytics-total";
+  const title = document.createElement("span");
+  title.textContent = label;
+  const strong = document.createElement("strong");
+  strong.textContent = value;
+  card.append(title, strong);
+  return card;
+}
+
+function leaderboardCell(text: string): HTMLElement {
+  const span = document.createElement("span");
+  span.textContent = text;
+  return span;
+}
+
+function formatSigned(value: number): string {
+  return `${value >= 0 ? "+" : ""}${value.toFixed(1)}`;
+}
+
 function renderDecisionReviewPage(): void {
   const events = loadAnalytics().events;
   const games = gameLogRecords(events);
@@ -3712,19 +3808,23 @@ function render(game: GameState | null): void {
     ? "analytics"
     : state.gameLogOpen
       ? "game-log"
-      : state.modelInfoOpen
-        ? "model-info"
-        : state.decisionReviewOpen
-          ? "decision-review"
-          : "game";
+      : state.leaderboardOpen
+        ? "leaderboard"
+        : state.modelInfoOpen
+          ? "model-info"
+          : state.decisionReviewOpen
+            ? "decision-review"
+            : "game";
   els.app.dataset.inlineResult = shouldInlineResult(game) ? "true" : "false";
   els.app.dataset.parGuides = state.parGuides ? "true" : "false";
   els.analyticsPage.hidden = !state.analyticsOpen;
   els.gameLogPage.hidden = !state.gameLogOpen;
+  els.leaderboardPage.hidden = !state.leaderboardOpen;
   els.modelInfoPage.hidden = !state.modelInfoOpen;
   els.decisionReviewPage.hidden = !state.decisionReviewOpen;
   if (state.analyticsOpen) renderAnalytics();
   if (state.gameLogOpen) renderGameLog();
+  if (state.leaderboardOpen) renderLeaderboard();
   if (state.modelInfoOpen) renderModelInfoPage();
   if (state.decisionReviewOpen) renderDecisionReviewPage();
   els.humanScore.textContent = String(game.scores.human);
@@ -4096,6 +4196,7 @@ function openAnalytics(mode: "my" | "full"): void {
   state.analyticsMode = mode;
   state.analyticsOpen = true;
   state.gameLogOpen = false;
+  state.leaderboardOpen = false;
   state.modelInfoOpen = false;
   state.decisionReviewOpen = false;
   els.settingsPanel.hidden = true;
@@ -4120,6 +4221,7 @@ els.gameLogOpen.addEventListener("click", () => {
   closeDecisionSnapshot();
   state.gameLogOpen = true;
   state.analyticsOpen = false;
+  state.leaderboardOpen = false;
   state.modelInfoOpen = false;
   state.decisionReviewOpen = false;
   els.settingsPanel.hidden = true;
@@ -4132,12 +4234,30 @@ els.gameLogClose.addEventListener("click", () => {
   render(state.game);
 });
 
+els.leaderboardOpen.addEventListener("click", () => {
+  closeDecisionSnapshot();
+  state.leaderboardOpen = true;
+  state.analyticsOpen = false;
+  state.gameLogOpen = false;
+  state.modelInfoOpen = false;
+  state.decisionReviewOpen = false;
+  els.settingsPanel.hidden = true;
+  els.menuToggle.setAttribute("aria-expanded", "false");
+  render(state.game);
+});
+
+els.leaderboardClose.addEventListener("click", () => {
+  state.leaderboardOpen = false;
+  render(state.game);
+});
+
 els.modelInfoOpen.addEventListener("click", () => {
   closeDecisionSnapshot();
   state.selectedModelInfo = normalizeAnalyticsEngine(els.opponent.value);
   state.modelInfoOpen = true;
   state.analyticsOpen = false;
   state.gameLogOpen = false;
+  state.leaderboardOpen = false;
   state.decisionReviewOpen = false;
   els.settingsPanel.hidden = true;
   els.menuToggle.setAttribute("aria-expanded", "false");

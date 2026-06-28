@@ -82,6 +82,7 @@
             <span>Loading model</span>
           </div>
           <button id="game-log-open" type="button">Game log</button>
+          <button id="leaderboard-open" type="button">Leaderboard</button>
           <button id="model-info-open" type="button">Model info</button>
           <button id="export-game-log" type="button">Export games</button>
           <details id="admin-menu" class="admin-menu" hidden>
@@ -234,6 +235,18 @@
         <div class="game-log-layout">
           <div id="game-log-list" class="game-log-list"></div>
         </div>
+      </section>
+
+      <section id="leaderboard-page" class="leaderboard-page" aria-label="Leaderboard" hidden>
+        <div class="analytics-header">
+          <div>
+            <h2>Leaderboard</h2>
+            <p id="leaderboard-summary">No leaderboard data yet.</p>
+          </div>
+          <button id="leaderboard-close" type="button">Done</button>
+        </div>
+        <div id="leaderboard-highlights" class="analytics-totals"></div>
+        <div id="leaderboard-list" class="analytics-list"></div>
       </section>
 
       <section id="decision-review-page" class="decision-review-page" aria-label="Decision review" hidden>

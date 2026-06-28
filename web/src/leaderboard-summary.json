@@ -1,0 +1,111 @@
+{
+  "generatedAt": "2026-06-28T03:43:58.200Z",
+  "sourceRunId": "production-server-pull-20260627-203517",
+  "games": 22,
+  "playerStats": [
+    {
+      "player": "Kurtis",
+      "games": 2,
+      "wins": 1,
+      "losses": 1,
+      "skunks": 0,
+      "skunked": 0,
+      "pointsFor": 227,
+      "pointsAgainst": 228,
+      "winRate": 0.5,
+      "avgMargin": -0.5
+    },
+    {
+      "player": "Popchuckles",
+      "games": 3,
+      "wins": 1,
+      "losses": 2,
+      "skunks": 0,
+      "skunked": 0,
+      "pointsFor": 343,
+      "pointsAgainst": 346,
+      "winRate": 0.3333333333333333,
+      "avgMargin": -1
+    },
+    {
+      "player": "Garrett",
+      "games": 11,
+      "wins": 3,
+      "losses": 8,
+      "skunks": 0,
+      "skunked": 0,
+      "pointsFor": 1207,
+      "pointsAgainst": 1285,
+      "winRate": 0.2727272727272727,
+      "avgMargin": -7.090909090909091
+    },
+    {
+      "player": "Shane",
+      "games": 4,
+      "wins": 1,
+      "losses": 3,
+      "skunks": 1,
+      "skunked": 0,
+      "pointsFor": 435,
+      "pointsAgainst": 450,
+      "winRate": 0.25,
+      "avgMargin": -3.75
+    },
+    {
+      "player": "Stone",
+      "games": 2,
+      "wins": 0,
+      "losses": 2,
+      "skunks": 0,
+      "skunked": 0,
+      "pointsFor": 217,
+      "pointsAgainst": 242,
+      "winRate": 0,
+      "avgMargin": -12.5
+    }
+  ],
+  "bestWinRate": [
+    {
+      "player": "Kurtis",
+      "games": 2,
+      "wins": 1,
+      "losses": 1,
+      "skunks": 0,
+      "skunked": 0,
+      "pointsFor": 227,
+      "pointsAgainst": 228,
+      "winRate": 0.5,
+      "avgMargin": -0.5
+    }
+  ],
+  "mostSkunks": [
+    {
+      "player": "Shane",
+      "games": 4,
+      "wins": 1,
+      "losses": 3,
+      "skunks": 1,
+      "skunked": 0,
+      "pointsFor": 435,
+      "pointsAgainst": 450,
+      "winRate": 0.25,
+      "avgMargin": -3.75
+    }
+  ],
+  "byModel": {
+    "schell_table-peg_table-13.0": {
+      "games": 9,
+      "wins": 1,
+      "losses": 8,
+      "winRate": 0.1111111111111111,
+      "avgMargin": -11.444444444444445
+    },
+    "schell_table-peg_table-14.3": {
+      "games": 13,
+      "wins": 5,
+      "losses": 8,
+      "winRate": 0.38461538461538464,
+      "avgMargin": -1.4615384615384615
+    }
+  }
+}
