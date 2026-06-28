@@ -26,6 +26,20 @@
   --actions-bg: rgba(20, 87, 61, 0.96);
   --human: #1d7fd1;
   --ai: #c43d36;
+  --app-font: 16px;
+  --heading-font: 22px;
+  --subheading-font: 15px;
+  --control-font: 15px;
+  --control-small-font: 13px;
+  --fine-font: 12px;
+  --score-label-font: 13px;
+  --score-value-font: 30px;
+  --score-meta-font: 11px;
+  --score-meta-small-font: 10px;
+  --body-font: 14px;
+  --notice-font: 14px;
+  --row-font: 12px;
+  --menu-font: 13px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -77,12 +91,38 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 
-body[data-font-size="large"] .app {
-  font-size: 17px;
+body[data-font-size="large"] {
+  --app-font: 17px;
+  --heading-font: 24px;
+  --subheading-font: 17px;
+  --control-font: 17px;
+  --control-small-font: 15px;
+  --fine-font: 13px;
+  --score-label-font: 15px;
+  --score-value-font: 34px;
+  --score-meta-font: 12px;
+  --score-meta-small-font: 11px;
+  --body-font: 16px;
+  --notice-font: 16px;
+  --row-font: 14px;
+  --menu-font: 15px;
 }
 
-body[data-font-size="x-large"] .app {
-  font-size: 18px;
+body[data-font-size="x-large"] {
+  --app-font: 18px;
+  --heading-font: 26px;
+  --subheading-font: 18px;
+  --control-font: 18px;
+  --control-small-font: 16px;
+  --fine-font: 14px;
+  --score-label-font: 16px;
+  --score-value-font: 38px;
+  --score-meta-font: 13px;
+  --score-meta-small-font: 12px;
+  --body-font: 17px;
+  --notice-font: 17px;
+  --row-font: 15px;
+  --menu-font: 16px;
 }
 
 .splash-page {
@@ -111,7 +151,7 @@ body:not([data-ready="true"]) .splash-resume-game {
 body:not([data-ready="true"]) .splash-shell::after {
   content: "Loading preview...";
   color: var(--muted);
-  font-size: 15px;
+  font-size: var(--control-font);
   font-weight: 800;
 }
 
@@ -182,7 +222,7 @@ body:not([data-ready="true"]) .splash-shell::after {
   gap: 7px;
   width: min(100%, 320px);
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--menu-font);
   font-weight: 800;
   text-align: left;
 }
@@ -238,6 +278,7 @@ select {
   max-width: 960px;
   margin: 0 auto;
   padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
+  font-size: var(--app-font);
 }
 
 @supports (padding: max(0px)) {
@@ -274,7 +315,7 @@ select {
   gap: 7px;
   margin-left: auto;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fine-font);
   font-weight: 800;
   white-space: nowrap;
 }
@@ -288,7 +329,7 @@ select {
   border-radius: 6px;
   background: var(--surface-soft);
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--control-small-font);
   font-weight: 800;
 }
 
@@ -299,7 +340,7 @@ p {
 }
 
 h1 {
-  font-size: 22px;
+  font-size: var(--heading-font);
   line-height: 1.1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -308,7 +349,7 @@ h1 {
 
 h2 {
   margin-bottom: 10px;
-  font-size: 15px;
+  font-size: var(--subheading-font);
 }
 
 .controls,
@@ -364,7 +405,7 @@ h2 {
   display: grid;
   gap: 6px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--menu-font);
 }
 
 .admin-menu {
@@ -383,7 +424,7 @@ h2 {
 .admin-menu summary {
   cursor: pointer;
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--menu-font);
   font-weight: 800;
 }
 
@@ -432,7 +473,7 @@ h2 {
 .app-version {
   padding-top: 2px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fine-font);
   text-align: right;
 }
 
@@ -447,7 +488,7 @@ h2 {
   border-radius: 6px;
   background: var(--surface-soft);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fine-font);
   font-weight: 800;
 }
 
@@ -463,6 +504,7 @@ select {
   background: var(--surface);
   color: var(--ink);
   padding: 0 12px;
+  font-size: var(--control-font);
 }
 
 button:not(:disabled) {
@@ -502,7 +544,7 @@ button:disabled {
 
 .score span {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--score-label-font);
 }
 
 .score-label {
@@ -526,7 +568,7 @@ button:disabled {
   border-radius: 999px;
   background: #f5d676;
   color: #493511;
-  font-size: 10px;
+  font-size: var(--score-meta-small-font);
   font-weight: 800;
   line-height: 1;
   text-transform: uppercase;
@@ -538,7 +580,7 @@ button:disabled {
 
 .score strong {
   color: var(--human);
-  font-size: 30px;
+  font-size: var(--score-value-font);
   line-height: 1;
 }
 
@@ -556,7 +598,7 @@ button:disabled {
 }
 
 .score-pace {
-  font-size: 11px;
+  font-size: var(--score-meta-font);
   font-weight: 800;
 }
 
@@ -574,7 +616,7 @@ button:disabled {
 
 .score-win-prob {
   margin-top: 2px;
-  font-size: 10px;
+  font-size: var(--score-meta-small-font);
   font-weight: 900;
 }
 
@@ -588,7 +630,7 @@ button:disabled {
 
 .score-final {
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--score-meta-small-font);
   font-weight: 700;
   overflow-wrap: anywhere;
 }
@@ -616,7 +658,7 @@ button:disabled {
 
 .score-cut > span:first-child {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--score-meta-font);
   font-weight: 700;
 }
 
@@ -893,7 +935,7 @@ button:disabled {
 .analytics-header p {
   margin-top: 4px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--menu-font);
 }
 
 .analytics-totals {
@@ -910,12 +952,12 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface-soft);
-  font-size: 13px;
+  font-size: var(--menu-font);
 }
 
 .analytics-total strong {
   grid-column: 1 / -1;
-  font-size: 15px;
+  font-size: var(--subheading-font);
 }
 
 .analytics-total-wide {
@@ -929,7 +971,7 @@ button:disabled {
 .analytics-baseline-note {
   grid-column: 1 / -1;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fine-font);
 }
 
 .analytics-total.human strong {
@@ -964,7 +1006,7 @@ button:disabled {
 
 .single-game-report p {
   color: rgba(255, 255, 255, 0.9);
-  font-size: 14px;
+  font-size: var(--body-font);
 }
 
 .single-game-report-cards {
@@ -980,7 +1022,7 @@ button:disabled {
 
 .decision-review h3 {
   margin: 4px 0 0;
-  font-size: 14px;
+  font-size: var(--body-font);
 }
 
 .decision-ev-summary {
@@ -991,7 +1033,7 @@ button:disabled {
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.08);
-  font-size: 12px;
+  font-size: var(--fine-font);
 }
 
 .decision-ev-summary span {
@@ -1023,7 +1065,7 @@ button:disabled {
 }
 
 .error-average-row strong {
-  font-size: 12px;
+  font-size: var(--fine-font);
 }
 
 .error-average-row em {
@@ -1047,7 +1089,7 @@ button:disabled {
 
 .decision-outcome-impact {
   color: rgba(255, 255, 255, 0.9);
-  font-size: 12px;
+  font-size: var(--fine-font);
   font-weight: 700;
 }
 
@@ -1065,7 +1107,7 @@ button:disabled {
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.07);
   color: inherit;
-  font-size: 13px;
+  font-size: var(--menu-font);
   text-align: left;
 }
 
@@ -1081,7 +1123,7 @@ button:disabled {
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.07);
   color: inherit;
-  font-size: 13px;
+  font-size: var(--menu-font);
 }
 
 .decision-review-toggle {
@@ -1136,7 +1178,7 @@ button:disabled {
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.12);
   color: rgba(255, 255, 255, 0.9);
-  font-size: 12px;
+  font-size: var(--fine-font);
 }
 
 .decision-context[hidden] {
@@ -1151,7 +1193,7 @@ button:disabled {
   display: grid;
   gap: 6px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--menu-font);
 }
 
 .game-log-layout {
@@ -1183,7 +1225,7 @@ button:disabled {
   border-radius: 6px;
   background: var(--surface-soft);
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--menu-font);
   text-align: left;
 }
 
@@ -1201,7 +1243,7 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface-soft);
-  font-size: 14px;
+  font-size: var(--body-font);
   line-height: 1.42;
 }
 
@@ -1213,11 +1255,11 @@ button:disabled {
 }
 
 .model-info-content h3 {
-  font-size: 17px;
+  font-size: var(--control-font);
 }
 
 .model-info-content h4 {
-  font-size: 15px;
+  font-size: var(--subheading-font);
 }
 
 .model-info-content ul {
@@ -1249,7 +1291,7 @@ button:disabled {
 
 .game-log-item span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fine-font);
 }
 
 .game-log-item .game-log-ev {
@@ -1336,7 +1378,7 @@ button:disabled {
   width: 36px;
   min-height: 36px;
   padding: 0;
-  font-size: 20px;
+  font-size: var(--heading-font);
   font-weight: 800;
 }
 
@@ -1368,7 +1410,7 @@ button:disabled {
 
 .snapshot-decision-summary strong {
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: var(--fine-font);
   text-transform: uppercase;
 }
 
@@ -1428,7 +1470,7 @@ button:disabled {
 
 .game-over-alert-box h2 {
   margin: 0;
-  font-size: 34px;
+  font-size: calc(var(--score-value-font) + 4px);
   line-height: 1;
   text-align: center;
 }
@@ -1464,7 +1506,7 @@ button:disabled {
   border-radius: 6px;
   background: var(--surface-row);
   color: var(--ink);
-  font-size: 12px;
+  font-size: var(--row-font);
 }
 
 .analytics-row span:first-child {
@@ -1474,14 +1516,14 @@ button:disabled {
 .leaderboard-section-title {
   margin: 8px 0 2px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fine-font);
   font-weight: 850;
   text-transform: uppercase;
 }
 
 .analytics-empty {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--menu-font);
 }
 
 .status {
@@ -1497,7 +1539,7 @@ button:disabled {
 }
 
 .status-count strong {
-  font-size: 19px;
+  font-size: var(--heading-font);
   font-weight: 900;
 }
 
@@ -1509,7 +1551,7 @@ button:disabled {
   border-radius: 999px;
   padding: 4px 9px;
   color: rgba(255, 255, 255, 0.9);
-  font-size: 12px;
+  font-size: var(--fine-font);
   font-weight: 800;
   white-space: nowrap;
 }
@@ -1543,7 +1585,7 @@ button:disabled {
   border-radius: 8px;
   background: rgba(13, 31, 24, 0.9);
   color: #fff;
-  font-size: 14px;
+  font-size: var(--body-font);
   font-weight: 800;
   box-shadow: var(--settings-shadow);
 }
@@ -1589,13 +1631,13 @@ button:disabled {
 }
 
 .server-busy-box h2 {
-  font-size: 28px;
+  font-size: var(--score-value-font);
   line-height: 1;
 }
 
 .server-busy-box p {
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--body-font);
   font-weight: 700;
 }
 
@@ -1680,7 +1722,7 @@ button:disabled {
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.92);
-  font-size: 14px;
+  font-size: var(--notice-font);
   font-weight: 650;
   transition: opacity 0.16s ease, transform 0.16s ease;
 }
@@ -1688,7 +1730,7 @@ button:disabled {
 .scoring-result {
   margin-top: 0;
   color: rgba(255, 255, 255, 0.82);
-  font-size: 14px;
+  font-size: var(--notice-font);
   font-weight: 650;
 }
 
@@ -1776,7 +1818,7 @@ button:disabled {
   grid-column: 1 / -1;
   justify-self: center;
   color: rgba(255, 255, 255, 0.9);
-  font-size: 15px;
+  font-size: var(--control-font);
   font-weight: 850;
 }
 
@@ -1807,7 +1849,7 @@ button:disabled {
 .deal-animation-hand > span {
   flex: 0 0 auto;
   color: rgba(255, 255, 255, 0.86);
-  font-size: 12px;
+  font-size: var(--fine-font);
   font-weight: 850;
 }
 
@@ -1860,7 +1902,7 @@ button:disabled {
   gap: 4px;
   justify-items: center;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fine-font);
   font-weight: 700;
 }
 
@@ -2028,7 +2070,7 @@ button:disabled {
 
 .scoring-summary strong {
   color: #fff;
-  font-size: 20px;
+  font-size: var(--heading-font);
 }
 
 .scoring-summary button {
@@ -2214,6 +2256,38 @@ button.card {
     background: var(--app-bg);
   }
 
+  body[data-font-size="large"] {
+    --heading-font: 20px;
+    --subheading-font: 14px;
+    --control-font: 16px;
+    --control-small-font: 13px;
+    --fine-font: 12px;
+    --score-label-font: 13px;
+    --score-value-font: 30px;
+    --score-meta-font: 11px;
+    --score-meta-small-font: 10px;
+    --body-font: 15px;
+    --notice-font: 15px;
+    --row-font: 13px;
+    --menu-font: 14px;
+  }
+
+  body[data-font-size="x-large"] {
+    --heading-font: 20px;
+    --subheading-font: 15px;
+    --control-font: 17px;
+    --control-small-font: 14px;
+    --fine-font: 13px;
+    --score-label-font: 14px;
+    --score-value-font: 32px;
+    --score-meta-font: 12px;
+    --score-meta-small-font: 11px;
+    --body-font: 16px;
+    --notice-font: 16px;
+    --row-font: 14px;
+    --menu-font: 15px;
+  }
+
   .app {
     gap: 8px;
     padding: max(8px, calc(env(safe-area-inset-top) + 8px)) 8px max(8px, env(safe-area-inset-bottom));
@@ -2231,11 +2305,11 @@ button.card {
   }
 
   h1 {
-    font-size: 18px;
+    font-size: min(var(--heading-font), 20px);
   }
 
   .font-size-control {
-    font-size: 11px;
+    font-size: var(--fine-font);
   }
 
   .font-size-control span {
@@ -2247,11 +2321,11 @@ button.card {
     min-width: 72px;
     min-height: 34px;
     padding: 4px 6px;
-    font-size: 12px;
+    font-size: var(--fine-font);
   }
 
   h2 {
-    font-size: 12px;
+    font-size: var(--subheading-font);
     margin-bottom: 4px;
   }
 
@@ -2272,11 +2346,11 @@ button.card {
   }
 
   .score span {
-    font-size: 12px;
+    font-size: var(--score-label-font);
   }
 
   .score strong {
-    font-size: 27px;
+    font-size: var(--score-value-font);
   }
 
   .score-cut {

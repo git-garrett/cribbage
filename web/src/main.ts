@@ -3112,7 +3112,6 @@ function renderLeaderboard(): void {
   els.leaderboardSummary.textContent = `${summary.games} completed production game${summary.games === 1 ? "" : "s"} recorded.`;
   els.leaderboardHighlights.innerHTML = "";
   const top14_3 = winRate14_3[0] ?? null;
-  const largestWin = bestWins[0] ?? null;
   const skunks = summary.mostSkunks?.length ? summary.mostSkunks : [];
   els.leaderboardHighlights.append(
     leaderboardCard(
@@ -3122,13 +3121,7 @@ function renderLeaderboard(): void {
         : "No 14.3 games yet",
     ),
     leaderboardCard(
-      "Largest win",
-      largestWin
-        ? `${largestWin.player} +${largestWin.margin} (${largestWin.humanScore}-${largestWin.aiScore})`
-        : "No human wins yet",
-    ),
-    leaderboardCard(
-      "Most skunks",
+      "Skunked the AI:",
       skunks.length
         ? skunks.map((player) => `${player.player} ${player.skunks}`).join(", ")
         : "No skunks yet",
@@ -3142,7 +3135,7 @@ function renderLeaderboard(): void {
   ]);
   appendLeaderboardSection("Biggest human wins", bestWins, (win) => [
     leaderboardCell(win.player),
-    leaderboardCell(`${win.humanScore}-${win.aiScore} (${formatSigned(win.margin)})`),
+    leaderboardCell(`Margin ${formatSigned(win.margin)}`),
     leaderboardCell(`${engineName(win.opponent)} · ${shortDate(win.endedAt)}${win.result !== "regular" ? ` · ${win.result}` : ""}`),
   ]);
   if (!winRate14_3.length && !bestWins.length) {
