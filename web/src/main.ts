@@ -51,6 +51,8 @@ interface AiBenchmarkSummarySource {
   }>;
 }
 
+type ServerBusyRetry = () => void | Promise<void>;
+
 function safeLocalStorageGet(key: string): string | null {
   try {
     return window.localStorage.getItem(key);
@@ -83,6 +85,7 @@ const state: {
   splashOpen: boolean;
   hasResumableGame: boolean;
   resultOverride: string[] | null;
+  serverBusy: { retry: ServerBusyRetry | null } | null;
   parGuides: boolean;
   analyticsOpen: boolean;
   analyticsMode: "my" | "full";
@@ -120,6 +123,7 @@ const state: {
   splashOpen: false,
   hasResumableGame: false,
   resultOverride: null,
+  serverBusy: null,
   parGuides: safeLocalStorageGet("strong-cribbage.admin.parGuides") === "1",
   analyticsOpen: false,
   analyticsMode: "my",
@@ -161,6 +165,7 @@ function resetTransientGameUi(): void {
   interactionEpoch += 1;
   state.selected.clear();
   state.resultOverride = null;
+  state.serverBusy = null;
   state.dismissedGameOverId = null;
   state.aiThinking = false;
   state.modelLoading = false;
@@ -260,6 +265,8 @@ const els = {
   modelThinking: document.querySelector("#model-thinking") as HTMLElement,
   thinkingOverlay: document.querySelector("#thinking-overlay") as HTMLElement,
   thinkingOverlayLabel: document.querySelector("#thinking-overlay-label") as HTMLElement,
+  serverBusyAlert: document.querySelector("#server-busy-alert") as HTMLElement,
+  serverBusyRetry: document.querySelector("#server-busy-retry") as HTMLButtonElement,
   turnCard: document.querySelector("#turn-card") as HTMLElement,
   playAreaTitle: document.querySelector("#play-area-title") as HTMLElement,
   plays: document.querySelector("#plays") as HTMLElement,
@@ -287,6 +294,39 @@ const els = {
   gameOverClose: document.querySelector("#game-over-close") as HTMLButtonElement,
   singleGameReport: document.querySelector("#single-game-report") as HTMLElement,
 };
+
+class ApiInteractionError extends Error {
+  constructor(message = "Server Busy", options?: ErrorOptions) {
+    super(message, options);
+    this.name = "ApiInteractionError";
+  }
+}
+
+function renderServerBusy(): void {
+  els.serverBusyAlert.hidden = !state.serverBusy;
+}
+
+function clearServerBusy(): void {
+  state.serverBusy = null;
+  renderServerBusy();
+}
+
+function showServerBusy(error: unknown, retry: ServerBusyRetry | null): void {
+  console.warn("API interaction failed", error);
+  state.serverBusy = { retry };
+  state.pending = false;
+  setAiThinking(false);
+  renderServerBusy();
+}
+
+els.serverBusyRetry.addEventListener("click", () => {
+  const retry = state.serverBusy?.retry;
+  if (!retry) return;
+  clearServerBusy();
+  void Promise.resolve(retry()).catch((error) => {
+    showServerBusy(error, retry);
+  });
+});
 
 const SHARED_PAR_HOLES = [17, 33, 43, 59, 69, 85, 95];
 const GRANULAR_PARS = {
@@ -620,13 +660,20 @@ async function serverJson<T>(path: string, body: Record<string, unknown>): Promi
     });
     const contentType = response.headers.get("content-type") || "";
     if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(text || `Server request failed with ${response.status}`);
+      await response.text().catch(() => "");
+      throw new ApiInteractionError(`Server Busy (${response.status})`);
     }
     if (!contentType.includes("application/json")) {
-      throw new Error(`Server returned ${contentType || "non-JSON"} instead of JSON.`);
+      throw new ApiInteractionError("Server Busy");
     }
-    return response.json() as Promise<T>;
+    try {
+      return await response.json() as T;
+    } catch (error) {
+      throw new ApiInteractionError("Server Busy", { cause: error });
+    }
+  } catch (error) {
+    if (error instanceof ApiInteractionError) throw error;
+    throw new ApiInteractionError("Server Busy", { cause: error });
   } finally {
     window.clearTimeout(timeout);
   }
@@ -3626,6 +3673,8 @@ function shortDate(value: string): string {
 }
 
 function playAreaTitle(game: GameState): string {
+  if (state.dealAnimation) return "";
+  if (state.dealCutRevealStage) return "Cut result";
   if (state.turnCutRevealStage === "user-cut") return "Cut the deck for AI";
   if (state.turnCutRevealStage === "ai-cut") return "AI cuts the deck";
   if (state.turnCutRevealStage === "user-turn") return "Turn the cut card";
@@ -3691,14 +3740,22 @@ function render(game: GameState | null): void {
   els.thinkingOverlay.hidden = !state.aiThinking && !showModelLoadingUi;
   els.thinkingOverlayLabel.textContent = showModelLoadingUi ? "Loading model" : "AI thinking";
   els.modelLoading.hidden = !showModelLoadingUi;
+  renderServerBusy();
   renderCutCard(state.turnCutRevealStage ? null : game.turnCard);
   renderScoring(game.scoring);
   renderResult(game);
   renderGameOver(game);
   renderBoard(game.scores, game.pegPositions, game.firstDealer, game.phase, game.handNumber);
+  const hideHandsForInterstitial = Boolean(
+    state.dealAnimation ||
+    state.dealCutRevealStage ||
+    state.turnCutRevealStage ||
+    game.phase === "cut_for_deal",
+  );
   const playTitle = playAreaTitle(game);
   els.playAreaTitle.textContent = playTitle;
   els.playAreaTitle.hidden = !playTitle;
+  els.userHandTitle.hidden = hideHandsForInterstitial;
   els.userHandTitle.textContent = game.peggingResetPending
     ? "Press OK to continue"
     : game.phase === "cut_for_deal"
@@ -3722,13 +3779,12 @@ function render(game: GameState | null): void {
   } else {
     renderPlayedCards(game);
   }
-  const hideHandsForInterstitial = Boolean(state.dealAnimation || state.dealCutRevealStage);
   renderCards(els.humanHand, hideHandsForInterstitial ? [] : game.humanHand, {
     clickable: !hideHandsForInterstitial && game.phase !== "discard" && game.phase === "pegging" && game.turn === "User",
   });
 
   els.aiHand.innerHTML = "";
-  els.aiStrip.hidden = game.phase === "game_over";
+  els.aiStrip.hidden = game.phase === "game_over" || hideHandsForInterstitial;
   const aiSlots = hideHandsForInterstitial ? 0 : aiCardSlots(game);
   for (let i = 0; i < aiSlots; i += 1) {
     const card = cardBack();
@@ -4008,7 +4064,7 @@ function scheduleDecisionReviewCompletion(game = state.game): void {
     api("/api/complete-decision-reviews", {})
       .then((next) => render(next))
       .catch((error) => {
-        els.result.textContent = error instanceof Error ? error.message : "Request failed";
+        showServerBusy(error, () => scheduleDecisionReviewCompletion(game));
       })
       .finally(() => {
         state.completingReviews = false;
@@ -4197,6 +4253,8 @@ async function cutForDeal(): Promise<void> {
     } else {
       render(next);
     }
+  } catch (error) {
+    showServerBusy(error, () => cutForDeal());
   } finally {
     state.dealCutRevealStage = null;
     state.dealCutResolve = null;
@@ -4269,7 +4327,8 @@ els.discard.addEventListener("click", async () => {
     }
     await prepareModel13Pegging(next);
   } catch (error) {
-    state.resultOverride = [error instanceof Error ? error.message : "Discard failed"];
+    state.selected = new Set(selectedIds);
+    showServerBusy(error, () => els.discard.click());
     render(state.game);
   } finally {
     if (!handoffToBackground) setAiThinking(false);
@@ -4293,7 +4352,8 @@ els.play.addEventListener("click", async () => {
     await waitForPaint();
     await continuePeggingAfterRender(next);
   } catch (error) {
-    state.resultOverride = [error instanceof Error ? error.message : "Play failed"];
+    state.selected = new Set([card.id]);
+    showServerBusy(error, () => els.play.click());
     render(state.game);
   } finally {
     setAiThinking(false);
@@ -4311,6 +4371,8 @@ els.go.addEventListener("click", async () => {
     const next = await api("/api/go-human", {});
     render(next);
     await continuePeggingAfterRender(next);
+  } catch (error) {
+    showServerBusy(error, () => els.go.click());
   } finally {
     state.pending = false;
     render(state.game);
@@ -4326,6 +4388,8 @@ els.acknowledgePeggingReset.addEventListener("click", async () => {
     const next = await api("/api/acknowledge-pegging-reset", {});
     render(next);
     await continuePeggingAfterRender(next);
+  } catch (error) {
+    showServerBusy(error, () => els.acknowledgePeggingReset.click());
   } finally {
     state.pending = false;
     render(state.game);
@@ -4353,6 +4417,8 @@ els.continueScoring.addEventListener("click", async () => {
     state.selected.clear();
     render(next);
     await playDealAnimationIfNeeded(next);
+  } catch (error) {
+    showServerBusy(error, () => els.continueScoring.click());
   } finally {
     state.pending = false;
     render(state.game);
@@ -4368,6 +4434,8 @@ els.continuePegging.addEventListener("click", async () => {
     const next = await api("/api/continue-scoring", {});
     state.selected.clear();
     render(next);
+  } catch (error) {
+    showServerBusy(error, () => els.continuePegging.click());
   } finally {
     state.pending = false;
     render(state.game);
@@ -4388,9 +4456,7 @@ async function startNewGameFromUi(): Promise<void> {
     els.menuToggle.setAttribute("aria-expanded", "false");
     render(next);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "New game failed";
-    state.resultOverride = [message];
-    els.result.textContent = message;
+    showServerBusy(error, () => startNewGameFromUi());
   } finally {
     state.pending = false;
     render(state.game);
@@ -4403,7 +4469,7 @@ function resumeGameFromSplash(): void {
   state.splashOpen = false;
   render(state.game);
   void continuePeggingAfterRender(state.game as GameState).catch((error) => {
-    els.result.textContent = error instanceof Error ? error.message : "Request failed";
+    showServerBusy(error, () => resumeGameFromSplash());
   });
 }
 
@@ -4437,6 +4503,8 @@ els.troubleGame.addEventListener("click", async () => {
     els.menuToggle.setAttribute("aria-expanded", "false");
     render(next);
     await prepareModel13Pegging(next);
+  } catch (error) {
+    showServerBusy(error, () => els.troubleGame.click());
   } finally {
     setAiThinking(false);
     state.pending = false;
@@ -4491,7 +4559,7 @@ async function finishDiscardInBackground(
   } catch (error) {
     if (!isCurrent()) return;
     failed = true;
-    state.resultOverride = [error instanceof Error ? error.message : "Request failed"];
+    showServerBusy(error, () => finishDiscardInBackground(epoch, preplayedStartStage));
     render(state.game);
   } finally {
     if (!isCurrent()) return;
@@ -4503,18 +4571,22 @@ async function finishDiscardInBackground(
   }
 }
 
-api("/api/state")
-  .then(async (game) => {
-    startCutForDealPreparation(game);
-    startAiDiscardPreparation(game);
-    startNextHandPreparation(game);
-    render(game);
-    markAppReady();
-    if (game.phase === "ai_discarding") finishDiscardInBackground(interactionEpoch);
-    else await continuePeggingAfterRender(game);
-    scheduleDecisionReviewCompletion(game);
-  })
-  .catch((error) => {
-    markAppReady();
-    els.result.textContent = error instanceof Error ? error.message : "Request failed";
-  });
+function initializeGameState(): void {
+  api("/api/state")
+    .then(async (game) => {
+      startCutForDealPreparation(game);
+      startAiDiscardPreparation(game);
+      startNextHandPreparation(game);
+      render(game);
+      markAppReady();
+      if (game.phase === "ai_discarding") finishDiscardInBackground(interactionEpoch);
+      else await continuePeggingAfterRender(game);
+      scheduleDecisionReviewCompletion(game);
+    })
+    .catch((error) => {
+      markAppReady();
+      showServerBusy(error, () => initializeGameState());
+    });
+}
+
+initializeGameState();

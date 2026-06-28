@@ -1504,6 +1504,55 @@ button:disabled {
   border-width: 4px;
 }
 
+.server-busy-alert {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(8, 14, 11, 0.32);
+}
+
+.server-busy-alert[hidden] {
+  display: none;
+}
+
+.server-busy-box {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  width: min(330px, 100%);
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: center;
+  box-shadow: var(--settings-shadow);
+}
+
+.server-busy-box h2,
+.server-busy-box p {
+  margin: 0;
+}
+
+.server-busy-box h2 {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.server-busy-box p {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.server-busy-box button {
+  width: 100%;
+  min-height: 44px;
+}
+
 .throbber {
   display: inline-block;
   width: 14px;
