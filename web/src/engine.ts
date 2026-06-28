@@ -462,6 +462,7 @@ interface PlayerSnapshot {
 export interface GameSnapshot {
   version: 1;
   gameId?: string;
+  rngState?: number;
   analyticsCounter?: number;
   analyticsEvents?: AnalyticsEvent[];
   opponent: StoredOpponent;
@@ -700,6 +701,7 @@ export class CribbageGame {
   log: string[] = [];
   result: string[] = [];
   gameId = createAnalyticsId("game");
+  private rngState = createRandomState();
   analyticsCounter = 0;
   analyticsEvents: AnalyticsEvent[] = [];
   pegPositions: Record<PlayerKey, [number | string, number | string]> = {
@@ -728,7 +730,7 @@ export class CribbageGame {
     };
     this.human = { key: "human", name: "User", hand: [], table: [], crib: [], score: 0 };
     this.ai = { key: "ai", name: "AI", hand: [], table: [], crib: [], score: 0 };
-    this.deal = Math.random() < 0.5 ? 0 : 1;
+    this.deal = this.random() < 0.5 ? 0 : 1;
     this.firstDeal = this.deal;
     this.turnCard = new Card(0);
     this.recordAnalytics({
@@ -744,6 +746,7 @@ export class CribbageGame {
     if (snapshot.version !== 1) throw new Error("Unsupported saved game version.");
     const game = new CribbageGame();
     game.gameId = snapshot.gameId ?? createAnalyticsId("game");
+    game.rngState = normalizeRngState(snapshot.rngState);
     game.analyticsCounter = snapshot.analyticsCounter ?? 0;
     game.analyticsEvents = snapshot.analyticsEvents ? [...snapshot.analyticsEvents] : [];
     game.opponent = normalizeOpponent(snapshot.opponent);
@@ -817,6 +820,7 @@ export class CribbageGame {
     return {
       version: 1,
       gameId: this.gameId,
+      rngState: this.rngState,
       analyticsCounter: this.analyticsCounter,
       analyticsEvents: [...this.analyticsEvents],
       opponent: this.opponent,
@@ -876,7 +880,7 @@ export class CribbageGame {
   startHand(): void {
     this.dealer = [this.human, this.ai][this.deal];
     this.pone = [this.human, this.ai][this.deal ^ 1];
-    const deck = shuffledDeck();
+    const deck = this.shuffledDeck();
     this.dealer.hand = deck.splice(0, 6);
     this.pone.hand = deck.splice(0, 6);
     this.dealer.table = [];
@@ -914,7 +918,7 @@ export class CribbageGame {
 
   startDealCut(): void {
     this.phase = "cut_for_deal";
-    this.cutDeck = shuffledDeck();
+    this.cutDeck = this.shuffledDeck();
     this.cutCards = { human: null, ai: null };
     this.human.hand = [];
     this.ai.hand = [];
@@ -940,14 +944,14 @@ export class CribbageGame {
 
   cutForDeal(): void {
     if (this.phase !== "cut_for_deal") throw new Error("It is not time to cut for deal.");
-    if (this.cutDeck.length < 2) this.cutDeck = shuffledDeck();
+    if (this.cutDeck.length < 2) this.cutDeck = this.shuffledDeck();
     const humanCut = this.cutDeck.shift()!;
     const aiCut = this.cutDeck.shift()!;
     this.cutCards = { human: humanCut, ai: aiCut };
     if (humanCut.rank === aiCut.rank) {
       this.message = `User cut ${this.cardLabel(humanCut)}. AI cut ${this.cardLabel(aiCut)}. Tie. Tap to cut again.`;
       this.logEvent(this.message);
-      this.cutDeck = shuffledDeck();
+      this.cutDeck = this.shuffledDeck();
       return;
     }
     this.deal = humanCut.rank < aiCut.rank ? 0 : 1;
@@ -2055,16 +2059,38 @@ export class CribbageGame {
       owner,
     };
   }
+
+  private random(): number {
+    this.rngState = (Math.imul(1664525, this.rngState) + 1013904223) >>> 0;
+    return this.rngState / 0x100000000;
+  }
+
+  private shuffledDeck(): Card[] {
+    return shuffledDeck(() => this.random());
+  }
 }
 
 function fullDeck(): Card[] {
   return Array.from({ length: 52 }, (_, id) => new Card(id));
 }
 
-function shuffledDeck(): Card[] {
+function createRandomState(): number {
+  const value = Math.floor(Math.random() * 0x100000000) >>> 0;
+  return value || 0x9e3779b9;
+}
+
+function normalizeRngState(value: unknown): number {
+  if (Number.isFinite(value)) {
+    const normalized = Number(value) >>> 0;
+    if (normalized) return normalized;
+  }
+  return createRandomState();
+}
+
+function shuffledDeck(random: () => number = Math.random): Card[] {
   const deck = fullDeck();
   for (let i = deck.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(random() * (i + 1));
     [deck[i], deck[j]] = [deck[j], deck[i]];
   }
   return deck;
