@@ -1497,6 +1497,11 @@ button:disabled {
   padding-right: 2px;
 }
 
+#leaderboard-list {
+  max-height: none;
+  overflow: visible;
+}
+
 .analytics-row {
   display: grid;
   grid-template-columns: minmax(92px, 0.8fr) minmax(110px, 1fr) minmax(110px, 1.2fr);
@@ -2537,6 +2542,11 @@ button.card {
 
   .analytics-list {
     max-height: 220px;
+  }
+
+  #leaderboard-list {
+    max-height: none;
+    overflow: visible;
   }
 
   .status {
