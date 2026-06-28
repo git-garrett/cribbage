@@ -462,7 +462,6 @@ interface AnalyticsTotals {
 }
 
 type ScoreKey = "peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib";
-const ERROR_EV_THRESHOLD = 0.25;
 const ERROR_WIN_PROBABILITY_THRESHOLD = 0.0025;
 const ERROR_SCORE_KEYS: ScoreKey[] = ["peggingDealer", "peggingPone", "handDealer", "handPone", "crib"];
 type GameEndEvent = Extract<AnalyticsEvent, { type: "game" }> & { action: "end" };
@@ -2336,13 +2335,23 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   section.append(title, model);
 
   const mistakes = sortedDecisionMistakes(events, end.gameId);
+  const pending = pendingDecisionReviews(events, end.gameId);
   const totals = decisionEvTotals(mistakes);
   section.append(decisionEvSummary(totals), decisionWinProbabilityImpact(totals));
+
+  if (pending.length) {
+    const pendingNotice = document.createElement("div");
+    pendingNotice.className = "decision-review-pending";
+    pendingNotice.textContent = `${pending.length} user peg play${pending.length === 1 ? "" : "s"} still being analyzed. This report will fill in as analysis completes.`;
+    section.append(pendingNotice);
+  }
 
   if (!mistakes.length) {
     const empty = document.createElement("div");
     empty.className = "decision-review-empty";
-    empty.textContent = "No user discards or peg plays were flagged by AI analysis.";
+    empty.textContent = pending.length
+      ? "No completed user discards or peg plays have been flagged yet."
+      : "No user discards or peg plays were flagged by AI analysis.";
     section.append(empty);
     return section;
   }
@@ -2383,6 +2392,16 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   return section;
 }
 
+function pendingDecisionReviews(events: AnalyticsEvent[], gameId: string): PeggingEvent[] {
+  return events.filter((event): event is PeggingEvent =>
+    event.gameId === gameId &&
+    event.type === "pegging" &&
+    event.action === "play" &&
+    event.player === "human" &&
+    !event.review,
+  );
+}
+
 function decisionMistakes(events: AnalyticsEvent[], gameId: string): DecisionReviewEvent[] {
   return events.filter((event): event is DecisionReviewEvent => {
     if (
@@ -2408,9 +2427,7 @@ function sortedDecisionMistakes(events: AnalyticsEvent[], gameId: string): Decis
 }
 
 function decisionMistakeSortValue(event: DecisionReviewEvent): number {
-  return event.review.winProbabilityDelta === undefined
-    ? Math.max(0, event.review.delta)
-    : Math.max(0, event.review.winProbabilityDelta);
+  return decisionMistakeMagnitude(event);
 }
 
 function decisionEvTotals(events: DecisionReviewEvent[]): DecisionEvTotals {
@@ -2424,14 +2441,14 @@ function decisionEvTotals(events: DecisionReviewEvent[]): DecisionEvTotals {
     count: events.length,
   };
   for (const event of events) {
-    const delta = Math.max(0, decisionWinProbabilityDelta(event));
-    const pointEvDelta = Math.max(0, event.review.delta);
-    totals.total += delta;
-    totals.pointEvTotal += pointEvDelta;
-    if (event.type === "discard") totals.discard += delta;
-    if (event.type === "pegging") totals.pegging += delta;
-    if (event.role === "dealer") totals.dealer += delta;
-    if (event.role === "pone") totals.pone += delta;
+    const impact = decisionErrorWinProbabilityImpact(event);
+    const pointEvImpact = -Math.max(0, event.review.delta);
+    totals.total += impact;
+    totals.pointEvTotal += pointEvImpact;
+    if (event.type === "discard") totals.discard += impact;
+    if (event.type === "pegging") totals.pegging += impact;
+    if (event.role === "dealer") totals.dealer += impact;
+    if (event.role === "pone") totals.pone += impact;
   }
   return totals;
 }
@@ -2440,17 +2457,16 @@ function decisionWinProbabilityDelta(event: DecisionReviewEvent): number {
   return Number(event.review.winProbabilityDelta ?? 0);
 }
 
-function decisionMistakeMagnitude(event: DecisionReviewEvent): number {
-  const winProbabilityDelta = event.review.winProbabilityDelta;
-  return winProbabilityDelta === undefined
-    ? Math.max(0, event.review.delta)
-    : Math.max(0, winProbabilityDelta);
+function decisionErrorWinProbabilityImpact(event: DecisionReviewEvent): number {
+  return -Math.max(0, decisionWinProbabilityDelta(event));
 }
 
-function decisionMistakeThreshold(event: DecisionReviewEvent): number {
-  return event.review.winProbabilityDelta === undefined
-    ? ERROR_EV_THRESHOLD
-    : ERROR_WIN_PROBABILITY_THRESHOLD;
+function decisionMistakeMagnitude(event: DecisionReviewEvent): number {
+  return Math.max(0, decisionWinProbabilityDelta(event));
+}
+
+function decisionMistakeThreshold(_event: DecisionReviewEvent): number {
+  return ERROR_WIN_PROBABILITY_THRESHOLD;
 }
 
 function emptyDecisionErrorTotals(): Record<ScoreKey, number> {
@@ -2471,7 +2487,7 @@ function categorizedDecisionError(event: DecisionReviewEvent): Record<ScoreKey, 
   if (componentDeltas) {
     for (const key of ERROR_SCORE_KEYS) {
       const value = Math.max(0, Number(componentDeltas[key] ?? 0));
-      if (value >= ERROR_EV_THRESHOLD) totals[key] += value;
+      if (value > 0) totals[key] += value;
     }
     if (ERROR_SCORE_KEYS.some((key) => totals[key] > 0)) return totals;
   }
@@ -2603,7 +2619,7 @@ function formatWinProbability(value: number): string {
 function decisionWinProbabilityImpact(totals: DecisionEvTotals): HTMLElement {
   const impact = document.createElement("p");
   impact.className = "decision-outcome-impact";
-  impact.textContent = `Total win probability change from reviewed errors: ${formatPercentagePointDelta(totals.total)}.`;
+  impact.textContent = `Total win probability impact from reviewed errors: ${formatPercentagePointDelta(totals.total)}.`;
   return impact;
 }
 
@@ -2660,11 +2676,11 @@ function decisionContext(event: DecisionReviewEvent, events: AnalyticsEvent[]): 
   }
   rows.push(["Your point EV", formatEvPoints(event.review.selectedEv)]);
   rows.push(["Advised point EV", formatEvPoints(event.review.recommendedEv)]);
-  rows.push(["Point EV gain", formatEvPoints(event.review.delta)]);
+  rows.push(["Point EV impact", formatEvPoints(-Math.max(0, event.review.delta))]);
   if (event.review.selectedWinProbability !== undefined && event.review.recommendedWinProbability !== undefined) {
     rows.push(["Your win probability", formatWinProbability(event.review.selectedWinProbability)]);
     rows.push(["Advised win probability", formatWinProbability(event.review.recommendedWinProbability)]);
-    rows.push(["Win probability gain", formatPercentagePointDelta(event.review.winProbabilityDelta ?? 0)]);
+    rows.push(["Win probability impact", formatPercentagePointDelta(decisionErrorWinProbabilityImpact(event))]);
   }
 
   for (const [label, value] of rows) {
@@ -2986,9 +3002,9 @@ function decisionReviewText(event: DecisionReviewEvent): string {
   const review = event.review;
   const pointEv = `your EV ${formatEvPoints(review.selectedEv)}, advised EV ${formatEvPoints(review.recommendedEv)}`;
   const delta = review.winProbabilityDelta !== undefined
-    ? `; win% gain ${formatPercentagePointDelta(review.winProbabilityDelta)}; ${pointEv}`
+    ? `; win% impact ${formatPercentagePointDelta(decisionErrorWinProbabilityImpact(event))}; ${pointEv}`
     : review.delta !== 0
-      ? `; AI analysis gain ${formatEv(review.delta)}`
+      ? `; point EV impact ${formatEv(-Math.max(0, review.delta))}`
       : "";
   if (event.type === "discard") {
     return `You discarded ${review.selected.join(" ")}; AI advised ${review.recommended.join(" ")}${delta}.`;
@@ -3193,7 +3209,7 @@ function renderGameLog(): void {
     const ev = document.createElement("span");
     const totals = decisionEvTotals(decisionMistakes(events, game.gameId));
     ev.textContent = `${formatPercentagePointDelta(totals.total)} error win% (${totals.count}); ${formatEvPoints(totals.pointEvTotal)} EV`;
-    ev.className = totals.total > 0 ? "game-log-ev has-errors" : "game-log-ev";
+    ev.className = totals.total < 0 ? "game-log-ev has-errors" : "game-log-ev";
     button.append(title, meta, ev);
     button.addEventListener("click", () => {
       state.selectedLogGameId = game.gameId;
