@@ -92,37 +92,37 @@ body {
 }
 
 body[data-font-size="large"] {
-  --app-font: 17px;
-  --heading-font: 24px;
-  --subheading-font: 17px;
-  --control-font: 17px;
-  --control-small-font: 15px;
-  --fine-font: 13px;
-  --score-label-font: 15px;
-  --score-value-font: 34px;
-  --score-meta-font: 12px;
-  --score-meta-small-font: 11px;
-  --body-font: 16px;
-  --notice-font: 16px;
-  --row-font: 14px;
-  --menu-font: 15px;
+  --app-font: 24px;
+  --heading-font: 33px;
+  --subheading-font: 23px;
+  --control-font: 23px;
+  --control-small-font: 20px;
+  --fine-font: 18px;
+  --score-label-font: 20px;
+  --score-value-font: 45px;
+  --score-meta-font: 17px;
+  --score-meta-small-font: 15px;
+  --body-font: 21px;
+  --notice-font: 21px;
+  --row-font: 18px;
+  --menu-font: 20px;
 }
 
 body[data-font-size="x-large"] {
-  --app-font: 18px;
-  --heading-font: 26px;
-  --subheading-font: 18px;
-  --control-font: 18px;
-  --control-small-font: 16px;
-  --fine-font: 14px;
-  --score-label-font: 16px;
-  --score-value-font: 38px;
-  --score-meta-font: 13px;
-  --score-meta-small-font: 12px;
-  --body-font: 17px;
-  --notice-font: 17px;
-  --row-font: 15px;
-  --menu-font: 16px;
+  --app-font: 32px;
+  --heading-font: 44px;
+  --subheading-font: 30px;
+  --control-font: 30px;
+  --control-small-font: 26px;
+  --fine-font: 24px;
+  --score-label-font: 26px;
+  --score-value-font: 60px;
+  --score-meta-font: 22px;
+  --score-meta-small-font: 20px;
+  --body-font: 28px;
+  --notice-font: 28px;
+  --row-font: 24px;
+  --menu-font: 26px;
 }
 
 .splash-page {
@@ -323,7 +323,7 @@ select {
 .font-size-control select {
   width: auto;
   min-width: 88px;
-  min-height: 34px;
+  min-height: max(34px, calc(var(--control-small-font) * 2.2));
   padding: 5px 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -385,7 +385,7 @@ h2 {
   z-index: 20;
   display: grid;
   gap: 10px;
-  width: min(240px, calc(100vw - 24px));
+  width: min(360px, calc(100vw - 24px));
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -498,7 +498,7 @@ h2 {
 
 button,
 select {
-  min-height: 38px;
+  min-height: max(38px, calc(var(--control-font) * 2.45));
   border: 1px solid var(--line-strong);
   border-radius: 6px;
   background: var(--surface);
@@ -2140,6 +2140,7 @@ button:disabled {
 }
 
 button.card {
+  min-height: 0;
   padding: 0;
 }
 
@@ -2257,35 +2258,37 @@ button.card {
   }
 
   body[data-font-size="large"] {
-    --heading-font: 20px;
-    --subheading-font: 14px;
-    --control-font: 16px;
-    --control-small-font: 13px;
-    --fine-font: 12px;
-    --score-label-font: 13px;
-    --score-value-font: 30px;
-    --score-meta-font: 11px;
-    --score-meta-small-font: 10px;
-    --body-font: 15px;
-    --notice-font: 15px;
-    --row-font: 13px;
-    --menu-font: 14px;
+    --app-font: 24px;
+    --heading-font: 27px;
+    --subheading-font: 18px;
+    --control-font: 23px;
+    --control-small-font: 20px;
+    --fine-font: 18px;
+    --score-label-font: 18px;
+    --score-value-font: 41px;
+    --score-meta-font: 17px;
+    --score-meta-small-font: 15px;
+    --body-font: 21px;
+    --notice-font: 21px;
+    --row-font: 18px;
+    --menu-font: 20px;
   }
 
   body[data-font-size="x-large"] {
-    --heading-font: 20px;
-    --subheading-font: 15px;
-    --control-font: 17px;
-    --control-small-font: 14px;
-    --fine-font: 13px;
-    --score-label-font: 14px;
-    --score-value-font: 32px;
-    --score-meta-font: 12px;
-    --score-meta-small-font: 11px;
-    --body-font: 16px;
-    --notice-font: 16px;
-    --row-font: 14px;
-    --menu-font: 15px;
+    --app-font: 32px;
+    --heading-font: 36px;
+    --subheading-font: 24px;
+    --control-font: 30px;
+    --control-small-font: 26px;
+    --fine-font: 24px;
+    --score-label-font: 24px;
+    --score-value-font: 54px;
+    --score-meta-font: 22px;
+    --score-meta-small-font: 20px;
+    --body-font: 28px;
+    --notice-font: 28px;
+    --row-font: 24px;
+    --menu-font: 26px;
   }
 
   .app {
@@ -2305,7 +2308,45 @@ button.card {
   }
 
   h1 {
-    font-size: min(var(--heading-font), 20px);
+    font-size: 18px;
+  }
+
+  body[data-font-size="large"] .topbar,
+  body[data-font-size="x-large"] .topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 4px;
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+
+  body[data-font-size="large"] .topbar > div:first-child,
+  body[data-font-size="x-large"] .topbar > div:first-child {
+    grid-column: 1 / -1;
+  }
+
+  body[data-font-size="large"] h1,
+  body[data-font-size="x-large"] h1 {
+    font-size: var(--heading-font);
+  }
+
+  body[data-font-size="large"] .font-size-control,
+  body[data-font-size="x-large"] .font-size-control {
+    grid-column: 1;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  body[data-font-size="large"] .font-size-control select,
+  body[data-font-size="x-large"] .font-size-control select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  body[data-font-size="large"] #menu-toggle,
+  body[data-font-size="x-large"] #menu-toggle {
+    grid-column: 2;
   }
 
   .font-size-control {
@@ -2331,8 +2372,21 @@ button.card {
 
   button,
   select {
-    min-height: 44px;
+    min-height: max(44px, calc(var(--control-font) * 2.45));
     width: 100%;
+  }
+
+  .font-size-control select {
+    width: auto;
+  }
+
+  body[data-font-size="large"] .font-size-control select,
+  body[data-font-size="x-large"] .font-size-control select {
+    width: 100%;
+  }
+
+  button.card {
+    min-height: 0;
   }
 
   .scoreboard {
