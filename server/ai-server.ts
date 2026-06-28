@@ -23,6 +23,7 @@ type DatabaseSyncLike = {
   exec(sql: string): void;
   prepare(sql: string): {
     run(...values: unknown[]): void;
+    all(...values: unknown[]): unknown[];
   };
 };
 
@@ -277,6 +278,128 @@ async function persistGameUpload(requestBody: JsonRecord): Promise<void> {
   );
 }
 
+function uploadedGameLeaderboardRows(db: DatabaseSyncLike): JsonRecord[] {
+  return db.prepare(`
+    SELECT game_id, tag, model, uploaded_at, final_result_json
+    FROM game_uploads
+    WHERE model = ?
+    ORDER BY uploaded_at ASC
+  `).all(MODEL) as JsonRecord[];
+}
+
+function playerNameFromTag(tag: unknown): string {
+  return typeof tag === "string" && tag.trim() ? tag.trim().slice(0, 40) : "Anonymous";
+}
+
+function finalResultFromRow(row: JsonRecord): JsonRecord | null {
+  try {
+    const parsed = JSON.parse(String(row.final_result_json || "null")) as JsonRecord | null;
+    if (!parsed || typeof parsed !== "object") return null;
+    const scores = parsed.finalScores as JsonRecord | undefined;
+    if (!scores || typeof scores !== "object") return null;
+    if (!Number.isFinite(Number(scores.human)) || !Number.isFinite(Number(scores.ai))) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function buildLeaderboardSummary(rows: JsonRecord[]): JsonRecord {
+  const players = new Map<string, {
+    player: string;
+    games: number;
+    wins: number;
+    losses: number;
+    skunks: number;
+    skunked: number;
+    pointsFor: number;
+    pointsAgainst: number;
+  }>();
+  const bestWins: JsonRecord[] = [];
+  for (const row of rows) {
+    const finalResult = finalResultFromRow(row);
+    if (!finalResult) continue;
+    const scores = finalResult.finalScores as JsonRecord;
+    const humanScore = Number(scores.human);
+    const aiScore = Number(scores.ai);
+    const result = typeof finalResult.result === "string" ? finalResult.result : "regular";
+    const player = playerNameFromTag(row.tag);
+    const stats = players.get(player) ?? {
+      player,
+      games: 0,
+      wins: 0,
+      losses: 0,
+      skunks: 0,
+      skunked: 0,
+      pointsFor: 0,
+      pointsAgainst: 0,
+    };
+    const humanWon = finalResult.winner === "human";
+    stats.games += 1;
+    if (humanWon) stats.wins += 1;
+    else stats.losses += 1;
+    if (humanWon && (result === "skunk" || result === "double-skunk")) stats.skunks += 1;
+    if (!humanWon && (result === "skunk" || result === "double-skunk")) stats.skunked += 1;
+    stats.pointsFor += humanScore;
+    stats.pointsAgainst += aiScore;
+    players.set(player, stats);
+    if (humanWon) {
+      bestWins.push({
+        player,
+        margin: humanScore - aiScore,
+        humanScore,
+        aiScore,
+        result,
+        opponent: row.model || MODEL,
+        endedAt: typeof finalResult.at === "string" ? finalResult.at : row.uploaded_at,
+      });
+    }
+  }
+  const playerStats = [...players.values()].map((player) => ({
+    ...player,
+    winRate: player.games ? player.wins / player.games : 0,
+    avgMargin: player.games ? (player.pointsFor - player.pointsAgainst) / player.games : 0,
+  })).sort((a, b) => (
+    b.winRate - a.winRate ||
+    b.games - a.games ||
+    b.skunks - a.skunks ||
+    b.avgMargin - a.avgMargin ||
+    a.player.localeCompare(b.player)
+  ));
+  bestWins.sort((a, b) => (
+    Number(b.margin) - Number(a.margin) ||
+    String(a.endedAt).localeCompare(String(b.endedAt))
+  ));
+  const highSkunkCount = Math.max(0, ...playerStats.map((player) => player.skunks));
+  return {
+    generatedAt: new Date().toISOString(),
+    source: "server-game-uploads",
+    model: MODEL,
+    games: playerStats.reduce((sum, player) => sum + player.games, 0),
+    playerStats,
+    winRate14_3: playerStats,
+    bestWins,
+    mostSkunks: highSkunkCount > 0 ? playerStats.filter((player) => player.skunks === highSkunkCount) : [],
+  };
+}
+
+async function leaderboardSummary(): Promise<JsonRecord> {
+  const db = await ensureDatabase();
+  if (!db) {
+    return {
+      generatedAt: new Date().toISOString(),
+      source: "server-game-uploads",
+      model: MODEL,
+      games: 0,
+      playerStats: [],
+      winRate14_3: [],
+      bestWins: [],
+      mostSkunks: [],
+    };
+  }
+  return buildLeaderboardSummary(uploadedGameLeaderboardRows(db));
+}
+
 async function handleApi(request: IncomingMessage, response: ServerResponse, pathname: string): Promise<void> {
   if (request.method === "GET" && pathname === "/health") {
     jsonResponse(response, 200, {
@@ -285,6 +408,10 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, pat
       model: MODEL,
       sqlite: Boolean(await ensureDatabase()),
     });
+    return;
+  }
+  if (request.method === "GET" && pathname === "/api/leaderboard") {
+    jsonResponse(response, 200, await leaderboardSummary());
     return;
   }
   if (request.method === "GET" && pathname === "/api/model") {

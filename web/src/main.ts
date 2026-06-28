@@ -75,6 +75,8 @@ interface LeaderboardWin {
 
 interface LeaderboardSummarySource {
   generatedAt: string;
+  source?: string;
+  model?: string;
   games: number;
   playerStats: LeaderboardPlayer[];
   bestWinRate?: LeaderboardPlayer[];
@@ -131,6 +133,8 @@ const state: {
   analyticsMode: "my" | "full";
   gameLogOpen: boolean;
   leaderboardOpen: boolean;
+  leaderboardLoading: boolean;
+  leaderboardSummary: LeaderboardSummarySource;
   modelInfoOpen: boolean;
   decisionReviewOpen: boolean;
   selectedModelInfo: Opponent;
@@ -171,6 +175,8 @@ const state: {
   analyticsMode: "my",
   gameLogOpen: false,
   leaderboardOpen: false,
+  leaderboardLoading: false,
+  leaderboardSummary: leaderboardSummary as LeaderboardSummarySource,
   modelInfoOpen: false,
   decisionReviewOpen: false,
   selectedModelInfo: DEFAULT_OPPONENT,
@@ -737,6 +743,28 @@ async function serverJson<T>(path: string, body: Record<string, unknown>): Promi
   }
 }
 
+async function serverGetJson<T>(path: string): Promise<T> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await fetch(`${REMOTE_AI_BASE}${path}`, {
+      method: "GET",
+      headers: { "accept": "application/json" },
+      signal: controller.signal,
+    });
+    const contentType = response.headers.get("content-type") || "";
+    if (!response.ok || !contentType.includes("application/json")) {
+      throw new ApiInteractionError(`Server Busy (${response.status})`);
+    }
+    return await response.json() as T;
+  } catch (error) {
+    if (error instanceof ApiInteractionError) throw error;
+    throw new ApiInteractionError("Server Busy", { cause: error });
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 function uploadedGameIds(): Set<string> {
   try {
     const parsed = JSON.parse(safeLocalStorageGet(SERVER_UPLOAD_KEY) || "[]");
@@ -768,6 +796,7 @@ function uploadCompletedGame(gameId: string): void {
     events,
   }).then(() => {
     markGameUploaded(gameId);
+    if (state.leaderboardOpen) void refreshLeaderboard();
   }).catch((error) => {
     console.warn("Completed game upload failed", error);
   });
@@ -3105,11 +3134,27 @@ function percentage(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
+async function refreshLeaderboard(): Promise<void> {
+  if (!usesRemoteAi()) return;
+  state.leaderboardLoading = true;
+  render(state.game);
+  try {
+    state.leaderboardSummary = await serverGetJson<LeaderboardSummarySource>("/api/leaderboard");
+  } catch (error) {
+    console.warn("Leaderboard refresh failed", error);
+  } finally {
+    state.leaderboardLoading = false;
+    render(state.game);
+  }
+}
+
 function renderLeaderboard(): void {
-  const summary = leaderboardSummary as LeaderboardSummarySource;
+  const summary = state.leaderboardSummary;
   const winRate14_3 = summary.winRate14_3 ?? [];
   const bestWins = summary.bestWins ?? [];
-  els.leaderboardSummary.textContent = `${summary.games} completed production game${summary.games === 1 ? "" : "s"} recorded.`;
+  els.leaderboardSummary.textContent = state.leaderboardLoading
+    ? "Refreshing leaderboard..."
+    : `${summary.games} completed ${summary.model ? engineName(summary.model) : "production"} game${summary.games === 1 ? "" : "s"} recorded.`;
   els.leaderboardHighlights.innerHTML = "";
   const top14_3 = winRate14_3[0] ?? null;
   const skunks = summary.mostSkunks?.length ? summary.mostSkunks : [];
@@ -4286,6 +4331,7 @@ els.leaderboardOpen.addEventListener("click", () => {
   els.settingsPanel.hidden = true;
   els.menuToggle.setAttribute("aria-expanded", "false");
   render(state.game);
+  void refreshLeaderboard();
 });
 
 els.leaderboardClose.addEventListener("click", () => {
