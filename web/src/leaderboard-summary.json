@@ -64,6 +64,62 @@
       "avgMargin": -12.5
     }
   ],
+  "bestWins": [
+    {
+      "player": "Shane",
+      "margin": 34,
+      "humanScore": 121,
+      "aiScore": 87,
+      "result": "skunk",
+      "opponent": "schell_table-peg_table-14.3",
+      "endedAt": "2026-06-27T12:16:37.864Z"
+    },
+    {
+      "player": "Garrett",
+      "margin": 25,
+      "humanScore": 121,
+      "aiScore": 96,
+      "result": "regular",
+      "opponent": "schell_table-peg_table-13.0",
+      "endedAt": "2026-06-19T11:32:10.977Z"
+    },
+    {
+      "player": "Popchuckles",
+      "margin": 17,
+      "humanScore": 121,
+      "aiScore": 104,
+      "result": "regular",
+      "opponent": "schell_table-peg_table-14.3",
+      "endedAt": "2026-06-26T06:29:31.741Z"
+    },
+    {
+      "player": "Garrett",
+      "margin": 15,
+      "humanScore": 121,
+      "aiScore": 106,
+      "result": "regular",
+      "opponent": "schell_table-peg_table-14.3",
+      "endedAt": "2026-06-23T07:25:38.174Z"
+    },
+    {
+      "player": "Kurtis",
+      "margin": 14,
+      "humanScore": 121,
+      "aiScore": 107,
+      "result": "regular",
+      "opponent": "schell_table-peg_table-14.3",
+      "endedAt": "2026-06-27T23:27:00.243Z"
+    },
+    {
+      "player": "Garrett",
+      "margin": 6,
+      "humanScore": 121,
+      "aiScore": 115,
+      "result": "regular",
+      "opponent": "schell_table-peg_table-14.3",
+      "endedAt": "2026-06-27T05:03:51.443Z"
+    }
+  ],
   "bestWinRate": [
     {
       "player": "Kurtis",
@@ -76,6 +132,68 @@
       "pointsAgainst": 228,
       "winRate": 0.5,
       "avgMargin": -0.5
+    }
+  ],
+  "winRate14_3": [
+    {
+      "player": "Garrett",
+      "games": 4,
+      "wins": 2,
+      "losses": 2,
+      "skunks": 0,
+      "skunked": 0,
+      "pointsFor": 459,
+      "pointsAgainst": 463,
+      "winRate": 0.5,
+      "avgMargin": -1
+    },
+    {
+      "player": "Kurtis",
+      "games": 2,
+      "wins": 1,
+      "losses": 1,
+      "skunks": 0,
+      "skunked": 0,
+      "pointsFor": 227,
+      "pointsAgainst": 228,
+      "winRate": 0.5,
+      "avgMargin": -0.5
+    },
+    {
+      "player": "Popchuckles",
+      "games": 2,
+      "wins": 1,
+      "losses": 1,
+      "skunks": 0,
+      "skunked": 0,
+      "pointsFor": 229,
+      "pointsAgainst": 225,
+      "winRate": 0.5,
+      "avgMargin": 2
+    },
+    {
+      "player": "Shane",
+      "games": 3,
+      "wins": 1,
+      "losses": 2,
+      "skunks": 1,
+      "skunked": 0,
+      "pointsFor": 336,
+      "pointsAgainst": 329,
+      "winRate": 0.3333333333333333,
+      "avgMargin": 2.3333333333333335
+    },
+    {
+      "player": "Stone",
+      "games": 2,
+      "wins": 0,
+      "losses": 2,
+      "skunks": 0,
+      "skunked": 0,
+      "pointsFor": 217,
+      "pointsAgainst": 242,
+      "winRate": 0,
+      "avgMargin": -12.5
     }
   ],
   "mostSkunks": [

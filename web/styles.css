@@ -77,6 +77,14 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 
+body[data-font-size="large"] .app {
+  font-size: 17px;
+}
+
+body[data-font-size="x-large"] .app {
+  font-size: 18px;
+}
+
 .splash-page {
   min-height: 100vh;
   min-height: 100svh;
@@ -256,6 +264,34 @@ select {
   padding: 10px 12px;
 }
 
+.topbar > div:first-child {
+  min-width: 0;
+}
+
+.font-size-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.font-size-control select {
+  width: auto;
+  min-width: 88px;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-soft);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 h1,
 h2,
 p {
@@ -265,6 +301,9 @@ p {
 h1 {
   font-size: 22px;
   line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 h2 {
@@ -1432,6 +1471,14 @@ button:disabled {
   font-weight: 750;
 }
 
+.leaderboard-section-title {
+  margin: 8px 0 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
 .analytics-empty {
   color: var(--muted);
   font-size: 13px;
@@ -2180,11 +2227,27 @@ button.card {
 
   .topbar {
     padding: 8px 10px;
-    gap: 10px;
+    gap: 6px;
   }
 
   h1 {
-    font-size: 19px;
+    font-size: 18px;
+  }
+
+  .font-size-control {
+    font-size: 11px;
+  }
+
+  .font-size-control span {
+    display: none;
+  }
+
+  .font-size-control select {
+    width: auto;
+    min-width: 72px;
+    min-height: 34px;
+    padding: 4px 6px;
+    font-size: 12px;
   }
 
   h2 {

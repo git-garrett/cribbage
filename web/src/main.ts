@@ -63,15 +63,34 @@ interface LeaderboardPlayer {
   avgMargin: number;
 }
 
+interface LeaderboardWin {
+  player: string;
+  margin: number;
+  humanScore: number;
+  aiScore: number;
+  result: string;
+  opponent: string;
+  endedAt: string;
+}
+
 interface LeaderboardSummarySource {
   generatedAt: string;
   games: number;
   playerStats: LeaderboardPlayer[];
-  bestWinRate: LeaderboardPlayer[];
+  bestWinRate?: LeaderboardPlayer[];
+  winRate14_3?: LeaderboardPlayer[];
+  bestWins?: LeaderboardWin[];
   mostSkunks: LeaderboardPlayer[];
 }
 
 type ServerBusyRetry = () => void | Promise<void>;
+type AppFontSize = "normal" | "large" | "x-large";
+
+const FONT_SIZE_STORAGE_KEY = "strong-cribbage.fontSize";
+
+function normalizeAppFontSize(value: string | null): AppFontSize {
+  return value === "large" || value === "x-large" ? value : "normal";
+}
 
 function safeLocalStorageGet(key: string): string | null {
   try {
@@ -107,6 +126,7 @@ const state: {
   resultOverride: string[] | null;
   serverBusy: { retry: ServerBusyRetry | null } | null;
   parGuides: boolean;
+  fontSize: AppFontSize;
   analyticsOpen: boolean;
   analyticsMode: "my" | "full";
   gameLogOpen: boolean;
@@ -146,6 +166,7 @@ const state: {
   resultOverride: null,
   serverBusy: null,
   parGuides: safeLocalStorageGet("strong-cribbage.admin.parGuides") === "1",
+  fontSize: normalizeAppFontSize(safeLocalStorageGet(FONT_SIZE_STORAGE_KEY)),
   analyticsOpen: false,
   analyticsMode: "my",
   gameLogOpen: false,
@@ -231,6 +252,7 @@ const els = {
   splashNameRow: document.querySelector("#splash-name-row") as HTMLElement,
   splashFirstName: document.querySelector("#splash-first-name") as HTMLInputElement,
   board: document.querySelector("#board") as HTMLElement,
+  fontSizeSelect: document.querySelector("#font-size-select") as HTMLSelectElement,
   menuToggle: document.querySelector("#menu-toggle") as HTMLButtonElement,
   settingsPanel: document.querySelector("#settings-panel") as HTMLElement,
   adminMenu: document.querySelector("#admin-menu") as HTMLElement,
@@ -538,8 +560,14 @@ function applyAdminVisibility(): void {
   if (!showAdmin) els.adminMenu.removeAttribute("open");
 }
 
+function applyFontSizePreference(): void {
+  els.fontSizeSelect.value = state.fontSize;
+  document.body.dataset.fontSize = state.fontSize;
+}
+
 applySimpleNetworkMode();
 applyAdminVisibility();
+applyFontSizePreference();
 window.addEventListener("hashchange", applyAdminVisibility);
 try {
   if (state.game) render(state.game);
@@ -3079,17 +3107,25 @@ function percentage(value: number): string {
 
 function renderLeaderboard(): void {
   const summary = leaderboardSummary as LeaderboardSummarySource;
-  const players = summary.playerStats ?? [];
+  const winRate14_3 = summary.winRate14_3 ?? [];
+  const bestWins = summary.bestWins ?? [];
   els.leaderboardSummary.textContent = `${summary.games} completed production game${summary.games === 1 ? "" : "s"} recorded.`;
   els.leaderboardHighlights.innerHTML = "";
-  const best = summary.bestWinRate?.length ? summary.bestWinRate : players.slice(0, 1);
+  const top14_3 = winRate14_3[0] ?? null;
+  const largestWin = bestWins[0] ?? null;
   const skunks = summary.mostSkunks?.length ? summary.mostSkunks : [];
   els.leaderboardHighlights.append(
     leaderboardCard(
-      "Best win rate",
-      best.length
-        ? best.map((player) => `${player.player} ${percentage(player.winRate)} (${player.wins}-${player.losses})`).join(", ")
-        : "No games yet",
+      "Best vs AI 14.3",
+      top14_3
+        ? `${top14_3.player} ${percentage(top14_3.winRate)} (${top14_3.wins}-${top14_3.losses})`
+        : "No 14.3 games yet",
+    ),
+    leaderboardCard(
+      "Largest win",
+      largestWin
+        ? `${largestWin.player} +${largestWin.margin} (${largestWin.humanScore}-${largestWin.aiScore})`
+        : "No human wins yet",
     ),
     leaderboardCard(
       "Most skunks",
@@ -3099,21 +3135,34 @@ function renderLeaderboard(): void {
     ),
   );
   els.leaderboardList.innerHTML = "";
-  if (!players.length) {
+  appendLeaderboardSection("Win percentage vs AI 14.3", winRate14_3, (player) => [
+    leaderboardCell(player.player),
+    leaderboardCell(`${player.wins}-${player.losses} (${percentage(player.winRate)})`),
+    leaderboardCell(`Skunks ${player.skunks}; margin ${formatSigned(player.avgMargin)}`),
+  ]);
+  appendLeaderboardSection("Biggest human wins", bestWins, (win) => [
+    leaderboardCell(win.player),
+    leaderboardCell(`${win.humanScore}-${win.aiScore} (${formatSigned(win.margin)})`),
+    leaderboardCell(`${engineName(win.opponent)} · ${shortDate(win.endedAt)}${win.result !== "regular" ? ` · ${win.result}` : ""}`),
+  ]);
+  if (!winRate14_3.length && !bestWins.length) {
     const empty = document.createElement("p");
     empty.className = "analytics-empty";
     empty.textContent = "No leaderboard data yet.";
     els.leaderboardList.append(empty);
-    return;
   }
-  for (const player of players) {
+}
+
+function appendLeaderboardSection<T>(title: string, rows: T[], cellsForRow: (row: T) => HTMLElement[]): void {
+  if (!rows.length) return;
+  const heading = document.createElement("h2");
+  heading.className = "leaderboard-section-title";
+  heading.textContent = title;
+  els.leaderboardList.append(heading);
+  for (const rowData of rows) {
     const row = document.createElement("div");
     row.className = "analytics-row leaderboard-row";
-    row.append(
-      leaderboardCell(player.player),
-      leaderboardCell(`${player.wins}-${player.losses} (${percentage(player.winRate)})`),
-      leaderboardCell(`Skunks ${player.skunks}; margin ${formatSigned(player.avgMargin)}`),
-    );
+    row.append(...cellsForRow(rowData));
     els.leaderboardList.append(row);
   }
 }
@@ -4607,6 +4656,13 @@ els.splashNewGame.addEventListener("click", () => {
 
 els.splashResumeGame.addEventListener("click", () => {
   resumeGameFromSplash();
+});
+
+els.fontSizeSelect.addEventListener("change", () => {
+  state.fontSize = normalizeAppFontSize(els.fontSizeSelect.value);
+  safeLocalStorageSet(FONT_SIZE_STORAGE_KEY, state.fontSize);
+  applyFontSizePreference();
+  render(state.game);
 });
 
 els.newGame.addEventListener("click", () => {
