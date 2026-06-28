@@ -1823,21 +1823,28 @@ button:disabled {
   border-radius: 10px;
   cursor: pointer;
   touch-action: manipulation;
+  overflow: visible;
 }
 
-.pegging-row .turn-cut-deck::after,
-.played-active.pegging-row .turn-cut-deck::after {
+.deal-cut-row .cut-deck-cutting::after,
+.pegging-row .turn-cut-deck-cutting::after,
+.played-active.pegging-row .turn-cut-deck-cutting::after {
   content: "";
   position: absolute;
-  inset: 0;
+  top: -1px;
+  left: -1px;
+  width: calc(100% + 2px);
+  height: 58%;
   border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: inherit;
+  border-radius: inherit inherit 6px 6px;
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.2) 25%, transparent 25%) 0 0 / 12px 12px,
     linear-gradient(135deg, transparent 75%, rgba(255, 255, 255, 0.2) 75%) 0 0 / 12px 12px,
     #315f9c;
   box-shadow: 0 10px 16px rgba(18, 35, 28, 0.22);
   animation: deck-cut-slide 0.58s ease both;
+  pointer-events: none;
+  transform-origin: 70% 100%;
 }
 
 .pegging-row .turn-cut-deck:focus-visible,
@@ -1875,11 +1882,18 @@ button:disabled {
 
 @keyframes deck-cut-slide {
   0% {
+    opacity: 1;
     transform: translate(0, 0) rotate(0deg);
   }
 
+  38% {
+    opacity: 1;
+    transform: translate(18%, -10%) rotate(3deg);
+  }
+
   100% {
-    transform: translate(18px, -12px) rotate(4deg);
+    opacity: 0.9;
+    transform: translate(36%, -23%) rotate(7deg);
   }
 }
 
@@ -2497,6 +2511,7 @@ button.card {
   border-radius: 10px;
   cursor: pointer;
   touch-action: manipulation;
+  overflow: visible;
 }
 
 .app[data-phase="cut_for_deal"] .deal-cut-row .cut-result .card,
@@ -2539,6 +2554,7 @@ button.card {
   width: clamp(82px, 22vw, 112px);
   height: clamp(115px, 31vw, 157px);
   margin-left: 0;
+  overflow: visible;
 }
 
 .deal-cut-row.played-active.pegging-row .cut-result-human {

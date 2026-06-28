@@ -1784,6 +1784,7 @@ function renderDealCut(game: GameState, revealStage: "human" | "ai" | null = nul
   const showAiCut = Boolean(game.cutForDeal?.ai && (!revealStage || revealStage === "ai"));
   const deck = cardBack();
   deck.classList.add("cut-deck");
+  if (!state.dealCutResolve) deck.classList.add("cut-deck-cutting");
   deck.setAttribute("role", "button");
   deck.setAttribute("aria-label", state.dealCutResolve ? "Continue to deal" : "Cut deck for deal");
   deck.tabIndex = state.pending ? -1 : 0;
@@ -1863,6 +1864,9 @@ function renderTurnCut(game: GameState): void {
   cutSlot.className = "cut-slot cut-slot-ai";
   const deck = cardBack();
   deck.classList.add("turn-cut-deck");
+  if (state.turnCutRevealStage === "user-cut" || state.turnCutRevealStage === "ai-cut") {
+    deck.classList.add("turn-cut-deck-cutting");
+  }
   const userCanAct = state.turnCutRevealStage === "user-cut" ||
     state.turnCutRevealStage === "user-turn" ||
     state.turnCutRevealStage === "revealed";
@@ -3784,8 +3788,8 @@ function render(game: GameState | null): void {
   });
 
   els.aiHand.innerHTML = "";
-  els.aiStrip.hidden = game.phase === "game_over" || hideHandsForInterstitial;
   const aiSlots = hideHandsForInterstitial ? 0 : aiCardSlots(game);
+  els.aiStrip.hidden = game.phase === "game_over" || hideHandsForInterstitial || aiSlots === 0;
   for (let i = 0; i < aiSlots; i += 1) {
     const card = cardBack();
     if (i >= game.aiHandCount) {
