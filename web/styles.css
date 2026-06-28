@@ -496,6 +496,23 @@ h2 {
   display: none;
 }
 
+.current-model-indicator {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: var(--fine-font);
+}
+
+.current-model-indicator strong {
+  color: var(--ink);
+  font-size: var(--menu-font);
+  line-height: 1.15;
+}
+
 button,
 select {
   min-height: max(38px, calc(var(--control-font) * 2.45));

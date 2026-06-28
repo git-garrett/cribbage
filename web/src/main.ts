@@ -264,6 +264,7 @@ const els = {
   adminMenu: document.querySelector("#admin-menu") as HTMLElement,
   parGuidesToggle: document.querySelector("#par-guides-toggle") as HTMLInputElement,
   appVersion: document.querySelector("#app-version") as HTMLElement,
+  currentModel: document.querySelector("#current-model") as HTMLElement,
   myStatsOpen: document.querySelector("#my-stats-open") as HTMLButtonElement,
   analyticsOpen: document.querySelector("#analytics-open") as HTMLButtonElement,
   exportGameLog: document.querySelector("#export-game-log") as HTMLButtonElement,
@@ -4023,6 +4024,7 @@ function render(game: GameState | null): void {
   if (state.decisionReviewOpen) renderDecisionReviewPage();
   els.humanScore.textContent = String(game.scores.human);
   els.aiScore.textContent = String(game.scores.ai);
+  els.currentModel.textContent = engineName(currentSnapshot?.opponent ?? els.opponent.value ?? DEFAULT_OPPONENT);
   renderScorePace(game);
   els.humanDealer.hidden = game.dealer !== "User";
   els.aiDealer.hidden = game.dealer !== "AI";
