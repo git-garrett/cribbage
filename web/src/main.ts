@@ -781,8 +781,8 @@ function markGameUploaded(gameId: string): void {
   safeLocalStorageSet(SERVER_UPLOAD_KEY, JSON.stringify([...ids]));
 }
 
-function uploadCompletedGame(gameId: string): void {
-  if (!usesRemoteAi() || uploadedGameIds().has(gameId)) return;
+function uploadCompletedGame(gameId: string, force = false): void {
+  if (!usesRemoteAi() || (!force && uploadedGameIds().has(gameId))) return;
   const store = loadAnalytics();
   const events = store.events.filter((event) => event.gameId === gameId).map((event) => tagPhoneRecord(event));
   if (!events.length) return;
@@ -853,21 +853,28 @@ async function exportPhoneGameLog(): Promise<void> {
 function syncAnalytics(events: AnalyticsEvent[]): void {
   if (!events.length) return;
   const store = loadAnalytics();
-  const known = new Set(store.events.map((event) => event.id));
-  const newEvents: AnalyticsEvent[] = [];
+  const existingIndexes = new Map(store.events.map((event, index) => [event.id, index]));
+  const changedEvents: AnalyticsEvent[] = [];
   for (const event of events) {
-    if (!known.has(event.id)) {
-      const taggedEvent = tagPhoneRecord(event);
+    const taggedEvent = tagPhoneRecord(event);
+    const existingIndex = existingIndexes.get(event.id);
+    if (existingIndex === undefined) {
       store.events.push(taggedEvent);
-      known.add(event.id);
-      newEvents.push(taggedEvent);
+      existingIndexes.set(event.id, store.events.length - 1);
+      changedEvents.push(taggedEvent);
+      continue;
+    }
+    if (JSON.stringify(store.events[existingIndex]) !== JSON.stringify(taggedEvent)) {
+      store.events[existingIndex] = taggedEvent;
+      changedEvents.push(taggedEvent);
     }
   }
   store.events.sort((a, b) => a.at.localeCompare(b.at));
   saveAnalytics(store);
-  persistPhoneGameEvents(newEvents);
-  for (const event of newEvents) {
+  persistPhoneGameEvents(changedEvents);
+  for (const event of changedEvents) {
     if (event.type === "game" && event.action === "end") uploadCompletedGame(event.gameId);
+    else if ("review" in event && event.review) uploadCompletedGame(event.gameId, true);
   }
 }
 
@@ -4095,6 +4102,7 @@ function render(game: GameState | null): void {
     els.continuePegging.disabled = false;
   }
 
+  if (!state.pending) scheduleDecisionReviewCompletion(game);
 }
 
 function shouldAdvancePeggingAi(game: GameState): boolean {
@@ -4313,9 +4321,8 @@ function scheduleDecisionReviewCompletion(game = state.game): void {
   if (state.completingReviews) return;
   if (
     !game ||
-    game.phase !== "pegging" ||
-    game.turn !== "User" ||
     game.peggingResetPending ||
+    !(currentSnapshot?.pendingPeggingReviews?.length) ||
     state.pending
   ) {
     return;
