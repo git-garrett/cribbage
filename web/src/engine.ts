@@ -14,6 +14,14 @@ import peggingPairwise14Manifest from "./models/schell_table-peg_table-14.0/pegg
 import peggingPairwise14Url from "./models/schell_table-peg_table-14.0/pegging-outcome-tripolicy-aligned.bin?url";
 import cribTripolicy14Manifest from "./models/schell_table-peg_table-14.0/crib-score-histogram-tripolicy-by-discard-cut.manifest.json";
 import cribTripolicy14Url from "./models/schell_table-peg_table-14.0/crib-score-histogram-tripolicy-by-discard-cut.bin?url";
+import peggingBounded144Manifest from "./models/schell_table-peg_table-14.4/pegging-outcome-bounded-overrides.manifest.json";
+import peggingBounded144Url from "./models/schell_table-peg_table-14.4/pegging-outcome-bounded-overrides.bin?url";
+import cribBounded144Manifest from "./models/schell_table-peg_table-14.4/crib-score-histogram-bounded-tripolicy-by-discard-cut.manifest.json";
+import cribBounded144Url from "./models/schell_table-peg_table-14.4/crib-score-histogram-bounded-tripolicy-by-discard-cut.bin?url";
+import peggingFrontier145Manifest from "./models/schell_table-peg_table-14.5/pegging-outcome-frontier-overrides.manifest.json";
+import peggingFrontier145Url from "./models/schell_table-peg_table-14.5/pegging-outcome-frontier-overrides.bin?url";
+import cribFrontier145Manifest from "./models/schell_table-peg_table-14.5/crib-score-histogram-frontier-by-discard-cut.manifest.json";
+import cribFrontier145Url from "./models/schell_table-peg_table-14.5/crib-score-histogram-frontier-by-discard-cut.bin?url";
 
 export type PlayerKey = "human" | "ai";
 export type Opponent =
@@ -38,6 +46,8 @@ export type Opponent =
   | "schell_table-peg_table-14.1"
   | "schell_table-peg_table-14.2"
   | "schell_table-peg_table-14.3"
+  | "schell_table-peg_table-14.4"
+  | "schell_table-peg_table-14.5"
   | "schell_table-2.0";
 type LegacyOpponent =
   | "ras-table-1.0"
@@ -105,6 +115,8 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "schell_table-peg_table-14.1": "Schell Table + Peg Table 14.1",
   "schell_table-peg_table-14.2": "Schell Table + Peg Table 14.2",
   "schell_table-peg_table-14.3": "Schell Table + Peg Table 14.3",
+  "schell_table-peg_table-14.4": "Schell Table + Peg Table 14.4",
+  "schell_table-peg_table-14.5": "Schell Table + Peg Table 14.5",
 };
 const CRIB_FLUSH_BONUS_BY_SUIT_COUNT = cribFlushBonusBySuitCount as number[];
 const HAND_RANK_SCORE_BY_KEEP_CUT = (handRankScoreByKeepCut as {
@@ -118,14 +130,18 @@ type CribHistogramEntry = {
   histogram: Record<string, number>;
   opponentDiscards: Array<{ ranks: string; weight: number; rankScore: number }>;
 };
-type CribPolicy = "ev" | "on" | "off";
+type FrontierPolicy = "frontier-on" | "frontier-off" | `frontier:${number}`;
+type CribPolicy = "ev" | "on" | "off" | FrontierPolicy;
 type CribTripolicyPolicyEntry = {
   average: number;
   opponentDiscards: Array<{ ranks: string; weight: number; rankScore: number }>;
+  direct?: [number, number];
 };
 type CribTripolicyTable = {
   pairKeys: string[];
   pairIndexByKey: Map<string, number>;
+  policyIndexByName: Map<string, number>;
+  policyCount: number;
   directory: DataView;
   records: DataView;
   directoryRecordBytes: number;
@@ -136,8 +152,15 @@ type CribTripolicyManifest = {
   pairKeys: string[];
   binaryFormat?: {
     magic?: string;
-    policies?: CribPolicy[];
+    policies?: string[];
   };
+};
+type CribFrontierTable = {
+  table: Record<"dealer" | "pone", Record<string, Array<{
+    ev?: CribTripolicyPolicyEntry | null;
+    frontier?: Array<{ lambda: number | string; entry: CribTripolicyPolicyEntry }>;
+  } | null>>>;
+  maxFrontierEntries: number;
 };
 const CRIB_SCORE_HISTOGRAM_BY_DISCARD_CUT = (cribScoreHistogramByDiscardCut as unknown as {
   table: Record<"dealer" | "pone", Record<string, Array<CribHistogramEntry | null>>>;
@@ -231,6 +254,8 @@ DISCARD_TABLES["schell_table-peg_table-14.0"] = DISCARD_TABLES["schell_table-2.0
 DISCARD_TABLES["schell_table-peg_table-14.1"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-14.2"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-14.3"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-14.4"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-14.5"] = DISCARD_TABLES["schell_table-2.0"];
 
 export class WinGame extends Error {}
 
@@ -2215,23 +2240,30 @@ type PeggingOutcomeSummary = {
   opponentEv: number;
   hist: Array<[number, number, number]>;
 };
-type PeggingOutcomePolicy = "ev" | "on" | "off";
+type PeggingOutcomePolicy = "ev" | "on" | "off" | FrontierPolicy;
 type PeggingPairwiseManifest = {
   keepKeys: string[];
 };
 type PeggingPairwiseTable = {
-  format: "word32" | "packed49" | "aligned7";
+  format: "word32" | "packed49" | "aligned7" | "sparse14" | "frontier45";
   keepKeys: string[];
   keepRanks: RankCounts[];
   keepIdByKey: Map<string, number>;
   dealerOffsets: Uint32Array;
   poneOffsets: Uint32Array;
+  baseTable?: PeggingPairwiseTable;
   dealerRecords?: Uint32Array;
   poneRecords?: Uint32Array;
   dealerPackedRecords?: Uint8Array;
   ponePackedRecords?: Uint8Array;
   dealerAlignedRecords?: Uint8Array;
   poneAlignedRecords?: Uint8Array;
+  dealerSparseRecords?: Uint8Array;
+  poneSparseRecords?: Uint8Array;
+  dealerFrontierRecords?: DataView;
+  poneFrontierRecords?: DataView;
+  frontierOutcomes?: Uint16Array;
+  maxFrontierOutcomes?: number;
   recordBits: number;
   recordBytes: number;
 };
@@ -2260,7 +2292,7 @@ const PEGGING_HOLD_TABLES: Partial<Record<Opponent, PeggingHoldTable>> = {};
 const PEGGING_PAIRWISE_TABLES: Partial<Record<Opponent, PeggingPairwiseTable>> = {};
 const PONE_LEAD_FREQUENCY_TABLES: Partial<Record<Opponent, PoneLeadFrequencyTable>> = {};
 const CRIB_TRIPOLICY_TABLES: Partial<Record<Opponent, CribTripolicyTable>> = {};
-const CRIB_TRIPOLICY_POLICY_INDEX: Record<CribPolicy, number> = { ev: 0, on: 1, off: 2 };
+const CRIB_FRONTIER_TABLES: Partial<Record<Opponent, CribFrontierTable>> = {};
 const DISCARD_WIN_BASE_OUTCOME_CACHE = new Map<string, DiscardWinBaseOutcome[]>();
 const DISCARD_WIN_BASE_OUTCOME_CACHE_LIMIT = 1500;
 const DISCARD_OPPONENT_HAND_SCORE_CACHE = new Map<string, ScoreDistribution>();
@@ -2321,6 +2353,10 @@ const PEGGING_HOLD_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Pegging
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
   "schell_table-peg_table-14.3": () =>
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
+  "schell_table-peg_table-14.4": () =>
+    loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
+  "schell_table-peg_table-14.5": () =>
+    loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
 };
 const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<PeggingPairwiseTable>>> = {
   "schell_table-peg_table-12.0": () =>
@@ -2335,6 +2371,10 @@ const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Peg
     loadPairwisePeggingTable(peggingPairwise14Url, peggingPairwise14Manifest as PeggingPairwiseManifest),
   "schell_table-peg_table-14.3": () =>
     loadPairwisePeggingTable(peggingPairwise14Url, peggingPairwise14Manifest as PeggingPairwiseManifest),
+  "schell_table-peg_table-14.4": () =>
+    loadSparseBoundedPeggingTable(peggingBounded144Url, peggingBounded144Manifest as PeggingPairwiseManifest),
+  "schell_table-peg_table-14.5": () =>
+    loadFrontierPeggingTable(peggingFrontier145Url, peggingFrontier145Manifest as PeggingPairwiseManifest),
 };
 const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLeadFrequencyTable>>> = {
   "schell_table-peg_table-13.0": () =>
@@ -2347,6 +2387,10 @@ const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLe
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
   "schell_table-peg_table-14.3": () =>
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
+  "schell_table-peg_table-14.4": () =>
+    loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
+  "schell_table-peg_table-14.5": () =>
+    loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
 };
 const CRIB_TRIPOLICY_LOADERS: Partial<Record<Opponent, () => Promise<CribTripolicyTable>>> = {
   "schell_table-peg_table-14.0": () =>
@@ -2357,7 +2401,12 @@ const CRIB_TRIPOLICY_LOADERS: Partial<Record<Opponent, () => Promise<CribTripoli
     loadTripolicyCribTable(cribTripolicy14Url, cribTripolicy14Manifest as CribTripolicyManifest),
   "schell_table-peg_table-14.3": () =>
     loadTripolicyCribTable(cribTripolicy14Url, cribTripolicy14Manifest as CribTripolicyManifest),
+  "schell_table-peg_table-14.4": () =>
+    loadTripolicyCribTable(cribBounded144Url, cribBounded144Manifest as CribTripolicyManifest),
+  "schell_table-peg_table-14.5": () =>
+    loadTripolicyCribTable(cribFrontier145Url, cribFrontier145Manifest as CribTripolicyManifest),
 };
+const CRIB_FRONTIER_LOADERS: Partial<Record<Opponent, () => Promise<CribFrontierTable>>> = {};
 
 export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
   const engine = normalizeOpponent(opponent);
@@ -2366,7 +2415,8 @@ export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
   const hasOutcomeTable = !PEGGING_PAIRWISE_TABLE_LOADERS[engine] || Boolean(PEGGING_PAIRWISE_TABLES[engine]);
   const hasLeadTable = !PONE_LEAD_FREQUENCY_LOADERS[engine] || Boolean(PONE_LEAD_FREQUENCY_TABLES[engine]);
   const hasCribTripolicyTable = !CRIB_TRIPOLICY_LOADERS[engine] || Boolean(CRIB_TRIPOLICY_TABLES[engine]);
-  return hasPegTable && hasHoldTable && hasOutcomeTable && hasLeadTable && hasCribTripolicyTable;
+  const hasCribFrontierTable = !CRIB_FRONTIER_LOADERS[engine] || Boolean(CRIB_FRONTIER_TABLES[engine]);
+  return hasPegTable && hasHoldTable && hasOutcomeTable && hasLeadTable && hasCribTripolicyTable && hasCribFrontierTable;
 }
 
 export async function loadOpponentResources(opponent: StoredOpponent): Promise<void> {
@@ -2380,6 +2430,7 @@ export async function loadOpponentResources(opponent: StoredOpponent): Promise<v
   const outcomeTableLoader = PEGGING_PAIRWISE_TABLE_LOADERS[engine];
   const leadTableLoader = PONE_LEAD_FREQUENCY_LOADERS[engine];
   const cribTripolicyLoader = CRIB_TRIPOLICY_LOADERS[engine];
+  const cribFrontierLoader = CRIB_FRONTIER_LOADERS[engine];
   const loadPegTable = loader && !PEG_TABLE_POLICIES[engine]
     ? loader().then((policy) => {
         PEG_TABLE_POLICIES[engine] = policy;
@@ -2406,7 +2457,12 @@ export async function loadOpponentResources(opponent: StoredOpponent): Promise<v
         CRIB_TRIPOLICY_TABLES[engine] = table;
       })
     : Promise.resolve();
-  await Promise.all([loadPegTable, loadHoldTable, loadOutcomeTable, loadLeadTable, loadCribTripolicyTable]);
+  const loadCribFrontierTable = cribFrontierLoader && !CRIB_FRONTIER_TABLES[engine]
+    ? cribFrontierLoader().then((table) => {
+        CRIB_FRONTIER_TABLES[engine] = table;
+      })
+    : Promise.resolve();
+  await Promise.all([loadPegTable, loadHoldTable, loadOutcomeTable, loadLeadTable, loadCribTripolicyTable, loadCribFrontierTable]);
 }
 
 function sharedPegTablePolicyEngine(engine: Opponent): Opponent | null {
@@ -2436,16 +2492,22 @@ function usesCribFlushAdjustment(engine: Opponent): boolean {
     usesModel13LivePegging(engine);
 }
 
+function isModel14OrLater(engine: Opponent): boolean {
+  return engine === "schell_table-peg_table-14.0" ||
+    engine === "schell_table-peg_table-14.1" ||
+    engine === "schell_table-peg_table-14.2" ||
+    engine === "schell_table-peg_table-14.3" ||
+    engine === "schell_table-peg_table-14.4" ||
+    engine === "schell_table-peg_table-14.5";
+}
+
 function usesWinProbabilityPegging(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-10.0" ||
     engine === "schell_table-peg_table-11.0" ||
     engine === "schell_table-peg_table-11.1" ||
     engine === "schell_table-peg_table-12.0" ||
     engine === "schell_table-peg_table-13.0" ||
-    engine === "schell_table-peg_table-14.0" ||
-    engine === "schell_table-peg_table-14.1" ||
-    engine === "schell_table-peg_table-14.2" ||
-    engine === "schell_table-peg_table-14.3";
+    isModel14OrLater(engine);
 }
 
 function usesRankCutDiscardTables(engine: Opponent): boolean {
@@ -2453,44 +2515,29 @@ function usesRankCutDiscardTables(engine: Opponent): boolean {
     engine === "schell_table-peg_table-11.1" ||
     engine === "schell_table-peg_table-12.0" ||
     engine === "schell_table-peg_table-13.0" ||
-    engine === "schell_table-peg_table-14.0" ||
-    engine === "schell_table-peg_table-14.1" ||
-    engine === "schell_table-peg_table-14.2" ||
-    engine === "schell_table-peg_table-14.3";
+    isModel14OrLater(engine);
 }
 
 function usesDiscardWinProbability(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-11.1" ||
     engine === "schell_table-peg_table-12.0" ||
     engine === "schell_table-peg_table-13.0" ||
-    engine === "schell_table-peg_table-14.0" ||
-    engine === "schell_table-peg_table-14.1" ||
-    engine === "schell_table-peg_table-14.2" ||
-    engine === "schell_table-peg_table-14.3";
+    isModel14OrLater(engine);
 }
 
 function usesPeggingOutcomeTables(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-12.0" ||
     engine === "schell_table-peg_table-13.0" ||
-    engine === "schell_table-peg_table-14.0" ||
-    engine === "schell_table-peg_table-14.1" ||
-    engine === "schell_table-peg_table-14.2" ||
-    engine === "schell_table-peg_table-14.3";
+    isModel14OrLater(engine);
 }
 
 function usesModel13LivePegging(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-13.0" ||
-    engine === "schell_table-peg_table-14.0" ||
-    engine === "schell_table-peg_table-14.1" ||
-    engine === "schell_table-peg_table-14.2" ||
-    engine === "schell_table-peg_table-14.3";
+    isModel14OrLater(engine);
 }
 
 function usesTripolicyDiscardModel(engine: Opponent): boolean {
-  return engine === "schell_table-peg_table-14.0" ||
-    engine === "schell_table-peg_table-14.1" ||
-    engine === "schell_table-peg_table-14.2" ||
-    engine === "schell_table-peg_table-14.3";
+  return isModel14OrLater(engine);
 }
 
 function usesNineWayTripolicyDiscardModel(engine: Opponent): boolean {
@@ -2501,18 +2548,49 @@ function usesNineWayTripolicyDiscardModel(engine: Opponent): boolean {
 function usesCorrectedDiscardWinProbability(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-14.1" ||
     engine === "schell_table-peg_table-14.2" ||
-    engine === "schell_table-peg_table-14.3";
+    engine === "schell_table-peg_table-14.3" ||
+    engine === "schell_table-peg_table-14.4" ||
+    engine === "schell_table-peg_table-14.5";
 }
 
 function usesRankOnlyDiscardWinProbabilityApproximation(engine: Opponent): boolean {
-  return engine === "schell_table-peg_table-14.3";
+  return engine === "schell_table-peg_table-14.3" ||
+    engine === "schell_table-peg_table-14.4" ||
+    engine === "schell_table-peg_table-14.5";
 }
 
 function usesKnownCardPostPeggingWinProbability(engine: Opponent): boolean {
-  return engine === "schell_table-peg_table-14.0" ||
-    engine === "schell_table-peg_table-14.1" ||
-    engine === "schell_table-peg_table-14.2" ||
-    engine === "schell_table-peg_table-14.3";
+  return isModel14OrLater(engine);
+}
+
+function usesFrontierPolicyModel(engine: Opponent): boolean {
+  return engine === "schell_table-peg_table-14.5";
+}
+
+function frontierPolicyIndex(policy: CribPolicy | PeggingOutcomePolicy): number | null {
+  if (!policy.startsWith("frontier:")) return null;
+  const value = Number.parseInt(policy.slice("frontier:".length), 10);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function peggingOutcomePolicies(engine: Opponent): PeggingOutcomePolicy[] {
+  if (usesFrontierPolicyModel(engine)) {
+    return ["ev", "frontier-on", "frontier-off"];
+  }
+  return usesTripolicyDiscardModel(engine)
+    ? ["ev", "on", "off"]
+    : ["ev"];
+}
+
+function cribPolicies(engine: Opponent): CribPolicy[] {
+  if (usesFrontierPolicyModel(engine)) {
+    return CRIB_TRIPOLICY_TABLES[engine]
+      ? ["ev", "frontier-on", "frontier-off"]
+      : ["ev"];
+  }
+  return CRIB_TRIPOLICY_TABLES[engine]
+    ? ["ev", "on", "off"]
+    : ["ev"];
 }
 
 function pegTableEv(
@@ -2644,6 +2722,105 @@ async function loadPairwisePeggingTable(url: string, manifest: PeggingPairwiseMa
   };
 }
 
+async function loadBasePairwise12Table(): Promise<PeggingPairwiseTable> {
+  const existing = PEGGING_PAIRWISE_TABLES["schell_table-peg_table-12.0"];
+  if (existing) return existing;
+  const table = await loadPairwisePeggingTable(peggingPairwise12Url, peggingPairwise12Manifest as PeggingPairwiseManifest);
+  PEGGING_PAIRWISE_TABLES["schell_table-peg_table-12.0"] = table;
+  return table;
+}
+
+async function loadSparseBoundedPeggingTable(url: string, manifest: PeggingPairwiseManifest): Promise<PeggingPairwiseTable> {
+  const [baseTable, response] = await Promise.all([loadBasePairwise12Table(), fetch(url)]);
+  if (!response.ok) throw new Error(`Unable to load bounded pegging table: ${response.status}`);
+  const buffer = await response.arrayBuffer();
+  const view = new DataView(buffer);
+  const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  if (magic !== "P14S") throw new Error(`Unexpected bounded pegging table magic: ${magic}`);
+  const version = view.getUint16(4, true);
+  if (version !== 1) throw new Error(`Unsupported bounded pegging table version: ${version}`);
+  const keepCount = view.getUint16(6, true);
+  const dealerRecordCount = view.getUint32(8, true);
+  const poneRecordCount = view.getUint32(12, true);
+  const recordBytes = view.getUint16(16, true);
+  if (keepCount !== manifest.keepKeys.length || keepCount !== baseTable.keepKeys.length) {
+    throw new Error(`Bounded pegging table keep count mismatch: ${keepCount}`);
+  }
+  if (recordBytes !== 6) throw new Error(`Unsupported bounded pegging record width: ${recordBytes}`);
+  let offset = 20;
+  const dealerOffsets = new Uint32Array(buffer, offset, keepCount + 1);
+  offset += (keepCount + 1) * 4;
+  const poneOffsets = new Uint32Array(buffer, offset, (keepCount * 13) + 1);
+  offset += ((keepCount * 13) + 1) * 4;
+  const dealerSparseRecords = new Uint8Array(buffer, offset, dealerRecordCount * recordBytes);
+  offset += dealerRecordCount * recordBytes;
+  const poneSparseRecords = new Uint8Array(buffer, offset, poneRecordCount * recordBytes);
+  return {
+    ...baseTable,
+    format: "sparse14",
+    baseTable,
+    dealerOffsets,
+    poneOffsets,
+    dealerSparseRecords,
+    poneSparseRecords,
+    recordBits: 0,
+    recordBytes,
+  };
+}
+
+async function loadFrontierPeggingTable(url: string, manifest: PeggingPairwiseManifest): Promise<PeggingPairwiseTable> {
+  const [baseTable, response] = await Promise.all([loadBasePairwise12Table(), fetch(url)]);
+  if (!response.ok) throw new Error(`Unable to load frontier pegging table: ${response.status}`);
+  const buffer = await response.arrayBuffer();
+  const view = new DataView(buffer);
+  const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  if (magic !== "P45F") throw new Error(`Unexpected frontier pegging table magic: ${magic}`);
+  const version = view.getUint16(4, true);
+  if (version !== 1) throw new Error(`Unsupported frontier pegging table version: ${version}`);
+  const keepCount = view.getUint16(6, true);
+  const dealerRecordCount = view.getUint32(8, true);
+  const poneRecordCount = view.getUint32(12, true);
+  const outcomeCount = view.getUint32(16, true);
+  const recordBytes = view.getUint16(20, true);
+  const outcomeBytes = view.getUint16(22, true);
+  if (keepCount !== manifest.keepKeys.length || keepCount !== baseTable.keepKeys.length) {
+    throw new Error(`Frontier pegging table keep count mismatch: ${keepCount}`);
+  }
+  if (recordBytes !== 8 || outcomeBytes !== 2) {
+    throw new Error(`Unsupported frontier pegging record widths: ${recordBytes}/${outcomeBytes}`);
+  }
+  let offset = 32;
+  const dealerOffsets = new Uint32Array(buffer, offset, keepCount + 1);
+  offset += (keepCount + 1) * 4;
+  const poneOffsets = new Uint32Array(buffer, offset, (keepCount * 13) + 1);
+  offset += ((keepCount * 13) + 1) * 4;
+  const dealerFrontierRecords = new DataView(buffer, offset, dealerRecordCount * recordBytes);
+  offset += dealerRecordCount * recordBytes;
+  const poneFrontierRecords = new DataView(buffer, offset, poneRecordCount * recordBytes);
+  offset += poneRecordCount * recordBytes;
+  const frontierOutcomes = new Uint16Array(buffer, offset, outcomeCount);
+  let maxFrontierOutcomes = 0;
+  for (let index = 0; index < dealerRecordCount; index += 1) {
+    maxFrontierOutcomes = Math.max(maxFrontierOutcomes, dealerFrontierRecords.getUint16((index * recordBytes) + 6, true));
+  }
+  for (let index = 0; index < poneRecordCount; index += 1) {
+    maxFrontierOutcomes = Math.max(maxFrontierOutcomes, poneFrontierRecords.getUint16((index * recordBytes) + 6, true));
+  }
+  return {
+    ...baseTable,
+    format: "frontier45",
+    baseTable,
+    dealerOffsets,
+    poneOffsets,
+    dealerFrontierRecords,
+    poneFrontierRecords,
+    frontierOutcomes,
+    maxFrontierOutcomes,
+    recordBits: 0,
+    recordBytes,
+  };
+}
+
 async function loadTripolicyCribTable(url: string, manifest: CribTripolicyManifest): Promise<CribTripolicyTable> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Unable to load 14.0 crib table: ${response.status}`);
@@ -2662,7 +2839,8 @@ async function loadTripolicyCribTable(url: string, manifest: CribTripolicyManife
   if (pairCount !== manifest.pairKeys.length) {
     throw new Error(`14.0 crib table pair count mismatch: ${pairCount} vs ${manifest.pairKeys.length}`);
   }
-  if (entryCount !== 2 * pairCount * 13 * 3) {
+  const policies = manifest.binaryFormat?.policies ?? ["ev", "on", "off"];
+  if (entryCount !== 2 * pairCount * 13 * policies.length) {
     throw new Error(`14.0 crib table entry count mismatch: ${entryCount}`);
   }
   if (directoryRecordBytes !== 10 || opponentRecordBytes !== 9) {
@@ -2671,11 +2849,33 @@ async function loadTripolicyCribTable(url: string, manifest: CribTripolicyManife
   return {
     pairKeys: manifest.pairKeys,
     pairIndexByKey: new Map(manifest.pairKeys.map((key, index) => [key, index])),
+    policyIndexByName: new Map(policies.map((policy, index) => [policy, index])),
+    policyCount: policies.length,
     directory: new DataView(buffer, directoryOffset, recordsOffset - directoryOffset),
     records: new DataView(buffer, recordsOffset),
     directoryRecordBytes,
     opponentRecordBytes,
     entryCount,
+  };
+}
+
+async function loadFrontierCribTable(url: string): Promise<CribFrontierTable> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Unable to load 14.5 crib frontier table: ${response.status}`);
+  const source = await response.json() as {
+    table: CribFrontierTable["table"];
+  };
+  let maxFrontierEntries = 0;
+  for (const role of ["dealer", "pone"] as const) {
+    for (const cuts of Object.values(source.table?.[role] ?? {})) {
+      for (const entry of cuts ?? []) {
+        maxFrontierEntries = Math.max(maxFrontierEntries, entry?.frontier?.length ?? 0);
+      }
+    }
+  }
+  return {
+    table: source.table,
+    maxFrontierEntries,
   };
 }
 
@@ -2803,7 +3003,7 @@ function peggingOutcomeDiscardOptions(
 }> {
   if (usesTripolicyDiscardModel(engine) && PEGGING_PAIRWISE_TABLES[engine]) {
     const options: Array<PegTableEv & { hist: Array<[number, number, number]>; policy: PeggingOutcomePolicy }> = [];
-    for (const policy of ["ev", "on", "off"] as PeggingOutcomePolicy[]) {
+    for (const policy of peggingOutcomePolicies(engine)) {
       if (role === "dealer") {
         const summary = aggregatePairwisePeggingOutcomes(keep, "dealer", engine, knownCards, null, policy);
         if (summary) options.push(peggingOptionFromSummary(summary, null, policy));
@@ -2874,6 +3074,8 @@ function aggregatePairwisePeggingOutcomes(
 ): PeggingOutcomeSummary | null {
   const table = PEGGING_PAIRWISE_TABLES[engine];
   if (!table) return null;
+  if (table.format === "sparse14") return aggregateSparseBoundedPeggingOutcomes(keep, role, engine, knownCards, leadRank, policy);
+  if (table.format === "frontier45") return aggregateFrontierPeggingOutcomes(keep, role, engine, knownCards, leadRank, policy);
   const keepKey = rankCountsForCards(keep).join("");
   const keepId = table.keepIdByKey.get(keepKey);
   if (keepId === undefined) return null;
@@ -2933,6 +3135,167 @@ function aggregatePairwisePeggingOutcomes(
   return summary;
 }
 
+function aggregateSparseBoundedPeggingOutcomes(
+  keep: Card[],
+  role: "dealer" | "pone",
+  engine: Opponent,
+  knownCards: Card[],
+  leadRank: number | null,
+  policy: PeggingOutcomePolicy = "ev",
+): PeggingOutcomeSummary | null {
+  const table = PEGGING_PAIRWISE_TABLES[engine];
+  const base = table?.baseTable;
+  if (!table || !base) return null;
+  if (policy !== "ev" && policy !== "on" && policy !== "off") return null;
+  const keepKey = rankCountsForCards(keep).join("");
+  const keepId = base.keepIdByKey.get(keepKey);
+  if (keepId === undefined) return null;
+  const available = remainingRankCounts(knownCards);
+  const cacheKey = `${engine}:${role}:${leadRank ?? "-"}:${policy}:${keepKey}:${available.join("")}`;
+  if (PAIRWISE_PEGGING_OUTCOME_CACHE.has(cacheKey)) {
+    return PAIRWISE_PEGGING_OUTCOME_CACHE.get(cacheKey) ?? null;
+  }
+  const baseStart = role === "dealer"
+    ? base.dealerOffsets[keepId]
+    : base.poneOffsets[(keepId * 13) + (leadRank ?? 0)];
+  const baseEnd = role === "dealer"
+    ? base.dealerOffsets[keepId + 1]
+    : base.poneOffsets[(keepId * 13) + (leadRank ?? 0) + 1];
+  const overrideStart = role === "dealer"
+    ? table.dealerOffsets[keepId]
+    : table.poneOffsets[(keepId * 13) + (leadRank ?? 0)];
+  const overrideEnd = role === "dealer"
+    ? table.dealerOffsets[keepId + 1]
+    : table.poneOffsets[(keepId * 13) + (leadRank ?? 0) + 1];
+  const overrideRecords = role === "dealer" ? table.dealerSparseRecords : table.poneSparseRecords;
+  const hist = new Map<string, number>();
+  let totalWeight = 0;
+  let myTotal = 0;
+  let opponentTotal = 0;
+  let overrideCursor = overrideStart;
+  for (let index = baseStart; index < baseEnd; index += 1) {
+    const ev = unpackBasePairwiseRecord(base, role, index, "ev");
+    while (overrideCursor < overrideEnd) {
+      const candidate = unpackSparseBoundedRecord(overrideRecords, overrideCursor);
+      if (candidate.opponentKeepId >= ev.opponentKeepId) break;
+      overrideCursor += 1;
+    }
+    const override = overrideCursor < overrideEnd
+      ? unpackSparseBoundedRecord(overrideRecords, overrideCursor)
+      : null;
+    const pair = override?.opponentKeepId === ev.opponentKeepId
+      ? sparseBoundedPairForPolicy(override, policy)
+      : null;
+    const record = pair
+      ? { ...ev, myPegging: pair.myPegging, opponentPegging: pair.opponentPegging }
+      : ev;
+    const opponentRanks = base.keepRanks[record.opponentKeepId];
+    const weight = opponentKeepWeight(available, opponentRanks);
+    if (!weight) continue;
+    addPeggingSummaryRecord(hist, record.myPegging, record.opponentPegging, weight);
+    totalWeight += weight;
+    myTotal += record.myPegging * weight;
+    opponentTotal += record.opponentPegging * weight;
+  }
+  const summary = summarizePeggingHist(hist, totalWeight, myTotal, opponentTotal);
+  boundedCacheSet(PAIRWISE_PEGGING_OUTCOME_CACHE, cacheKey, summary, PAIRWISE_PEGGING_OUTCOME_CACHE_LIMIT);
+  return summary;
+}
+
+function aggregateFrontierPeggingOutcomes(
+  keep: Card[],
+  role: "dealer" | "pone",
+  engine: Opponent,
+  knownCards: Card[],
+  leadRank: number | null,
+  policy: PeggingOutcomePolicy = "ev",
+): PeggingOutcomeSummary | null {
+  const table = PEGGING_PAIRWISE_TABLES[engine];
+  const base = table?.baseTable;
+  if (!table || !base) return null;
+  const frontierIndex = frontierPolicyIndex(policy);
+  if (policy !== "ev" && policy !== "frontier-on" && policy !== "frontier-off" && frontierIndex === null) return null;
+  const keepKey = rankCountsForCards(keep).join("");
+  const keepId = base.keepIdByKey.get(keepKey);
+  if (keepId === undefined) return null;
+  const available = remainingRankCounts(knownCards);
+  const cacheKey = `${engine}:${role}:${leadRank ?? "-"}:${policy}:${keepKey}:${available.join("")}`;
+  if (PAIRWISE_PEGGING_OUTCOME_CACHE.has(cacheKey)) {
+    return PAIRWISE_PEGGING_OUTCOME_CACHE.get(cacheKey) ?? null;
+  }
+  const baseStart = role === "dealer"
+    ? base.dealerOffsets[keepId]
+    : base.poneOffsets[(keepId * 13) + (leadRank ?? 0)];
+  const baseEnd = role === "dealer"
+    ? base.dealerOffsets[keepId + 1]
+    : base.poneOffsets[(keepId * 13) + (leadRank ?? 0) + 1];
+  const frontierStart = role === "dealer"
+    ? table.dealerOffsets[keepId]
+    : table.poneOffsets[(keepId * 13) + (leadRank ?? 0)];
+  const frontierEnd = role === "dealer"
+    ? table.dealerOffsets[keepId + 1]
+    : table.poneOffsets[(keepId * 13) + (leadRank ?? 0) + 1];
+  const frontierRecords = role === "dealer" ? table.dealerFrontierRecords : table.poneFrontierRecords;
+  const outcomes = table.frontierOutcomes;
+  const hist = new Map<string, number>();
+  let totalWeight = 0;
+  let myTotal = 0;
+  let opponentTotal = 0;
+  let frontierCursor = frontierStart;
+  for (let index = baseStart; index < baseEnd; index += 1) {
+    const ev = unpackBasePairwiseRecord(base, role, index, "ev");
+    while (frontierCursor < frontierEnd) {
+      const candidate = unpackFrontierRecord(frontierRecords, frontierCursor);
+      if (candidate.opponentKeepId >= ev.opponentKeepId) break;
+      frontierCursor += 1;
+    }
+    const frontier = frontierCursor < frontierEnd
+      ? unpackFrontierRecord(frontierRecords, frontierCursor)
+      : null;
+    const pair = frontier?.opponentKeepId === ev.opponentKeepId && policy !== "ev"
+      ? frontierPairForPolicy(outcomes, frontier, policy)
+      : null;
+    const record = pair
+      ? { ...ev, myPegging: pair.myPegging, opponentPegging: pair.opponentPegging }
+      : ev;
+    const opponentRanks = base.keepRanks[record.opponentKeepId];
+    const weight = opponentKeepWeight(available, opponentRanks);
+    if (!weight) continue;
+    addPeggingSummaryRecord(hist, record.myPegging, record.opponentPegging, weight);
+    totalWeight += weight;
+    myTotal += record.myPegging * weight;
+    opponentTotal += record.opponentPegging * weight;
+  }
+  const summary = summarizePeggingHist(hist, totalWeight, myTotal, opponentTotal);
+  boundedCacheSet(PAIRWISE_PEGGING_OUTCOME_CACHE, cacheKey, summary, PAIRWISE_PEGGING_OUTCOME_CACHE_LIMIT);
+  return summary;
+}
+
+function addPeggingSummaryRecord(hist: Map<string, number>, myPegging: number, opponentPegging: number, weight: number): void {
+  const key = `${myPegging},${opponentPegging}`;
+  hist.set(key, (hist.get(key) ?? 0) + weight);
+}
+
+function summarizePeggingHist(
+  hist: Map<string, number>,
+  totalWeight: number,
+  myTotal: number,
+  opponentTotal: number,
+): PeggingOutcomeSummary | null {
+  if (!totalWeight) return null;
+  return {
+    totalWeight,
+    myEv: myTotal / totalWeight,
+    opponentEv: opponentTotal / totalWeight,
+    hist: [...hist.entries()]
+      .map(([key, weight]) => {
+        const [my, opponent] = key.split(",").map((value) => Number.parseInt(value, 10));
+        return [my, opponent, weight] as [number, number, number];
+      })
+      .sort((a, b) => a[0] - b[0] || a[1] - b[1]),
+  };
+}
+
 function unpackPairwiseRecord(record: number): { opponentKeepId: number; myPegging: number; opponentPegging: number; weight: number } {
   return {
     opponentKeepId: record & 0x7ff,
@@ -2940,6 +3303,100 @@ function unpackPairwiseRecord(record: number): { opponentKeepId: number; myPeggi
     opponentPegging: (record >>> 16) & 0x1f,
     weight: ((record >>> 21) & 0xff) + 1,
   };
+}
+
+function unpackBasePairwiseRecord(
+  table: PeggingPairwiseTable,
+  role: "dealer" | "pone",
+  index: number,
+  policy: PeggingOutcomePolicy,
+): { opponentKeepId: number; myPegging: number; opponentPegging: number; weight: number } {
+  if (table.format === "aligned7") {
+    return unpackAlignedPairwiseRecord(role === "dealer" ? table.dealerAlignedRecords : table.poneAlignedRecords, index, policy);
+  }
+  if (table.format === "packed49") {
+    return unpackPackedPairwiseRecord(role === "dealer" ? table.dealerPackedRecords : table.ponePackedRecords, index, policy);
+  }
+  const records = role === "dealer" ? table.dealerRecords : table.poneRecords;
+  return unpackPairwiseRecord(records?.[index] ?? 0);
+}
+
+function unpackSparseBoundedRecord(
+  records: Uint8Array | undefined,
+  index: number,
+): { opponentKeepId: number; onPair: number; offPair: number } {
+  if (!records) return { opponentKeepId: 0, onPair: 0xffff, offPair: 0xffff };
+  const offset = index * 6;
+  return {
+    opponentKeepId: records[offset] | (records[offset + 1] << 8),
+    onPair: records[offset + 2] | (records[offset + 3] << 8),
+    offPair: records[offset + 4] | (records[offset + 5] << 8),
+  };
+}
+
+function sparseBoundedPairForPolicy(
+  record: { onPair: number; offPair: number },
+  policy: PeggingOutcomePolicy,
+): { myPegging: number; opponentPegging: number } | null {
+  const pair = policy === "on"
+    ? record.onPair
+    : policy === "off"
+      ? record.offPair
+      : 0xffff;
+  return pair === 0xffff ? null : unpackPointPair(pair);
+}
+
+function unpackPointPair(pair: number): { myPegging: number; opponentPegging: number } {
+  return {
+    myPegging: pair & 0x1f,
+    opponentPegging: (pair >>> 5) & 0x1f,
+  };
+}
+
+function unpackFrontierRecord(
+  records: DataView | undefined,
+  index: number,
+): { opponentKeepId: number; outcomeOffset: number; outcomeCount: number } {
+  if (!records) return { opponentKeepId: 0, outcomeOffset: 0, outcomeCount: 0 };
+  const offset = index * 8;
+  return {
+    opponentKeepId: records.getUint16(offset, true),
+    outcomeOffset: records.getUint32(offset + 2, true),
+    outcomeCount: records.getUint16(offset + 6, true),
+  };
+}
+
+function frontierPairAt(
+  outcomes: Uint16Array | undefined,
+  record: { outcomeOffset: number; outcomeCount: number },
+  index: number,
+): { myPegging: number; opponentPegging: number } | null {
+  if (!outcomes || index < 0 || index >= record.outcomeCount) return null;
+  return unpackPointPair(outcomes[record.outcomeOffset + index]);
+}
+
+function frontierPairForPolicy(
+  outcomes: Uint16Array | undefined,
+  record: { outcomeOffset: number; outcomeCount: number },
+  policy: PeggingOutcomePolicy,
+): { myPegging: number; opponentPegging: number } | null {
+  const frontierIndex = frontierPolicyIndex(policy);
+  if (frontierIndex !== null) return frontierPairAt(outcomes, record, frontierIndex);
+  if (!outcomes || record.outcomeCount <= 0) return null;
+  let best: { myPegging: number; opponentPegging: number } | null = null;
+  let bestScore: [number, number] | null = null;
+  for (let index = 0; index < record.outcomeCount; index += 1) {
+    const pair = frontierPairAt(outcomes, record, index);
+    if (!pair) continue;
+    const score: [number, number] = policy === "frontier-on"
+      ? [pair.myPegging, -pair.opponentPegging]
+      : [-pair.opponentPegging, pair.myPegging];
+    if (!bestScore || score[0] > bestScore[0] || (score[0] === bestScore[0] && score[1] > bestScore[1])) {
+      best = pair;
+      bestScore = score;
+    }
+  }
+  return best;
 }
 
 function unpackPackedPairwiseRecord(
@@ -3048,9 +3505,7 @@ function choosePeggingOutcomeLead(
   ];
   let best: { card: Card; ev: number; score: number } | null = null;
   for (const card of legal) {
-    const policies = usesTripolicyDiscardModel(engine)
-      ? ["ev", "on", "off"] as PeggingOutcomePolicy[]
-      : ["ev"] as PeggingOutcomePolicy[];
+    const policies = peggingOutcomePolicies(engine);
     for (const policy of policies) {
       const summary = aggregatePairwisePeggingOutcomes(player.hand, "pone", engine, knownCards, card.rank, policy);
       if (!summary) continue;
@@ -4496,8 +4951,9 @@ function tripolicyCribPolicyEntry(
   const pairIndex = table.pairIndexByKey.get(discardKey);
   if (pairIndex === undefined) return null;
   const roleIndex = role === "dealer" ? 0 : 1;
-  const policyIndex = CRIB_TRIPOLICY_POLICY_INDEX[policy];
-  const entryIndex = ((roleIndex * table.pairKeys.length + pairIndex) * 13 + cut.rank) * 3 + policyIndex;
+  const policyIndex = table.policyIndexByName.get(policy);
+  if (policyIndex === undefined) return null;
+  const entryIndex = ((roleIndex * table.pairKeys.length + pairIndex) * 13 + cut.rank) * table.policyCount + policyIndex;
   if (entryIndex < 0 || entryIndex >= table.entryCount) return null;
   const directoryOffset = entryIndex * table.directoryRecordBytes;
   const average = table.directory.getFloat32(directoryOffset, true);
@@ -4516,6 +4972,50 @@ function tripolicyCribPolicyEntry(
   return { average, opponentDiscards };
 }
 
+function frontierCribPolicyEntry(
+  discard: Card[],
+  role: "dealer" | "pone",
+  cut: Card,
+  engine: Opponent,
+  policy: CribPolicy,
+): CribTripolicyPolicyEntry | null {
+  const table = CRIB_FRONTIER_TABLES[engine];
+  if (!table) return null;
+  const discardKey = rankCountsForCards(discard).join("");
+  const root = table.table[role]?.[discardKey]?.[cut.rank] ?? null;
+  if (!root) return null;
+  if (policy === "ev") return root.ev ?? null;
+  if (policy === "frontier-on" || policy === "frontier-off") {
+    let best: CribTripolicyPolicyEntry | null = null;
+    let bestScore: [number, number] | null = null;
+    for (const frontier of root.frontier ?? []) {
+      const direct = frontier.entry.direct ?? [frontier.entry.average, 0];
+      const score: [number, number] = policy === "frontier-on"
+        ? [direct[0], -direct[1]]
+        : [-direct[1], direct[0]];
+      if (!bestScore || score[0] > bestScore[0] || (score[0] === bestScore[0] && score[1] > bestScore[1])) {
+        best = frontier.entry;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+  const frontierIndex = frontierPolicyIndex(policy);
+  if (frontierIndex === null) return null;
+  return root.frontier?.[frontierIndex]?.entry ?? null;
+}
+
+function cribPolicyEntry(
+  discard: Card[],
+  role: "dealer" | "pone",
+  cut: Card,
+  engine: Opponent,
+  policy: CribPolicy,
+): CribTripolicyPolicyEntry | null {
+  return frontierCribPolicyEntry(discard, role, cut, engine, policy) ??
+    tripolicyCribPolicyEntry(discard, role, cut, engine, policy);
+}
+
 function rankCutCribScore(
   discard: Card[],
   role: "dealer" | "pone",
@@ -4523,7 +5023,7 @@ function rankCutCribScore(
   engine: Opponent = DEFAULT_OPPONENT,
   policy: CribPolicy = "ev",
 ): number {
-  const tripolicyScore = tripolicyCribPolicyEntry(discard, role, cut, engine, policy)?.average;
+  const tripolicyScore = cribPolicyEntry(discard, role, cut, engine, policy)?.average;
   if (typeof tripolicyScore === "number" && Number.isFinite(tripolicyScore)) return tripolicyScore;
   const discardKey = rankCountsForCards(discard).join("");
   return CRIB_RANK_SCORE_BY_DISCARD_CUT[role]?.[discardKey]?.[cut.rank] ?? 0;
@@ -4681,7 +5181,7 @@ function cribScoreOutcomesForCut(
   policy: CribPolicy = "ev",
 ): Array<[number, number]> {
   const discardKey = rankCountsForCards(discard).join("");
-  const entry = tripolicyCribPolicyEntry(discard, role, cut, engine, policy) ??
+  const entry = cribPolicyEntry(discard, role, cut, engine, policy) ??
     CRIB_SCORE_HISTOGRAM_BY_DISCARD_CUT[role]?.[discardKey]?.[cut.rank];
   if (!entry) {
     const fallback = rankCutCribScore(discard, role, cut, engine, policy) + scoreFlushAndRightJack(discard, cut, true);
@@ -4730,7 +5230,7 @@ function cribScoreOutcomesForCutRank(
   policy: CribPolicy = "ev",
 ): Array<[number, number]> {
   const discardKey = rankCountsForCards(discard).join("");
-  const entry = tripolicyCribPolicyEntry(discard, role, cut.card, engine, policy) ??
+  const entry = cribPolicyEntry(discard, role, cut.card, engine, policy) ??
     CRIB_SCORE_HISTOGRAM_BY_DISCARD_CUT[role]?.[discardKey]?.[cut.rank];
   if (!entry) {
     const fallback = rankCutCribScore(discard, role, cut.card, engine, policy) +
@@ -5067,9 +5567,7 @@ function analyzeDiscardChoice(
 
   for (const discard of combinations(hand, 2, 2)) {
     const keep = hand.filter((card) => !discard.includes(card));
-    const strategyPolicies = usesTripolicyDiscardModel(engine) && CRIB_TRIPOLICY_TABLES[engine]
-      ? ["ev", "on", "off"] as CribPolicy[]
-      : ["ev"] as CribPolicy[];
+    const strategyPolicies = cribPolicies(engine);
     const baseCutJoinedScores = usesRankCutDiscardTables(engine)
       ? rankCutDiscardScores(keep, discard, deck, role, cribFlushBonusBySuit, engine, "ev")
       : null;
@@ -5281,6 +5779,8 @@ function normalizeOpponent(opponent: StoredOpponent): Opponent {
     opponent === "expert_schell-table-peg_table-1.2" ||
     opponent === "expert_schell_table-peg_table-4.0"
   ) return "schell_table-peg_table-4.0";
+  if (opponent === "schell_table-peg_table-14.5") return "schell_table-peg_table-14.5";
+  if (opponent === "schell_table-peg_table-14.4") return "schell_table-peg_table-14.4";
   if (opponent === "schell_table-peg_table-14.3") return "schell_table-peg_table-14.3";
   if (opponent === "schell_table-peg_table-14.2") return "schell_table-peg_table-14.2";
   if (opponent === "schell_table-peg_table-14.1") return "schell_table-peg_table-14.1";

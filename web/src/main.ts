@@ -3601,6 +3601,8 @@ function sortedAnalyticsEngines(
 
 function analyticsEngineSortKey(engine: Opponent): number {
   return [
+    "schell_table-peg_table-14.5",
+    "schell_table-peg_table-14.4",
     "schell_table-peg_table-14.3",
     "schell_table-peg_table-14.2",
     "schell_table-peg_table-14.1",
@@ -3941,6 +3943,8 @@ function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
     engine === "schell_table-peg_table-14.1" ||
     engine === "schell_table-peg_table-14.2" ||
     engine === "schell_table-peg_table-14.3" ||
+    engine === "schell_table-peg_table-14.4" ||
+    engine === "schell_table-peg_table-14.5" ||
     engine === "schell_table-2.0"
   ) {
     return engine;
@@ -4658,6 +4662,7 @@ els.play.addEventListener("click", async () => {
   const card = state.game ? selectedPlayableCard(state.game) : null;
   if (!card) return;
   state.pending = true;
+  setAiThinking(true);
   render(state.game);
   await waitForPaint();
   try {
@@ -4681,7 +4686,9 @@ els.play.addEventListener("click", async () => {
 els.go.addEventListener("click", async () => {
   if (state.pending) return;
   state.pending = true;
+  setAiThinking(true);
   render(state.game);
+  await waitForPaint();
   try {
     state.resultOverride = null;
     const next = await api("/api/go-human", {});
@@ -4690,6 +4697,7 @@ els.go.addEventListener("click", async () => {
   } catch (error) {
     showServerBusy(error, () => els.go.click());
   } finally {
+    setAiThinking(false);
     state.pending = false;
     render(state.game);
   }

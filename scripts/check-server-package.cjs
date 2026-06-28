@@ -13,6 +13,10 @@ const required = [
   "web/src/models/schell_table-peg_table-13.0/pone-lead-frequency.bin",
   "web/src/models/schell_table-peg_table-14.0/pegging-outcome-tripolicy-aligned.bin",
   "web/src/models/schell_table-peg_table-14.0/crib-score-histogram-tripolicy-by-discard-cut.bin",
+  "web/src/models/schell_table-peg_table-14.4/pegging-outcome-bounded-overrides.bin",
+  "web/src/models/schell_table-peg_table-14.4/crib-score-histogram-bounded-tripolicy-by-discard-cut.bin",
+  "web/src/models/schell_table-peg_table-14.5/pegging-outcome-frontier-overrides.bin",
+  "web/src/models/schell_table-peg_table-14.5/crib-score-histogram-frontier-by-discard-cut.bin",
 ];
 
 if (!existsSync(archive)) {

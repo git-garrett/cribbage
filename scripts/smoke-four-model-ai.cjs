@@ -22,6 +22,8 @@ const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
 const rankIndex = new Map(ranks.map((rank, index) => [rank, index]));
 
 const currentModels = [
+  "schell_table-peg_table-14.5",
+  "schell_table-peg_table-14.4",
   "schell_table-peg_table-14.3",
   "schell_table-peg_table-14.2",
   "schell_table-peg_table-14.1",
@@ -64,6 +66,8 @@ const labels = {
   "schell_table-peg_table-14.1": "Schell Table + Peg Table 14.1",
   "schell_table-peg_table-14.2": "Schell Table + Peg Table 14.2",
   "schell_table-peg_table-14.3": "Schell Table + Peg Table 14.3",
+  "schell_table-peg_table-14.4": "Schell Table + Peg Table 14.4",
+  "schell_table-peg_table-14.5": "Schell Table + Peg Table 14.5",
   "schell_table-peg_table-6.0": "Schell Table + Peg Table 6.0",
   "ras_table-peg_table-4.0": "Ras Table + Peg Table 4.0",
   "schell_table-peg-3.0": "Schell Table + Peg 3.0",
@@ -237,6 +241,30 @@ function patchEngineAssetImports(source) {
     () => {
       const assetPath = path.join(path.dirname(enginePath), "models", "schell_table-peg_table-14.0", "crib-score-histogram-tripolicy-by-discard-cut.bin");
       return `const cribTripolicy14Url = ${JSON.stringify(pathToFileURL(assetPath).href)};`;
+    },
+  ).replace(
+    /import\s+peggingBounded144Url\s+from\s+"\.\/models\/schell_table-peg_table-14\.4\/pegging-outcome-bounded-overrides\.bin\?url";/,
+    () => {
+      const assetPath = path.join(path.dirname(enginePath), "models", "schell_table-peg_table-14.4", "pegging-outcome-bounded-overrides.bin");
+      return `const peggingBounded144Url = ${JSON.stringify(pathToFileURL(assetPath).href)};`;
+    },
+  ).replace(
+    /import\s+cribBounded144Url\s+from\s+"\.\/models\/schell_table-peg_table-14\.4\/crib-score-histogram-bounded-tripolicy-by-discard-cut\.bin\?url";/,
+    () => {
+      const assetPath = path.join(path.dirname(enginePath), "models", "schell_table-peg_table-14.4", "crib-score-histogram-bounded-tripolicy-by-discard-cut.bin");
+      return `const cribBounded144Url = ${JSON.stringify(pathToFileURL(assetPath).href)};`;
+    },
+  ).replace(
+    /import\s+peggingFrontier145Url\s+from\s+"\.\/models\/schell_table-peg_table-14\.5\/pegging-outcome-frontier-overrides\.bin\?url";/,
+    () => {
+      const assetPath = path.join(path.dirname(enginePath), "models", "schell_table-peg_table-14.5", "pegging-outcome-frontier-overrides.bin");
+      return `const peggingFrontier145Url = ${JSON.stringify(pathToFileURL(assetPath).href)};`;
+    },
+  ).replace(
+    /import\s+cribFrontier145Url\s+from\s+"\.\/models\/schell_table-peg_table-14\.5\/crib-score-histogram-frontier-by-discard-cut\.bin\?url";/,
+    () => {
+      const assetPath = path.join(path.dirname(enginePath), "models", "schell_table-peg_table-14.5", "crib-score-histogram-frontier-by-discard-cut.bin");
+      return `const cribFrontier145Url = ${JSON.stringify(pathToFileURL(assetPath).href)};`;
     },
   );
 }

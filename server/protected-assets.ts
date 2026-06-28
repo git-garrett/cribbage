@@ -7,13 +7,18 @@ const PROTECTED_MODEL_ASSET_DIR = resolve(ROOT, "web/src/models");
 
 export function protectedModelAssetPath(assetUrl: string): string | null {
   const assetName = assetUrl.split("/").pop() || "";
-  if (!assetName.endsWith(".bin")) return null;
+  const isProtectedAsset = assetName.endsWith(".bin");
+  if (!isProtectedAsset) return null;
   const modelByAsset: Record<string, string> = {
     "pegging-outcome-pairwise.bin": "schell_table-peg_table-12.0",
     "pegging-remaining-hand-distribution.bin": "schell_table-peg_table-13.0",
     "pone-lead-frequency.bin": "schell_table-peg_table-13.0",
     "pegging-outcome-tripolicy-aligned.bin": "schell_table-peg_table-14.0",
     "crib-score-histogram-tripolicy-by-discard-cut.bin": "schell_table-peg_table-14.0",
+    "pegging-outcome-bounded-overrides.bin": "schell_table-peg_table-14.4",
+    "crib-score-histogram-bounded-tripolicy-by-discard-cut.bin": "schell_table-peg_table-14.4",
+    "pegging-outcome-frontier-overrides.bin": "schell_table-peg_table-14.5",
+    "crib-score-histogram-frontier-by-discard-cut.bin": "schell_table-peg_table-14.5",
   };
   const sourceName = Object.keys(modelByAsset).find((name) => {
     const prefix = name.slice(0, -".bin".length);
