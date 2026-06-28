@@ -24,6 +24,7 @@ type DatabaseSyncLike = {
   prepare(sql: string): {
     run(...values: unknown[]): void;
     all(...values: unknown[]): unknown[];
+    get(...values: unknown[]): unknown;
   };
 };
 
@@ -188,6 +189,18 @@ async function ensureDatabase(): Promise<DatabaseSyncLike | null> {
           request_json TEXT NOT NULL,
           response_json TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS game_sessions (
+          session_key TEXT PRIMARY KEY,
+          tag TEXT NOT NULL,
+          model TEXT NOT NULL,
+          game_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          status TEXT NOT NULL,
+          snapshot_json TEXT NOT NULL,
+          state_json TEXT NOT NULL,
+          request_json TEXT NOT NULL
+        );
       `);
       return db;
     } catch (error) {
@@ -276,6 +289,116 @@ async function persistGameUpload(requestBody: JsonRecord): Promise<void> {
     JSON.stringify(record.events),
     JSON.stringify(record.request),
   );
+  await clearCompletedGameSession(db, record.tag, record.model, record.gameId);
+}
+
+function sessionTagFromRequest(requestBody: JsonRecord): string | null {
+  return typeof requestBody.tag === "string" && requestBody.tag.trim()
+    ? requestBody.tag.trim().slice(0, 80)
+    : null;
+}
+
+function sessionModelFromRequest(requestBody: JsonRecord): string {
+  return typeof requestBody.model === "string" && requestBody.model.trim()
+    ? requestBody.model.trim().slice(0, 120)
+    : MODEL;
+}
+
+function gameSessionKey(tag: string, model: string): string {
+  return `${model.toLowerCase()}::${tag.toLowerCase()}`;
+}
+
+async function persistGameSession(requestBody: JsonRecord): Promise<void> {
+  const tag = sessionTagFromRequest(requestBody);
+  if (!tag) return;
+  const snapshot = requestBody.snapshot as JsonRecord | undefined;
+  const state = requestBody.state as JsonRecord | undefined;
+  if (!snapshot || !state) throw new Error("Game session save is missing state or snapshot.");
+  if (state.phase === "game_over") {
+    await completeGameSession(requestBody);
+    return;
+  }
+  const db = await ensureDatabase();
+  if (!db) {
+    await mkdir(DATA_DIR, { recursive: true });
+    await appendFile(join(DATA_DIR, "game-sessions.jsonl"), `${JSON.stringify({ ...requestBody, savedAt: new Date().toISOString() })}\n`);
+    return;
+  }
+  const model = sessionModelFromRequest(requestBody);
+  const now = new Date().toISOString();
+  const gameId = String(requestBody.gameId || snapshot.gameId || "");
+  db.prepare(`
+    INSERT INTO game_sessions
+      (session_key, tag, model, game_id, created_at, updated_at, status, snapshot_json, state_json, request_json)
+    VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+    ON CONFLICT(session_key) DO UPDATE SET
+      tag = excluded.tag,
+      model = excluded.model,
+      game_id = excluded.game_id,
+      updated_at = excluded.updated_at,
+      status = 'active',
+      snapshot_json = excluded.snapshot_json,
+      state_json = excluded.state_json,
+      request_json = excluded.request_json
+  `).run(
+    gameSessionKey(tag, model),
+    tag,
+    model,
+    gameId || null,
+    now,
+    now,
+    JSON.stringify(snapshot),
+    JSON.stringify(state),
+    JSON.stringify(requestBody),
+  );
+}
+
+async function loadGameSession(requestBody: JsonRecord): Promise<JsonRecord> {
+  const tag = sessionTagFromRequest(requestBody);
+  if (!tag) return { ok: true, session: null };
+  const db = await ensureDatabase();
+  if (!db) return { ok: true, session: null };
+  const model = sessionModelFromRequest(requestBody);
+  const row = db.prepare(`
+    SELECT game_id, updated_at, snapshot_json, state_json
+    FROM game_sessions
+    WHERE session_key = ? AND status = 'active'
+  `).get(gameSessionKey(tag, model)) as JsonRecord | undefined;
+  if (!row) return { ok: true, session: null };
+  return {
+    ok: true,
+    session: {
+      gameId: row.game_id ?? null,
+      updatedAt: row.updated_at,
+      snapshot: JSON.parse(String(row.snapshot_json)),
+      state: JSON.parse(String(row.state_json)),
+    },
+  };
+}
+
+async function completeGameSession(requestBody: JsonRecord): Promise<void> {
+  const tag = sessionTagFromRequest(requestBody);
+  if (!tag) return;
+  const db = await ensureDatabase();
+  if (!db) return;
+  const model = sessionModelFromRequest(requestBody);
+  const gameId = typeof requestBody.gameId === "string" && requestBody.gameId ? requestBody.gameId : null;
+  if (gameId) {
+    db.prepare(`
+      DELETE FROM game_sessions
+      WHERE session_key = ? AND (game_id = ? OR game_id IS NULL)
+    `).run(gameSessionKey(tag, model), gameId);
+  } else {
+    db.prepare("DELETE FROM game_sessions WHERE session_key = ?").run(gameSessionKey(tag, model));
+  }
+}
+
+async function clearCompletedGameSession(db: DatabaseSyncLike, tag: string | null, model: string, gameId: string): Promise<void> {
+  if (!tag) return;
+  db.prepare(`
+    DELETE FROM game_sessions
+    WHERE session_key = ? AND (game_id = ? OR game_id IS NULL)
+  `).run(gameSessionKey(tag, model), gameId);
 }
 
 function uploadedGameLeaderboardRows(db: DatabaseSyncLike): JsonRecord[] {
@@ -453,6 +576,20 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, pat
   }
   if (pathname === "/api/games") {
     await persistGameUpload(requestBody);
+    jsonResponse(response, 200, { ok: true });
+    return;
+  }
+  if (pathname === "/api/game/session/save") {
+    await persistGameSession(requestBody);
+    jsonResponse(response, 200, { ok: true });
+    return;
+  }
+  if (pathname === "/api/game/session/load") {
+    jsonResponse(response, 200, await loadGameSession(requestBody));
+    return;
+  }
+  if (pathname === "/api/game/session/complete") {
+    await completeGameSession(requestBody);
     jsonResponse(response, 200, { ok: true });
     return;
   }

@@ -514,6 +514,7 @@ function saveGame(): void {
   if (!currentSnapshot || !state.game) return;
   safeLocalStorageSet(SAVE_KEY, JSON.stringify({ version: 1, snapshot: currentSnapshot, state: state.game }));
   syncAnalytics(currentSnapshot.analyticsEvents ?? state.game.analyticsEvents ?? []);
+  persistRemoteGameSession();
 }
 
 let currentSnapshot: GameSnapshot | null = null;
@@ -1538,6 +1539,16 @@ interface ServerGameActionResponse {
   snapshot: GameSnapshot;
 }
 
+interface RemoteGameSessionResponse {
+  ok: boolean;
+  session: {
+    gameId: string | null;
+    updatedAt: string;
+    snapshot: GameSnapshot;
+    state: GameState;
+  } | null;
+}
+
 interface AiDiscardPreparationResult {
   cardIds: number[];
   bestLead: number | null;
@@ -1571,6 +1582,63 @@ async function serverGameAction(action: string, payload: Record<string, unknown>
   startAiDiscardPreparation(response.state);
   startNextHandPreparation(response.state);
   return response.state;
+}
+
+function isActiveGame(game: GameState | null): game is GameState {
+  return Boolean(game && game.phase !== "game_over");
+}
+
+let remoteSessionSaveTimer = 0;
+
+function persistRemoteGameSession(): void {
+  if (!usesRemoteAi() || !currentSnapshot || !state.game) return;
+  const tag = currentSessionTag();
+  if (!tag) return;
+  window.clearTimeout(remoteSessionSaveTimer);
+  const game = state.game;
+  const snapshot = currentSnapshot;
+  remoteSessionSaveTimer = window.setTimeout(() => {
+    const path = game.phase === "game_over" ? "/api/game/session/complete" : "/api/game/session/save";
+    void serverJson(path, remoteGameSessionPayload(tag, snapshot, game)).catch((error) => {
+      console.warn("Active game session sync failed", error);
+    });
+  }, 200);
+}
+
+function remoteGameSessionPayload(tag: string, snapshot: GameSnapshot, game: GameState): Record<string, unknown> {
+  return {
+    gameId: snapshot.gameId ?? null,
+    tag,
+    model: SIMPLE_NETWORK_OPPONENT,
+    snapshot,
+    state: game,
+  };
+}
+
+function flushRemoteGameSession(): void {
+  if (!usesRemoteAi() || !currentSnapshot || !state.game || state.game.phase === "game_over") return;
+  const tag = currentSessionTag();
+  if (!tag || !navigator.sendBeacon) return;
+  window.clearTimeout(remoteSessionSaveTimer);
+  const body = JSON.stringify(remoteGameSessionPayload(tag, currentSnapshot, state.game));
+  navigator.sendBeacon(`${REMOTE_AI_BASE}/api/game/session/save`, new Blob([body], { type: "application/json" }));
+}
+
+async function loadRemoteActiveGameSession(): Promise<GameState | null> {
+  if (!usesRemoteAi()) return null;
+  const tag = currentSessionTag();
+  if (!tag) return null;
+  const response = await serverJson<RemoteGameSessionResponse>("/api/game/session/load", {
+    tag,
+    model: SIMPLE_NETWORK_OPPONENT,
+  });
+  const session = response.session;
+  if (!session || session.state.phase === "game_over") return null;
+  currentSnapshot = session.snapshot;
+  state.game = session.state;
+  state.hasResumableGame = true;
+  safeLocalStorageSet(SAVE_KEY, JSON.stringify({ version: 1, snapshot: currentSnapshot, state: state.game }));
+  return session.state;
 }
 
 function cutForDealPreparationKey(game: GameState): string | null {
@@ -3887,6 +3955,7 @@ function render(game: GameState | null): void {
   document.body.dataset.splash = state.splashOpen ? "true" : "false";
   els.splashPage.hidden = !state.splashOpen;
   els.splashResumeGame.hidden = !state.hasResumableGame;
+  els.splashNewGame.hidden = state.hasResumableGame;
   els.splashNameRow.hidden = Boolean(playerFirstName);
   els.splashFirstName.value = playerFirstName || els.splashFirstName.value;
   els.app.dataset.phase = game.phase;
@@ -3987,6 +4056,7 @@ function render(game: GameState | null): void {
   }
 
   const gameActive = game.phase !== "game_over";
+  els.newGame.hidden = SIMPLE_NETWORK_MODE && gameActive;
   const waitingForTurnCutClick = state.turnCutRevealStage === "user-cut" ||
     state.turnCutRevealStage === "user-turn" ||
     state.turnCutRevealStage === "revealed";
@@ -4657,10 +4727,26 @@ els.continuePegging.addEventListener("click", async () => {
 async function startNewGameFromUi(): Promise<void> {
   if (state.pending) return;
   if (state.splashOpen && !saveSplashName()) return;
+  if (isActiveGame(state.game)) {
+    state.splashOpen = false;
+    els.settingsPanel.hidden = true;
+    els.menuToggle.setAttribute("aria-expanded", "false");
+    render(state.game);
+    return;
+  }
   resetTransientGameUi();
   state.pending = true;
   render(state.game);
   try {
+    const remoteGame = await loadRemoteActiveGameSession();
+    if (remoteGame) {
+      state.splashOpen = false;
+      els.settingsPanel.hidden = true;
+      els.menuToggle.setAttribute("aria-expanded", "false");
+      render(remoteGame);
+      await continuePeggingAfterRender(remoteGame);
+      return;
+    }
     const next = await api("/api/new", { opponent: els.opponent.value });
     state.splashOpen = false;
     state.hasResumableGame = true;
@@ -4675,14 +4761,23 @@ async function startNewGameFromUi(): Promise<void> {
   }
 }
 
-function resumeGameFromSplash(): void {
+async function resumeGameFromSplash(): Promise<void> {
   if (state.pending || !state.hasResumableGame) return;
   if (!saveSplashName()) return;
+  state.pending = true;
   state.splashOpen = false;
   render(state.game);
-  void continuePeggingAfterRender(state.game as GameState).catch((error) => {
+  try {
+    const game = state.game ?? await loadRemoteActiveGameSession();
+    if (!game) return;
+    render(game);
+    await continuePeggingAfterRender(game);
+  } catch (error) {
     showServerBusy(error, () => resumeGameFromSplash());
-  });
+  } finally {
+    state.pending = false;
+    render(state.game);
+  }
 }
 
 els.splashFirstName.addEventListener("input", () => {
@@ -4694,7 +4789,7 @@ els.splashNewGame.addEventListener("click", () => {
 });
 
 els.splashResumeGame.addEventListener("click", () => {
-  resumeGameFromSplash();
+  void resumeGameFromSplash();
 });
 
 els.fontSizeSelect.addEventListener("change", () => {
@@ -4732,6 +4827,7 @@ els.troubleGame.addEventListener("click", async () => {
 });
 
 window.addEventListener("resize", () => render(state.game));
+window.addEventListener("pagehide", flushRemoteGameSession);
 
 async function finishDiscardInBackground(
   epoch = interactionEpoch,
@@ -4790,22 +4886,22 @@ async function finishDiscardInBackground(
   }
 }
 
-function initializeGameState(): void {
-  api("/api/state")
-    .then(async (game) => {
-      startCutForDealPreparation(game);
-      startAiDiscardPreparation(game);
-      startNextHandPreparation(game);
-      render(game);
-      markAppReady();
-      if (game.phase === "ai_discarding") finishDiscardInBackground(interactionEpoch);
-      else await continuePeggingAfterRender(game);
-      scheduleDecisionReviewCompletion(game);
-    })
-    .catch((error) => {
-      markAppReady();
-      showServerBusy(error, () => initializeGameState());
-    });
+async function initializeGameState(): Promise<void> {
+  try {
+    const remoteGame = await loadRemoteActiveGameSession();
+    const initialGame = remoteGame ?? await api("/api/state");
+    startCutForDealPreparation(initialGame);
+    startAiDiscardPreparation(initialGame);
+    startNextHandPreparation(initialGame);
+    render(initialGame);
+    markAppReady();
+    if (initialGame.phase === "ai_discarding") finishDiscardInBackground(interactionEpoch);
+    else await continuePeggingAfterRender(initialGame);
+    scheduleDecisionReviewCompletion(initialGame);
+  } catch (error) {
+    markAppReady();
+    showServerBusy(error, () => initializeGameState());
+  }
 }
 
-initializeGameState();
+void initializeGameState();
