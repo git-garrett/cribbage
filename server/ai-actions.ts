@@ -7,7 +7,7 @@ import {
   type GameSnapshot,
   type Opponent,
 } from "../web/src/engine";
-import { MODEL } from "./ai-constants";
+import { MODEL, modelForGameStart } from "./ai-constants";
 import { installProtectedAssetFetch } from "./protected-assets";
 
 installProtectedAssetFetch();
@@ -48,7 +48,9 @@ export async function handleGameAction(requestBody: JsonRecord): Promise<JsonRec
   let game: CribbageGame;
   try {
     if (action === "new") {
-      const opponent = (typeof payload.opponent === "string" ? payload.opponent : MODEL) as Opponent;
+      const opponent = (typeof payload.opponent === "string" && payload.opponent
+        ? payload.opponent
+        : modelForGameStart()) as Opponent;
       game = new CribbageGame(opponent, undefined, { dealMode: "cut" });
       return gamePayload(game);
     }

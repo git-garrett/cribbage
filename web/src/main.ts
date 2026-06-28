@@ -405,6 +405,10 @@ const PHONE_GAME_DB_NAME = "cribbage-game-log";
 const PHONE_GAME_DB_VERSION = 1;
 const NOTICE_MIN_MS = 600;
 const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-14.3";
+const SIMPLE_NETWORK_ALLOWED_OPPONENTS = new Set<string>([
+  "schell_table-peg_table-13.0",
+  "schell_table-peg_table-14.3",
+]);
 const URL_PARAMS = new URLSearchParams(window.location.search);
 const FULL_APP_MODE = URL_PARAMS.get("full") === "1" || URL_PARAMS.get("mode") === "full";
 const SIMPLE_NETWORK_MODE = !FULL_APP_MODE;
@@ -517,7 +521,10 @@ function saveGame(): void {
 }
 
 let currentSnapshot: GameSnapshot | null = null;
-const simpleNetworkSessionValue = SIMPLE_NETWORK_OPPONENT;
+const simpleNetworkSessionValue = "server-assigned-13.0-14.3";
+function isValidSimpleNetworkSessionValue(value: string | null): boolean {
+  return value === simpleNetworkSessionValue || value === SIMPLE_NETWORK_OPPONENT;
+}
 const savedGame = loadSavedGame();
 if (savedGame) {
   currentSnapshot = savedGame.snapshot;
@@ -525,12 +532,15 @@ if (savedGame) {
 }
 const simpleLoadedState = state.game;
 state.splashOpen = SIMPLE_NETWORK_MODE && !playerFirstName;
-state.hasResumableGame = SIMPLE_NETWORK_MODE && currentSnapshot?.opponent === SIMPLE_NETWORK_OPPONENT && simpleLoadedState?.phase !== "game_over";
+state.hasResumableGame = SIMPLE_NETWORK_MODE &&
+  Boolean(currentSnapshot?.opponent && SIMPLE_NETWORK_ALLOWED_OPPONENTS.has(currentSnapshot.opponent)) &&
+  simpleLoadedState?.phase !== "game_over";
 if (
   SIMPLE_NETWORK_MODE &&
   (
-    currentSnapshot?.opponent !== SIMPLE_NETWORK_OPPONENT ||
-    safeLocalStorageGet(SIMPLE_NETWORK_SESSION_KEY) !== simpleNetworkSessionValue ||
+    !currentSnapshot?.opponent ||
+    !SIMPLE_NETWORK_ALLOWED_OPPONENTS.has(currentSnapshot.opponent) ||
+    !isValidSimpleNetworkSessionValue(safeLocalStorageGet(SIMPLE_NETWORK_SESSION_KEY)) ||
     simpleLoadedState?.phase === "game_over"
   )
 ) {
@@ -538,7 +548,9 @@ if (
   state.game = null;
   safeLocalStorageRemove(SAVE_KEY);
 }
-state.hasResumableGame = SIMPLE_NETWORK_MODE && currentSnapshot?.opponent === SIMPLE_NETWORK_OPPONENT && state.game?.phase !== "game_over";
+state.hasResumableGame = SIMPLE_NETWORK_MODE &&
+  Boolean(currentSnapshot?.opponent && SIMPLE_NETWORK_ALLOWED_OPPONENTS.has(currentSnapshot.opponent)) &&
+  state.game?.phase !== "game_over";
 if (SIMPLE_NETWORK_MODE) {
   safeLocalStorageSet(SIMPLE_NETWORK_SESSION_KEY, simpleNetworkSessionValue);
 } else {
@@ -790,7 +802,7 @@ function uploadCompletedGame(gameId: string, force = false): void {
     gameId,
     tag: currentSessionTag() || null,
     appVersion: __APP_VERSION__,
-    model: SIMPLE_NETWORK_OPPONENT,
+    model: currentSnapshot?.opponent ?? SIMPLE_NETWORK_OPPONENT,
     finalResult: endEvent ?? null,
     snapshot: currentSnapshot?.gameId === gameId ? currentSnapshot : null,
     events,
@@ -1615,7 +1627,7 @@ function remoteGameSessionPayload(tag: string, snapshot: GameSnapshot, game: Gam
   return {
     gameId: snapshot.gameId ?? null,
     tag,
-    model: SIMPLE_NETWORK_OPPONENT,
+    model: snapshot.opponent,
     snapshot,
     state: game,
   };
@@ -1636,7 +1648,6 @@ async function loadRemoteActiveGameSession(): Promise<GameState | null> {
   if (!tag) return null;
   const response = await serverJson<RemoteGameSessionResponse>("/api/game/session/load", {
     tag,
-    model: SIMPLE_NETWORK_OPPONENT,
   });
   const session = response.session;
   if (!session || session.state.phase === "game_over") return null;
@@ -1781,13 +1792,13 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
   try {
     if (path === "/api/state") {
       if (state.game) return state.game;
-      return serverGameAction("new", { opponent: SIMPLE_NETWORK_MODE ? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT });
+      return serverGameAction("new", SIMPLE_NETWORK_MODE ? {} : { opponent: DEFAULT_OPPONENT });
     }
     if (path === "/api/new") {
       const opponent = SIMPLE_NETWORK_MODE
-        ? SIMPLE_NETWORK_OPPONENT
+        ? null
         : (body?.opponent as Opponent) || DEFAULT_OPPONENT;
-      return serverGameAction("new", { opponent });
+      return serverGameAction("new", opponent ? { opponent } : {});
     }
     if (path === "/api/cut-for-deal") {
       return serverGameAction("cut-for-deal");
@@ -3251,10 +3262,10 @@ function renderLeaderboard(): void {
   const skunks = summary.mostSkunks?.length ? summary.mostSkunks : [];
   els.leaderboardHighlights.append(
     leaderboardCard(
-      "Best vs AI 14.3",
+      "Best vs AI",
       top14_3
         ? `${top14_3.player} ${percentage(top14_3.winRate)} (${top14_3.wins}-${top14_3.losses})`
-        : "No 14.3 games yet",
+        : "No games yet",
     ),
     leaderboardCard(
       "Skunked the AI:",
@@ -3264,7 +3275,7 @@ function renderLeaderboard(): void {
     ),
   );
   els.leaderboardList.innerHTML = "";
-  appendLeaderboardSection("Win percentage vs AI 14.3", winRate14_3, (player) => [
+  appendLeaderboardSection("Win percentage vs AI", winRate14_3, (player) => [
     leaderboardCell(player.player),
     leaderboardCell(`${player.wins}-${player.losses} (${percentage(player.winRate)})`),
     leaderboardCell(`Skunks ${player.skunks}; margin ${formatSigned(player.avgMargin)}`),

@@ -4,7 +4,7 @@ import { createReadStream } from "node:fs";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { Worker } from "node:worker_threads";
-import { MODEL } from "./ai-constants";
+import { MODEL, MODEL_13, MODEL_14_3 } from "./ai-constants";
 
 declare const __APP_VERSION__: string;
 
@@ -16,6 +16,7 @@ const DATA_DIR = resolve(process.env.CRIBBAGE_DATA_DIR || join(ROOT, "data"));
 const DB_PATH = resolve(process.env.CRIBBAGE_DB_PATH || join(DATA_DIR, "cribbage-server.sqlite"));
 const MARKETING_HOSTS = new Set(["strongcribbage.com"]);
 const AI_QUEUE_MAX_WAITING = Number(process.env.AI_QUEUE_MAX_WAITING || 4);
+const LEADERBOARD_MODELS = [MODEL_13, MODEL_14_3] as const;
 
 type JsonRecord = Record<string, unknown>;
 type AiJobKind = "game-action" | "ai-discard" | "ai-peg" | "model-status";
@@ -213,11 +214,11 @@ async function ensureDatabase(): Promise<DatabaseSyncLike | null> {
 
 async function persistAiRequest(kind: string, requestBody: JsonRecord, responseBody: JsonRecord, durationMs: number): Promise<void> {
   const db = await ensureDatabase();
-  const snapshot = requestBody.snapshot as { gameId?: string } | undefined;
+  const snapshot = requestBody.snapshot as { gameId?: string; opponent?: string } | undefined;
   const record = {
     kind,
     tag: typeof requestBody.tag === "string" ? requestBody.tag : null,
-    model: MODEL,
+    model: typeof snapshot?.opponent === "string" ? snapshot.opponent : MODEL,
     gameId: snapshot?.gameId ?? null,
     receivedAt: new Date().toISOString(),
     durationMs: Math.round(durationMs),
@@ -299,9 +300,14 @@ function sessionTagFromRequest(requestBody: JsonRecord): string | null {
 }
 
 function sessionModelFromRequest(requestBody: JsonRecord): string {
-  return typeof requestBody.model === "string" && requestBody.model.trim()
-    ? requestBody.model.trim().slice(0, 120)
-    : MODEL;
+  if (typeof requestBody.model === "string" && requestBody.model.trim()) {
+    return requestBody.model.trim().slice(0, 120);
+  }
+  const snapshot = requestBody.snapshot as JsonRecord | undefined;
+  if (snapshot && typeof snapshot.opponent === "string" && snapshot.opponent.trim()) {
+    return snapshot.opponent.trim().slice(0, 120);
+  }
+  return MODEL;
 }
 
 function gameSessionKey(tag: string, model: string): string {
@@ -358,12 +364,22 @@ async function loadGameSession(requestBody: JsonRecord): Promise<JsonRecord> {
   if (!tag) return { ok: true, session: null };
   const db = await ensureDatabase();
   if (!db) return { ok: true, session: null };
-  const model = sessionModelFromRequest(requestBody);
-  const row = db.prepare(`
-    SELECT game_id, updated_at, snapshot_json, state_json
-    FROM game_sessions
-    WHERE session_key = ? AND status = 'active'
-  `).get(gameSessionKey(tag, model)) as JsonRecord | undefined;
+  const requestedModel = typeof requestBody.model === "string" && requestBody.model.trim()
+    ? requestBody.model.trim().slice(0, 120)
+    : null;
+  const row = requestedModel
+    ? db.prepare(`
+        SELECT game_id, updated_at, snapshot_json, state_json
+        FROM game_sessions
+        WHERE session_key = ? AND status = 'active'
+      `).get(gameSessionKey(tag, requestedModel)) as JsonRecord | undefined
+    : db.prepare(`
+        SELECT game_id, updated_at, snapshot_json, state_json
+        FROM game_sessions
+        WHERE lower(tag) = lower(?) AND status = 'active'
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `).get(tag) as JsonRecord | undefined;
   if (!row) return { ok: true, session: null };
   return {
     ok: true,
@@ -402,12 +418,13 @@ async function clearCompletedGameSession(db: DatabaseSyncLike, tag: string | nul
 }
 
 function uploadedGameLeaderboardRows(db: DatabaseSyncLike): JsonRecord[] {
+  const placeholders = LEADERBOARD_MODELS.map(() => "?").join(", ");
   return db.prepare(`
     SELECT game_id, tag, model, uploaded_at, final_result_json
     FROM game_uploads
-    WHERE model = ?
+    WHERE model IN (${placeholders})
     ORDER BY uploaded_at ASC
-  `).all(MODEL) as JsonRecord[];
+  `).all(...LEADERBOARD_MODELS) as JsonRecord[];
 }
 
 function playerNameFromTag(tag: unknown): string {
@@ -497,7 +514,8 @@ function buildLeaderboardSummary(rows: JsonRecord[]): JsonRecord {
   return {
     generatedAt: new Date().toISOString(),
     source: "server-game-uploads",
-    model: MODEL,
+    model: "13.0/14.3 alternating",
+    models: LEADERBOARD_MODELS,
     games: playerStats.reduce((sum, player) => sum + player.games, 0),
     playerStats,
     winRate14_3: playerStats,
@@ -512,7 +530,8 @@ async function leaderboardSummary(): Promise<JsonRecord> {
     return {
       generatedAt: new Date().toISOString(),
       source: "server-game-uploads",
-      model: MODEL,
+      model: "13.0/14.3 alternating",
+      models: LEADERBOARD_MODELS,
       games: 0,
       playerStats: [],
       winRate14_3: [],
