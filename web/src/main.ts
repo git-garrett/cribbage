@@ -808,11 +808,21 @@ function uploadCompletedGame(gameId: string, force = false): void {
     snapshot: currentSnapshot?.gameId === gameId ? currentSnapshot : null,
     events,
   }).then(() => {
-    markGameUploaded(gameId);
+    if (endEvent) markGameUploaded(gameId);
     if (state.leaderboardOpen) void refreshLeaderboard();
   }).catch((error) => {
     console.warn("Completed game upload failed", error);
   });
+}
+
+function uploadLocalCompletedGames(force = false): void {
+  if (!usesRemoteAi()) return;
+  const completedGameIds = new Set(
+    loadAnalytics().events
+      .filter((event) => event.type === "game" && event.action === "end")
+      .map((event) => event.gameId),
+  );
+  for (const gameId of completedGameIds) uploadCompletedGame(gameId, force);
 }
 
 function idbRequest<T>(request: IDBRequest<T>): Promise<T> {
@@ -885,7 +895,7 @@ function syncAnalytics(events: AnalyticsEvent[]): void {
   saveAnalytics(store);
   persistPhoneGameEvents(changedEvents);
   for (const event of changedEvents) {
-    if (event.type === "game" && event.action === "end") uploadCompletedGame(event.gameId);
+    if (event.type === "game" && event.action === "end") uploadCompletedGame(event.gameId, true);
     else if ("review" in event && event.review) uploadCompletedGame(event.gameId, true);
   }
 }
@@ -3242,6 +3252,7 @@ async function refreshLeaderboard(): Promise<void> {
   state.leaderboardLoading = true;
   render(state.game);
   try {
+    uploadLocalCompletedGames(true);
     state.leaderboardSummary = await serverGetJson<LeaderboardSummarySource>("/api/leaderboard");
   } catch (error) {
     console.warn("Leaderboard refresh failed", error);
@@ -4871,7 +4882,10 @@ els.troubleGame.addEventListener("click", async () => {
 });
 
 window.addEventListener("resize", () => render(state.game));
-window.addEventListener("pagehide", flushRemoteGameSession);
+window.addEventListener("pagehide", () => {
+  uploadLocalCompletedGames(true);
+  flushRemoteGameSession();
+});
 
 async function finishDiscardInBackground(
   epoch = interactionEpoch,
@@ -4932,6 +4946,7 @@ async function finishDiscardInBackground(
 
 async function initializeGameState(): Promise<void> {
   try {
+    uploadLocalCompletedGames(true);
     const remoteGame = await loadRemoteActiveGameSession();
     const initialGame = remoteGame ?? await api("/api/state");
     startCutForDealPreparation(initialGame);
