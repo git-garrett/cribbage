@@ -160,6 +160,7 @@ const state: {
   turnCutResolve: (() => void) | null;
   cutForDealPreparation: { key: string; promise: Promise<ServerCutForDealPreparationResponse> } | null;
   aiDiscardPreparation: { key: string; promise: Promise<AiDiscardPreparationResult> } | null;
+  finishingDiscardKey: string | null;
   nextHandPreparation: { key: string; promise: Promise<ServerAiDiscardPreparationResponse> } | null;
 } = {
   game: null,
@@ -202,6 +203,7 @@ const state: {
   turnCutResolve: null,
   cutForDealPreparation: null,
   aiDiscardPreparation: null,
+  finishingDiscardKey: null,
   nextHandPreparation: null,
 };
 
@@ -1749,6 +1751,11 @@ function preparedAiDiscardFor(game: GameState | null): Promise<AiDiscardPreparat
   if (!game || !currentSnapshot) return null;
   const key = `${currentSnapshot.gameId ?? "game"}:${game.handNumber}:${game.dealer}`;
   return state.aiDiscardPreparation?.key === key ? state.aiDiscardPreparation.promise : null;
+}
+
+function finishDiscardKeyFor(game: GameState | null): string | null {
+  if (!game || !currentSnapshot || game.phase !== "ai_discarding") return null;
+  return `${currentSnapshot.gameId ?? "game"}:${game.handNumber}:${game.dealer}`;
 }
 
 function nextHandPreparationKey(game: GameState): string | null {
@@ -4892,6 +4899,9 @@ async function finishDiscardInBackground(
   preplayedStartStage?: TurnCutProgress,
 ): Promise<void> {
   const isCurrent = (): boolean => epoch === interactionEpoch;
+  const finishKey = finishDiscardKeyFor(state.game);
+  if (finishKey && state.finishingDiscardKey === finishKey) return;
+  state.finishingDiscardKey = finishKey;
   setAiThinking(false);
   render(state.game);
   await waitForPaint();
@@ -4935,6 +4945,7 @@ async function finishDiscardInBackground(
     showServerBusy(error, () => finishDiscardInBackground(epoch, preplayedStartStage));
     render(state.game);
   } finally {
+    if (!finishKey || state.finishingDiscardKey === finishKey) state.finishingDiscardKey = null;
     if (!isCurrent()) return;
     state.turnCutRevealStage = null;
     state.turnCutResolve = null;

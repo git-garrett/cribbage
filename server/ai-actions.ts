@@ -115,10 +115,12 @@ export async function handleGameAction(requestBody: JsonRecord): Promise<JsonRec
         };
       }
       case "finish-discard":
+        if (game.phase !== "ai_discarding") break;
         await ensureOpponentModel(game.opponent as Opponent);
         game.finishDiscard();
         break;
       case "finish-discard-with-cards":
+        if (game.phase !== "ai_discarding") break;
         await ensureOpponentModel(game.opponent as Opponent);
         game.finishDiscardWithAiCards((payload.ids as number[]) || [], typeof payload.bestLead === "number" ? payload.bestLead : null);
         break;
