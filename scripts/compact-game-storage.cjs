@@ -379,6 +379,14 @@ function insertCompactGameRecords(db, { runId, matchupId, records }) {
   `);
   const pegDelete = db.prepare("DELETE FROM compact_peg_plays WHERE game_id = ?");
   const discardDelete = db.prepare("DELETE FROM compact_discards WHERE game_id = ?");
+  const handDelete = db.prepare("DELETE FROM compact_hands WHERE game_id = ?");
+  const existingGameIds = db.prepare(`
+    SELECT game_id
+    FROM compact_games
+    WHERE game_id = ?
+       OR (run_id = ? AND matchup_id = ? AND game_index = ?)
+  `);
+  const gameDelete = db.prepare("DELETE FROM compact_games WHERE game_id = ?");
   const pegInsert = db.prepare(`
     INSERT OR REPLACE INTO compact_peg_plays (
       game_id, hand_number, sequence, player, role, model, selected_ev, action, card,
@@ -399,6 +407,16 @@ function insertCompactGameRecords(db, { runId, matchupId, records }) {
     for (const record of records) {
       const gameId = record.gameId || `${runId}:${matchupId}:${record.gameIndex}`;
       const normalized = { ...record, gameId };
+      const replacementIds = new Set(
+        existingGameIds.all(gameId, runId, matchupId, record.gameIndex).map((row) => row.game_id),
+      );
+      replacementIds.add(gameId);
+      for (const replacementId of replacementIds) {
+        pegDelete.run(replacementId);
+        discardDelete.run(replacementId);
+        handDelete.run(replacementId);
+        gameDelete.run(replacementId);
+      }
       gameInsert.run(
         gameId,
         runId,
@@ -419,8 +437,6 @@ function insertCompactGameRecords(db, { runId, matchupId, records }) {
         record.logDetail ?? (record.events ? "events" : record.hands ? "hand" : "game"),
         record.notes ?? "",
       );
-      pegDelete.run(gameId);
-      discardDelete.run(gameId);
       games += 1;
       for (const hand of handsFromEvents(normalized)) {
         const row = compactHand(normalized, hand);

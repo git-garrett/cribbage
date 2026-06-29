@@ -47,6 +47,7 @@ export type Opponent =
   | "schell_table-peg_table-14.2"
   | "schell_table-peg_table-14.3"
   | "schell_table-peg_table-14.4"
+  | "schell_table-peg_table-14.4.1"
   | "schell_table-peg_table-14.5"
   | "schell_table-2.0";
 type LegacyOpponent =
@@ -116,6 +117,7 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "schell_table-peg_table-14.2": "Schell Table + Peg Table 14.2",
   "schell_table-peg_table-14.3": "Schell Table + Peg Table 14.3",
   "schell_table-peg_table-14.4": "Schell Table + Peg Table 14.4",
+  "schell_table-peg_table-14.4.1": "Schell Table + Peg Table 14.4.1",
   "schell_table-peg_table-14.5": "Schell Table + Peg Table 14.5",
 };
 const CRIB_FLUSH_BONUS_BY_SUIT_COUNT = cribFlushBonusBySuitCount as number[];
@@ -255,6 +257,7 @@ DISCARD_TABLES["schell_table-peg_table-14.1"] = DISCARD_TABLES["schell_table-2.0
 DISCARD_TABLES["schell_table-peg_table-14.2"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-14.3"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-14.4"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-14.4.1"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-14.5"] = DISCARD_TABLES["schell_table-2.0"];
 
 export class WinGame extends Error {}
@@ -2355,6 +2358,8 @@ const PEGGING_HOLD_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Pegging
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
   "schell_table-peg_table-14.4": () =>
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
+  "schell_table-peg_table-14.4.1": () =>
+    loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
   "schell_table-peg_table-14.5": () =>
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
 };
@@ -2373,6 +2378,8 @@ const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Peg
     loadPairwisePeggingTable(peggingPairwise14Url, peggingPairwise14Manifest as PeggingPairwiseManifest),
   "schell_table-peg_table-14.4": () =>
     loadSparseBoundedPeggingTable(peggingBounded144Url, peggingBounded144Manifest as PeggingPairwiseManifest),
+  "schell_table-peg_table-14.4.1": () =>
+    loadSparseBoundedPeggingTable(peggingBounded144Url, peggingBounded144Manifest as PeggingPairwiseManifest),
   "schell_table-peg_table-14.5": () =>
     loadFrontierPeggingTable(peggingFrontier145Url, peggingFrontier145Manifest as PeggingPairwiseManifest),
 };
@@ -2389,6 +2396,8 @@ const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLe
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
   "schell_table-peg_table-14.4": () =>
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
+  "schell_table-peg_table-14.4.1": () =>
+    loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
   "schell_table-peg_table-14.5": () =>
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
 };
@@ -2402,6 +2411,8 @@ const CRIB_TRIPOLICY_LOADERS: Partial<Record<Opponent, () => Promise<CribTripoli
   "schell_table-peg_table-14.3": () =>
     loadTripolicyCribTable(cribTripolicy14Url, cribTripolicy14Manifest as CribTripolicyManifest),
   "schell_table-peg_table-14.4": () =>
+    loadTripolicyCribTable(cribBounded144Url, cribBounded144Manifest as CribTripolicyManifest),
+  "schell_table-peg_table-14.4.1": () =>
     loadTripolicyCribTable(cribBounded144Url, cribBounded144Manifest as CribTripolicyManifest),
   "schell_table-peg_table-14.5": () =>
     loadTripolicyCribTable(cribFrontier145Url, cribFrontier145Manifest as CribTripolicyManifest),
@@ -2498,6 +2509,7 @@ function isModel14OrLater(engine: Opponent): boolean {
     engine === "schell_table-peg_table-14.2" ||
     engine === "schell_table-peg_table-14.3" ||
     engine === "schell_table-peg_table-14.4" ||
+    engine === "schell_table-peg_table-14.4.1" ||
     engine === "schell_table-peg_table-14.5";
 }
 
@@ -2542,7 +2554,8 @@ function usesTripolicyDiscardModel(engine: Opponent): boolean {
 
 function usesNineWayTripolicyDiscardModel(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-14.2" ||
-    engine === "schell_table-peg_table-14.3";
+    engine === "schell_table-peg_table-14.3" ||
+    engine === "schell_table-peg_table-14.4.1";
 }
 
 function usesCorrectedDiscardWinProbability(engine: Opponent): boolean {
@@ -2550,12 +2563,14 @@ function usesCorrectedDiscardWinProbability(engine: Opponent): boolean {
     engine === "schell_table-peg_table-14.2" ||
     engine === "schell_table-peg_table-14.3" ||
     engine === "schell_table-peg_table-14.4" ||
+    engine === "schell_table-peg_table-14.4.1" ||
     engine === "schell_table-peg_table-14.5";
 }
 
 function usesRankOnlyDiscardWinProbabilityApproximation(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-14.3" ||
     engine === "schell_table-peg_table-14.4" ||
+    engine === "schell_table-peg_table-14.4.1" ||
     engine === "schell_table-peg_table-14.5";
 }
 
@@ -5780,6 +5795,7 @@ function normalizeOpponent(opponent: StoredOpponent): Opponent {
     opponent === "expert_schell_table-peg_table-4.0"
   ) return "schell_table-peg_table-4.0";
   if (opponent === "schell_table-peg_table-14.5") return "schell_table-peg_table-14.5";
+  if (opponent === "schell_table-peg_table-14.4.1") return "schell_table-peg_table-14.4.1";
   if (opponent === "schell_table-peg_table-14.4") return "schell_table-peg_table-14.4";
   if (opponent === "schell_table-peg_table-14.3") return "schell_table-peg_table-14.3";
   if (opponent === "schell_table-peg_table-14.2") return "schell_table-peg_table-14.2";
