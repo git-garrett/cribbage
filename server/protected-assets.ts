@@ -19,6 +19,7 @@ export function protectedModelAssetPath(assetUrl: string): string | null {
     "crib-score-histogram-bounded-tripolicy-by-discard-cut.bin": "schell_table-peg_table-14.4",
     "pegging-outcome-frontier-overrides.bin": "schell_table-peg_table-14.5",
     "crib-score-histogram-frontier-by-discard-cut.bin": "schell_table-peg_table-14.5",
+    "crib-score-histogram-full-frontier-by-discard-cut.bin": "schell_table-peg_table-14.6",
   };
   const sourceName = Object.keys(modelByAsset).find((name) => {
     const prefix = name.slice(0, -".bin".length);

@@ -3620,6 +3620,7 @@ function sortedAnalyticsEngines(
 
 function analyticsEngineSortKey(engine: Opponent): number {
   return [
+    "schell_table-peg_table-14.6",
     "schell_table-peg_table-14.5",
     "schell_table-peg_table-14.4.1",
     "schell_table-peg_table-14.4",
@@ -3966,6 +3967,7 @@ function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
     engine === "schell_table-peg_table-14.4" ||
     engine === "schell_table-peg_table-14.4.1" ||
     engine === "schell_table-peg_table-14.5" ||
+    engine === "schell_table-peg_table-14.6" ||
     engine === "schell_table-2.0"
   ) {
     return engine;

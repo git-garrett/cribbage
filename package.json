@@ -1,10 +1,10 @@
 {
-  "version": "14.5.0",
+  "version": "14.6.0",
   "scripts": {
     "build": "node --max-old-space-size=8192 node_modules/vite/bin/vite.js build && node scripts/check-client-artifacts.cjs",
     "build:server": "vite build --config vite.server.config.ts",
     "build:deploy": "npm run build && npm run build:server",
-    "package:server": "COPYFILE_DISABLE=1 tar --no-xattrs -czf cribbage-server-${npm_package_version}.tgz dist server-dist package.json docs/nanode-rocky-server-setup.md web/src/models/schell_table-peg_table-12.0/pegging-outcome-pairwise.bin web/src/models/schell_table-peg_table-13.0/pegging-remaining-hand-distribution.bin web/src/models/schell_table-peg_table-13.0/pone-lead-frequency.bin web/src/models/schell_table-peg_table-14.0/pegging-outcome-tripolicy-aligned.bin web/src/models/schell_table-peg_table-14.0/crib-score-histogram-tripolicy-by-discard-cut.bin web/src/models/schell_table-peg_table-14.4/pegging-outcome-bounded-overrides.bin web/src/models/schell_table-peg_table-14.4/crib-score-histogram-bounded-tripolicy-by-discard-cut.bin web/src/models/schell_table-peg_table-14.5/pegging-outcome-frontier-overrides.bin web/src/models/schell_table-peg_table-14.5/crib-score-histogram-frontier-by-discard-cut.bin && node scripts/check-server-package.cjs",
+    "package:server": "COPYFILE_DISABLE=1 tar --no-xattrs -czf cribbage-server-${npm_package_version}.tgz dist server-dist package.json docs/nanode-rocky-server-setup.md web/src/models/schell_table-peg_table-12.0/pegging-outcome-pairwise.bin web/src/models/schell_table-peg_table-13.0/pegging-remaining-hand-distribution.bin web/src/models/schell_table-peg_table-13.0/pone-lead-frequency.bin web/src/models/schell_table-peg_table-14.0/pegging-outcome-tripolicy-aligned.bin web/src/models/schell_table-peg_table-14.0/crib-score-histogram-tripolicy-by-discard-cut.bin web/src/models/schell_table-peg_table-14.4/pegging-outcome-bounded-overrides.bin web/src/models/schell_table-peg_table-14.4/crib-score-histogram-bounded-tripolicy-by-discard-cut.bin web/src/models/schell_table-peg_table-14.5/pegging-outcome-frontier-overrides.bin web/src/models/schell_table-peg_table-14.5/crib-score-histogram-frontier-by-discard-cut.bin web/src/models/schell_table-peg_table-14.6/crib-score-histogram-full-frontier-by-discard-cut.bin && node scripts/check-server-package.cjs",
     "cap:copy": "npm run build && cap copy",
     "cap:sync:ios": "npm run build && cap sync ios",
     "dev": "vite --host 0.0.0.0",

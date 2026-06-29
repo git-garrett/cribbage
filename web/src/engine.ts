@@ -22,6 +22,8 @@ import peggingFrontier145Manifest from "./models/schell_table-peg_table-14.5/peg
 import peggingFrontier145Url from "./models/schell_table-peg_table-14.5/pegging-outcome-frontier-overrides.bin?url";
 import cribFrontier145Manifest from "./models/schell_table-peg_table-14.5/crib-score-histogram-frontier-by-discard-cut.manifest.json";
 import cribFrontier145Url from "./models/schell_table-peg_table-14.5/crib-score-histogram-frontier-by-discard-cut.bin?url";
+import cribFullFrontier146Manifest from "./models/schell_table-peg_table-14.6/crib-score-histogram-full-frontier-by-discard-cut.manifest.json";
+import cribFullFrontier146Url from "./models/schell_table-peg_table-14.6/crib-score-histogram-full-frontier-by-discard-cut.bin?url";
 
 export type PlayerKey = "human" | "ai";
 export type Opponent =
@@ -49,6 +51,7 @@ export type Opponent =
   | "schell_table-peg_table-14.4"
   | "schell_table-peg_table-14.4.1"
   | "schell_table-peg_table-14.5"
+  | "schell_table-peg_table-14.6"
   | "schell_table-2.0";
 type LegacyOpponent =
   | "ras-table-1.0"
@@ -119,6 +122,7 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "schell_table-peg_table-14.4": "Schell Table + Peg Table 14.4",
   "schell_table-peg_table-14.4.1": "Schell Table + Peg Table 14.4.1",
   "schell_table-peg_table-14.5": "Schell Table + Peg Table 14.5",
+  "schell_table-peg_table-14.6": "Schell Table + Peg Table 14.6",
 };
 const CRIB_FLUSH_BONUS_BY_SUIT_COUNT = cribFlushBonusBySuitCount as number[];
 const HAND_RANK_SCORE_BY_KEEP_CUT = (handRankScoreByKeepCut as {
@@ -259,6 +263,7 @@ DISCARD_TABLES["schell_table-peg_table-14.3"] = DISCARD_TABLES["schell_table-2.0
 DISCARD_TABLES["schell_table-peg_table-14.4"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-14.4.1"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-14.5"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-14.6"] = DISCARD_TABLES["schell_table-2.0"];
 
 export class WinGame extends Error {}
 
@@ -2362,6 +2367,8 @@ const PEGGING_HOLD_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Pegging
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
   "schell_table-peg_table-14.5": () =>
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
+  "schell_table-peg_table-14.6": () =>
+    loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
 };
 const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<PeggingPairwiseTable>>> = {
   "schell_table-peg_table-12.0": () =>
@@ -2382,6 +2389,8 @@ const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Peg
     loadSparseBoundedPeggingTable(peggingBounded144Url, peggingBounded144Manifest as PeggingPairwiseManifest),
   "schell_table-peg_table-14.5": () =>
     loadFrontierPeggingTable(peggingFrontier145Url, peggingFrontier145Manifest as PeggingPairwiseManifest),
+  "schell_table-peg_table-14.6": () =>
+    loadFrontierPeggingTable(peggingFrontier145Url, peggingFrontier145Manifest as PeggingPairwiseManifest),
 };
 const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLeadFrequencyTable>>> = {
   "schell_table-peg_table-13.0": () =>
@@ -2400,6 +2409,8 @@ const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLe
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
   "schell_table-peg_table-14.5": () =>
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
+  "schell_table-peg_table-14.6": () =>
+    loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
 };
 const CRIB_TRIPOLICY_LOADERS: Partial<Record<Opponent, () => Promise<CribTripolicyTable>>> = {
   "schell_table-peg_table-14.0": () =>
@@ -2416,6 +2427,8 @@ const CRIB_TRIPOLICY_LOADERS: Partial<Record<Opponent, () => Promise<CribTripoli
     loadTripolicyCribTable(cribBounded144Url, cribBounded144Manifest as CribTripolicyManifest),
   "schell_table-peg_table-14.5": () =>
     loadTripolicyCribTable(cribFrontier145Url, cribFrontier145Manifest as CribTripolicyManifest),
+  "schell_table-peg_table-14.6": () =>
+    loadTripolicyCribTable(cribFullFrontier146Url, cribFullFrontier146Manifest as CribTripolicyManifest),
 };
 const CRIB_FRONTIER_LOADERS: Partial<Record<Opponent, () => Promise<CribFrontierTable>>> = {};
 
@@ -2510,7 +2523,8 @@ function isModel14OrLater(engine: Opponent): boolean {
     engine === "schell_table-peg_table-14.3" ||
     engine === "schell_table-peg_table-14.4" ||
     engine === "schell_table-peg_table-14.4.1" ||
-    engine === "schell_table-peg_table-14.5";
+    engine === "schell_table-peg_table-14.5" ||
+    engine === "schell_table-peg_table-14.6";
 }
 
 function usesWinProbabilityPegging(engine: Opponent): boolean {
@@ -2555,7 +2569,8 @@ function usesTripolicyDiscardModel(engine: Opponent): boolean {
 function usesNineWayTripolicyDiscardModel(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-14.2" ||
     engine === "schell_table-peg_table-14.3" ||
-    engine === "schell_table-peg_table-14.4.1";
+    engine === "schell_table-peg_table-14.4.1" ||
+    engine === "schell_table-peg_table-14.6";
 }
 
 function usesCorrectedDiscardWinProbability(engine: Opponent): boolean {
@@ -2564,14 +2579,16 @@ function usesCorrectedDiscardWinProbability(engine: Opponent): boolean {
     engine === "schell_table-peg_table-14.3" ||
     engine === "schell_table-peg_table-14.4" ||
     engine === "schell_table-peg_table-14.4.1" ||
-    engine === "schell_table-peg_table-14.5";
+    engine === "schell_table-peg_table-14.5" ||
+    engine === "schell_table-peg_table-14.6";
 }
 
 function usesRankOnlyDiscardWinProbabilityApproximation(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-14.3" ||
     engine === "schell_table-peg_table-14.4" ||
     engine === "schell_table-peg_table-14.4.1" ||
-    engine === "schell_table-peg_table-14.5";
+    engine === "schell_table-peg_table-14.5" ||
+    engine === "schell_table-peg_table-14.6";
 }
 
 function usesKnownCardPostPeggingWinProbability(engine: Opponent): boolean {
@@ -2579,7 +2596,12 @@ function usesKnownCardPostPeggingWinProbability(engine: Opponent): boolean {
 }
 
 function usesFrontierPolicyModel(engine: Opponent): boolean {
-  return engine === "schell_table-peg_table-14.5";
+  return engine === "schell_table-peg_table-14.5" ||
+    engine === "schell_table-peg_table-14.6";
+}
+
+function usesIndexedFrontierPolicyModel(engine: Opponent): boolean {
+  return engine === "schell_table-peg_table-14.6";
 }
 
 function frontierPolicyIndex(policy: CribPolicy | PeggingOutcomePolicy): number | null {
@@ -2589,6 +2611,10 @@ function frontierPolicyIndex(policy: CribPolicy | PeggingOutcomePolicy): number 
 }
 
 function peggingOutcomePolicies(engine: Opponent): PeggingOutcomePolicy[] {
+  if (usesIndexedFrontierPolicyModel(engine)) {
+    const max = PEGGING_PAIRWISE_TABLES[engine]?.maxFrontierOutcomes ?? 0;
+    return ["ev", ...Array.from({ length: max }, (_, index) => `frontier:${index}` as const)];
+  }
   if (usesFrontierPolicyModel(engine)) {
     return ["ev", "frontier-on", "frontier-off"];
   }
@@ -2598,6 +2624,10 @@ function peggingOutcomePolicies(engine: Opponent): PeggingOutcomePolicy[] {
 }
 
 function cribPolicies(engine: Opponent): CribPolicy[] {
+  if (usesIndexedFrontierPolicyModel(engine)) {
+    const policyCount = CRIB_TRIPOLICY_TABLES[engine]?.policyCount ?? 1;
+    return ["ev", ...Array.from({ length: Math.max(0, policyCount - 1) }, (_, index) => `frontier:${index}` as const)];
+  }
   if (usesFrontierPolicyModel(engine)) {
     return CRIB_TRIPOLICY_TABLES[engine]
       ? ["ev", "frontier-on", "frontier-off"]
@@ -4974,6 +5004,7 @@ function tripolicyCribPolicyEntry(
   const average = table.directory.getFloat32(directoryOffset, true);
   const recordOffset = table.directory.getUint32(directoryOffset + 4, true);
   const recordCount = table.directory.getUint16(directoryOffset + 8, true);
+  if (recordCount === 0 && frontierPolicyIndex(policy) !== null) return null;
   const opponentDiscards: CribTripolicyPolicyEntry["opponentDiscards"] = [];
   for (let index = 0; index < recordCount; index += 1) {
     const offset = (recordOffset + index) * table.opponentRecordBytes;
@@ -5027,8 +5058,12 @@ function cribPolicyEntry(
   engine: Opponent,
   policy: CribPolicy,
 ): CribTripolicyPolicyEntry | null {
-  return frontierCribPolicyEntry(discard, role, cut, engine, policy) ??
+  const entry = frontierCribPolicyEntry(discard, role, cut, engine, policy) ??
     tripolicyCribPolicyEntry(discard, role, cut, engine, policy);
+  if (entry) return entry;
+  return frontierPolicyIndex(policy) !== null
+    ? tripolicyCribPolicyEntry(discard, role, cut, engine, "ev")
+    : null;
 }
 
 function rankCutCribScore(
@@ -5794,6 +5829,7 @@ function normalizeOpponent(opponent: StoredOpponent): Opponent {
     opponent === "expert_schell-table-peg_table-1.2" ||
     opponent === "expert_schell_table-peg_table-4.0"
   ) return "schell_table-peg_table-4.0";
+  if (opponent === "schell_table-peg_table-14.6") return "schell_table-peg_table-14.6";
   if (opponent === "schell_table-peg_table-14.5") return "schell_table-peg_table-14.5";
   if (opponent === "schell_table-peg_table-14.4.1") return "schell_table-peg_table-14.4.1";
   if (opponent === "schell_table-peg_table-14.4") return "schell_table-peg_table-14.4";
