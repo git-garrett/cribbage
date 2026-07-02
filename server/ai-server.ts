@@ -17,6 +17,7 @@ const DB_PATH = resolve(process.env.CRIBBAGE_DB_PATH || join(DATA_DIR, "cribbage
 const MARKETING_HOSTS = new Set(["strongcribbage.com"]);
 const AI_QUEUE_MAX_WAITING = Number(process.env.AI_QUEUE_MAX_WAITING || 4);
 const LEADERBOARD_MODELS = [MODEL_13, MODEL_14_3] as const;
+const PUBLIC_GAME_MODELS = [MODEL_13, MODEL_14_3] as const;
 
 type JsonRecord = Record<string, unknown>;
 type AiJobKind = "game-action" | "ai-discard" | "ai-peg" | "model-status";
@@ -577,7 +578,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, pat
   const requestBody = await readRequestJson(request);
   const startedAt = performance.now();
   if (pathname === "/api/game/action") {
-    const payload = await runAiJob("game-action", requestBody);
+    const payload = await runAiJob("game-action", await publicGameActionRequest(request, requestBody));
     jsonResponse(response, 200, payload);
     return;
   }
@@ -665,7 +666,105 @@ async function serveComingSoon(response: ServerResponse): Promise<void> {
 }
 
 function requestHost(request: IncomingMessage): string {
-  return String(request.headers.host || "").split(":")[0].toLowerCase();
+  const host = String(request.headers.host || "").toLowerCase();
+  const closingBracket = host.indexOf("]");
+  if (host.startsWith("[") && closingBracket > 1) return host.slice(1, closingBracket);
+  return host.split(":")[0];
+}
+
+function isLocalNetworkHost(host: string): boolean {
+  const normalized = host.replace(/^\[|\]$/g, "").toLowerCase();
+  if (normalized === "localhost" || normalized === "::1") return true;
+  if (normalized.endsWith(".local")) return true;
+  const parts = normalized.split(".").map((part) => Number.parseInt(part, 10));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+  const [a, b] = parts;
+  return a === 10 ||
+    a === 127 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168);
+}
+
+function gameUploadCountsByPublicModel(db: DatabaseSyncLike): Record<string, number> {
+  const counts: Record<string, number> = Object.fromEntries(PUBLIC_GAME_MODELS.map((model) => [model, 0]));
+  const placeholders = PUBLIC_GAME_MODELS.map(() => "?").join(", ");
+  const rows = db.prepare(`
+    SELECT model, final_result_json
+    FROM game_uploads
+    WHERE model IN (${placeholders})
+  `).all(...PUBLIC_GAME_MODELS) as JsonRecord[];
+  for (const row of rows) {
+    if (!finalResultFromRow(row)) continue;
+    const model = String(row.model || "");
+    if (model in counts) counts[model] += 1;
+  }
+  return counts;
+}
+
+function activeGameSessionCountsByPublicModel(db: DatabaseSyncLike): Record<string, number> {
+  const counts: Record<string, number> = Object.fromEntries(PUBLIC_GAME_MODELS.map((model) => [model, 0]));
+  const placeholders = PUBLIC_GAME_MODELS.map(() => "?").join(", ");
+  const rows = db.prepare(`
+    SELECT model, COUNT(*) AS games
+    FROM game_sessions
+    WHERE status = 'active' AND model IN (${placeholders})
+    GROUP BY model
+  `).all(...PUBLIC_GAME_MODELS) as JsonRecord[];
+  for (const row of rows) {
+    const model = String(row.model || "");
+    if (model in counts) counts[model] += Number(row.games || 0);
+  }
+  return counts;
+}
+
+function mostRecentPublicModel(db: DatabaseSyncLike): string | null {
+  const placeholders = PUBLIC_GAME_MODELS.map(() => "?").join(", ");
+  const upload = db.prepare(`
+    SELECT model, uploaded_at AS at
+    FROM game_uploads
+    WHERE model IN (${placeholders})
+    ORDER BY uploaded_at DESC
+    LIMIT 1
+  `).get(...PUBLIC_GAME_MODELS) as JsonRecord | undefined;
+  const session = db.prepare(`
+    SELECT model, created_at AS at
+    FROM game_sessions
+    WHERE status = 'active' AND model IN (${placeholders})
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(...PUBLIC_GAME_MODELS) as JsonRecord | undefined;
+  if (!upload && !session) return null;
+  if (!upload) return String(session?.model || "");
+  if (!session) return String(upload.model || "");
+  return String(String(session.at || "") > String(upload.at || "") ? session.model : upload.model);
+}
+
+async function publicModelForGameStart(): Promise<string> {
+  const db = await ensureDatabase();
+  if (!db) return MODEL_13;
+  const uploadCounts = gameUploadCountsByPublicModel(db);
+  const sessionCounts = activeGameSessionCountsByPublicModel(db);
+  const count13 = uploadCounts[MODEL_13] + sessionCounts[MODEL_13];
+  const count14_3 = uploadCounts[MODEL_14_3] + sessionCounts[MODEL_14_3];
+  if (count13 < count14_3) return MODEL_13;
+  if (count14_3 < count13) return MODEL_14_3;
+  return mostRecentPublicModel(db) === MODEL_13 ? MODEL_14_3 : MODEL_13;
+}
+
+async function publicGameActionRequest(request: IncomingMessage, requestBody: JsonRecord): Promise<JsonRecord> {
+  if (isLocalNetworkHost(requestHost(request))) return requestBody;
+  if (requestBody.action !== "new") return requestBody;
+  const payload = requestBody.payload && typeof requestBody.payload === "object"
+    ? requestBody.payload as JsonRecord
+    : {};
+  const publicPayload = { ...payload };
+  publicPayload.opponent = await publicModelForGameStart();
+  return {
+    ...requestBody,
+    payload: publicPayload,
+  };
 }
 
 const server = createServer((request, response) => {

@@ -10,7 +10,6 @@ import type {
   ScorePhase,
 } from "./engine";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
-import leaderboardSummary from "./leaderboard-summary.json";
 
 const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-14.3";
 
@@ -84,6 +83,17 @@ interface LeaderboardSummarySource {
   bestWins?: LeaderboardWin[];
   mostSkunks: LeaderboardPlayer[];
 }
+
+const EMPTY_LEADERBOARD_SUMMARY: LeaderboardSummarySource = {
+  generatedAt: "",
+  source: "server-game-uploads",
+  model: "13.0/14.3 balanced",
+  games: 0,
+  playerStats: [],
+  winRate14_3: [],
+  bestWins: [],
+  mostSkunks: [],
+};
 
 type ServerBusyRetry = () => void | Promise<void>;
 type AppFontSize = "normal" | "large" | "x-large";
@@ -177,7 +187,7 @@ const state: {
   gameLogOpen: false,
   leaderboardOpen: false,
   leaderboardLoading: false,
-  leaderboardSummary: leaderboardSummary as LeaderboardSummarySource,
+  leaderboardSummary: EMPTY_LEADERBOARD_SUMMARY,
   modelInfoOpen: false,
   decisionReviewOpen: false,
   selectedModelInfo: DEFAULT_OPPONENT,
@@ -408,9 +418,13 @@ const PHONE_GAME_DB_NAME = "cribbage-game-log";
 const PHONE_GAME_DB_VERSION = 1;
 const NOTICE_MIN_MS = 600;
 const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-14.3";
-const SIMPLE_NETWORK_ALLOWED_OPPONENTS = new Set<string>([
+const SIMPLE_NETWORK_PUBLIC_OPPONENTS = new Set<string>([
   "schell_table-peg_table-13.0",
   "schell_table-peg_table-14.3",
+]);
+const SIMPLE_NETWORK_LOCAL_OPPONENTS = new Set<string>([
+  ...SIMPLE_NETWORK_PUBLIC_OPPONENTS,
+  "schell_table-peg_table-14.7",
 ]);
 const URL_PARAMS = new URLSearchParams(window.location.search);
 const FULL_APP_MODE = URL_PARAMS.get("full") === "1" || URL_PARAMS.get("mode") === "full";
@@ -418,10 +432,15 @@ const SIMPLE_NETWORK_MODE = !FULL_APP_MODE;
 const SESSION_TAG = (URL_PARAMS.get("tag") || "").trim();
 const PLAYER_FIRST_NAME_KEY = "strong-cribbage.playerFirstName.v1";
 const SIMPLE_NETWORK_SESSION_KEY = "strong-cribbage.simpleNetworkSession";
+const SIMPLE_NETWORK_OPPONENT_KEY = "strong-cribbage.simpleNetworkOpponent.v1";
 const REMOTE_AI_DISABLED = URL_PARAMS.get("local") === "1";
 const REMOTE_AI_BASE = (URL_PARAMS.get("api") || "").replace(/\/$/, "");
 const REMOTE_AI_EXPLICIT = URL_PARAMS.has("api");
 const IS_VITE_DEV = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV);
+const LOCAL_NETWORK_MODE = isLocalNetworkHostname(window.location.hostname);
+const SIMPLE_NETWORK_LOCAL_AI_MODE = SIMPLE_NETWORK_MODE &&
+  LOCAL_NETWORK_MODE &&
+  (REMOTE_AI_DISABLED || (IS_VITE_DEV && !REMOTE_AI_EXPLICIT));
 const SERVER_UPLOAD_KEY = "strong-cribbage.serverUploadedGames.v1";
 const ADMIN_HASH = "#strong-admin-13";
 
@@ -524,9 +543,33 @@ function saveGame(): void {
 }
 
 let currentSnapshot: GameSnapshot | null = null;
-const simpleNetworkSessionValue = "server-assigned-13.0-14.3";
+function simpleNetworkSessionValue(): string {
+  return SIMPLE_NETWORK_LOCAL_AI_MODE ? "local-13.0-14.3-14.7" : "server-assigned-13.0-14.3";
+}
 function isValidSimpleNetworkSessionValue(value: string | null): boolean {
-  return value === simpleNetworkSessionValue || value === SIMPLE_NETWORK_OPPONENT;
+  return value === simpleNetworkSessionValue() ||
+    (SIMPLE_NETWORK_LOCAL_AI_MODE && value === "server-assigned-13.0-14.3-14.7") ||
+    value === SIMPLE_NETWORK_OPPONENT;
+}
+function simpleNetworkAllowedOpponents(): Set<string> {
+  return SIMPLE_NETWORK_LOCAL_AI_MODE ? SIMPLE_NETWORK_LOCAL_OPPONENTS : SIMPLE_NETWORK_PUBLIC_OPPONENTS;
+}
+function isAllowedSimpleNetworkOpponent(opponent: string | undefined): boolean {
+  return Boolean(opponent && simpleNetworkAllowedOpponents().has(opponent));
+}
+function simpleNetworkCanSelectOpponent(): boolean {
+  return SIMPLE_NETWORK_LOCAL_AI_MODE;
+}
+function simpleNetworkSelectedOpponent(): Opponent {
+  const engine = normalizeAnalyticsEngine(safeLocalStorageGet(SIMPLE_NETWORK_OPPONENT_KEY) ?? undefined);
+  return isAllowedSimpleNetworkOpponent(engine) ? engine : SIMPLE_NETWORK_OPPONENT;
+}
+function selectedMenuOpponent(): Opponent | null {
+  if (SIMPLE_NETWORK_MODE && !simpleNetworkCanSelectOpponent()) return null;
+  const engine = normalizeAnalyticsEngine(els.opponent.value);
+  return SIMPLE_NETWORK_MODE && !isAllowedSimpleNetworkOpponent(engine)
+    ? SIMPLE_NETWORK_OPPONENT
+    : engine;
 }
 const savedGame = loadSavedGame();
 if (savedGame) {
@@ -536,13 +579,13 @@ if (savedGame) {
 const simpleLoadedState = state.game;
 state.splashOpen = SIMPLE_NETWORK_MODE && !playerFirstName;
 state.hasResumableGame = SIMPLE_NETWORK_MODE &&
-  Boolean(currentSnapshot?.opponent && SIMPLE_NETWORK_ALLOWED_OPPONENTS.has(currentSnapshot.opponent)) &&
+  isAllowedSimpleNetworkOpponent(currentSnapshot?.opponent) &&
   simpleLoadedState?.phase !== "game_over";
 if (
   SIMPLE_NETWORK_MODE &&
   (
     !currentSnapshot?.opponent ||
-    !SIMPLE_NETWORK_ALLOWED_OPPONENTS.has(currentSnapshot.opponent) ||
+    !isAllowedSimpleNetworkOpponent(currentSnapshot.opponent) ||
     !isValidSimpleNetworkSessionValue(safeLocalStorageGet(SIMPLE_NETWORK_SESSION_KEY)) ||
     simpleLoadedState?.phase === "game_over"
   )
@@ -552,27 +595,53 @@ if (
   safeLocalStorageRemove(SAVE_KEY);
 }
 state.hasResumableGame = SIMPLE_NETWORK_MODE &&
-  Boolean(currentSnapshot?.opponent && SIMPLE_NETWORK_ALLOWED_OPPONENTS.has(currentSnapshot.opponent)) &&
+  isAllowedSimpleNetworkOpponent(currentSnapshot?.opponent) &&
   state.game?.phase !== "game_over";
 if (SIMPLE_NETWORK_MODE) {
-  safeLocalStorageSet(SIMPLE_NETWORK_SESSION_KEY, simpleNetworkSessionValue);
+  safeLocalStorageSet(SIMPLE_NETWORK_SESSION_KEY, simpleNetworkSessionValue());
 } else {
   safeLocalStorageRemove(SIMPLE_NETWORK_SESSION_KEY);
 }
 els.appVersion.textContent = displayAppVersion(__APP_VERSION__);
 buildBoard();
 
+function applyFullModeOpponentAvailability(): void {
+  if (LOCAL_NETWORK_MODE) return;
+  for (const option of [...els.opponent.options]) {
+    if (option.value !== "schell_table-peg_table-14.7") continue;
+    option.hidden = true;
+    option.disabled = true;
+  }
+  if (els.opponent.value === "schell_table-peg_table-14.7") {
+    els.opponent.value = DEFAULT_OPPONENT;
+  }
+}
+
 function applySimpleNetworkMode(): void {
-  if (!SIMPLE_NETWORK_MODE) return;
+  if (!SIMPLE_NETWORK_MODE) {
+    applyFullModeOpponentAvailability();
+    return;
+  }
   els.app.dataset.simpleNetwork = "true";
-  els.opponent.value = SIMPLE_NETWORK_OPPONENT;
-  els.opponent.disabled = true;
-  els.opponent.closest("label")?.setAttribute("hidden", "");
+  const allowedOpponents = simpleNetworkAllowedOpponents();
+  for (const option of [...els.opponent.options]) {
+    const allowed = allowedOpponents.has(option.value);
+    option.hidden = !allowed;
+    option.disabled = !allowed;
+  }
+  els.opponent.value = simpleNetworkSelectedOpponent();
+  els.opponent.disabled = !simpleNetworkCanSelectOpponent();
+  if (simpleNetworkCanSelectOpponent()) {
+    els.opponent.closest("label")?.removeAttribute("hidden");
+  } else {
+    els.opponent.closest("label")?.setAttribute("hidden", "");
+  }
   els.gameLogOpen.hidden = true;
   els.leaderboardOpen.hidden = false;
   els.modelInfoOpen.hidden = true;
   els.exportGameLog.hidden = true;
   els.modelLoading.hidden = true;
+  syncNewGameControl(state.game);
 }
 
 function applyAdminVisibility(): void {
@@ -696,6 +765,21 @@ function tagPhoneRecord<T extends object>(record: T): T & { tags?: string[]; ses
     tags,
     sessionTag,
   };
+}
+
+function isLocalNetworkHostname(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (host === "localhost" || host === "::1") return true;
+  if (host.endsWith(".local")) return true;
+  const parts = host.split(".").map((part) => Number.parseInt(part, 10));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+  const [a, b] = parts;
+  return a === 10 ||
+    a === 127 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168);
 }
 
 function cleanFirstName(value: string): string {
@@ -1619,6 +1703,17 @@ function isActiveGame(game: GameState | null): game is GameState {
   return Boolean(game && game.phase !== "game_over");
 }
 
+function canStartFreshGame(game: GameState | null): boolean {
+  return !game || game.phase === "game_over" || game.phase === "cut_for_deal";
+}
+
+function syncNewGameControl(game: GameState | null): boolean {
+  const canStartNewGame = canStartFreshGame(game);
+  els.newGame.hidden = false;
+  els.newGame.disabled = !canStartNewGame;
+  return canStartNewGame;
+}
+
 let remoteSessionSaveTimer = 0;
 
 function persistRemoteGameSession(): void {
@@ -1664,6 +1759,7 @@ async function loadRemoteActiveGameSession(): Promise<GameState | null> {
   });
   const session = response.session;
   if (!session || session.state.phase === "game_over") return null;
+  if (SIMPLE_NETWORK_MODE && !isAllowedSimpleNetworkOpponent(session.snapshot.opponent)) return null;
   currentSnapshot = session.snapshot;
   state.game = session.state;
   state.hasResumableGame = true;
@@ -1810,11 +1906,14 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
   try {
     if (path === "/api/state") {
       if (state.game) return state.game;
-      return serverGameAction("new", SIMPLE_NETWORK_MODE ? {} : { opponent: DEFAULT_OPPONENT });
+      const opponent = SIMPLE_NETWORK_MODE
+        ? selectedMenuOpponent()
+        : DEFAULT_OPPONENT;
+      return serverGameAction("new", opponent ? { opponent } : {});
     }
     if (path === "/api/new") {
       const opponent = SIMPLE_NETWORK_MODE
-        ? null
+        ? selectedMenuOpponent()
         : (body?.opponent as Opponent) || DEFAULT_OPPONENT;
       return serverGameAction("new", opponent ? { opponent } : {});
     }
@@ -2028,7 +2127,7 @@ function completeTurnCutInteraction(): void {
   if (wasConfirmingCut) {
     state.turnCutRevealStage = null;
     state.resultOverride = ["Waiting for AI to play."];
-    setAiThinking(true);
+    if (state.game && shouldShowAiThinkingForPegging(state.game)) setAiThinking(true);
     render(state.game);
   }
   resolve();
@@ -3620,6 +3719,7 @@ function sortedAnalyticsEngines(
 
 function analyticsEngineSortKey(engine: Opponent): number {
   return [
+    "schell_table-peg_table-14.7",
     "schell_table-peg_table-14.6",
     "schell_table-peg_table-14.5",
     "schell_table-peg_table-14.4.1",
@@ -3968,6 +4068,7 @@ function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
     engine === "schell_table-peg_table-14.4.1" ||
     engine === "schell_table-peg_table-14.5" ||
     engine === "schell_table-peg_table-14.6" ||
+    engine === "schell_table-peg_table-14.7" ||
     engine === "schell_table-2.0"
   ) {
     return engine;
@@ -4118,7 +4219,7 @@ function render(game: GameState | null): void {
   }
 
   const gameActive = game.phase !== "game_over";
-  els.newGame.hidden = SIMPLE_NETWORK_MODE && gameActive;
+  const canStartNewGame = syncNewGameControl(game);
   const waitingForTurnCutClick = state.turnCutRevealStage === "user-cut" ||
     state.turnCutRevealStage === "user-turn" ||
     state.turnCutRevealStage === "revealed";
@@ -4153,7 +4254,7 @@ function render(game: GameState | null): void {
     els.continuePegging.disabled = true;
   } else {
     els.acknowledgePeggingReset.disabled = false;
-    els.newGame.disabled = false;
+    els.newGame.disabled = !canStartNewGame;
     els.continuePegging.disabled = false;
   }
 
@@ -4164,8 +4265,33 @@ function shouldAdvancePeggingAi(game: GameState): boolean {
   return game.phase === "pegging" && game.turn === "AI" && !game.peggingResetPending;
 }
 
+function shouldShowAiThinkingForPegging(game: GameState): boolean {
+  return shouldAdvancePeggingAi(game) && game.aiLegalCardIds.length > 1;
+}
+
 function shouldAutoHumanGo(game: GameState): boolean {
   return game.phase === "pegging" && game.turn === "User" && game.canGo && !game.peggingResetPending;
+}
+
+async function withDelayedAiThinking<T>(game: GameState, action: () => Promise<T>): Promise<T> {
+  const shouldShow = shouldShowAiThinkingForPegging(game);
+  let shown = false;
+  const timer = shouldShow
+    ? window.setTimeout(() => {
+        shown = true;
+        setAiThinking(true);
+        render(state.game);
+      }, 180)
+    : 0;
+  try {
+    return await action();
+  } finally {
+    if (timer) window.clearTimeout(timer);
+    if (shown) {
+      setAiThinking(false);
+      render(state.game);
+    }
+  }
 }
 
 function waitForPaint(): Promise<void> {
@@ -4354,17 +4480,11 @@ async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
       continue;
     }
     if (shouldAdvancePeggingAi(current)) {
-      setAiThinking(true);
       render(current);
       await waitForPaint();
-      try {
-        current = await api("/api/advance-pegging", {});
-        render(current);
-        scheduleDecisionReviewCompletion(current);
-      } finally {
-        setAiThinking(false);
-        render(state.game);
-      }
+      current = await withDelayedAiThinking(current, () => api("/api/advance-pegging", {}));
+      render(current);
+      scheduleDecisionReviewCompletion(current);
       continue;
     }
     return current;
@@ -4456,6 +4576,7 @@ els.gameLogClose.addEventListener("click", () => {
 els.leaderboardOpen.addEventListener("click", () => {
   closeDecisionSnapshot();
   state.leaderboardOpen = true;
+  state.leaderboardLoading = usesRemoteAi();
   state.analyticsOpen = false;
   state.gameLogOpen = false;
   state.modelInfoOpen = false;
@@ -4544,6 +4665,15 @@ els.noticeForward.addEventListener("click", () => {
 
 els.opponent.addEventListener("change", async () => {
   if (state.pending) return;
+  if (SIMPLE_NETWORK_MODE) {
+    const opponent = selectedMenuOpponent();
+    if (opponent) {
+      els.opponent.value = opponent;
+      safeLocalStorageSet(SIMPLE_NETWORK_OPPONENT_KEY, opponent);
+    }
+    render(state.game);
+    return;
+  }
   if (usesRemoteAi()) return;
   try {
     await ensureOpponentResources(normalizeAnalyticsEngine(els.opponent.value));
@@ -4686,7 +4816,6 @@ els.play.addEventListener("click", async () => {
   const card = state.game ? selectedPlayableCard(state.game) : null;
   if (!card) return;
   state.pending = true;
-  setAiThinking(true);
   render(state.game);
   await waitForPaint();
   try {
@@ -4701,7 +4830,6 @@ els.play.addEventListener("click", async () => {
     showServerBusy(error, () => els.play.click());
     render(state.game);
   } finally {
-    setAiThinking(false);
     state.pending = false;
     render(state.game);
   }
@@ -4710,7 +4838,6 @@ els.play.addEventListener("click", async () => {
 els.go.addEventListener("click", async () => {
   if (state.pending) return;
   state.pending = true;
-  setAiThinking(true);
   render(state.game);
   await waitForPaint();
   try {
@@ -4721,7 +4848,6 @@ els.go.addEventListener("click", async () => {
   } catch (error) {
     showServerBusy(error, () => els.go.click());
   } finally {
-    setAiThinking(false);
     state.pending = false;
     render(state.game);
   }
@@ -4790,10 +4916,16 @@ els.continuePegging.addEventListener("click", async () => {
   }
 });
 
-async function startNewGameFromUi(): Promise<void> {
+async function startNewGameFromUi({ forceNew = false }: { forceNew?: boolean } = {}): Promise<void> {
   if (state.pending) return;
   if (state.splashOpen && !saveSplashName()) return;
-  if (isActiveGame(state.game)) {
+  if (forceNew && !canStartFreshGame(state.game)) {
+    els.settingsPanel.hidden = true;
+    els.menuToggle.setAttribute("aria-expanded", "false");
+    render(state.game);
+    return;
+  }
+  if (isActiveGame(state.game) && !forceNew) {
     state.splashOpen = false;
     els.settingsPanel.hidden = true;
     els.menuToggle.setAttribute("aria-expanded", "false");
@@ -4804,7 +4936,7 @@ async function startNewGameFromUi(): Promise<void> {
   state.pending = true;
   render(state.game);
   try {
-    const remoteGame = await loadRemoteActiveGameSession();
+    const remoteGame = forceNew ? null : await loadRemoteActiveGameSession();
     if (remoteGame) {
       state.splashOpen = false;
       els.settingsPanel.hidden = true;
@@ -4866,7 +4998,7 @@ els.fontSizeSelect.addEventListener("change", () => {
 });
 
 els.newGame.addEventListener("click", () => {
-  void startNewGameFromUi();
+  void startNewGameFromUi({ forceNew: true });
 });
 
 els.troubleGame.addEventListener("click", async () => {

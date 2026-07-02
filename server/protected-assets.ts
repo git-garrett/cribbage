@@ -20,6 +20,7 @@ export function protectedModelAssetPath(assetUrl: string): string | null {
     "pegging-outcome-frontier-overrides.bin": "schell_table-peg_table-14.5",
     "crib-score-histogram-frontier-by-discard-cut.bin": "schell_table-peg_table-14.5",
     "crib-score-histogram-full-frontier-by-discard-cut.bin": "schell_table-peg_table-14.6",
+    "six-card-discard-policy.bin": "rank-crib-discard",
   };
   const sourceName = Object.keys(modelByAsset).find((name) => {
     const prefix = name.slice(0, -".bin".length);

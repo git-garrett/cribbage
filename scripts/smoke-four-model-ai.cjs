@@ -22,6 +22,7 @@ const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
 const rankIndex = new Map(ranks.map((rank, index) => [rank, index]));
 
 const currentModels = [
+  "schell_table-peg_table-14.7",
   "schell_table-peg_table-14.6",
   "schell_table-peg_table-14.5",
   "schell_table-peg_table-14.4.1",
@@ -72,6 +73,7 @@ const labels = {
   "schell_table-peg_table-14.4.1": "Schell Table + Peg Table 14.4.1",
   "schell_table-peg_table-14.5": "Schell Table + Peg Table 14.5",
   "schell_table-peg_table-14.6": "Schell Table + Peg Table 14.6",
+  "schell_table-peg_table-14.7": "Schell Table + Peg Table 14.7",
   "schell_table-peg_table-6.0": "Schell Table + Peg Table 6.0",
   "ras_table-peg_table-4.0": "Ras Table + Peg Table 4.0",
   "schell_table-peg-3.0": "Schell Table + Peg 3.0",
@@ -195,6 +197,7 @@ function summarize(stats) {
 
 function loadEngine() {
   globalThis.__CRIBBAGE_LOG_SCORE_COMPONENTS = scoreComponentsEnabled;
+  globalThis.__CRIBBAGE_PROFILE_SIX_CARD_DISCARD = process.env.AI_SMOKE_PROFILE_SIX_CARD_DISCARD === "1";
   globalThis.__CRIBBAGE_MODEL13_TREE_CACHE_LIMIT = Number.isFinite(model13TreeCacheLimit)
     ? model13TreeCacheLimit
     : 10000;
@@ -217,6 +220,12 @@ function loadEngine() {
 
 function patchEngineAssetImports(source) {
   return source.replace(
+    /import\s+sixCardDiscardPolicyUrl\s+from\s+"\.\/models\/rank-crib-discard\/six-card-discard-policy\.bin\?url";/,
+    () => {
+      const assetPath = path.join(path.dirname(enginePath), "models", "rank-crib-discard", "six-card-discard-policy.bin");
+      return `const sixCardDiscardPolicyUrl = ${JSON.stringify(pathToFileURL(assetPath).href)};`;
+    },
+  ).replace(
     /import\s+peggingPairwise12Url\s+from\s+"\.\/models\/schell_table-peg_table-12\.0\/pegging-outcome-pairwise\.bin\?url";/,
     () => {
       const assetPath = path.join(path.dirname(enginePath), "models", "schell_table-peg_table-12.0", "pegging-outcome-pairwise.bin");

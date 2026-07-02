@@ -4,6 +4,8 @@ import cribRankComponentsByDiscardCut from "./models/rank-crib-discard/crib-rank
 import cribRankScoreByDiscardCut from "./models/rank-crib-discard/crib-rank-score-by-discard-cut.json";
 import cribScoreHistogramByDiscardCut from "./models/rank-crib-discard/crib-score-histogram-by-discard-cut.json";
 import handRankScoreByKeepCut from "./models/rank-crib-discard/hand-rank-score-by-keep-cut.json";
+import sixCardDiscardPolicyManifest from "./models/rank-crib-discard/six-card-discard-policy.manifest.json";
+import sixCardDiscardPolicyUrl from "./models/rank-crib-discard/six-card-discard-policy.bin?url";
 import peggingPairwise12Manifest from "./models/schell_table-peg_table-12.0/pegging-outcome-pairwise.manifest.json";
 import peggingPairwise12Url from "./models/schell_table-peg_table-12.0/pegging-outcome-pairwise.bin?url";
 import model13HoldManifest from "./models/schell_table-peg_table-13.0/pegging-remaining-hand-distribution.manifest.json";
@@ -52,6 +54,7 @@ export type Opponent =
   | "schell_table-peg_table-14.4.1"
   | "schell_table-peg_table-14.5"
   | "schell_table-peg_table-14.6"
+  | "schell_table-peg_table-14.7"
   | "schell_table-2.0";
 type LegacyOpponent =
   | "ras-table-1.0"
@@ -123,6 +126,7 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "schell_table-peg_table-14.4.1": "Schell Table + Peg Table 14.4.1",
   "schell_table-peg_table-14.5": "Schell Table + Peg Table 14.5",
   "schell_table-peg_table-14.6": "Schell Table + Peg Table 14.6",
+  "schell_table-peg_table-14.7": "Schell Table + Peg Table 14.7",
 };
 const CRIB_FLUSH_BONUS_BY_SUIT_COUNT = cribFlushBonusBySuitCount as number[];
 const HAND_RANK_SCORE_BY_KEEP_CUT = (handRankScoreByKeepCut as {
@@ -167,6 +171,38 @@ type CribFrontierTable = {
     frontier?: Array<{ lambda: number | string; entry: CribTripolicyPolicyEntry }>;
   } | null>>>;
   maxFrontierEntries: number;
+};
+type SixCardDiscardPolicyManifest = {
+  roles: Array<"dealer" | "pone">;
+  pairKeys: string[];
+  sixHandKeys: string[];
+};
+type SixCardDiscardPolicyChoice = {
+  discardKey: string;
+  discard: RankCounts;
+  weight: number;
+};
+type SixCardDiscardPolicyTable = {
+  manifest: SixCardDiscardPolicyManifest;
+  choices(role: "dealer" | "pone", handKey: string): SixCardDiscardPolicyChoice[];
+};
+type DiscardChoiceAnalysis = {
+  selectedEv: number;
+  recommendedEv: number;
+  recommended: Card[];
+  selectedPegTableLead: number | null;
+  recommendedPegTableLead: number | null;
+  selectedWinProbability?: number;
+  recommendedWinProbability?: number;
+  selectedComponents: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
+  recommendedComponents: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
+};
+type DiscardSelection = {
+  cards: Card[];
+  analysis: DiscardChoiceAnalysis;
+};
+type SixCardDiscardProfileGlobal = typeof globalThis & {
+  __CRIBBAGE_PROFILE_SIX_CARD_DISCARD?: boolean;
 };
 const CRIB_SCORE_HISTOGRAM_BY_DISCARD_CUT = (cribScoreHistogramByDiscardCut as unknown as {
   table: Record<"dealer" | "pone", Record<string, Array<CribHistogramEntry | null>>>;
@@ -264,6 +300,7 @@ DISCARD_TABLES["schell_table-peg_table-14.4"] = DISCARD_TABLES["schell_table-2.0
 DISCARD_TABLES["schell_table-peg_table-14.4.1"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-14.5"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-14.6"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-14.7"] = DISCARD_TABLES["schell_table-2.0"];
 
 export class WinGame extends Error {}
 
@@ -345,6 +382,7 @@ export interface GameState {
   humanTable: SerializedCard[];
   aiTable: SerializedCard[];
   legalCardIds: number[];
+  aiLegalCardIds: number[];
   canGo: boolean;
   scoring: {
     stage: "pone" | "dealer" | "crib";
@@ -1046,6 +1084,9 @@ export class CribbageGame {
   state(): GameState {
     const current = this.phase === "pegging" ? this.currentPlayer() : null;
     const legalIds = new Set(this.legalCards(this.human).map((card) => card.id));
+    const aiLegalIds = this.phase === "pegging" && current === this.ai
+      ? this.legalCards(this.ai).map((card) => card.id)
+      : [];
     const humanHand = this.phase === "discard" ? sortedCards(this.human.hand) : this.human.hand;
     return {
       phase: this.phase,
@@ -1075,6 +1116,7 @@ export class CribbageGame {
       humanTable: this.human.table.map((card) => this.serializeCard(card)),
       aiTable: this.ai.table.map((card) => this.serializeCard(card)),
       legalCardIds: [...legalIds],
+      aiLegalCardIds: aiLegalIds,
       canGo: this.phase === "pegging" && current === this.human && legalIds.size === 0,
       scoring: this.scoringReview
         ? {
@@ -1124,7 +1166,8 @@ export class CribbageGame {
   recommendAiDiscard(): { cards: SerializedCard[]; cardIds: number[]; bestLead: number | null } {
     if (this.phase !== "discard" && this.phase !== "ai_discarding") throw new Error("AI is not waiting to discard.");
     if (this.ai.hand.length !== 6) throw new Error("AI does not have a discard decision available.");
-    const discards = this.chooseDiscards(this.ai, this.dealer === this.ai);
+    const selection = this.chooseDiscards(this.ai, this.dealer === this.ai);
+    const discards = selection.cards;
     return {
       cards: discards.map((card) => this.serializeCard(card)),
       cardIds: discards.map((card) => card.id),
@@ -1426,21 +1469,23 @@ export class CribbageGame {
 
   private aiDiscard(): void {
     const handBeforeDiscard = [...this.ai.hand];
-    const discards = this.chooseDiscards(this.ai, this.dealer === this.ai);
+    const selection = this.chooseDiscards(this.ai, this.dealer === this.ai);
+    const discards = selection.cards;
     removeCards(this.ai.hand, discards);
     this.crib.push(...discards);
-    this.recordDiscard(this.ai, discards, handBeforeDiscard);
+    this.recordDiscard(this.ai, discards, handBeforeDiscard, false, selection.analysis);
     this.logEvent("AI discarded two cards to the crib.");
   }
 
   private autoDiscardHuman(): void {
     this.beginInteraction();
     if (this.phase !== "discard") throw new Error("It is not discard time.");
-    const discards = this.chooseDiscards(this.human, this.dealer === this.human);
+    const selection = this.chooseDiscards(this.human, this.dealer === this.human);
+    const discards = selection.cards;
     const handBeforeDiscard = [...this.human.hand];
     removeCards(this.human.hand, discards);
     this.crib.push(...discards);
-    this.recordDiscard(this.human, discards, handBeforeDiscard, false);
+    this.recordDiscard(this.human, discards, handBeforeDiscard, false, selection.analysis);
     this.logEvent("User discarded two cards to the crib.");
     if (this.ai.hand.length === 6) {
       this.phase = "ai_discarding";
@@ -1450,11 +1495,11 @@ export class CribbageGame {
     this.beginPegging();
   }
 
-  private chooseDiscards(player: PlayerState, myCrib: boolean): Card[] {
+  private chooseDiscards(player: PlayerState, myCrib: boolean): DiscardSelection {
     const engine = this.playerEngines[player.key];
     const analysis = analyzeDiscardChoice(player.hand, player.hand.slice(0, 2), myCrib, engine, { game: this, player });
     this.pegTableLeads[player.key] = analysis.recommendedPegTableLead;
-    return analysis.recommended;
+    return { cards: analysis.recommended, analysis };
   }
 
   private beginPegging(): void {
@@ -1545,6 +1590,16 @@ export class CribbageGame {
 
   private choosePlay(player: PlayerState): Card {
     const legal = this.legalCards(player);
+    if (legal.length === 1) {
+      const card = legal[0];
+      const engine = this.playerEngines[player.key];
+      this.pegDecisionEvs[player.key] = {
+        cardId: card.id,
+        model: engine,
+        ev: roundEv(scoreCount([...this.plays, card])),
+      };
+      return card;
+    }
     const engine = this.playerEngines[player.key];
     const outcomeLead = choosePeggingOutcomeLead(this, player, legal, engine);
     if (outcomeLead) {
@@ -1923,9 +1978,11 @@ export class CribbageGame {
     cards: Card[],
     handBeforeDiscard: Card[] = player.hand,
     reviewDecision = player === this.human,
+    discardAnalysis?: DiscardChoiceAnalysis,
   ): void {
     const engine = this.playerEngines[player.key];
-    const analysis = analyzeDiscardChoice(handBeforeDiscard, cards, player === this.dealer, engine, { game: this, player });
+    const analysis = discardAnalysis ??
+      analyzeDiscardChoice(handBeforeDiscard, cards, player === this.dealer, engine, { game: this, player });
     this.pegTableLeads[player.key] = analysis.selectedPegTableLead;
     const selectedEvComponents = shouldLogScoreComponents()
       ? selectedDiscardEvComponents(handBeforeDiscard, cards, player === this.dealer, engine)
@@ -2008,6 +2065,7 @@ export class CribbageGame {
 
   private choosePlayForEngine(player: PlayerState, engine: Opponent): Card {
     const legal = this.legalCards(player);
+    if (legal.length === 1) return legal[0];
     const outcomeLead = choosePeggingOutcomeLead(this, player, legal, engine);
     if (outcomeLead) return outcomeLead.card;
     const pegTableLead = choosePegTableLead(player.hand, legal, this.pegTableLeads[player.key], {
@@ -2203,6 +2261,25 @@ type OptimalPegSimulationState = PegSimulationState & {
 };
 type ScoreDistribution = Array<[number, number]>;
 type DiscardWinBaseOutcome = [number, number, number];
+type SixCardOpponentPolicyChoice = {
+  discard: RankCounts;
+  discardKey: string;
+  keep: RankCounts;
+  keepKey: string;
+  probability: number;
+  scoringCards: Card[];
+};
+type SixCardOpponentContext = {
+  hand: WeightedRankHand;
+  cutAvailability: RankCounts;
+  choices: SixCardOpponentPolicyChoice[];
+};
+type SixCardDiscardEvaluationMemo = {
+  ownHandScore: Map<string, number>;
+  opponentHandSuitBonus: Map<string, number>;
+  cribSuitBonus: Map<string, number>;
+  peggingOptions: Map<string, Array<{ leadRank: number | null; ownPegging: number; opponentPegging: number }>>;
+};
 type CutRankOption = {
   rank: number;
   card: Card;
@@ -2301,6 +2378,7 @@ const PEGGING_PAIRWISE_TABLES: Partial<Record<Opponent, PeggingPairwiseTable>> =
 const PONE_LEAD_FREQUENCY_TABLES: Partial<Record<Opponent, PoneLeadFrequencyTable>> = {};
 const CRIB_TRIPOLICY_TABLES: Partial<Record<Opponent, CribTripolicyTable>> = {};
 const CRIB_FRONTIER_TABLES: Partial<Record<Opponent, CribFrontierTable>> = {};
+const SIX_CARD_DISCARD_POLICY_TABLES: Partial<Record<Opponent, SixCardDiscardPolicyTable>> = {};
 const DISCARD_WIN_BASE_OUTCOME_CACHE = new Map<string, DiscardWinBaseOutcome[]>();
 const DISCARD_WIN_BASE_OUTCOME_CACHE_LIMIT = 1500;
 const DISCARD_OPPONENT_HAND_SCORE_CACHE = new Map<string, ScoreDistribution>();
@@ -2369,6 +2447,8 @@ const PEGGING_HOLD_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Pegging
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
   "schell_table-peg_table-14.6": () =>
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
+  "schell_table-peg_table-14.7": () =>
+    loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
 };
 const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<PeggingPairwiseTable>>> = {
   "schell_table-peg_table-12.0": () =>
@@ -2391,6 +2471,8 @@ const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Peg
     loadFrontierPeggingTable(peggingFrontier145Url, peggingFrontier145Manifest as PeggingPairwiseManifest),
   "schell_table-peg_table-14.6": () =>
     loadFrontierPeggingTable(peggingFrontier145Url, peggingFrontier145Manifest as PeggingPairwiseManifest),
+  "schell_table-peg_table-14.7": () =>
+    loadPairwisePeggingTable(peggingPairwise12Url, peggingPairwise12Manifest as PeggingPairwiseManifest),
 };
 const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLeadFrequencyTable>>> = {
   "schell_table-peg_table-13.0": () =>
@@ -2410,6 +2492,8 @@ const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLe
   "schell_table-peg_table-14.5": () =>
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
   "schell_table-peg_table-14.6": () =>
+    loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
+  "schell_table-peg_table-14.7": () =>
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
 };
 const CRIB_TRIPOLICY_LOADERS: Partial<Record<Opponent, () => Promise<CribTripolicyTable>>> = {
@@ -2431,6 +2515,10 @@ const CRIB_TRIPOLICY_LOADERS: Partial<Record<Opponent, () => Promise<CribTripoli
     loadTripolicyCribTable(cribFullFrontier146Url, cribFullFrontier146Manifest as CribTripolicyManifest),
 };
 const CRIB_FRONTIER_LOADERS: Partial<Record<Opponent, () => Promise<CribFrontierTable>>> = {};
+const SIX_CARD_DISCARD_POLICY_LOADERS: Partial<Record<Opponent, () => Promise<SixCardDiscardPolicyTable>>> = {
+  "schell_table-peg_table-14.7": () =>
+    loadSixCardDiscardPolicyTable(sixCardDiscardPolicyUrl, sixCardDiscardPolicyManifest as SixCardDiscardPolicyManifest),
+};
 
 export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
   const engine = normalizeOpponent(opponent);
@@ -2440,7 +2528,8 @@ export function hasLoadedOpponentResources(opponent: StoredOpponent): boolean {
   const hasLeadTable = !PONE_LEAD_FREQUENCY_LOADERS[engine] || Boolean(PONE_LEAD_FREQUENCY_TABLES[engine]);
   const hasCribTripolicyTable = !CRIB_TRIPOLICY_LOADERS[engine] || Boolean(CRIB_TRIPOLICY_TABLES[engine]);
   const hasCribFrontierTable = !CRIB_FRONTIER_LOADERS[engine] || Boolean(CRIB_FRONTIER_TABLES[engine]);
-  return hasPegTable && hasHoldTable && hasOutcomeTable && hasLeadTable && hasCribTripolicyTable && hasCribFrontierTable;
+  const hasSixCardDiscardPolicy = !SIX_CARD_DISCARD_POLICY_LOADERS[engine] || Boolean(SIX_CARD_DISCARD_POLICY_TABLES[engine]);
+  return hasPegTable && hasHoldTable && hasOutcomeTable && hasLeadTable && hasCribTripolicyTable && hasCribFrontierTable && hasSixCardDiscardPolicy;
 }
 
 export async function loadOpponentResources(opponent: StoredOpponent): Promise<void> {
@@ -2455,6 +2544,7 @@ export async function loadOpponentResources(opponent: StoredOpponent): Promise<v
   const leadTableLoader = PONE_LEAD_FREQUENCY_LOADERS[engine];
   const cribTripolicyLoader = CRIB_TRIPOLICY_LOADERS[engine];
   const cribFrontierLoader = CRIB_FRONTIER_LOADERS[engine];
+  const sixCardDiscardPolicyLoader = SIX_CARD_DISCARD_POLICY_LOADERS[engine];
   const loadPegTable = loader && !PEG_TABLE_POLICIES[engine]
     ? loader().then((policy) => {
         PEG_TABLE_POLICIES[engine] = policy;
@@ -2486,7 +2576,20 @@ export async function loadOpponentResources(opponent: StoredOpponent): Promise<v
         CRIB_FRONTIER_TABLES[engine] = table;
       })
     : Promise.resolve();
-  await Promise.all([loadPegTable, loadHoldTable, loadOutcomeTable, loadLeadTable, loadCribTripolicyTable, loadCribFrontierTable]);
+  const loadSixCardDiscardPolicy = sixCardDiscardPolicyLoader && !SIX_CARD_DISCARD_POLICY_TABLES[engine]
+    ? sixCardDiscardPolicyLoader().then((table) => {
+        SIX_CARD_DISCARD_POLICY_TABLES[engine] = table;
+      })
+    : Promise.resolve();
+  await Promise.all([
+    loadPegTable,
+    loadHoldTable,
+    loadOutcomeTable,
+    loadLeadTable,
+    loadCribTripolicyTable,
+    loadCribFrontierTable,
+    loadSixCardDiscardPolicy,
+  ]);
 }
 
 function sharedPegTablePolicyEngine(engine: Opponent): Opponent | null {
@@ -2524,7 +2627,12 @@ function isModel14OrLater(engine: Opponent): boolean {
     engine === "schell_table-peg_table-14.4" ||
     engine === "schell_table-peg_table-14.4.1" ||
     engine === "schell_table-peg_table-14.5" ||
-    engine === "schell_table-peg_table-14.6";
+    engine === "schell_table-peg_table-14.6" ||
+    engine === "schell_table-peg_table-14.7";
+}
+
+function usesSixCardDiscardModel(engine: Opponent): boolean {
+  return engine === "schell_table-peg_table-14.7";
 }
 
 function usesWinProbabilityPegging(engine: Opponent): boolean {
@@ -2563,7 +2671,7 @@ function usesModel13LivePegging(engine: Opponent): boolean {
 }
 
 function usesTripolicyDiscardModel(engine: Opponent): boolean {
-  return isModel14OrLater(engine);
+  return isModel14OrLater(engine) && !usesSixCardDiscardModel(engine);
 }
 
 function usesNineWayTripolicyDiscardModel(engine: Opponent): boolean {
@@ -2580,7 +2688,8 @@ function usesCorrectedDiscardWinProbability(engine: Opponent): boolean {
     engine === "schell_table-peg_table-14.4" ||
     engine === "schell_table-peg_table-14.4.1" ||
     engine === "schell_table-peg_table-14.5" ||
-    engine === "schell_table-peg_table-14.6";
+    engine === "schell_table-peg_table-14.6" ||
+    engine === "schell_table-peg_table-14.7";
 }
 
 function usesRankOnlyDiscardWinProbabilityApproximation(engine: Opponent): boolean {
@@ -2588,7 +2697,8 @@ function usesRankOnlyDiscardWinProbabilityApproximation(engine: Opponent): boole
     engine === "schell_table-peg_table-14.4" ||
     engine === "schell_table-peg_table-14.4.1" ||
     engine === "schell_table-peg_table-14.5" ||
-    engine === "schell_table-peg_table-14.6";
+    engine === "schell_table-peg_table-14.6" ||
+    engine === "schell_table-peg_table-14.7";
 }
 
 function usesKnownCardPostPeggingWinProbability(engine: Opponent): boolean {
@@ -2611,6 +2721,7 @@ function frontierPolicyIndex(policy: CribPolicy | PeggingOutcomePolicy): number 
 }
 
 function peggingOutcomePolicies(engine: Opponent): PeggingOutcomePolicy[] {
+  if (usesSixCardDiscardModel(engine)) return ["ev"];
   if (usesIndexedFrontierPolicyModel(engine)) {
     const max = PEGGING_PAIRWISE_TABLES[engine]?.maxFrontierOutcomes ?? 0;
     return ["ev", ...Array.from({ length: max }, (_, index) => `frontier:${index}` as const)];
@@ -2624,6 +2735,7 @@ function peggingOutcomePolicies(engine: Opponent): PeggingOutcomePolicy[] {
 }
 
 function cribPolicies(engine: Opponent): CribPolicy[] {
+  if (usesSixCardDiscardModel(engine)) return ["ev"];
   if (usesIndexedFrontierPolicyModel(engine)) {
     const policyCount = CRIB_TRIPOLICY_TABLES[engine]?.policyCount ?? 1;
     return ["ev", ...Array.from({ length: Math.max(0, policyCount - 1) }, (_, index) => `frontier:${index}` as const)];
@@ -2764,6 +2876,62 @@ async function loadPairwisePeggingTable(url: string, manifest: PeggingPairwiseMa
     format: "word32",
     dealerRecords,
     poneRecords,
+  };
+}
+
+async function loadSixCardDiscardPolicyTable(
+  url: string,
+  manifest: SixCardDiscardPolicyManifest,
+): Promise<SixCardDiscardPolicyTable> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Unable to load six-card discard policy table: ${response.status}`);
+  const buffer = await response.arrayBuffer();
+  const view = new DataView(buffer);
+  const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  if (magic !== "D6P1") throw new Error(`Unexpected six-card discard policy magic: ${magic}`);
+  const version = view.getUint16(4, true);
+  if (version !== 1) throw new Error(`Unsupported six-card discard policy version: ${version}`);
+  const recordBytes = view.getUint16(6, true);
+  const rootCount = view.getUint32(8, true);
+  const recordCount = view.getUint32(12, true);
+  const rootOffsetCount = view.getUint32(16, true);
+  const rootOffsetsOffset = view.getUint32(20, true);
+  const recordsOffset = view.getUint32(24, true);
+  const pairCount = view.getUint16(28, true);
+  if (recordBytes !== 8) throw new Error(`Unsupported six-card discard policy record width: ${recordBytes}`);
+  if (rootOffsetCount !== rootCount + 1) throw new Error("Invalid six-card discard policy root offset count");
+  if (pairCount !== manifest.pairKeys.length) throw new Error(`Six-card discard policy pair count mismatch: ${pairCount}`);
+  const rootOffsets = new Uint32Array(buffer, rootOffsetsOffset, rootOffsetCount);
+  const pairRanks = manifest.pairKeys.map(rankCountsFromKey);
+  const rootIndexByKey = new Map<string, number>();
+  for (let roleIndex = 0; roleIndex < manifest.roles.length; roleIndex += 1) {
+    for (let handIndex = 0; handIndex < manifest.sixHandKeys.length; handIndex += 1) {
+      rootIndexByKey.set(
+        `${manifest.roles[roleIndex]}:${manifest.sixHandKeys[handIndex]}`,
+        (roleIndex * manifest.sixHandKeys.length) + handIndex,
+      );
+    }
+  }
+  return {
+    manifest,
+    choices(role, handKey) {
+      const rootIndex = rootIndexByKey.get(`${role}:${handKey}`);
+      if (rootIndex === undefined || rootIndex >= rootCount) return [];
+      const start = rootOffsets[rootIndex];
+      const end = rootOffsets[rootIndex + 1];
+      const choices: SixCardDiscardPolicyChoice[] = [];
+      for (let recordIndex = start; recordIndex < end; recordIndex += 1) {
+        if (recordIndex >= recordCount) throw new Error(`Six-card discard policy record index out of range: ${recordIndex}`);
+        const offset = recordsOffset + (recordIndex * recordBytes);
+        const pairIndex = view.getUint16(offset, true);
+        choices.push({
+          discardKey: manifest.pairKeys[pairIndex],
+          discard: pairRanks[pairIndex],
+          weight: view.getUint32(offset + 2, true),
+        });
+      }
+      return choices;
+    },
   };
 }
 
@@ -3531,7 +3699,7 @@ function choosePeggingOutcomeLead(
   engine: Opponent,
 ): { card: Card; ev: number } | null {
   if (
-    (usesModel13LivePegging(engine) && !usesTripolicyDiscardModel(engine)) ||
+    (usesModel13LivePegging(engine) && !usesTripolicyDiscardModel(engine) && !usesSixCardDiscardModel(engine)) ||
     !usesPeggingOutcomeTables(engine) ||
     player !== game.pone ||
     game.count !== 0 ||
@@ -3912,6 +4080,22 @@ function rankPrefixKey(ranks: number[]): string {
 
 function rankCountKey(ranks: RankCounts): string {
   return ranks.join("");
+}
+
+function rankCountsFromKey(key: string): RankCounts {
+  return key.split("").map((digit) => Number.parseInt(digit, 10));
+}
+
+function addRankCounts(a: RankCounts, b: RankCounts): RankCounts {
+  return a.map((count, rank) => count + b[rank]);
+}
+
+function subtractRankCounts(a: RankCounts, b: RankCounts): RankCounts {
+  return a.map((count, rank) => count - b[rank]);
+}
+
+function rankCountsSubset(part: RankCounts, whole: RankCounts): boolean {
+  return part.every((count, rank) => count <= whole[rank]);
 }
 
 function choose(n: number, k: number): number {
@@ -5582,23 +5766,377 @@ function discardCandidateWinProbability(
   return totalWeight ? total / totalWeight : 0.5;
 }
 
+function analyzeSixCardDiscardChoice(
+  hand: Card[],
+  selected: Card[],
+  myCrib: boolean,
+  engine: Opponent,
+  context: { game: CribbageGame; player: PlayerState },
+): DiscardChoiceAnalysis | null {
+  const policy = SIX_CARD_DISCARD_POLICY_TABLES[engine];
+  const pairwise = PEGGING_PAIRWISE_TABLES[engine];
+  if (!policy || !pairwise) return null;
+
+  const deck = fullDeck().filter((card) => !hand.some((held) => held.id === card.id));
+  const role = myCrib ? "dealer" : "pone";
+  const opponentRole = myCrib ? "pone" : "dealer";
+  const nextRole = myCrib ? "pone" : "dealer";
+  const player = context.player;
+  const opponent = player === context.game.human ? context.game.ai : context.game.human;
+  const fullHandRanks = rankCountsForCards(hand);
+  const profile = Boolean((globalThis as SixCardDiscardProfileGlobal).__CRIBBAGE_PROFILE_SIX_CARD_DISCARD);
+  const profileStart = profile ? performance.now() : 0;
+  const opponentContexts = sixCardOpponentContexts(
+    enumerateRankHands(remainingRankCounts(hand), 6),
+    opponentRole,
+    fullHandRanks,
+    policy,
+  );
+  if (profile) {
+    console.error(
+      `six-card-discard contexts player=${player.key} role=${role} hand=${hand.map((card) => card.rankStr).join(" ")} contexts=${opponentContexts.length} ms=${(performance.now() - profileStart).toFixed(1)}`,
+    );
+  }
+  const cutOptionsByRank = new Map(cutRankOptions(deck).map((cut) => [cut.rank, cut]));
+  const selectedKey = cardSetKey(selected);
+  const memo: SixCardDiscardEvaluationMemo = {
+    ownHandScore: new Map(),
+    opponentHandSuitBonus: new Map(),
+    cribSuitBonus: new Map(),
+    peggingOptions: new Map(),
+  };
+  let selectedEvaluation: ReturnType<typeof evaluateSixCardDiscardCandidate> | null = null;
+  let recommendedEvaluation: ReturnType<typeof evaluateSixCardDiscardCandidate> | null = null;
+  let recommended = hand.slice(0, 2);
+
+  let candidateIndex = 0;
+  for (const discard of combinations(hand, 2, 2)) {
+    candidateIndex += 1;
+    const candidateStart = profile ? performance.now() : 0;
+    const keep = hand.filter((card) => !discard.includes(card));
+    const evaluation = evaluateSixCardDiscardCandidate({
+      keep,
+      discard,
+      role,
+      nextRole,
+      opponentContexts,
+      pairwise,
+      cutOptionsByRank,
+      deck,
+      playerScore: player.score,
+      opponentScore: opponent.score,
+      memo,
+    });
+    if (profile) {
+      console.error(
+        `six-card-discard candidate ${candidateIndex}/15 discard=${discard.map((card) => card.rankStr).join(" ")} ms=${(performance.now() - candidateStart).toFixed(1)} totalMs=${(performance.now() - profileStart).toFixed(1)}`,
+      );
+    }
+    if (!evaluation) continue;
+    if (cardSetKey(discard) === selectedKey) selectedEvaluation = evaluation;
+    if (
+      !recommendedEvaluation ||
+      evaluation.winProbability > recommendedEvaluation.winProbability ||
+      (
+        evaluation.winProbability === recommendedEvaluation.winProbability &&
+        evaluation.totalEv > recommendedEvaluation.totalEv
+      )
+    ) {
+      recommendedEvaluation = evaluation;
+      recommended = discard;
+    }
+  }
+
+  if (!recommendedEvaluation) return null;
+  const selectedResult = selectedEvaluation ?? recommendedEvaluation;
+  return {
+    selectedEv: selectedResult.totalEv,
+    recommendedEv: recommendedEvaluation.totalEv,
+    recommended,
+    selectedPegTableLead: selectedResult.bestLead,
+    recommendedPegTableLead: recommendedEvaluation.bestLead,
+    selectedWinProbability: selectedResult.winProbability,
+    recommendedWinProbability: recommendedEvaluation.winProbability,
+    selectedComponents: selectedResult.components,
+    recommendedComponents: recommendedEvaluation.components,
+  };
+}
+
+function sixCardOpponentContexts(
+  opponentSixHands: WeightedRankHand[],
+  opponentRole: "dealer" | "pone",
+  fullHandRanks: RankCounts,
+  policy: SixCardDiscardPolicyTable,
+): SixCardOpponentContext[] {
+  const contexts: SixCardOpponentContext[] = [];
+  const fullDeckRanks = Array.from({ length: 13 }, () => 4);
+  for (const hand of opponentSixHands) {
+    const rawChoices = policy.choices(opponentRole, rankCountKey(hand.ranks));
+    const totalChoiceWeight = rawChoices.reduce((sum, choice) => sum + choice.weight, 0);
+    if (!totalChoiceWeight) continue;
+    const choices: SixCardOpponentPolicyChoice[] = [];
+    for (const choice of rawChoices) {
+      if (!rankCountsSubset(choice.discard, hand.ranks)) continue;
+      const keep = subtractRankCounts(hand.ranks, choice.discard);
+      choices.push({
+        discard: choice.discard,
+        discardKey: rankCountKey(choice.discard),
+        keep,
+        keepKey: rankCountKey(keep),
+        probability: choice.weight / totalChoiceWeight,
+        scoringCards: cardsForRankCountsForScoring(choice.discard),
+      });
+    }
+    if (!choices.length) continue;
+    contexts.push({
+      hand,
+      cutAvailability: subtractRankCounts(fullDeckRanks, addRankCounts(fullHandRanks, hand.ranks)),
+      choices,
+    });
+  }
+  return contexts;
+}
+
+function evaluateSixCardDiscardCandidate({
+  keep,
+  discard,
+  role,
+  nextRole,
+  opponentContexts,
+  pairwise,
+  cutOptionsByRank,
+  deck,
+  playerScore,
+  opponentScore,
+  memo,
+}: {
+  keep: Card[];
+  discard: Card[];
+  role: "dealer" | "pone";
+  nextRole: "dealer" | "pone";
+  opponentContexts: SixCardOpponentContext[];
+  pairwise: PeggingPairwiseTable;
+  cutOptionsByRank: Map<number, CutRankOption>;
+  deck: Card[];
+  playerScore: number;
+  opponentScore: number;
+  memo: SixCardDiscardEvaluationMemo;
+}): {
+  winProbability: number;
+  totalEv: number;
+  bestLead: number | null;
+  components: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
+} | null {
+  const keepRanks = rankCountsForCards(keep);
+  const keepKey = rankCountKey(keepRanks);
+  const discardKey = cardSetKey(discard);
+  const leadEvaluations = new Map<number, {
+    totalWeight: number;
+    winProbabilityOutcomes: Map<number, number>;
+    ownHandTotal: number;
+    opponentHandTotal: number;
+    cribTotal: number;
+    ownPeggingTotal: number;
+    opponentPeggingTotal: number;
+  }>();
+
+  const availableCardsAfterOwnHand = deck;
+  for (const opponentContext of opponentContexts) {
+    for (const opponentChoice of opponentContext.choices) {
+      const peggingOptionsKey = `${role}:${keepKey}:${opponentChoice.keepKey}`;
+      const peggingOptions = memo.peggingOptions.get(peggingOptionsKey) ??
+        pairwisePeggingOptionsForKeeps(pairwise, keepRanks, role, opponentChoice.keep);
+      memo.peggingOptions.set(peggingOptionsKey, peggingOptions);
+      if (!peggingOptions.length) continue;
+
+      for (let cutRank = 0; cutRank < 13; cutRank += 1) {
+        const cutWeight = opponentContext.cutAvailability[cutRank];
+        if (cutWeight <= 0) continue;
+        const cut = cutOptionsByRank.get(cutRank);
+        if (!cut) continue;
+        const baseWeight = opponentContext.hand.weight * opponentChoice.probability * cutWeight;
+        const ownHandScoreKey = `${keepKey}:${cutRank}`;
+        const ownHandScore = memo.ownHandScore.get(ownHandScoreKey) ??
+          (
+            rankCutHandScore(keep, cut.card) +
+            expectedKnownHandSuitBonusForCutRank(keep, cut, false)
+          );
+        memo.ownHandScore.set(ownHandScoreKey, ownHandScore);
+        const opponentSuitBonusKey = `${opponentChoice.keepKey}:${cutRank}`;
+        const opponentSuitBonus = memo.opponentHandSuitBonus.get(opponentSuitBonusKey) ??
+          expectedRankHandSuitBonusForCutRank(opponentChoice.keep, cut, availableCardsAfterOwnHand);
+        memo.opponentHandSuitBonus.set(opponentSuitBonusKey, opponentSuitBonus);
+        const opponentHandScore = handRankScoreForRanks(opponentChoice.keepKey, opponentChoice.keep, cut) +
+          opponentSuitBonus;
+        const cribSuitBonusKey = `${discardKey}:${opponentChoice.discardKey}:${cutRank}`;
+        const cribSuitBonus = memo.cribSuitBonus.get(cribSuitBonusKey) ??
+          expectedCribSuitBonusForCutRank(
+            discard,
+            opponentChoice.discard,
+            cut,
+            availableCardsAfterOwnHand,
+          );
+        memo.cribSuitBonus.set(cribSuitBonusKey, cribSuitBonus);
+        const cribScore = scoreHandRankOnly([
+          ...discard,
+          ...opponentChoice.scoringCards,
+        ], cut.card) + cribSuitBonus;
+        for (const pegging of peggingOptions) {
+          const leadKey = pegging.leadRank ?? -1;
+          const accumulator = leadEvaluations.get(leadKey) ?? {
+            totalWeight: 0,
+            winProbabilityOutcomes: new Map<number, number>(),
+            ownHandTotal: 0,
+            opponentHandTotal: 0,
+            cribTotal: 0,
+            ownPeggingTotal: 0,
+            opponentPeggingTotal: 0,
+          };
+          const ownRoundScore = pegging.ownPegging + ownHandScore + (role === "dealer" ? cribScore : 0);
+          const opponentRoundScore = pegging.opponentPegging + opponentHandScore + (role === "dealer" ? 0 : cribScore);
+          accumulator.totalWeight += baseWeight;
+          const futureScoreKey = roundedScorePairKey(playerScore + ownRoundScore, opponentScore + opponentRoundScore);
+          accumulator.winProbabilityOutcomes.set(
+            futureScoreKey,
+            (accumulator.winProbabilityOutcomes.get(futureScoreKey) ?? 0) + baseWeight,
+          );
+          accumulator.ownHandTotal += ownHandScore * baseWeight;
+          accumulator.opponentHandTotal += opponentHandScore * baseWeight;
+          accumulator.cribTotal += cribScore * baseWeight;
+          accumulator.ownPeggingTotal += pegging.ownPegging * baseWeight;
+          accumulator.opponentPeggingTotal += pegging.opponentPegging * baseWeight;
+          leadEvaluations.set(leadKey, accumulator);
+        }
+      }
+    }
+  }
+
+  let best: {
+    leadRank: number;
+    winProbability: number;
+    totalEv: number;
+    components: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
+  } | null = null;
+  for (const [leadRank, accumulator] of leadEvaluations) {
+    if (!accumulator.totalWeight) continue;
+    const handScore = accumulator.ownHandTotal / accumulator.totalWeight;
+    const cribScore = accumulator.cribTotal / accumulator.totalWeight;
+    const netPegging = (accumulator.ownPeggingTotal - accumulator.opponentPeggingTotal) / accumulator.totalWeight;
+    const totalEv = (role === "dealer" ? handScore + cribScore : handScore - cribScore) + netPegging;
+    let winProbabilityTotal = 0;
+    for (const [scoreKey, weight] of accumulator.winProbabilityOutcomes) {
+      const [myScore, futureOpponentScore] = roundedScorePairFromKey(scoreKey);
+      winProbabilityTotal += weight * approximateFutureWinProbability(
+        myScore,
+        futureOpponentScore,
+        nextRole,
+        "peggingPone",
+      );
+    }
+    const winProbability = winProbabilityTotal / accumulator.totalWeight;
+    const components: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>> = {
+      [role === "dealer" ? "handDealer" : "handPone"]: handScore,
+      [role === "dealer" ? "peggingDealer" : "peggingPone"]: netPegging,
+      crib: role === "dealer" ? cribScore : -cribScore,
+    };
+    if (
+      !best ||
+      winProbability > best.winProbability ||
+      (winProbability === best.winProbability && totalEv > best.totalEv) ||
+      (
+        winProbability === best.winProbability &&
+        totalEv === best.totalEv &&
+        leadTieValue(leadRank) < leadTieValue(best.leadRank)
+      )
+    ) {
+      best = { leadRank, winProbability, totalEv, components };
+    }
+  }
+  return best
+    ? {
+        winProbability: best.winProbability,
+        totalEv: best.totalEv,
+        bestLead: best.leadRank >= 0 ? best.leadRank : null,
+        components: best.components,
+      }
+    : null;
+}
+
+function handRankScoreForRanks(keepKey: string, ranks: RankCounts, cut: CutRankOption): number {
+  const tableScore = HAND_RANK_SCORE_BY_KEEP_CUT[keepKey]?.[cut.rank];
+  if (typeof tableScore === "number") return tableScore;
+  return scoreHandRankOnly(cardsForRankCountsForScoring(ranks), cut.card);
+}
+
+function leadTieValue(leadRank: number): number {
+  return leadRank >= 0 ? VALUES[leadRank] : -1;
+}
+
+function roundedScorePairKey(myScore: number, opponentScore: number): number {
+  const mine = Math.min(121, Math.max(0, Math.round(myScore)));
+  const opponent = Math.min(121, Math.max(0, Math.round(opponentScore)));
+  return (mine * 122) + opponent;
+}
+
+function roundedScorePairFromKey(key: number): [number, number] {
+  return [Math.floor(key / 122), key % 122];
+}
+
+function pairwisePeggingOptionsForKeeps(
+  table: PeggingPairwiseTable,
+  ownKeep: RankCounts,
+  role: "dealer" | "pone",
+  opponentKeep: RankCounts,
+): Array<{ leadRank: number | null; ownPegging: number; opponentPegging: number }> {
+  const ownKeepId = table.keepIdByKey.get(rankCountKey(ownKeep));
+  const opponentKeepId = table.keepIdByKey.get(rankCountKey(opponentKeep));
+  if (ownKeepId === undefined || opponentKeepId === undefined) return [];
+  if (role === "dealer") {
+    const record = findPairwisePeggingRecord(
+      table,
+      "dealer",
+      table.dealerOffsets[ownKeepId],
+      table.dealerOffsets[ownKeepId + 1],
+      opponentKeepId,
+    );
+    return record ? [{ leadRank: null, ownPegging: record.myPegging, opponentPegging: record.opponentPegging }] : [];
+  }
+  const options: Array<{ leadRank: number; ownPegging: number; opponentPegging: number }> = [];
+  for (const leadRank of legalPegRanks(ownKeep, 0)) {
+    const start = table.poneOffsets[(ownKeepId * 13) + leadRank];
+    const end = table.poneOffsets[(ownKeepId * 13) + leadRank + 1];
+    const record = findPairwisePeggingRecord(table, "pone", start, end, opponentKeepId);
+    if (record) options.push({ leadRank, ownPegging: record.myPegging, opponentPegging: record.opponentPegging });
+  }
+  return options;
+}
+
+function findPairwisePeggingRecord(
+  table: PeggingPairwiseTable,
+  role: "dealer" | "pone",
+  start: number,
+  end: number,
+  opponentKeepId: number,
+): { opponentKeepId: number; myPegging: number; opponentPegging: number; weight: number } | null {
+  for (let index = start; index < end; index += 1) {
+    const record = unpackBasePairwiseRecord(table, role, index, "ev");
+    if (record.opponentKeepId === opponentKeepId) return record;
+    if (record.opponentKeepId > opponentKeepId) break;
+  }
+  return null;
+}
+
 function analyzeDiscardChoice(
   hand: Card[],
   selected: Card[],
   myCrib: boolean,
   engine: Opponent,
   context?: { game: CribbageGame; player: PlayerState },
-): {
-  selectedEv: number;
-  recommendedEv: number;
-  recommended: Card[];
-  selectedPegTableLead: number | null;
-  recommendedPegTableLead: number | null;
-  selectedWinProbability?: number;
-  recommendedWinProbability?: number;
-  selectedComponents: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
-  recommendedComponents: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
-} {
+): DiscardChoiceAnalysis {
+  if (usesSixCardDiscardModel(engine) && context) {
+    const sixCardAnalysis = analyzeSixCardDiscardChoice(hand, selected, myCrib, engine, context);
+    if (sixCardAnalysis) return sixCardAnalysis;
+  }
   const deck = fullDeck().filter((card) => !hand.some((held) => held.id === card.id));
   const role = myCrib ? "dealer" : "pone";
   let recommendedEv = Number.NEGATIVE_INFINITY;
@@ -5829,6 +6367,7 @@ function normalizeOpponent(opponent: StoredOpponent): Opponent {
     opponent === "expert_schell-table-peg_table-1.2" ||
     opponent === "expert_schell_table-peg_table-4.0"
   ) return "schell_table-peg_table-4.0";
+  if (opponent === "schell_table-peg_table-14.7") return "schell_table-peg_table-14.7";
   if (opponent === "schell_table-peg_table-14.6") return "schell_table-peg_table-14.6";
   if (opponent === "schell_table-peg_table-14.5") return "schell_table-peg_table-14.5";
   if (opponent === "schell_table-peg_table-14.4.1") return "schell_table-peg_table-14.4.1";

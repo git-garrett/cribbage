@@ -17,3 +17,5 @@ node_modules
 web/node_modules
 benchmarks
 production-pulls
+web/src/models/rank-crib-discard/*.checkpoint.json
+web/src/models/rank-crib-discard/*.status.json
