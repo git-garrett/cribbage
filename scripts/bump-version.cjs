@@ -16,12 +16,20 @@ function writeJson(path, value) {
 
 function versionFromHighestModel() {
   const engine = fs.readFileSync(enginePath, "utf8");
-  const matches = [...engine.matchAll(/schell_table-peg_table-(\d+)\.(\d+)/g)];
+  const matches = [...engine.matchAll(/schell_table-peg_table-(\d+(?:\.\d+)+)/g)];
   if (!matches.length) throw new Error(`Could not determine app model version from ${enginePath}`);
-  const [major, minor] = matches
-    .map((match) => [Number(match[1]), Number(match[2])])
-    .sort((a, b) => b[0] - a[0] || b[1] - a[1])[0];
-  return `${major}.${minor}.0`;
+  const highest = matches
+    .map((match) => match[1].split(".").map(Number))
+    .sort((a, b) => {
+      const length = Math.max(a.length, b.length, 3);
+      for (let index = 0; index < length; index += 1) {
+        const diff = (b[index] ?? 0) - (a[index] ?? 0);
+        if (diff) return diff;
+      }
+      return 0;
+    })[0];
+  while (highest.length < 3) highest.push(0);
+  return highest.slice(0, 3).join(".");
 }
 
 const pkg = readJson(packagePath);

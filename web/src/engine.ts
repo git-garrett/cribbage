@@ -3,6 +3,7 @@ import boardPositionStats from "./models/flush-aware-board-position-stats.json";
 import cribRankComponentsByDiscardCut from "./models/rank-crib-discard/crib-rank-components-by-discard-cut.json";
 import cribRankScoreByDiscardCut from "./models/rank-crib-discard/crib-rank-score-by-discard-cut.json";
 import cribScoreHistogramByDiscardCut from "./models/rank-crib-discard/crib-score-histogram-by-discard-cut.json";
+import empiricalDiscardKeep148 from "./models/rank-crib-discard/empirical-discard-keep-14.8.json";
 import handRankScoreByKeepCut from "./models/rank-crib-discard/hand-rank-score-by-keep-cut.json";
 import sixCardDiscardPolicyManifest from "./models/rank-crib-discard/six-card-discard-policy.manifest.json";
 import sixCardDiscardPolicyUrl from "./models/rank-crib-discard/six-card-discard-policy.bin?url";
@@ -55,6 +56,8 @@ export type Opponent =
   | "schell_table-peg_table-14.5"
   | "schell_table-peg_table-14.6"
   | "schell_table-peg_table-14.7"
+  | "schell_table-peg_table-14.8"
+  | "schell_table-peg_table-14.8.1"
   | "schell_table-2.0";
 type LegacyOpponent =
   | "ras-table-1.0"
@@ -127,6 +130,8 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "schell_table-peg_table-14.5": "Schell Table + Peg Table 14.5",
   "schell_table-peg_table-14.6": "Schell Table + Peg Table 14.6",
   "schell_table-peg_table-14.7": "Schell Table + Peg Table 14.7",
+  "schell_table-peg_table-14.8": "Schell Table + Peg Table 14.8",
+  "schell_table-peg_table-14.8.1": "Schell Table + Peg Table 14.8.1",
 };
 const CRIB_FLUSH_BONUS_BY_SUIT_COUNT = cribFlushBonusBySuitCount as number[];
 const HAND_RANK_SCORE_BY_KEEP_CUT = (handRankScoreByKeepCut as {
@@ -301,6 +306,8 @@ DISCARD_TABLES["schell_table-peg_table-14.4.1"] = DISCARD_TABLES["schell_table-2
 DISCARD_TABLES["schell_table-peg_table-14.5"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-14.6"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-14.7"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-14.8"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-14.8.1"] = DISCARD_TABLES["schell_table-2.0"];
 
 export class WinGame extends Error {}
 
@@ -2280,6 +2287,56 @@ type SixCardDiscardEvaluationMemo = {
   cribSuitBonus: Map<string, number>;
   peggingOptions: Map<string, Array<{ leadRank: number | null; ownPegging: number; opponentPegging: number }>>;
 };
+type EmpiricalDiscardKeepJsonEntry = {
+  count: number;
+  suitedCount?: number;
+  suitedRate?: number;
+};
+type EmpiricalDiscardKeepJsonRole = {
+  discardTotal: number;
+  keepTotal: number;
+  suitedDiscardRate: number;
+  distinctSuitedDiscardRate: number;
+  discards: Record<string, EmpiricalDiscardKeepJsonEntry>;
+  keeps: Record<string, number>;
+};
+type EmpiricalDiscardKeepJson = {
+  roles: Record<"dealer" | "pone", EmpiricalDiscardKeepJsonRole>;
+};
+type EmpiricalRuntimeEntry = {
+  key: string;
+  ranks: RankCounts;
+  count: number;
+  fullCombinationCount: number;
+  scoringCards: Card[];
+  suitedRate?: number;
+};
+type EmpiricalRuntimeRole = {
+  suitedDiscardRate: number;
+  distinctSuitedDiscardRate: number;
+  discards: EmpiricalRuntimeEntry[];
+  keeps: EmpiricalRuntimeEntry[];
+};
+type EmpiricalDiscardKeepRuntimeTable = {
+  roles: Record<"dealer" | "pone", EmpiricalRuntimeRole>;
+};
+type EmpiricalWeightedEntry = EmpiricalRuntimeEntry & {
+  weight: number;
+};
+type EmpiricalDiscardCandidate = {
+  discard: Card[];
+  keep: Card[];
+};
+type EmpiricalDiscardCandidateGroup = EmpiricalDiscardCandidate & {
+  candidates: EmpiricalDiscardCandidate[];
+};
+type EmpiricalDiscardEvaluationMemo = SixCardDiscardEvaluationMemo & {
+  adjustedDiscards: Map<string, EmpiricalWeightedEntry[]>;
+  adjustedKeeps: Map<string, EmpiricalWeightedEntry[]>;
+  ownHandScoreOutcomes: Map<string, { outcomes: Array<[number, number]>; average: number }>;
+  cribScoreOutcomes: Map<string, { outcomes: Array<[number, number]>; average: number }>;
+  opponentHandScoreOutcomes: Map<string, Array<[number, number]>>;
+};
 type CutRankOption = {
   rank: number;
   card: Card;
@@ -2396,6 +2453,9 @@ const SCORE_PHASES: ScorePhase[] = ["peggingPone", "peggingDealer", "handPone", 
 const SCORE_PHASE_DISTRIBUTIONS: Record<ScorePhase, Array<[number, number]>> = Object.fromEntries(
   SCORE_PHASES.map((phase) => [phase, scorePhaseDistribution(BOARD_POSITION_STATS.global[phase])]),
 ) as Record<ScorePhase, Array<[number, number]>>;
+const EMPIRICAL_DISCARD_KEEP_TABLE_14_8 = normalizeEmpiricalDiscardKeepTable(
+  empiricalDiscardKeep148 as EmpiricalDiscardKeepJson,
+);
 const PEG_TABLE_POLICY_LOADERS: Partial<Record<Opponent, () => Promise<PegTablePolicy>>> = {
   "schell_table-peg_table-4.0": () =>
     import("./models/schell_table-peg_table-4.0/peg-table-policy.json").then((module) => module.default as unknown as PegTablePolicy),
@@ -2449,6 +2509,10 @@ const PEGGING_HOLD_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Pegging
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
   "schell_table-peg_table-14.7": () =>
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
+  "schell_table-peg_table-14.8": () =>
+    loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
+  "schell_table-peg_table-14.8.1": () =>
+    loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
 };
 const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<PeggingPairwiseTable>>> = {
   "schell_table-peg_table-12.0": () =>
@@ -2473,6 +2537,10 @@ const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Peg
     loadFrontierPeggingTable(peggingFrontier145Url, peggingFrontier145Manifest as PeggingPairwiseManifest),
   "schell_table-peg_table-14.7": () =>
     loadPairwisePeggingTable(peggingPairwise12Url, peggingPairwise12Manifest as PeggingPairwiseManifest),
+  "schell_table-peg_table-14.8": () =>
+    loadPairwisePeggingTable(peggingPairwise12Url, peggingPairwise12Manifest as PeggingPairwiseManifest),
+  "schell_table-peg_table-14.8.1": () =>
+    loadPairwisePeggingTable(peggingPairwise12Url, peggingPairwise12Manifest as PeggingPairwiseManifest),
 };
 const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLeadFrequencyTable>>> = {
   "schell_table-peg_table-13.0": () =>
@@ -2494,6 +2562,10 @@ const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLe
   "schell_table-peg_table-14.6": () =>
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
   "schell_table-peg_table-14.7": () =>
+    loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
+  "schell_table-peg_table-14.8": () =>
+    loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
+  "schell_table-peg_table-14.8.1": () =>
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
 };
 const CRIB_TRIPOLICY_LOADERS: Partial<Record<Opponent, () => Promise<CribTripolicyTable>>> = {
@@ -2628,11 +2700,22 @@ function isModel14OrLater(engine: Opponent): boolean {
     engine === "schell_table-peg_table-14.4.1" ||
     engine === "schell_table-peg_table-14.5" ||
     engine === "schell_table-peg_table-14.6" ||
-    engine === "schell_table-peg_table-14.7";
+    engine === "schell_table-peg_table-14.7" ||
+    engine === "schell_table-peg_table-14.8" ||
+    engine === "schell_table-peg_table-14.8.1";
 }
 
 function usesSixCardDiscardModel(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-14.7";
+}
+
+function usesEmpiricalDiscardKeepModel(engine: Opponent): boolean {
+  return engine === "schell_table-peg_table-14.8" ||
+    engine === "schell_table-peg_table-14.8.1";
+}
+
+function usesEmpiricalDiscardCandidateGrouping(engine: Opponent): boolean {
+  return engine === "schell_table-peg_table-14.8.1";
 }
 
 function usesWinProbabilityPegging(engine: Opponent): boolean {
@@ -2671,7 +2754,7 @@ function usesModel13LivePegging(engine: Opponent): boolean {
 }
 
 function usesTripolicyDiscardModel(engine: Opponent): boolean {
-  return isModel14OrLater(engine) && !usesSixCardDiscardModel(engine);
+  return isModel14OrLater(engine) && !usesSixCardDiscardModel(engine) && !usesEmpiricalDiscardKeepModel(engine);
 }
 
 function usesNineWayTripolicyDiscardModel(engine: Opponent): boolean {
@@ -2689,7 +2772,9 @@ function usesCorrectedDiscardWinProbability(engine: Opponent): boolean {
     engine === "schell_table-peg_table-14.4.1" ||
     engine === "schell_table-peg_table-14.5" ||
     engine === "schell_table-peg_table-14.6" ||
-    engine === "schell_table-peg_table-14.7";
+    engine === "schell_table-peg_table-14.7" ||
+    engine === "schell_table-peg_table-14.8" ||
+    engine === "schell_table-peg_table-14.8.1";
 }
 
 function usesRankOnlyDiscardWinProbabilityApproximation(engine: Opponent): boolean {
@@ -2698,7 +2783,9 @@ function usesRankOnlyDiscardWinProbabilityApproximation(engine: Opponent): boole
     engine === "schell_table-peg_table-14.4.1" ||
     engine === "schell_table-peg_table-14.5" ||
     engine === "schell_table-peg_table-14.6" ||
-    engine === "schell_table-peg_table-14.7";
+    engine === "schell_table-peg_table-14.7" ||
+    engine === "schell_table-peg_table-14.8" ||
+    engine === "schell_table-peg_table-14.8.1";
 }
 
 function usesKnownCardPostPeggingWinProbability(engine: Opponent): boolean {
@@ -2721,7 +2808,7 @@ function frontierPolicyIndex(policy: CribPolicy | PeggingOutcomePolicy): number 
 }
 
 function peggingOutcomePolicies(engine: Opponent): PeggingOutcomePolicy[] {
-  if (usesSixCardDiscardModel(engine)) return ["ev"];
+  if (usesSixCardDiscardModel(engine) || usesEmpiricalDiscardKeepModel(engine)) return ["ev"];
   if (usesIndexedFrontierPolicyModel(engine)) {
     const max = PEGGING_PAIRWISE_TABLES[engine]?.maxFrontierOutcomes ?? 0;
     return ["ev", ...Array.from({ length: max }, (_, index) => `frontier:${index}` as const)];
@@ -2735,7 +2822,7 @@ function peggingOutcomePolicies(engine: Opponent): PeggingOutcomePolicy[] {
 }
 
 function cribPolicies(engine: Opponent): CribPolicy[] {
-  if (usesSixCardDiscardModel(engine)) return ["ev"];
+  if (usesSixCardDiscardModel(engine) || usesEmpiricalDiscardKeepModel(engine)) return ["ev"];
   if (usesIndexedFrontierPolicyModel(engine)) {
     const policyCount = CRIB_TRIPOLICY_TABLES[engine]?.policyCount ?? 1;
     return ["ev", ...Array.from({ length: Math.max(0, policyCount - 1) }, (_, index) => `frontier:${index}` as const)];
@@ -6126,6 +6213,795 @@ function findPairwisePeggingRecord(
   return null;
 }
 
+function normalizeEmpiricalDiscardKeepTable(source: EmpiricalDiscardKeepJson): EmpiricalDiscardKeepRuntimeTable {
+  const normalizeDiscard = ([key, entry]: [string, EmpiricalDiscardKeepJsonEntry]): EmpiricalRuntimeEntry => {
+    const ranks = rankCountsFromKey(key);
+    return {
+      key,
+      ranks,
+      count: entry.count,
+      fullCombinationCount: fullDeckRankCombinationCount(ranks) || 1,
+      scoringCards: cardsForRankCountsForScoring(ranks),
+      suitedRate: entry.suitedRate ?? (entry.count ? (entry.suitedCount ?? 0) / entry.count : 0),
+    };
+  };
+  const normalizeKeep = ([key, count]: [string, number]): EmpiricalRuntimeEntry => {
+    const ranks = rankCountsFromKey(key);
+    return {
+      key,
+      ranks,
+      count,
+      fullCombinationCount: fullDeckRankCombinationCount(ranks) || 1,
+      scoringCards: cardsForRankCountsForScoring(ranks),
+    };
+  };
+  return {
+    roles: {
+      dealer: {
+        suitedDiscardRate: source.roles.dealer.suitedDiscardRate,
+        distinctSuitedDiscardRate: source.roles.dealer.distinctSuitedDiscardRate,
+        discards: Object.entries(source.roles.dealer.discards).map(normalizeDiscard),
+        keeps: Object.entries(source.roles.dealer.keeps).map(normalizeKeep),
+      },
+      pone: {
+        suitedDiscardRate: source.roles.pone.suitedDiscardRate,
+        distinctSuitedDiscardRate: source.roles.pone.distinctSuitedDiscardRate,
+        discards: Object.entries(source.roles.pone.discards).map(normalizeDiscard),
+        keeps: Object.entries(source.roles.pone.keeps).map(normalizeKeep),
+      },
+    },
+  };
+}
+
+function adjustedEmpiricalEntries(
+  entries: EmpiricalRuntimeEntry[],
+  availableRanks: RankCounts,
+  cache: Map<string, EmpiricalWeightedEntry[]>,
+  cacheKey: string,
+  fallbackSize: number,
+  fallbackSuitedRate = 0,
+): EmpiricalWeightedEntry[] {
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+  let adjusted = entries
+    .map((entry) => {
+      const availableCombinations = rankCombinationCount(entry.ranks, availableRanks);
+      const weight = entry.count * (availableCombinations / entry.fullCombinationCount);
+      return { ...entry, weight };
+    })
+    .filter((entry) => entry.weight > 0);
+  if (!adjusted.length) {
+    adjusted = enumerateRankHands(availableRanks, fallbackSize)
+      .map((hand) => {
+        const key = rankCountKey(hand.ranks);
+        return {
+          key,
+          ranks: hand.ranks,
+          count: 0,
+          fullCombinationCount: fullDeckRankCombinationCount(hand.ranks) || 1,
+          scoringCards: cardsForRankCountsForScoring(hand.ranks),
+          suitedRate: fallbackSize === 2 ? fallbackSuitedRate : undefined,
+          weight: hand.weight,
+        };
+      })
+      .filter((entry) => entry.weight > 0);
+  }
+  cache.set(cacheKey, adjusted);
+  return adjusted;
+}
+
+function rankPairCanBeSuited(ranks: RankCounts): boolean {
+  return ranks.reduce((sum, count) => sum + count, 0) === 2 && ranks.every((count) => count <= 1);
+}
+
+function normalizedScoreOutcomes(outcomes: Map<number, number>, totalWeight: number): Array<[number, number]> {
+  return [...outcomes.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([score, weight]) => [score, weight / totalWeight]);
+}
+
+function scoreOutcomeResult(outcomes: Map<number, number>, totalWeight: number): {
+  outcomes: Array<[number, number]>;
+  average: number;
+} {
+  if (!totalWeight) return { outcomes: [], average: 0 };
+  let total = 0;
+  for (const [score, weight] of outcomes) total += score * weight;
+  return {
+    outcomes: normalizedScoreOutcomes(outcomes, totalWeight),
+    average: total / totalWeight,
+  };
+}
+
+function rankHandSuitBonusOutcomesForCutCard(
+  ranks: RankCounts,
+  cutCard: Card,
+  availableCards: Card[],
+): Array<[number, number]> {
+  const suitCounts = rankSuitCountsExcluding(availableCards, cutCard);
+  const rankTotals = rankTotalsFromSuitCounts(suitCounts);
+  const outcomes = new Map<number, number>();
+  const totalHandCombinations = rankCombinationCount(ranks, rankTotals);
+  if (!totalHandCombinations) return [];
+
+  const jackCount = ranks[10] || 0;
+  let knobProbability = 0;
+  if (jackCount > 0) {
+    const totalJacks = rankTotals[10] || 0;
+    const cutSuitJackAvailable = suitCounts[10]?.[cutCard.suit] || 0;
+    const jackDenominator = choose(totalJacks, jackCount);
+    if (cutSuitJackAvailable && jackDenominator) {
+      knobProbability = choose(totalJacks - 1, jackCount - 1) / jackDenominator;
+    }
+  }
+
+  const flushBySuit = [0, 0, 0, 0];
+  if (ranks.reduce((sum, count) => sum + count, 0) === 4 && ranks.every((count) => count <= 1)) {
+    for (let suit = 0; suit < 4; suit += 1) {
+      flushBySuit[suit] = sameSuitRankHandProbability(ranks, suit, suitCounts, rankTotals);
+    }
+  }
+
+  const flushCutProbability = flushBySuit[cutCard.suit] || 0;
+  const flushOtherProbability = flushBySuit.reduce(
+    (sum, probability, suit) => sum + (suit === cutCard.suit ? 0 : probability),
+    0,
+  );
+  const flushCutIncludesKnob = jackCount > 0 ? flushCutProbability : 0;
+  const knobOnlyProbability = Math.max(0, knobProbability - flushCutIncludesKnob);
+  const noBonusProbability = Math.max(
+    0,
+    1 - flushCutProbability - flushOtherProbability - knobOnlyProbability,
+  );
+
+  if (noBonusProbability > 0) outcomes.set(0, noBonusProbability);
+  if (knobOnlyProbability > 0) outcomes.set(1, (outcomes.get(1) ?? 0) + knobOnlyProbability);
+  if (flushOtherProbability > 0) outcomes.set(4, (outcomes.get(4) ?? 0) + flushOtherProbability);
+  if (flushCutProbability > 0) {
+    const bonus = 5 + (jackCount > 0 ? 1 : 0);
+    outcomes.set(bonus, (outcomes.get(bonus) ?? 0) + flushCutProbability);
+  }
+
+  const totalWeight = [...outcomes.values()].reduce((sum, weight) => sum + weight, 0);
+  return totalWeight ? normalizedScoreOutcomes(outcomes, totalWeight) : [];
+}
+
+function empiricalOwnHandScoreOutcomesForCutRank(
+  keep: Card[],
+  keepKey: string,
+  cut: CutRankOption,
+  memo: EmpiricalDiscardEvaluationMemo,
+): { outcomes: Array<[number, number]>; average: number } {
+  const cacheKey = `${keepKey}:${cut.rank}:${cut.cards.map((card) => card.id).join(",")}`;
+  const cached = memo.ownHandScoreOutcomes.get(cacheKey);
+  if (cached) return cached;
+  const outcomes = new Map<number, number>();
+  for (const cutCard of cut.cards) {
+    const score = rankCutHandScore(keep, cutCard) + scoreFlushAndRightJack(keep, cutCard, false);
+    outcomes.set(score, (outcomes.get(score) ?? 0) + 1);
+  }
+  const result = scoreOutcomeResult(outcomes, cut.cards.length);
+  memo.ownHandScoreOutcomes.set(cacheKey, result);
+  return result;
+}
+
+function empiricalSuitedSplitWeights(
+  entry: EmpiricalWeightedEntry,
+  roleTable: EmpiricalRuntimeRole,
+  suited: Card[][],
+  unsuited: Card[][],
+): { suited: number; unsuited: number } {
+  if (!rankPairCanBeSuited(entry.ranks) || !suited.length) return { suited: 0, unsuited: entry.weight };
+  if (!unsuited.length) return { suited: entry.weight, unsuited: 0 };
+  const suitedRate = Math.max(
+    0,
+    Math.min(1, entry.suitedRate ?? roleTable.distinctSuitedDiscardRate ?? roleTable.suitedDiscardRate),
+  );
+  return {
+    suited: entry.weight * suitedRate,
+    unsuited: entry.weight * (1 - suitedRate),
+  };
+}
+
+function empiricalCribScoreOutcomesForCutCard({
+  discard,
+  opponentRole,
+  cutCard,
+  availableRanks,
+  availableCards,
+  table,
+  memo,
+}: {
+  discard: Card[];
+  opponentRole: "dealer" | "pone";
+  cutCard: Card;
+  availableRanks: RankCounts;
+  availableCards: Card[];
+  table: EmpiricalDiscardKeepRuntimeTable;
+  memo: EmpiricalDiscardEvaluationMemo;
+}): { outcomes: Array<[number, number]>; average: number } {
+  const cacheKey = `${opponentRole}:${cardSetKey(discard)}:${cutCard.id}:${idsKey(availableCards)}`;
+  const cached = memo.cribScoreOutcomes.get(cacheKey);
+  if (cached) return cached;
+  const roleTable = table.roles[opponentRole];
+  const entries = adjustedEmpiricalEntries(
+    roleTable.discards,
+    availableRanks,
+    memo.adjustedDiscards,
+    `${opponentRole}:${availableRanks.join("")}`,
+    2,
+    roleTable.distinctSuitedDiscardRate || roleTable.suitedDiscardRate,
+  );
+  const outcomes = new Map<number, number>();
+  let totalWeight = 0;
+  let total = 0;
+  for (const entry of entries) {
+    const rankScore = scoreHandRankOnly([...discard, ...entry.scoringCards], cutCard);
+    const suitedDiscards = cardsForRankCounts(availableCards, entry.ranks);
+    if (!suitedDiscards.length) continue;
+    const suited: Card[][] = [];
+    const unsuited: Card[][] = [];
+    for (const suitedDiscard of suitedDiscards) {
+      const suits = new Set(suitedDiscard.map((card) => card.suit));
+      if (rankPairCanBeSuited(entry.ranks) && suits.size === 1) suited.push(suitedDiscard);
+      else unsuited.push(suitedDiscard);
+    }
+    const split = empiricalSuitedSplitWeights(entry, roleTable, suited, unsuited);
+    for (const [group, groupWeight] of [[suited, split.suited], [unsuited, split.unsuited]] as const) {
+      if (!group.length || groupWeight <= 0) continue;
+      const suitedWeight = groupWeight / group.length;
+      for (const opponentDiscard of group) {
+        const score = rankScore + cribSuitBonus(discard, opponentDiscard, cutCard);
+        outcomes.set(score, (outcomes.get(score) ?? 0) + suitedWeight);
+        total += score * suitedWeight;
+        totalWeight += suitedWeight;
+      }
+    }
+  }
+  const result = totalWeight
+    ? {
+        outcomes: normalizedScoreOutcomes(outcomes, totalWeight),
+        average: total / totalWeight,
+      }
+    : { outcomes: [], average: 0 };
+  memo.cribScoreOutcomes.set(cacheKey, result);
+  return result;
+}
+
+function empiricalCribScoreOutcomesForCutRank({
+  discard,
+  opponentRole,
+  cut,
+  availableRanks,
+  availableCards,
+  table,
+  memo,
+}: {
+  discard: Card[];
+  opponentRole: "dealer" | "pone";
+  cut: CutRankOption;
+  availableRanks: RankCounts;
+  availableCards: Card[];
+  table: EmpiricalDiscardKeepRuntimeTable;
+  memo: EmpiricalDiscardEvaluationMemo;
+}): { outcomes: Array<[number, number]>; average: number } {
+  const cacheKey = `${opponentRole}:${cardSetKey(discard)}:rank:${cut.rank}:${cut.cards
+    .map((card) => card.id)
+    .join(",")}:${availableRanks.join("")}:${idsKey(availableCards)}`;
+  const cached = memo.cribScoreOutcomes.get(cacheKey);
+  if (cached) return cached;
+  const outcomes = new Map<number, number>();
+  const cutCardWeight = 1 / (cut.cards.length || 1);
+  let totalWeight = 0;
+  for (const cutCard of cut.cards) {
+    const cardResult = empiricalCribScoreOutcomesForCutCard({
+      discard,
+      opponentRole,
+      cutCard,
+      availableRanks,
+      availableCards: availableCards.filter((card) => card.id !== cutCard.id),
+      table,
+      memo,
+    });
+    for (const [score, weight] of cardResult.outcomes) {
+      const adjustedWeight = weight * cutCardWeight;
+      outcomes.set(score, (outcomes.get(score) ?? 0) + adjustedWeight);
+      totalWeight += adjustedWeight;
+    }
+  }
+  const result = scoreOutcomeResult(outcomes, totalWeight);
+  memo.cribScoreOutcomes.set(cacheKey, result);
+  return result;
+}
+
+function empiricalScoreOutcomeSignature(outcomes: Array<[number, number]>): string {
+  return outcomes.map(([score, weight]) => `${score}:${weight}`).join(",");
+}
+
+function empiricalDiscardCandidateEquivalenceKey({
+  keep,
+  discard,
+  opponentRole,
+  cutOptionsByRank,
+  deck,
+  baseAvailableRanks,
+  table,
+  memo,
+}: {
+  keep: Card[];
+  discard: Card[];
+  opponentRole: "dealer" | "pone";
+  cutOptionsByRank: Map<number, CutRankOption>;
+  deck: Card[];
+  baseAvailableRanks: RankCounts;
+  table: EmpiricalDiscardKeepRuntimeTable;
+  memo: EmpiricalDiscardEvaluationMemo;
+}): string {
+  const keepRanks = rankCountsForCards(keep);
+  const keepKey = rankCountKey(keepRanks);
+  const discardKey = rankCountKey(rankCountsForCards(discard));
+  const parts = [`keep=${keepKey}`, `discard=${discardKey}`];
+  for (const cut of cutOptionsByRank.values()) {
+    if ((baseAvailableRanks[cut.rank] || 0) <= 0) continue;
+    const availableRanks = [...baseAvailableRanks];
+    availableRanks[cut.rank] = Math.max(0, availableRanks[cut.rank] - 1);
+    const ownHand = empiricalOwnHandScoreOutcomesForCutRank(keep, keepKey, cut, memo);
+    const crib = empiricalCribScoreOutcomesForCutRank({
+      discard,
+      opponentRole,
+      cut,
+      availableRanks,
+      availableCards: deck,
+      table,
+      memo,
+    });
+    parts.push(
+      `${cut.rank}:own=${empiricalScoreOutcomeSignature(ownHand.outcomes)};crib=${empiricalScoreOutcomeSignature(crib.outcomes)}`,
+    );
+  }
+  return parts.join("|");
+}
+
+function empiricalDiscardCandidateGroups({
+  hand,
+  opponentRole,
+  cutOptionsByRank,
+  deck,
+  table,
+  memo,
+  groupEquivalentCandidates,
+}: {
+  hand: Card[];
+  opponentRole: "dealer" | "pone";
+  cutOptionsByRank: Map<number, CutRankOption>;
+  deck: Card[];
+  table: EmpiricalDiscardKeepRuntimeTable;
+  memo: EmpiricalDiscardEvaluationMemo;
+  groupEquivalentCandidates: boolean;
+}): EmpiricalDiscardCandidateGroup[] {
+  const groups = new Map<string, EmpiricalDiscardCandidateGroup>();
+  const baseAvailableRanks = remainingRankCounts(hand);
+  for (const discard of combinations(hand, 2, 2)) {
+    const keep = hand.filter((card) => !discard.includes(card));
+    const key = groupEquivalentCandidates
+      ? empiricalDiscardCandidateEquivalenceKey({
+          keep,
+          discard,
+          opponentRole,
+          cutOptionsByRank,
+          deck,
+          baseAvailableRanks,
+          table,
+          memo,
+        })
+      : cardSetKey(discard);
+    const existing = groups.get(key);
+    const candidate = { discard, keep };
+    if (existing) {
+      existing.candidates.push(candidate);
+    } else {
+      groups.set(key, { ...candidate, candidates: [candidate] });
+    }
+  }
+  return [...groups.values()];
+}
+
+function empiricalOpponentHandScoreOutcomes(
+  entry: EmpiricalWeightedEntry,
+  cutCard: Card,
+  availableCards: Card[],
+  memo: EmpiricalDiscardEvaluationMemo,
+): Array<[number, number]> {
+  const cacheKey = `${entry.key}:${cutCard.id}:${idsKey(availableCards)}`;
+  const cached = memo.opponentHandScoreOutcomes.get(cacheKey);
+  if (cached) return cached;
+  const outcomes = new Map<number, number>();
+  const rankScore = handRankScoreForRanks(entry.key, entry.ranks, {
+    rank: cutCard.rank,
+    card: cutCard,
+    cards: [cutCard],
+    weight: 1,
+  });
+  const suitBonuses = rankHandSuitBonusOutcomesForCutCard(entry.ranks, cutCard, availableCards);
+  for (const [bonus, weight] of suitBonuses) {
+    outcomes.set(rankScore + bonus, (outcomes.get(rankScore + bonus) ?? 0) + weight);
+  }
+  const result = suitBonuses.length
+    ? normalizedScoreOutcomes(outcomes, 1)
+    : [];
+  memo.opponentHandScoreOutcomes.set(cacheKey, result);
+  return result;
+}
+
+function empiricalOpponentHandScoreOutcomesForCutRank(
+  entry: EmpiricalWeightedEntry,
+  cut: CutRankOption,
+  availableCards: Card[],
+  memo: EmpiricalDiscardEvaluationMemo,
+): Array<[number, number]> {
+  const cacheKey = `${entry.key}:rank:${cut.rank}:${cut.cards
+    .map((card) => card.id)
+    .join(",")}:${idsKey(availableCards)}`;
+  const cached = memo.opponentHandScoreOutcomes.get(cacheKey);
+  if (cached) return cached;
+  const outcomes = new Map<number, number>();
+  const cutCardWeight = 1 / (cut.cards.length || 1);
+  let totalWeight = 0;
+  for (const cutCard of cut.cards) {
+    const cardOutcomes = empiricalOpponentHandScoreOutcomes(
+      entry,
+      cutCard,
+      availableCards.filter((card) => card.id !== cutCard.id),
+      memo,
+    );
+    for (const [score, weight] of cardOutcomes) {
+      const adjustedWeight = weight * cutCardWeight;
+      outcomes.set(score, (outcomes.get(score) ?? 0) + adjustedWeight);
+      totalWeight += adjustedWeight;
+    }
+  }
+  const result = totalWeight ? normalizedScoreOutcomes(outcomes, totalWeight) : [];
+  memo.opponentHandScoreOutcomes.set(cacheKey, result);
+  return result;
+}
+
+function empiricalKeepLeadOutcomesForCutRank({
+  keepRanks,
+  keepKey,
+  role,
+  opponentRole,
+  cut,
+  availableRanks,
+  availableCards,
+  ownHandOutcomes,
+  pairwise,
+  table,
+  memo,
+}: {
+  keepRanks: RankCounts;
+  keepKey: string;
+  role: "dealer" | "pone";
+  opponentRole: "dealer" | "pone";
+  cut: CutRankOption;
+  availableRanks: RankCounts;
+  availableCards: Card[];
+  ownHandOutcomes: Array<[number, number]>;
+  pairwise: PeggingPairwiseTable;
+  table: EmpiricalDiscardKeepRuntimeTable;
+  memo: EmpiricalDiscardEvaluationMemo;
+}): Map<number, {
+  totalWeight: number;
+  baseOutcomes: Map<string, number>;
+  ownHandTotal: number;
+  opponentHandTotal: number;
+  ownPeggingTotal: number;
+  opponentPeggingTotal: number;
+}> {
+  const roleTable = table.roles[opponentRole];
+  const entries = adjustedEmpiricalEntries(
+    roleTable.keeps,
+    availableRanks,
+    memo.adjustedKeeps,
+    `${opponentRole}:${availableRanks.join("")}`,
+    4,
+  );
+  const leadOutcomes = new Map<number, {
+    totalWeight: number;
+    baseOutcomes: Map<string, number>;
+    ownHandTotal: number;
+    opponentHandTotal: number;
+    ownPeggingTotal: number;
+    opponentPeggingTotal: number;
+  }>();
+  for (const entry of entries) {
+    const opponentHandOutcomes = empiricalOpponentHandScoreOutcomesForCutRank(entry, cut, availableCards, memo);
+    if (!opponentHandOutcomes.length) continue;
+    const peggingOptionsKey = `${role}:${keepKey}:${entry.key}`;
+    const peggingOptions = memo.peggingOptions.get(peggingOptionsKey) ??
+      pairwisePeggingOptionsForKeeps(pairwise, keepRanks, role, entry.ranks);
+    memo.peggingOptions.set(peggingOptionsKey, peggingOptions);
+    if (!peggingOptions.length) continue;
+    for (const pegging of peggingOptions) {
+      const leadKey = pegging.leadRank ?? -1;
+      const accumulator = leadOutcomes.get(leadKey) ?? {
+        totalWeight: 0,
+        baseOutcomes: new Map<string, number>(),
+        ownHandTotal: 0,
+        opponentHandTotal: 0,
+        ownPeggingTotal: 0,
+        opponentPeggingTotal: 0,
+      };
+      for (const [opponentHandScore, opponentHandWeight] of opponentHandOutcomes) {
+        for (const [ownHandScore, ownHandWeight] of ownHandOutcomes) {
+          const weight = entry.weight * opponentHandWeight * ownHandWeight;
+          const ownBase = ownHandScore + pegging.ownPegging;
+          const opponentBase = opponentHandScore + pegging.opponentPegging;
+          const baseKey = `${ownBase}:${opponentBase}`;
+          accumulator.baseOutcomes.set(baseKey, (accumulator.baseOutcomes.get(baseKey) ?? 0) + weight);
+          accumulator.totalWeight += weight;
+          accumulator.ownHandTotal += ownHandScore * weight;
+          accumulator.opponentHandTotal += opponentHandScore * weight;
+          accumulator.ownPeggingTotal += pegging.ownPegging * weight;
+          accumulator.opponentPeggingTotal += pegging.opponentPegging * weight;
+        }
+      }
+      leadOutcomes.set(leadKey, accumulator);
+    }
+  }
+  return leadOutcomes;
+}
+
+function analyzeEmpiricalDiscardChoice(
+  hand: Card[],
+  selected: Card[],
+  myCrib: boolean,
+  engine: Opponent,
+  context: { game: CribbageGame; player: PlayerState },
+): DiscardChoiceAnalysis | null {
+  const pairwise = PEGGING_PAIRWISE_TABLES[engine];
+  if (!pairwise) return null;
+  const deck = fullDeck().filter((card) => !hand.some((held) => held.id === card.id));
+  const role = myCrib ? "dealer" : "pone";
+  const opponentRole = myCrib ? "pone" : "dealer";
+  const nextRole = myCrib ? "pone" : "dealer";
+  const player = context.player;
+  const opponent = player === context.game.human ? context.game.ai : context.game.human;
+  const cutOptionsByRank = new Map(cutRankOptions(deck).map((cut) => [cut.rank, cut]));
+  const selectedKey = cardSetKey(selected);
+  const memo: EmpiricalDiscardEvaluationMemo = {
+    ownHandScore: new Map(),
+    opponentHandSuitBonus: new Map(),
+    cribSuitBonus: new Map(),
+    peggingOptions: new Map(),
+    adjustedDiscards: new Map(),
+    adjustedKeeps: new Map(),
+    ownHandScoreOutcomes: new Map(),
+    cribScoreOutcomes: new Map(),
+    opponentHandScoreOutcomes: new Map(),
+  };
+  let selectedEvaluation: ReturnType<typeof evaluateEmpiricalDiscardCandidate> | null = null;
+  let recommendedEvaluation: ReturnType<typeof evaluateEmpiricalDiscardCandidate> | null = null;
+  let recommended = hand.slice(0, 2);
+  const candidateGroups = empiricalDiscardCandidateGroups({
+    hand,
+    opponentRole,
+    cutOptionsByRank,
+    deck,
+    table: EMPIRICAL_DISCARD_KEEP_TABLE_14_8,
+    memo,
+    groupEquivalentCandidates: usesEmpiricalDiscardCandidateGrouping(engine),
+  });
+
+  for (const group of candidateGroups) {
+    const evaluation = evaluateEmpiricalDiscardCandidate({
+      fullHand: hand,
+      keep: group.keep,
+      discard: group.discard,
+      role,
+      opponentRole,
+      nextRole,
+      pairwise,
+      cutOptionsByRank,
+      deck,
+      playerScore: player.score,
+      opponentScore: opponent.score,
+      table: EMPIRICAL_DISCARD_KEEP_TABLE_14_8,
+      memo,
+    });
+    if (!evaluation) continue;
+    if (group.candidates.some((candidate) => cardSetKey(candidate.discard) === selectedKey)) {
+      selectedEvaluation = evaluation;
+    }
+    if (
+      !recommendedEvaluation ||
+      evaluation.winProbability > recommendedEvaluation.winProbability ||
+      (
+        evaluation.winProbability === recommendedEvaluation.winProbability &&
+        evaluation.totalEv > recommendedEvaluation.totalEv
+      )
+    ) {
+      recommendedEvaluation = evaluation;
+      recommended = group.discard;
+    }
+  }
+
+  if (!recommendedEvaluation) return null;
+  const selectedResult = selectedEvaluation ?? recommendedEvaluation;
+  return {
+    selectedEv: selectedResult.totalEv,
+    recommendedEv: recommendedEvaluation.totalEv,
+    recommended,
+    selectedPegTableLead: selectedResult.bestLead,
+    recommendedPegTableLead: recommendedEvaluation.bestLead,
+    selectedWinProbability: selectedResult.winProbability,
+    recommendedWinProbability: recommendedEvaluation.winProbability,
+    selectedComponents: selectedResult.components,
+    recommendedComponents: recommendedEvaluation.components,
+  };
+}
+
+function evaluateEmpiricalDiscardCandidate({
+  fullHand,
+  keep,
+  discard,
+  role,
+  opponentRole,
+  nextRole,
+  pairwise,
+  cutOptionsByRank,
+  deck,
+  playerScore,
+  opponentScore,
+  table,
+  memo,
+}: {
+  fullHand: Card[];
+  keep: Card[];
+  discard: Card[];
+  role: "dealer" | "pone";
+  opponentRole: "dealer" | "pone";
+  nextRole: "dealer" | "pone";
+  pairwise: PeggingPairwiseTable;
+  cutOptionsByRank: Map<number, CutRankOption>;
+  deck: Card[];
+  playerScore: number;
+  opponentScore: number;
+  table: EmpiricalDiscardKeepRuntimeTable;
+  memo: EmpiricalDiscardEvaluationMemo;
+}): {
+  winProbability: number;
+  totalEv: number;
+  bestLead: number | null;
+  components: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
+} | null {
+  const keepRanks = rankCountsForCards(keep);
+  const keepKey = rankCountKey(keepRanks);
+  const baseAvailableRanks = remainingRankCounts(fullHand);
+  const leadEvaluations = new Map<number, {
+    totalWeight: number;
+    winProbabilityOutcomes: Map<number, number>;
+    ownHandTotal: number;
+    opponentHandTotal: number;
+    cribTotal: number;
+    ownPeggingTotal: number;
+    opponentPeggingTotal: number;
+  }>();
+
+  for (const cut of cutOptionsByRank.values()) {
+    if ((baseAvailableRanks[cut.rank] || 0) <= 0) continue;
+    const availableRanks = [...baseAvailableRanks];
+    availableRanks[cut.rank] = Math.max(0, availableRanks[cut.rank] - 1);
+    const availableCards = deck;
+    const ownHand = empiricalOwnHandScoreOutcomesForCutRank(keep, keepKey, cut, memo);
+    if (!ownHand.outcomes.length) continue;
+    const crib = empiricalCribScoreOutcomesForCutRank({
+      discard,
+      opponentRole,
+      cut,
+      availableRanks,
+      availableCards,
+      table,
+      memo,
+    });
+    if (!crib.outcomes.length) continue;
+    const leadCutOutcomes = empiricalKeepLeadOutcomesForCutRank({
+      keepRanks,
+      keepKey,
+      role,
+      opponentRole,
+      cut,
+      availableRanks,
+      availableCards,
+      ownHandOutcomes: ownHand.outcomes,
+      pairwise,
+      table,
+      memo,
+    });
+    for (const [leadRank, leadCut] of leadCutOutcomes) {
+      if (!leadCut.totalWeight) continue;
+      const accumulator = leadEvaluations.get(leadRank) ?? {
+        totalWeight: 0,
+        winProbabilityOutcomes: new Map<number, number>(),
+        ownHandTotal: 0,
+        opponentHandTotal: 0,
+        cribTotal: 0,
+        ownPeggingTotal: 0,
+        opponentPeggingTotal: 0,
+      };
+      accumulator.totalWeight += leadCut.totalWeight * cut.weight;
+      accumulator.ownHandTotal += leadCut.ownHandTotal * cut.weight;
+      accumulator.opponentHandTotal += leadCut.opponentHandTotal * cut.weight;
+      accumulator.cribTotal += crib.average * leadCut.totalWeight * cut.weight;
+      accumulator.ownPeggingTotal += leadCut.ownPeggingTotal * cut.weight;
+      accumulator.opponentPeggingTotal += leadCut.opponentPeggingTotal * cut.weight;
+      for (const [baseKey, baseWeight] of leadCut.baseOutcomes) {
+        const [ownBase, opponentBase] = baseKey.split(":").map(Number);
+        for (const [cribScore, cribWeight] of crib.outcomes) {
+          const ownRoundScore = ownBase + (role === "dealer" ? cribScore : 0);
+          const opponentRoundScore = opponentBase + (role === "dealer" ? 0 : cribScore);
+          const scenarioWeight = baseWeight * cribWeight * cut.weight;
+          const futureScoreKey = roundedScorePairKey(playerScore + ownRoundScore, opponentScore + opponentRoundScore);
+          accumulator.winProbabilityOutcomes.set(
+            futureScoreKey,
+            (accumulator.winProbabilityOutcomes.get(futureScoreKey) ?? 0) + scenarioWeight,
+          );
+        }
+      }
+      leadEvaluations.set(leadRank, accumulator);
+    }
+  }
+
+  let best: {
+    leadRank: number;
+    winProbability: number;
+    totalEv: number;
+    components: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>>;
+  } | null = null;
+  for (const [leadRank, accumulator] of leadEvaluations) {
+    if (!accumulator.totalWeight) continue;
+    const handScore = accumulator.ownHandTotal / accumulator.totalWeight;
+    const cribScore = accumulator.cribTotal / accumulator.totalWeight;
+    const netPegging = (accumulator.ownPeggingTotal - accumulator.opponentPeggingTotal) / accumulator.totalWeight;
+    const totalEv = (role === "dealer" ? handScore + cribScore : handScore - cribScore) + netPegging;
+    let winProbabilityTotal = 0;
+    for (const [scoreKey, weight] of accumulator.winProbabilityOutcomes) {
+      const [myScore, futureOpponentScore] = roundedScorePairFromKey(scoreKey);
+      winProbabilityTotal += weight * approximateFutureWinProbability(
+        myScore,
+        futureOpponentScore,
+        nextRole,
+        "peggingPone",
+      );
+    }
+    const winProbability = winProbabilityTotal / accumulator.totalWeight;
+    const components: Partial<Record<"peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib", number>> = {
+      [role === "dealer" ? "handDealer" : "handPone"]: handScore,
+      [role === "dealer" ? "peggingDealer" : "peggingPone"]: netPegging,
+      crib: role === "dealer" ? cribScore : -cribScore,
+    };
+    if (
+      !best ||
+      winProbability > best.winProbability ||
+      (winProbability === best.winProbability && totalEv > best.totalEv) ||
+      (
+        winProbability === best.winProbability &&
+        totalEv === best.totalEv &&
+        leadTieValue(leadRank) < leadTieValue(best.leadRank)
+      )
+    ) {
+      best = { leadRank, winProbability, totalEv, components };
+    }
+  }
+  return best
+    ? {
+        winProbability: best.winProbability,
+        totalEv: best.totalEv,
+        bestLead: best.leadRank >= 0 ? best.leadRank : null,
+        components: best.components,
+      }
+    : null;
+}
+
 function analyzeDiscardChoice(
   hand: Card[],
   selected: Card[],
@@ -6136,6 +7012,10 @@ function analyzeDiscardChoice(
   if (usesSixCardDiscardModel(engine) && context) {
     const sixCardAnalysis = analyzeSixCardDiscardChoice(hand, selected, myCrib, engine, context);
     if (sixCardAnalysis) return sixCardAnalysis;
+  }
+  if (usesEmpiricalDiscardKeepModel(engine) && context) {
+    const empiricalAnalysis = analyzeEmpiricalDiscardChoice(hand, selected, myCrib, engine, context);
+    if (empiricalAnalysis) return empiricalAnalysis;
   }
   const deck = fullDeck().filter((card) => !hand.some((held) => held.id === card.id));
   const role = myCrib ? "dealer" : "pone";
@@ -6367,6 +7247,8 @@ function normalizeOpponent(opponent: StoredOpponent): Opponent {
     opponent === "expert_schell-table-peg_table-1.2" ||
     opponent === "expert_schell_table-peg_table-4.0"
   ) return "schell_table-peg_table-4.0";
+  if (opponent === "schell_table-peg_table-14.8.1") return "schell_table-peg_table-14.8.1";
+  if (opponent === "schell_table-peg_table-14.8") return "schell_table-peg_table-14.8";
   if (opponent === "schell_table-peg_table-14.7") return "schell_table-peg_table-14.7";
   if (opponent === "schell_table-peg_table-14.6") return "schell_table-peg_table-14.6";
   if (opponent === "schell_table-peg_table-14.5") return "schell_table-peg_table-14.5";

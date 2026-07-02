@@ -551,7 +551,7 @@ describe("game state", () => {
     const game = new CribbageGame("schell_table-peg_table-4.0");
     game.human.hand = cardsFromString("As 2d 3c 4h 5s 6d");
 
-    const discards = (game as any).chooseDiscards(game.human, false);
+    const discards = (game as any).chooseDiscards(game.human, false).cards;
 
     expect(discards.map((card: any) => card.ascii).sort()).toEqual(["2d", "As"]);
   });
@@ -563,7 +563,7 @@ describe("game state", () => {
     game.dealer = game.ai;
     game.turn = 0;
     game.human.hand = cardsFromString("As 2d 3c 4h 5s 6d");
-    const discards = (game as any).chooseDiscards(game.human, false);
+    const discards = (game as any).chooseDiscards(game.human, false).cards;
     game.human.hand = game.human.hand.filter((card: any) => !discards.includes(card));
     game.ai.hand = cardsFromString("7d 8c 9h 10s");
     game.plays = [];

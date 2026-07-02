@@ -425,6 +425,8 @@ const SIMPLE_NETWORK_PUBLIC_OPPONENTS = new Set<string>([
 const SIMPLE_NETWORK_LOCAL_OPPONENTS = new Set<string>([
   ...SIMPLE_NETWORK_PUBLIC_OPPONENTS,
   "schell_table-peg_table-14.7",
+  "schell_table-peg_table-14.8",
+  "schell_table-peg_table-14.8.1",
 ]);
 const URL_PARAMS = new URLSearchParams(window.location.search);
 const FULL_APP_MODE = URL_PARAMS.get("full") === "1" || URL_PARAMS.get("mode") === "full";
@@ -544,10 +546,12 @@ function saveGame(): void {
 
 let currentSnapshot: GameSnapshot | null = null;
 function simpleNetworkSessionValue(): string {
-  return SIMPLE_NETWORK_LOCAL_AI_MODE ? "local-13.0-14.3-14.7" : "server-assigned-13.0-14.3";
+  return SIMPLE_NETWORK_LOCAL_AI_MODE ? "local-13.0-14.3-14.7-14.8-14.8.1" : "server-assigned-13.0-14.3";
 }
 function isValidSimpleNetworkSessionValue(value: string | null): boolean {
   return value === simpleNetworkSessionValue() ||
+    (SIMPLE_NETWORK_LOCAL_AI_MODE && value === "local-13.0-14.3-14.7-14.8") ||
+    (SIMPLE_NETWORK_LOCAL_AI_MODE && value === "local-13.0-14.3-14.7") ||
     (SIMPLE_NETWORK_LOCAL_AI_MODE && value === "server-assigned-13.0-14.3-14.7") ||
     value === SIMPLE_NETWORK_OPPONENT;
 }
@@ -608,11 +612,19 @@ buildBoard();
 function applyFullModeOpponentAvailability(): void {
   if (LOCAL_NETWORK_MODE) return;
   for (const option of [...els.opponent.options]) {
-    if (option.value !== "schell_table-peg_table-14.7") continue;
+    if (
+      option.value !== "schell_table-peg_table-14.7" &&
+      option.value !== "schell_table-peg_table-14.8" &&
+      option.value !== "schell_table-peg_table-14.8.1"
+    ) continue;
     option.hidden = true;
     option.disabled = true;
   }
-  if (els.opponent.value === "schell_table-peg_table-14.7") {
+  if (
+    els.opponent.value === "schell_table-peg_table-14.7" ||
+    els.opponent.value === "schell_table-peg_table-14.8" ||
+    els.opponent.value === "schell_table-peg_table-14.8.1"
+  ) {
     els.opponent.value = DEFAULT_OPPONENT;
   }
 }
@@ -3719,6 +3731,8 @@ function sortedAnalyticsEngines(
 
 function analyticsEngineSortKey(engine: Opponent): number {
   return [
+    "schell_table-peg_table-14.8.1",
+    "schell_table-peg_table-14.8",
     "schell_table-peg_table-14.7",
     "schell_table-peg_table-14.6",
     "schell_table-peg_table-14.5",
@@ -4005,7 +4019,7 @@ function playerName(player: PlayerKey | undefined): string {
 
 function engineName(engine: string | undefined): string {
   if (!engine) return "-";
-  const version = engine.match(/(\d+(?:\.\d+)?)$/)?.[1];
+  const version = engine.match(/(\d+(?:\.\d+)*)$/)?.[1];
   return version ? `AI ${version}` : "AI";
 }
 
@@ -4069,6 +4083,8 @@ function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
     engine === "schell_table-peg_table-14.5" ||
     engine === "schell_table-peg_table-14.6" ||
     engine === "schell_table-peg_table-14.7" ||
+    engine === "schell_table-peg_table-14.8" ||
+    engine === "schell_table-peg_table-14.8.1" ||
     engine === "schell_table-2.0"
   ) {
     return engine;
