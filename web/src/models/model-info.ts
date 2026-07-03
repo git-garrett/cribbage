@@ -30,6 +30,7 @@ import schellPegTable148 from "./schell_table-peg_table-14.8/model.md?raw";
 import schellPegTable1481 from "./schell_table-peg_table-14.8.1/model.md?raw";
 
 export const MODEL_INFO_ORDER: Opponent[] = [
+  "schell_table-peg_table-15.0",
   "schell_table-peg_table-14.8.1",
   "schell_table-peg_table-14.8",
   "schell_table-peg_table-14.7",
@@ -91,4 +92,5 @@ export const MODEL_DOCS: Record<Opponent, string> = {
   "schell_table-peg_table-14.7": schellPegTable147,
   "schell_table-peg_table-14.8": schellPegTable148,
   "schell_table-peg_table-14.8.1": schellPegTable1481,
+  "schell_table-peg_table-15.0": schellPegTable1481,
 };

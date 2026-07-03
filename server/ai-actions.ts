@@ -7,7 +7,7 @@ import {
   type GameSnapshot,
   type Opponent,
 } from "../web/src/engine";
-import { MODEL, MODEL_13 } from "./ai-constants";
+import { MODEL, MODEL_13, REVIEW_MODEL } from "./ai-constants";
 import { installProtectedAssetFetch } from "./protected-assets";
 
 installProtectedAssetFetch();
@@ -33,6 +33,10 @@ export async function ensureModel(): Promise<void> {
     modelPromise = null;
   });
   await modelPromise;
+}
+
+async function ensureReviewModel(): Promise<void> {
+  await ensureOpponentModel(REVIEW_MODEL);
 }
 
 async function ensureOpponentModel(opponent: Opponent): Promise<void> {
@@ -161,7 +165,7 @@ export async function handleGameAction(requestBody: JsonRecord): Promise<JsonRec
         game.acknowledgePeggingReset();
         break;
       case "complete-decision-reviews":
-        await ensureModel();
+        await ensureReviewModel();
         game.completePendingDecisionReviews();
         break;
       case "continue-scoring":

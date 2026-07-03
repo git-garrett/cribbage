@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   CribbageGame,
   DEFAULT_OPPONENT,
+  REVIEW_OPPONENT,
   cardsFromString,
   scoreCount,
   scoreFlushAndRightJack,
@@ -574,7 +575,7 @@ describe("game state", () => {
     expect(play.ascii).toBe("3c");
   });
 
-  test("records discard review against the current best model", () => {
+  test("records discard review against the review model", () => {
     const game = new CribbageGame("schell_table-peg_table-4.0");
     game.phase = "discard";
     game.dealer = game.ai;
@@ -591,7 +592,7 @@ describe("game state", () => {
     expect(discard).toMatchObject({
       cards: ["5s", "6d"],
       review: {
-        model: DEFAULT_OPPONENT,
+        model: REVIEW_OPPONENT,
         selected: ["5s", "6d"],
         recommended: ["As", "2d"],
         delta: expect.any(Number),
@@ -602,7 +603,7 @@ describe("game state", () => {
     expect((discard as any).review.recommendedEv).toEqual(expect.any(Number));
   });
 
-  test("defers pegging review against the current best model", () => {
+  test("defers pegging review against the review model", () => {
     const game = new CribbageGame("schell_table-peg_table-4.0");
     game.phase = "pegging";
     game.pone = game.human;
@@ -631,7 +632,7 @@ describe("game state", () => {
     expect(game.completePendingDecisionReviews()).toBe(1);
     expect(pegging).toMatchObject({
       review: {
-        model: DEFAULT_OPPONENT,
+        model: REVIEW_OPPONENT,
         selected: ["10c"],
         recommended: ["5d"],
         selectedEv: expect.any(Number),

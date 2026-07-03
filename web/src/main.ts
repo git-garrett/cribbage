@@ -2146,11 +2146,23 @@ function completeTurnCutInteraction(): void {
   const wasConfirmingCut = state.turnCutRevealStage === "revealed";
   if (wasConfirmingCut) {
     state.turnCutRevealStage = null;
-    state.resultOverride = ["Waiting for AI to play."];
-    if (state.game && shouldShowAiThinkingForPegging(state.game)) setAiThinking(true);
+    const waitMessage = postTurnCutWaitMessage(state.game);
+    state.resultOverride = waitMessage ? [waitMessage] : null;
+    if (state.game && shouldShowAiThinkingAfterTurnCut(state.game)) setAiThinking(true);
     render(state.game);
   }
   resolve();
+}
+
+function postTurnCutWaitMessage(game: GameState | null): string | null {
+  if (!game) return null;
+  if (game.phase === "ai_discarding") return "Waiting for AI to discard.";
+  if (shouldShowAiThinkingForPegging(game)) return "Waiting for AI to play.";
+  return null;
+}
+
+function shouldShowAiThinkingAfterTurnCut(game: GameState): boolean {
+  return game.phase === "ai_discarding" || shouldShowAiThinkingForPegging(game);
 }
 
 function shouldAnimateTurnCutCard(game: GameState): boolean {
@@ -4124,6 +4136,7 @@ function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
     engine === "schell_table-peg_table-14.7" ||
     engine === "schell_table-peg_table-14.8" ||
     engine === "schell_table-peg_table-14.8.1" ||
+    engine === "schell_table-peg_table-15.0" ||
     engine === "schell_table-2.0"
   ) {
     return engine;

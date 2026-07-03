@@ -58,6 +58,7 @@ export type Opponent =
   | "schell_table-peg_table-14.7"
   | "schell_table-peg_table-14.8"
   | "schell_table-peg_table-14.8.1"
+  | "schell_table-peg_table-15.0"
   | "schell_table-2.0";
 type LegacyOpponent =
   | "ras-table-1.0"
@@ -85,6 +86,7 @@ type LegacyOpponent =
   | "expert-peg_table-2.3";
 type StoredOpponent = Opponent | LegacyOpponent;
 export const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-14.3";
+export const REVIEW_OPPONENT: Opponent = "schell_table-peg_table-15.0";
 export type Phase =
   | "cut_for_deal"
   | "discard"
@@ -132,6 +134,7 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "schell_table-peg_table-14.7": "Schell Table + Peg Table 14.7",
   "schell_table-peg_table-14.8": "Schell Table + Peg Table 14.8",
   "schell_table-peg_table-14.8.1": "Schell Table + Peg Table 14.8.1",
+  "schell_table-peg_table-15.0": "Schell Table + Peg Table 15.0",
 };
 const CRIB_FLUSH_BONUS_BY_SUIT_COUNT = cribFlushBonusBySuitCount as number[];
 const HAND_RANK_SCORE_BY_KEEP_CUT = (handRankScoreByKeepCut as {
@@ -308,6 +311,7 @@ DISCARD_TABLES["schell_table-peg_table-14.6"] = DISCARD_TABLES["schell_table-2.0
 DISCARD_TABLES["schell_table-peg_table-14.7"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-14.8"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-14.8.1"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-15.0"] = DISCARD_TABLES["schell_table-2.0"];
 
 export class WinGame extends Error {}
 
@@ -2105,22 +2109,22 @@ export class CribbageGame {
     cards: Card[],
     handBeforeDiscard: Card[],
   ): AnalyticsDecisionReview | undefined {
-    const analysis = analyzeDiscardChoice(handBeforeDiscard, cards, player === this.dealer, DEFAULT_OPPONENT, { game: this, player });
+    const analysis = analyzeDiscardChoice(handBeforeDiscard, cards, player === this.dealer, REVIEW_OPPONENT, { game: this, player });
     this.pegTableLeads[player.key] = analysis.selectedPegTableLead;
     const selectedWinProbability = analysis.selectedWinProbability ?? discardChoiceWinProbability(
       this,
       player,
       analysis.selectedComponents,
-      DEFAULT_OPPONENT,
+      REVIEW_OPPONENT,
     );
     const recommendedWinProbability = analysis.recommendedWinProbability ?? discardChoiceWinProbability(
       this,
       player,
       analysis.recommendedComponents,
-      DEFAULT_OPPONENT,
+      REVIEW_OPPONENT,
     );
     return {
-      model: DEFAULT_OPPONENT,
+      model: REVIEW_OPPONENT,
       selected: this.cardLabels(cards),
       recommended: this.cardLabels(analysis.recommended),
       selectedEv: roundEv(analysis.selectedEv),
@@ -2134,11 +2138,11 @@ export class CribbageGame {
   }
 
   private reviewPegPlay(player: PlayerState, card: Card): AnalyticsDecisionReview | undefined {
-    const recommended = this.choosePlayForEngine(player, DEFAULT_OPPONENT);
-    const selected = peggingPlayReviewValues(this, player, card, DEFAULT_OPPONENT);
-    const recommendedValues = peggingPlayReviewValues(this, player, recommended, DEFAULT_OPPONENT);
+    const recommended = this.choosePlayForEngine(player, REVIEW_OPPONENT);
+    const selected = peggingPlayReviewValues(this, player, card, REVIEW_OPPONENT);
+    const recommendedValues = peggingPlayReviewValues(this, player, recommended, REVIEW_OPPONENT);
     return {
-      model: DEFAULT_OPPONENT,
+      model: REVIEW_OPPONENT,
       selected: [this.cardLabel(card)],
       recommended: [this.cardLabel(recommended)],
       selectedEv: roundEv(selected.pointEv),
@@ -2597,6 +2601,8 @@ const PEGGING_HOLD_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Pegging
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
   "schell_table-peg_table-14.8.1": () =>
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
+  "schell_table-peg_table-15.0": () =>
+    loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
 };
 const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<PeggingPairwiseTable>>> = {
   "schell_table-peg_table-12.0": () =>
@@ -2625,6 +2631,8 @@ const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Peg
     loadPairwisePeggingTable(peggingPairwise12Url, peggingPairwise12Manifest as PeggingPairwiseManifest),
   "schell_table-peg_table-14.8.1": () =>
     loadPairwisePeggingTable(peggingPairwise12Url, peggingPairwise12Manifest as PeggingPairwiseManifest),
+  "schell_table-peg_table-15.0": () =>
+    loadPairwisePeggingTable(peggingPairwise12Url, peggingPairwise12Manifest as PeggingPairwiseManifest),
 };
 const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLeadFrequencyTable>>> = {
   "schell_table-peg_table-13.0": () =>
@@ -2650,6 +2658,8 @@ const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLe
   "schell_table-peg_table-14.8": () =>
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
   "schell_table-peg_table-14.8.1": () =>
+    loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
+  "schell_table-peg_table-15.0": () =>
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
 };
 const CRIB_TRIPOLICY_LOADERS: Partial<Record<Opponent, () => Promise<CribTripolicyTable>>> = {
@@ -2786,7 +2796,8 @@ function isModel14OrLater(engine: Opponent): boolean {
     engine === "schell_table-peg_table-14.6" ||
     engine === "schell_table-peg_table-14.7" ||
     engine === "schell_table-peg_table-14.8" ||
-    engine === "schell_table-peg_table-14.8.1";
+    engine === "schell_table-peg_table-14.8.1" ||
+    engine === "schell_table-peg_table-15.0";
 }
 
 function usesSixCardDiscardModel(engine: Opponent): boolean {
@@ -2795,11 +2806,13 @@ function usesSixCardDiscardModel(engine: Opponent): boolean {
 
 function usesEmpiricalDiscardKeepModel(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-14.8" ||
-    engine === "schell_table-peg_table-14.8.1";
+    engine === "schell_table-peg_table-14.8.1" ||
+    engine === "schell_table-peg_table-15.0";
 }
 
 function usesEmpiricalDiscardCandidateGrouping(engine: Opponent): boolean {
-  return engine === "schell_table-peg_table-14.8.1";
+  return engine === "schell_table-peg_table-14.8.1" ||
+    engine === "schell_table-peg_table-15.0";
 }
 
 function usesWinProbabilityPegging(engine: Opponent): boolean {
@@ -2858,7 +2871,8 @@ function usesCorrectedDiscardWinProbability(engine: Opponent): boolean {
     engine === "schell_table-peg_table-14.6" ||
     engine === "schell_table-peg_table-14.7" ||
     engine === "schell_table-peg_table-14.8" ||
-    engine === "schell_table-peg_table-14.8.1";
+    engine === "schell_table-peg_table-14.8.1" ||
+    engine === "schell_table-peg_table-15.0";
 }
 
 function usesRankOnlyDiscardWinProbabilityApproximation(engine: Opponent): boolean {
@@ -2869,7 +2883,8 @@ function usesRankOnlyDiscardWinProbabilityApproximation(engine: Opponent): boole
     engine === "schell_table-peg_table-14.6" ||
     engine === "schell_table-peg_table-14.7" ||
     engine === "schell_table-peg_table-14.8" ||
-    engine === "schell_table-peg_table-14.8.1";
+    engine === "schell_table-peg_table-14.8.1" ||
+    engine === "schell_table-peg_table-15.0";
 }
 
 function usesKnownCardPostPeggingWinProbability(engine: Opponent): boolean {
@@ -7333,6 +7348,7 @@ function normalizeOpponent(opponent: StoredOpponent): Opponent {
     opponent === "expert_schell-table-peg_table-1.2" ||
     opponent === "expert_schell_table-peg_table-4.0"
   ) return "schell_table-peg_table-4.0";
+  if (opponent === "schell_table-peg_table-15.0") return "schell_table-peg_table-15.0";
   if (opponent === "schell_table-peg_table-14.8.1") return "schell_table-peg_table-14.8.1";
   if (opponent === "schell_table-peg_table-14.8") return "schell_table-peg_table-14.8";
   if (opponent === "schell_table-peg_table-14.7") return "schell_table-peg_table-14.7";
