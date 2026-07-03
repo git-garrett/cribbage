@@ -719,6 +719,38 @@ function activeGameSessionCountsByPublicModel(db: DatabaseSyncLike): Record<stri
   return counts;
 }
 
+function gameUploadCountsByPublicModelForTag(db: DatabaseSyncLike, tag: string): Record<string, number> {
+  const counts: Record<string, number> = Object.fromEntries(PUBLIC_GAME_MODELS.map((model) => [model, 0]));
+  const placeholders = PUBLIC_GAME_MODELS.map(() => "?").join(", ");
+  const rows = db.prepare(`
+    SELECT model, final_result_json
+    FROM game_uploads
+    WHERE lower(tag) = lower(?) AND model IN (${placeholders})
+  `).all(tag, ...PUBLIC_GAME_MODELS) as JsonRecord[];
+  for (const row of rows) {
+    if (!finalResultFromRow(row)) continue;
+    const model = String(row.model || "");
+    if (model in counts) counts[model] += 1;
+  }
+  return counts;
+}
+
+function activeGameSessionCountsByPublicModelForTag(db: DatabaseSyncLike, tag: string): Record<string, number> {
+  const counts: Record<string, number> = Object.fromEntries(PUBLIC_GAME_MODELS.map((model) => [model, 0]));
+  const placeholders = PUBLIC_GAME_MODELS.map(() => "?").join(", ");
+  const rows = db.prepare(`
+    SELECT model, COUNT(*) AS games
+    FROM game_sessions
+    WHERE lower(tag) = lower(?) AND status = 'active' AND model IN (${placeholders})
+    GROUP BY model
+  `).all(tag, ...PUBLIC_GAME_MODELS) as JsonRecord[];
+  for (const row of rows) {
+    const model = String(row.model || "");
+    if (model in counts) counts[model] += Number(row.games || 0);
+  }
+  return counts;
+}
+
 function mostRecentPublicModel(db: DatabaseSyncLike): string | null {
   const placeholders = PUBLIC_GAME_MODELS.map(() => "?").join(", ");
   const upload = db.prepare(`
@@ -741,16 +773,37 @@ function mostRecentPublicModel(db: DatabaseSyncLike): string | null {
   return String(String(session.at || "") > String(upload.at || "") ? session.model : upload.model);
 }
 
-async function publicModelForGameStart(): Promise<string> {
-  const db = await ensureDatabase();
-  if (!db) return MODEL_13;
-  const uploadCounts = gameUploadCountsByPublicModel(db);
-  const sessionCounts = activeGameSessionCountsByPublicModel(db);
-  const count13 = uploadCounts[MODEL_13] + sessionCounts[MODEL_13];
-  const count14_3 = uploadCounts[MODEL_14_3] + sessionCounts[MODEL_14_3];
+function randomPublicModel(): string {
+  return Math.random() < 0.5 ? MODEL_13 : MODEL_14_3;
+}
+
+function balancedPublicModelFromCounts(counts: Record<string, number>): string | null {
+  const count13 = counts[MODEL_13] ?? 0;
+  const count14_3 = counts[MODEL_14_3] ?? 0;
   if (count13 < count14_3) return MODEL_13;
   if (count14_3 < count13) return MODEL_14_3;
-  return mostRecentPublicModel(db) === MODEL_13 ? MODEL_14_3 : MODEL_13;
+  return null;
+}
+
+async function publicModelForGameStart(tag: string | null = null): Promise<string> {
+  const db = await ensureDatabase();
+  if (!db) return MODEL_13;
+  if (tag) {
+    const uploadCounts = gameUploadCountsByPublicModelForTag(db, tag);
+    const sessionCounts = activeGameSessionCountsByPublicModelForTag(db, tag);
+    const personalChoice = balancedPublicModelFromCounts({
+      [MODEL_13]: uploadCounts[MODEL_13] + sessionCounts[MODEL_13],
+      [MODEL_14_3]: uploadCounts[MODEL_14_3] + sessionCounts[MODEL_14_3],
+    });
+    return personalChoice ?? randomPublicModel();
+  }
+  const uploadCounts = gameUploadCountsByPublicModel(db);
+  const sessionCounts = activeGameSessionCountsByPublicModel(db);
+  const globalChoice = balancedPublicModelFromCounts({
+    [MODEL_13]: uploadCounts[MODEL_13] + sessionCounts[MODEL_13],
+    [MODEL_14_3]: uploadCounts[MODEL_14_3] + sessionCounts[MODEL_14_3],
+  });
+  return globalChoice ?? (mostRecentPublicModel(db) === MODEL_13 ? MODEL_14_3 : MODEL_13);
 }
 
 async function publicGameActionRequest(request: IncomingMessage, requestBody: JsonRecord): Promise<JsonRecord> {
@@ -760,7 +813,7 @@ async function publicGameActionRequest(request: IncomingMessage, requestBody: Js
     ? requestBody.payload as JsonRecord
     : {};
   const publicPayload = { ...payload };
-  publicPayload.opponent = await publicModelForGameStart();
+  publicPayload.opponent = await publicModelForGameStart(sessionTagFromRequest(requestBody));
   return {
     ...requestBody,
     payload: publicPayload,
