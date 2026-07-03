@@ -435,7 +435,7 @@ function winProbabilityCalibration(db, runIds) {
   const runPlaceholders = placeholders(runIds);
   const rows = [];
   if (hasDiscardWinProbability) {
-    rows.push(...db.prepare(`
+    for (const row of db.prepare(`
       SELECT
         'discard' AS kind,
         d.game_id,
@@ -449,10 +449,12 @@ function winProbabilityCalibration(db, runIds) {
       WHERE g.run_id IN (${runPlaceholders})
         AND d.selected_win_probability IS NOT NULL
         AND g.winner IS NOT NULL
-    `).all(...runIds));
+    `).all(...runIds)) {
+      rows.push(row);
+    }
   }
   if (hasPeggingWinProbability) {
-    rows.push(...db.prepare(`
+    for (const row of db.prepare(`
       SELECT
         'pegging' AS kind,
         p.game_id,
@@ -469,7 +471,9 @@ function winProbabilityCalibration(db, runIds) {
         AND p.selected_win_probability IS NOT NULL
         AND p.player IS NOT NULL
         AND g.winner IS NOT NULL
-    `).all(...runIds));
+    `).all(...runIds)) {
+      rows.push(row);
+    }
   }
 
   const summaries = new Map();
