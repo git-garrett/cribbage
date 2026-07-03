@@ -53,6 +53,6 @@ Node remains authoritative while Rust runs in shadow mode until parity is proven
 - Shadow requests now include a compact `decision` object and compare `rustResponse.decision` to the Node decision when Rust returns supported output.
 - Explicit discard decisions are available from preparation responses and `/api/ai/discard`; explicit pegging decisions are available from `/api/ai/peg`. Production `/api/game/action` pegging via `advance-pegging` now emits an env-gated `pegRecommendation` and decision snapshot only when `CRIBBAGE_RUST_SHADOW=1`, so normal production remains unchanged with the flag off.
 - P12P pairwise reader compiles and validates the deployed table/key order on the production host in `/tmp`.
-- 14.8.1 discard grouping is not ported as a separate optimization; Rust evaluates all 15 physical discard candidates in TypeScript order. This keeps the decision surface equivalent while avoiding grouping-specific complexity.
+- 14.8.1 discard grouping is ported for Rust shadow discard decisions. The grouping key mirrors TypeScript by including rank keys plus cut-rank own-hand and crib outcome signatures, so suit/flush/jack effects remain part of the equivalence test.
 - Temporary production-host QA passes: scoring self-test, pairwise self-test, empirical table self-test, model13 hold-table self-test, three discard parity fixtures, and three pegging parity fixtures.
 - Deployed production-host sidecar self-tests pass: scoring, pairwise table, empirical discard/keep table, and model13 hold table.

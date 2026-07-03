@@ -83,6 +83,13 @@ struct CutRankOption {
 }
 
 #[derive(Clone)]
+struct DiscardCandidateGroup {
+    key: String,
+    discard: Vec<Card>,
+    keep: Vec<Card>,
+}
+
+#[derive(Clone)]
 struct PeggingOption {
     lead_rank: i8,
     own_pegging: i32,
@@ -274,19 +281,21 @@ fn recommend_discard(input: &DecisionInput, root: &str) -> Result<Decision, Stri
     let mut memo = DiscardMemo::default();
     let mut board = BoardModel::new();
     let mut recommended: Option<(Vec<Card>, CandidateEvaluation)> = None;
+    let candidate_groups = empirical_discard_candidate_groups(
+        &input.ai_hand,
+        opponent_role,
+        &cut_options,
+        &deck,
+        &tables.empirical,
+        &mut memo,
+        input.model == "schell_table-peg_table-14.8.1",
+    );
 
-    for discard_indices in crate::cards::combinations_indices(input.ai_hand.len(), 2) {
-        let discard: Vec<Card> = discard_indices.iter().map(|index| input.ai_hand[*index]).collect();
-        let keep: Vec<Card> = input
-            .ai_hand
-            .iter()
-            .enumerate()
-            .filter_map(|(index, card)| if discard_indices.contains(&index) { None } else { Some(*card) })
-            .collect();
+    for group in candidate_groups {
         let Some(evaluation) = evaluate_discard_candidate(
             &input.ai_hand,
-            &keep,
-            &discard,
+            &group.keep,
+            &group.discard,
             role,
             opponent_role,
             next_role,
@@ -308,7 +317,7 @@ fn recommend_discard(input: &DecisionInput, root: &str) -> Result<Decision, Stri
             }
         };
         if should_replace {
-            recommended = Some((discard, evaluation));
+            recommended = Some((group.discard, evaluation));
         }
     }
 
@@ -443,6 +452,98 @@ struct CandidateEvaluation {
     win_probability: f64,
     total_ev: f64,
     best_lead: i8,
+}
+
+fn empirical_discard_candidate_groups(
+    hand: &[Card],
+    opponent_role: Role,
+    cut_options: &[CutRankOption],
+    deck: &[Card],
+    table: &EmpiricalDiscardKeepTable,
+    memo: &mut DiscardMemo,
+    group_equivalent_candidates: bool,
+) -> Vec<DiscardCandidateGroup> {
+    let mut groups: Vec<DiscardCandidateGroup> = Vec::new();
+    let base_available_ranks = remaining_rank_counts(hand);
+    for discard_indices in crate::cards::combinations_indices(hand.len(), 2) {
+        let discard: Vec<Card> = discard_indices.iter().map(|index| hand[*index]).collect();
+        let keep: Vec<Card> = hand
+            .iter()
+            .enumerate()
+            .filter_map(|(index, card)| if discard_indices.contains(&index) { None } else { Some(*card) })
+            .collect();
+        let key = if group_equivalent_candidates {
+            empirical_discard_candidate_equivalence_key(
+                &keep,
+                &discard,
+                opponent_role,
+                cut_options,
+                deck,
+                &base_available_ranks,
+                table,
+                memo,
+            )
+        } else {
+            card_set_key(&discard)
+        };
+        if !groups.iter().any(|group| group.key == key) {
+            groups.push(DiscardCandidateGroup {
+                key,
+                discard,
+                keep,
+            });
+        }
+    }
+    groups
+}
+
+#[allow(clippy::too_many_arguments)]
+fn empirical_discard_candidate_equivalence_key(
+    keep: &[Card],
+    discard: &[Card],
+    opponent_role: Role,
+    cut_options: &[CutRankOption],
+    deck: &[Card],
+    base_available_ranks: &[u8; 13],
+    table: &EmpiricalDiscardKeepTable,
+    memo: &mut DiscardMemo,
+) -> String {
+    let keep_ranks = rank_counts(keep);
+    let keep_key = rank_count_key(&keep_ranks);
+    let discard_key = rank_count_key(&rank_counts(discard));
+    let mut parts = vec![format!("keep={}", keep_key), format!("discard={}", discard_key)];
+    for cut in cut_options {
+        if base_available_ranks[cut.rank as usize] == 0 {
+            continue;
+        }
+        let mut available_ranks = *base_available_ranks;
+        available_ranks[cut.rank as usize] = available_ranks[cut.rank as usize].saturating_sub(1);
+        let own_hand = empirical_own_hand_score_outcomes_for_cut_rank(keep, &keep_key, cut, memo);
+        let crib = empirical_crib_score_outcomes_for_cut_rank(
+            discard,
+            opponent_role,
+            cut,
+            &available_ranks,
+            deck,
+            table,
+            memo,
+        );
+        parts.push(format!(
+            "{}:own={};crib={}",
+            cut.rank,
+            empirical_score_outcome_signature(&own_hand.outcomes),
+            empirical_score_outcome_signature(&crib.outcomes),
+        ));
+    }
+    parts.join("|")
+}
+
+fn empirical_score_outcome_signature(outcomes: &[(i32, f64)]) -> String {
+    outcomes
+        .iter()
+        .map(|(score, weight)| format!("{}:{}", score, weight))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 #[allow(clippy::too_many_arguments)]
