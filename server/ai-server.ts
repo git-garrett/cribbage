@@ -5,6 +5,12 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { Worker } from "node:worker_threads";
 import { MODEL, MODEL_13, MODEL_14_3 } from "./ai-constants";
+import {
+  persistRustShadowRecord,
+  runRustShadowRequest,
+  shouldRunRustShadow,
+  rustShadowStatus,
+} from "./rust-shadow";
 
 declare const __APP_VERSION__: string;
 
@@ -203,6 +209,23 @@ async function ensureDatabase(): Promise<DatabaseSyncLike | null> {
           state_json TEXT NOT NULL,
           request_json TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS rust_shadow_requests (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          kind TEXT NOT NULL,
+          action TEXT,
+          tag TEXT,
+          model TEXT NOT NULL,
+          game_id TEXT,
+          received_at TEXT NOT NULL,
+          node_duration_ms INTEGER NOT NULL,
+          rust_duration_ms INTEGER,
+          rust_status TEXT NOT NULL,
+          parity_status TEXT NOT NULL,
+          request_json TEXT NOT NULL,
+          node_response_json TEXT NOT NULL,
+          rust_response_json TEXT,
+          error TEXT
+        );
       `);
       return db;
     } catch (error) {
@@ -245,6 +268,21 @@ async function persistAiRequest(kind: string, requestBody: JsonRecord, responseB
     JSON.stringify(requestBody),
     JSON.stringify(responseBody),
   );
+}
+
+function scheduleRustShadow(
+  kind: AiJobKind,
+  requestBody: JsonRecord,
+  nodeResponse: JsonRecord,
+  nodeDurationMs: number,
+): void {
+  if (!shouldRunRustShadow(requestBody, nodeResponse)) return;
+  void (async () => {
+    const record = await runRustShadowRequest(kind, requestBody, nodeResponse, nodeDurationMs);
+    persistRustShadowRecord(await ensureDatabase(), DATA_DIR, record);
+  })().catch((error) => {
+    console.warn("Rust shadow request failed.", error);
+  });
 }
 
 async function persistGameUpload(requestBody: JsonRecord): Promise<void> {
@@ -567,6 +605,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, pat
         waiting: aiJobQueue.length,
         maxWaiting: AI_QUEUE_MAX_WAITING,
       },
+      rustShadow: rustShadowStatus(),
     });
     return;
   }
@@ -578,19 +617,23 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, pat
   const requestBody = await readRequestJson(request);
   const startedAt = performance.now();
   if (pathname === "/api/game/action") {
-    const payload = await runAiJob("game-action", await publicGameActionRequest(request, requestBody));
+    const publicRequest = await publicGameActionRequest(request, requestBody);
+    const payload = await runAiJob("game-action", publicRequest);
+    scheduleRustShadow("game-action", publicRequest, payload, performance.now() - startedAt);
     jsonResponse(response, 200, payload);
     return;
   }
   if (pathname === "/api/ai/discard") {
     const payload = await runAiJob("ai-discard", requestBody);
     await persistAiRequest("discard", requestBody, payload, performance.now() - startedAt);
+    scheduleRustShadow("ai-discard", requestBody, payload, performance.now() - startedAt);
     jsonResponse(response, 200, payload);
     return;
   }
   if (pathname === "/api/ai/peg") {
     const payload = await runAiJob("ai-peg", requestBody);
     await persistAiRequest("peg", requestBody, payload, performance.now() - startedAt);
+    scheduleRustShadow("ai-peg", requestBody, payload, performance.now() - startedAt);
     jsonResponse(response, 200, payload);
     return;
   }

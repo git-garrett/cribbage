@@ -62,7 +62,7 @@ deploy() {
 
   echo "Installing app files on $REMOTE..."
   remote_exec "mkdir -p '$REMOTE_APP_DIR' '$REMOTE_DATA_DIR' && \
-    rm -rf '$REMOTE_APP_DIR/dist' '$REMOTE_APP_DIR/server-dist' '$REMOTE_APP_DIR/package.json' '$REMOTE_APP_DIR/docs' && \
+    rm -rf '$REMOTE_APP_DIR/dist' '$REMOTE_APP_DIR/server-dist' '$REMOTE_APP_DIR/package.json' '$REMOTE_APP_DIR/docs' '$REMOTE_APP_DIR/rust' && \
     tar -xzf '/tmp/$(basename "$ARCHIVE")' -C '$REMOTE_APP_DIR'"
 
   echo "Writing systemd unit..."
@@ -78,6 +78,12 @@ Environment=HOST=${REMOTE_BIND_HOST}
 Environment=PORT=${REMOTE_PORT_APP}
 Environment=CRIBBAGE_STATIC_DIR=${REMOTE_APP_DIR}/dist
 Environment=CRIBBAGE_DB_PATH=${REMOTE_DATA_DIR}/cribbage-server.sqlite
+Environment=CRIBBAGE_RUST_SHADOW=${CRIBBAGE_RUST_SHADOW:-0}
+Environment=CRIBBAGE_RUST_SHADOW_BIN=${REMOTE_APP_DIR}/rust/cribbage-shadow-engine/cribbage-shadow-engine
+Environment=CRIBBAGE_RUST_SHADOW_MODELS=${CRIBBAGE_RUST_SHADOW_MODELS:-schell_table-peg_table-14.8,schell_table-peg_table-14.8.1}
+Environment=CRIBBAGE_RUST_SHADOW_TIMEOUT_MS=${CRIBBAGE_RUST_SHADOW_TIMEOUT_MS:-5000}
+Environment=CRIBBAGE_RUST_SHADOW_SAMPLE_RATE=${CRIBBAGE_RUST_SHADOW_SAMPLE_RATE:-1}
+Environment=CRIBBAGE_RUST_SHADOW_MAX_IN_FLIGHT=${CRIBBAGE_RUST_SHADOW_MAX_IN_FLIGHT:-2}
 Environment=NODE_OPTIONS=--max-old-space-size=512
 ExecStart=/usr/bin/node --experimental-sqlite ${REMOTE_APP_DIR}/server-dist/server.mjs
 Restart=always
@@ -88,6 +94,11 @@ Group=root
 [Install]
 WantedBy=multi-user.target
 SERVICE
+
+  echo "Building Rust shadow engine when rustc is available..."
+  remote_exec "if command -v rustc >/dev/null 2>&1; then \
+    cd '$REMOTE_APP_DIR/rust/cribbage-shadow-engine' && ./build.sh; \
+    else echo 'rustc not installed; Rust shadow engine will remain unavailable until compiled.'; fi"
 
   echo "Writing Caddy reverse proxy..."
   "${SSH_BASE[@]}" "$REMOTE" "cat > /etc/caddy/Caddyfile" <<CADDY
