@@ -10,6 +10,7 @@ build
 dist
 server-dist
 cribbage-server-*.tgz
+rust/cribbage-shadow-engine/cribbage-shadow-engine
 data
 cribbage.egg-info
 .ipynb_checkpoints
