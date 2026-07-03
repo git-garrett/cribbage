@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -39,6 +39,7 @@ type ExpectedRustDecision = JsonRecord & {
 const RUST_SHADOW_ENABLED = process.env.CRIBBAGE_RUST_SHADOW === "1";
 const RUST_SHADOW_BIN = resolve(process.env.CRIBBAGE_RUST_SHADOW_BIN || "rust/cribbage-shadow-engine/cribbage-shadow-engine");
 const RUST_SHADOW_TIMEOUT_MS = Number.parseInt(process.env.CRIBBAGE_RUST_SHADOW_TIMEOUT_MS || "5000", 10);
+const RUST_SHADOW_PERSISTENT = process.env.CRIBBAGE_RUST_SHADOW_PERSISTENT !== "0";
 const RUST_SHADOW_SAMPLE_RATE = boundedFloat(process.env.CRIBBAGE_RUST_SHADOW_SAMPLE_RATE, 1, 0, 1);
 const RUST_SHADOW_MAX_IN_FLIGHT = Math.max(
   1,
@@ -53,6 +54,19 @@ const RUST_SHADOW_MODELS = new Set(
 let rustShadowInFlight = 0;
 let rustShadowDropped = 0;
 let rustShadowSampledOut = 0;
+
+type PendingRustRequest = {
+  input: JsonRecord;
+  resolve: (value: { durationMs: number; response: JsonRecord }) => void;
+  reject: (error: Error) => void;
+  startedAt: number | null;
+  timer: NodeJS.Timeout | null;
+  settled: boolean;
+};
+
+let rustWorker: ChildProcessWithoutNullStreams | null = null;
+let rustWorkerBuffer = "";
+let rustWorkerQueue: PendingRustRequest[] = [];
 
 function boundedFloat(value: string | undefined, fallback: number, min: number, max: number): number {
   const parsed = Number.parseFloat(value || "");
@@ -285,6 +299,111 @@ function runRustShadowProcess(input: JsonRecord): Promise<{ durationMs: number; 
   });
 }
 
+function rejectRustWorkerQueue(error: Error): void {
+  for (const pending of rustWorkerQueue) {
+    if (pending.settled) continue;
+    pending.settled = true;
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.reject(error);
+  }
+  rustWorkerQueue = [];
+}
+
+function stopRustWorker(error?: Error): void {
+  const child = rustWorker;
+  rustWorker = null;
+  rustWorkerBuffer = "";
+  if (error) rejectRustWorkerQueue(error);
+  if (child && !child.killed) child.kill("SIGTERM");
+}
+
+function sendNextRustWorkerRequest(): void {
+  if (!rustWorker || rustWorkerQueue.length === 0) return;
+  const pending = rustWorkerQueue[0];
+  if (pending.startedAt !== null) return;
+  pending.startedAt = performance.now();
+  pending.timer = setTimeout(() => {
+    stopRustWorker(new Error(`Rust shadow timed out after ${RUST_SHADOW_TIMEOUT_MS}ms`));
+  }, RUST_SHADOW_TIMEOUT_MS);
+  try {
+    rustWorker.stdin.write(`${JSON.stringify(pending.input)}\n`);
+  } catch (error) {
+    stopRustWorker(error instanceof Error ? error : new Error(String(error)));
+  }
+}
+
+function handleRustWorkerLine(line: string): void {
+  const pending = rustWorkerQueue.shift();
+  if (!pending) return;
+  if (pending.settled) {
+    sendNextRustWorkerRequest();
+    return;
+  }
+  pending.settled = true;
+  if (pending.timer) clearTimeout(pending.timer);
+  try {
+    pending.resolve({
+      durationMs: performance.now() - (pending.startedAt ?? performance.now()),
+      response: JSON.parse(line) as JsonRecord,
+    });
+  } catch (error) {
+    pending.reject(error instanceof Error ? error : new Error(String(error)));
+  }
+  sendNextRustWorkerRequest();
+}
+
+function ensureRustWorker(): ChildProcessWithoutNullStreams {
+  if (rustWorker) return rustWorker;
+  const child = spawn(RUST_SHADOW_BIN, [], {
+    env: { ...process.env, CRIBBAGE_RUST_SHADOW_WORKER: "1" },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  rustWorker = child;
+  rustWorkerBuffer = "";
+  child.stdout.on("data", (chunk: Buffer) => {
+    rustWorkerBuffer += chunk.toString("utf8");
+    for (;;) {
+      const newlineIndex = rustWorkerBuffer.indexOf("\n");
+      if (newlineIndex < 0) break;
+      const line = rustWorkerBuffer.slice(0, newlineIndex).trim();
+      rustWorkerBuffer = rustWorkerBuffer.slice(newlineIndex + 1);
+      if (line) handleRustWorkerLine(line);
+    }
+  });
+  child.stderr.on("data", (chunk: Buffer) => {
+    const message = chunk.toString("utf8").trim();
+    if (message) console.warn("Rust shadow worker stderr:", message);
+  });
+  child.on("error", (error) => {
+    if (rustWorker === child) stopRustWorker(error);
+  });
+  child.on("close", (code) => {
+    if (rustWorker === child) {
+      stopRustWorker(new Error(`Rust shadow worker exited ${code}`));
+    }
+  });
+  return child;
+}
+
+function runRustShadowWorker(input: JsonRecord): Promise<{ durationMs: number; response: JsonRecord }> {
+  return new Promise((resolvePromise, reject) => {
+    rustWorkerQueue.push({
+      input,
+      resolve: resolvePromise,
+      reject,
+      startedAt: null,
+      timer: null,
+      settled: false,
+    });
+    ensureRustWorker();
+    sendNextRustWorkerRequest();
+  });
+}
+
+function runRustShadowEngine(input: JsonRecord): Promise<{ durationMs: number; response: JsonRecord }> {
+  return RUST_SHADOW_PERSISTENT ? runRustShadowWorker(input) : runRustShadowProcess(input);
+}
+
 function summarizeParity(expected: ExpectedRustDecision | null, nodeResponse: JsonRecord, rustResponse: JsonRecord): string {
   if (rustResponse.supported === false) return "unsupported";
   if (expected && rustResponse.decision) {
@@ -353,7 +472,7 @@ export async function runRustShadowRequest(
     nodeResponse,
   };
   try {
-    const rust = await runRustShadowProcess({
+    const rust = await runRustShadowEngine({
       kind,
       action,
       model,
@@ -394,10 +513,13 @@ export function rustShadowStatus(): JsonRecord {
     binaryExists: existsSync(RUST_SHADOW_BIN),
     models: [...RUST_SHADOW_MODELS],
     timeoutMs: RUST_SHADOW_TIMEOUT_MS,
+    persistent: RUST_SHADOW_PERSISTENT,
     sampleRate: RUST_SHADOW_SAMPLE_RATE,
     maxInFlight: RUST_SHADOW_MAX_IN_FLIGHT,
     inFlight: rustShadowInFlight,
     dropped: rustShadowDropped,
     sampledOut: rustShadowSampledOut,
+    workerRunning: rustWorker !== null,
+    workerQueue: rustWorkerQueue.length,
   };
 }

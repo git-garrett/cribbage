@@ -26,10 +26,19 @@ struct PhaseStats {
 pub struct BoardModel {
     distributions: HashMap<ScorePhase, Vec<(u8, f64)>>,
     memo: HashMap<(u8, u8, Role, ScorePhase), f64>,
+    use_heuristic_before_90: bool,
 }
 
 impl BoardModel {
     pub fn new() -> BoardModel {
+        BoardModel::with_options(true)
+    }
+
+    pub fn without_early_heuristic() -> BoardModel {
+        BoardModel::with_options(false)
+    }
+
+    fn with_options(use_heuristic_before_90: bool) -> BoardModel {
         let mut distributions = HashMap::new();
         for phase in [
             ScorePhase::PeggingPone,
@@ -43,6 +52,7 @@ impl BoardModel {
         BoardModel {
             distributions,
             memo: HashMap::new(),
+            use_heuristic_before_90,
         }
     }
 
@@ -61,7 +71,7 @@ impl BoardModel {
         if opponent >= 121 {
             return 0.0;
         }
-        if my < 90 && opponent < 90 {
+        if self.use_heuristic_before_90 && my < 90 && opponent < 90 {
             return heuristic_win_probability(my as f64, opponent as f64, perspective_role);
         }
         let key = (my, opponent, perspective_role, phase);
