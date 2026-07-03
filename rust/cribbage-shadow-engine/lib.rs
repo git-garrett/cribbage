@@ -4,6 +4,7 @@ pub mod cards;
 pub mod game;
 pub mod model;
 pub mod model_id;
+pub mod playout;
 pub mod sidecar;
 
 #[cfg(test)]

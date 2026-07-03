@@ -14,7 +14,7 @@ impl Side {
         }
     }
 
-    fn index(self) -> usize {
+    pub fn index(self) -> usize {
         match self {
             Side::Left => 0,
             Side::Right => 1,

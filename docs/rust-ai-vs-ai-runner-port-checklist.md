@@ -47,6 +47,9 @@ Progress:
 - [ ] Add cut-for-deal support.
 - [ ] Add model-driven autoplay over the Rust decision API.
 - [ ] Add compact analytics/event capture needed by the DB writer.
+- [x] Added `playout` module that can drive full games through the existing Rust decision API for native Rust models only: 14.8, 14.8.1, and 15.0.
+- [ ] Add artifact-backed smoke/parity tests for native model playout.
+- [ ] Extend playout to 13.0 once the 13.0 Rust decision path is available.
 
 ## Phase 3: Model Dispatch
 
