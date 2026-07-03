@@ -146,3 +146,31 @@ impl ModelPlayout {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn playout_accepts_native_models() {
+        let playout = ModelPlayout::new(
+            0x9e3779b9,
+            Side::Left,
+            ModelId::Schell150,
+            ModelId::Schell1481,
+        );
+        assert!(playout.is_ok());
+    }
+
+    #[test]
+    fn playout_rejects_model13_until_native_port_exists() {
+        let error = ModelPlayout::new(
+            0x9e3779b9,
+            Side::Left,
+            ModelId::Schell150,
+            ModelId::Schell13,
+        )
+        .unwrap_err();
+        assert!(error.contains("does not yet have native Rust decisions"));
+    }
+}
