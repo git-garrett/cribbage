@@ -16,37 +16,54 @@ Initial target:
 - [x] Rust shadow sidecar compiles locally with `rust/cribbage-shadow-engine/build.sh`.
 - [x] Rust 14.8.1 sidecar parity fixtures pass against Node for discard and pegging decisions.
 - [x] Rust-only strength model is numbered `schell_table-peg_table-15.0`.
-- [ ] Rust code is not yet organized as a Cargo crate.
+- [x] Rust shadow engine is organized as a Cargo workspace/member crate while preserving the existing `rustc` build path.
 - [ ] Rust has decision logic but not full game lifecycle/scoring orchestration.
 - [ ] Rust has no compact SQLite writer yet.
 - [ ] Rust has no AI-vs-AI multi-worker runner yet.
 
 ## Phase 1: Crate And Module Structure
 
-- [ ] Create a Cargo workspace or crate under `rust/cribbage-engine`.
-- [ ] Move reusable sidecar code into library modules: `cards`, `artifacts`, `board`, `decision`, `models`.
-- [ ] Keep the current shadow binary as a thin wrapper over the library.
-- [ ] Add `cargo test` and keep the existing `rustc` build path only if deploy still requires it.
-- [ ] Add release profile settings appropriate for long-running benchmarks.
-- [ ] Decide dependency policy: prefer small, stable crates for SQLite, CLI parsing, serialization, and worker concurrency.
+- [x] Create a Cargo workspace with the current shadow-engine crate.
+- [x] Expose reusable sidecar code as library modules: `cards`, `artifacts`, `board`, `model`, `sidecar`.
+- [x] Keep the current shadow binary as a thin wrapper over the library-compatible modules.
+- [x] Add `cargo test` while preserving the existing `rustc` build path used by deploy scripts.
+- [x] Add release profile settings appropriate for long-running benchmarks.
+- [x] Decide dependency policy: keep the current crate dependency-free for parity/build safety; add small, stable crates only when needed by the runner (`rusqlite`, `serde_json`, CLI parsing, and worker concurrency are the likely first additions).
 
 ## Phase 2: Game State And Rules Port
 
 - [ ] Port full `CribbageGame` state model from `web/src/engine.ts`.
 - [ ] Port cut-for-deal, deal, discard, pegging, scoring, next-hand, and game-over transitions.
-- [ ] Port deterministic seeding/shuffling so Rust can reproduce Node fixtures where required.
+- [x] Port deterministic seeding/shuffling so Rust can reproduce Node fixtures where required.
 - [ ] Port card serialization and snapshot-compatible state encoding.
 - [ ] Add golden tests for scoring hands, crib scoring, pegging scoring, go/31/reset behavior, and game-over edge cases.
-- [ ] Add full-game smoke tests against fixed seeds.
+- [x] Add full-game smoke tests against fixed seeds.
+
+Progress:
+
+- [x] Added `game` module with deterministic shuffle/deal, discard-to-pegging transition, core pegging play/go/reset/last-card behavior, and hand/crib scoring transition.
+- [x] Added Cargo tests for TypeScript-compatible LCG shuffle/deal order, discard transition, 31 reset, and last-card pegging.
+- [x] Added fixed-seed naive-policy full-game smoke that reaches `GameOver`.
+- [ ] Add cut-for-deal support.
+- [ ] Add model-driven autoplay over the Rust decision API.
+- [ ] Add compact analytics/event capture needed by the DB writer.
 
 ## Phase 3: Model Dispatch
 
-- [ ] Define a Rust `ModelId` enum/string mapping for 13.0, 14.8.1, and 15.0.
+- [x] Define a Rust `ModelId` enum/string mapping for 13.0, 14.8.1, and 15.0.
 - [ ] Implement 13.0 discard/pegging behavior or bind to existing Rust components where already ported.
 - [ ] Keep 14.8.1 exact parity mode separate from 15.0 strength mode.
-- [ ] Add model-resource loading cache per process.
+- [x] Add model-resource loading cache per process.
 - [ ] Add model fixture tests: 13.0, 14.8.1, and 15.0 discard decisions.
 - [ ] Add model fixture tests: 13.0, 14.8.1, and 15.0 pegging decisions.
+
+Progress:
+
+- [x] Added `model_id` module with typed IDs and labels for 13.0, 14.8, 14.8.1, and 15.0.
+- [x] Marked native Rust decision support explicitly: 14.8, 14.8.1, and 15.0 supported; 13.0 parsed but still pending.
+- [x] Confirmed existing `RuntimeTables` cache is process-global via `OnceLock`.
+- [x] 14.8.1 parity mode and 15.0 strength mode remain separated in `model.rs`.
+- [ ] Port or bind 13.0 discard behavior, which still uses the legacy Schell discard table rather than the empirical 14.8 discard path.
 
 ## Phase 4: Compact Game Storage
 

@@ -10,10 +10,7 @@ use crate::cards::{
     rank_counts, remaining_rank_counts, score_count, score_flush_and_right_jack, score_hand,
     score_hand_rank_only, Card,
 };
-
-const MODEL_14_8: &str = "schell_table-peg_table-14.8";
-const MODEL_14_8_1: &str = "schell_table-peg_table-14.8.1";
-const MODEL_15_0: &str = "schell_table-peg_table-15.0";
+use crate::model_id::{MODEL_14_8, MODEL_14_8_1, MODEL_15_0};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DecisionKind {

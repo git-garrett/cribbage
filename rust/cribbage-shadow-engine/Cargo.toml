@@ -1,0 +1,12 @@
+[package]
+name = "cribbage-shadow-engine"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "cribbage_shadow_engine"
+path = "lib.rs"
+
+[[bin]]
+name = "cribbage-shadow-engine"
+path = "main.rs"
