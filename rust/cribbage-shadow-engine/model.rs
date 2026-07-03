@@ -13,7 +13,7 @@ use crate::cards::{
 
 const MODEL_14_8: &str = "schell_table-peg_table-14.8";
 const MODEL_14_8_1: &str = "schell_table-peg_table-14.8.1";
-const MODEL_14_8_2_RUST: &str = "schell_table-peg_table-14.8.2-rust";
+const MODEL_15_0: &str = "schell_table-peg_table-15.0";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DecisionKind {
@@ -279,11 +279,11 @@ pub fn evaluate_decision(input: &DecisionInput, root: &str) -> Result<Decision, 
 }
 
 fn is_supported_rust_model(model: &str) -> bool {
-    model == MODEL_14_8 || model == MODEL_14_8_1 || model == MODEL_14_8_2_RUST
+    model == MODEL_14_8 || model == MODEL_14_8_1 || model == MODEL_15_0
 }
 
 fn is_strength_model(input: &DecisionInput) -> bool {
-    input.model == MODEL_14_8_2_RUST
+    input.model == MODEL_15_0
 }
 
 fn groups_equivalent_discard_candidates(input: &DecisionInput) -> bool {

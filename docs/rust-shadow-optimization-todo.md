@@ -24,7 +24,7 @@ Improve the Rust shadow engine in two tracks:
 
 Notes:
 
-- Strength experiments use `schell_table-peg_table-14.8.2-rust`.
+- Strength experiments are now numbered `schell_table-peg_table-15.0`.
 - 14.8.1 still uses the original first-pone-lead `pegLead` shortcut and pre-90 heuristic.
 - Current discard and pegging score outcomes are integer buckets by the time they call board WP, so the remaining board-state clamp is integer-state clamping rather than fractional outcome rounding.
 
@@ -44,4 +44,4 @@ QA Results:
 - Temporary host Rust compile passed under `/tmp/cribbage-rust-opt-qa`.
 - Worker-mode Rust self-tests passed: `self-test`, `pairwise-self-test`, `empirical-self-test`, `model13-hold-self-test`.
 - Persistent-worker parity matched all 6 fixtures: 3 discard and 3 pegging fixtures for `schell_table-peg_table-14.8.1`.
-- Strength smoke accepted `schell_table-peg_table-14.8.2-rust` and exercised the live pegging path without changing 14.8.1 parity behavior.
+- Strength smoke accepted the Rust-only strength model and exercised the live pegging path without changing 14.8.1 parity behavior.
