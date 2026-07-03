@@ -30,6 +30,12 @@ export interface RustShadowRecord {
   error: string | null;
 }
 
+type ExpectedRustDecision = JsonRecord & {
+  kind: "discard" | "peg";
+  expected: JsonRecord;
+  inputText: string | null;
+};
+
 const RUST_SHADOW_ENABLED = process.env.CRIBBAGE_RUST_SHADOW === "1";
 const RUST_SHADOW_BIN = resolve(process.env.CRIBBAGE_RUST_SHADOW_BIN || "rust/cribbage-shadow-engine/cribbage-shadow-engine");
 const RUST_SHADOW_TIMEOUT_MS = Number.parseInt(process.env.CRIBBAGE_RUST_SHADOW_TIMEOUT_MS || "5000", 10);
@@ -82,10 +88,146 @@ function requestGameId(requestBody: JsonRecord, nodeResponse: JsonRecord): strin
   return typeof gameId === "string" && gameId ? gameId : null;
 }
 
-export function shouldRunRustShadow(requestBody: JsonRecord, nodeResponse: JsonRecord): boolean {
+function numberValue(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function playerSnapshot(snapshot: JsonRecord, player: "human" | "ai"): JsonRecord {
+  const value = snapshot[player];
+  return value && typeof value === "object" ? value as JsonRecord : {};
+}
+
+function idsValue(value: unknown): string {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "number").join(",") : "";
+}
+
+function nullablePlayer(value: unknown): string {
+  return value === "human" || value === "ai" ? value : "-";
+}
+
+function dealerKey(snapshot: JsonRecord): "human" | "ai" {
+  return numberValue(snapshot.deal) === 1 ? "ai" : "human";
+}
+
+function poneKey(snapshot: JsonRecord): "human" | "ai" {
+  return dealerKey(snapshot) === "ai" ? "human" : "ai";
+}
+
+function roleFor(snapshot: JsonRecord, player: "human" | "ai"): "dealer" | "pone" {
+  return dealerKey(snapshot) === player ? "dealer" : "pone";
+}
+
+function currentPlayerKey(snapshot: JsonRecord): "human" | "ai" {
+  return numberValue(snapshot.turn) === 0 ? poneKey(snapshot) : dealerKey(snapshot);
+}
+
+function compactRustDecisionInput(kind: "discard" | "peg", model: string, snapshotValue: unknown): string | null {
+  if (!snapshotValue || typeof snapshotValue !== "object") return null;
+  const snapshot = snapshotValue as JsonRecord;
+  const ai = playerSnapshot(snapshot, "ai");
+  const human = playerSnapshot(snapshot, "human");
+  const aiHand = Array.isArray(ai.hand) ? ai.hand : [];
+  const humanHand = Array.isArray(human.hand) ? human.hand : [];
+  const fields: Record<string, string | number> = {
+    v: 1,
+    kind,
+    model,
+    player: "ai",
+    role: roleFor(snapshot, "ai"),
+    dealer: dealerKey(snapshot),
+    pone: poneKey(snapshot),
+    phase: typeof snapshot.phase === "string" ? snapshot.phase : "",
+    handNumber: numberValue(snapshot.handNumber, 1),
+    aiScore: numberValue(ai.score),
+    humanScore: numberValue(human.score),
+    myScore: numberValue(ai.score),
+    opponentScore: numberValue(human.score),
+    aiHand: idsValue(aiHand),
+    humanHandCount: humanHand.filter((item) => typeof item === "number").length,
+    aiTable: idsValue(ai.table),
+    humanTable: idsValue(human.table),
+    crib: idsValue(snapshot.crib),
+    turnCard: numberValue(snapshot.turnCard, 0),
+    count: numberValue(snapshot.count),
+    turn: currentPlayerKey(snapshot),
+    go: nullablePlayer(snapshot.goPlayer),
+    last: nullablePlayer(snapshot.lastPlayer),
+    plays: idsValue(snapshot.plays),
+    playOwners: Array.isArray(snapshot.playOwners) ? snapshot.playOwners.map(nullablePlayer).join(",") : "",
+    pegLead: typeof (snapshot.pegTableLeads as JsonRecord | undefined)?.ai === "number"
+      ? (snapshot.pegTableLeads as JsonRecord).ai as number
+      : "-",
+  };
+  return Object.entries(fields).map(([key, value]) => `${key}=${value}`).join(";");
+}
+
+function expectedRustDecision(kind: string, requestBody: JsonRecord, nodeResponse: JsonRecord): ExpectedRustDecision | null {
+  const recommendation = nodeResponse.recommendation as JsonRecord | undefined;
+  if (recommendation && Array.isArray(recommendation.cardIds)) {
+    const model = requestModel(requestBody, nodeResponse);
+    const snapshot = nodeResponse.snapshot ?? requestBody.snapshot ?? null;
+    return {
+      kind: "discard",
+      expected: {
+        cardIds: recommendation.cardIds,
+        bestLead: typeof recommendation.bestLead === "number" ? recommendation.bestLead : null,
+      },
+      inputText: compactRustDecisionInput("discard", model, snapshot),
+      snapshot,
+    };
+  }
+
+  const pegRecommendation = nodeResponse.pegRecommendation as JsonRecord | undefined;
+  if (kind === "game-action" && pegRecommendation && typeof pegRecommendation.action === "string") {
+    const model = requestModel(requestBody, nodeResponse);
+    const snapshot = pegRecommendation.decisionSnapshot ?? null;
+    const expected: JsonRecord = { action: pegRecommendation.action };
+    if (typeof pegRecommendation.cardId === "number") expected.cardId = pegRecommendation.cardId;
+    if (typeof pegRecommendation.ev === "number") expected.ev = pegRecommendation.ev;
+    return {
+      kind: "peg",
+      expected,
+      inputText: compactRustDecisionInput("peg", model, snapshot),
+      snapshot,
+    };
+  }
+
+  if (kind === "ai-discard" && Array.isArray(nodeResponse.cardIds)) {
+    const model = requestModel(requestBody, nodeResponse);
+    const snapshot = requestBody.snapshot ?? null;
+    return {
+      kind: "discard",
+      expected: {
+        cardIds: nodeResponse.cardIds,
+        bestLead: typeof nodeResponse.bestLead === "number" ? nodeResponse.bestLead : null,
+      },
+      inputText: compactRustDecisionInput("discard", model, snapshot),
+      snapshot,
+    };
+  }
+
+  if (kind === "ai-peg" && typeof nodeResponse.action === "string") {
+    const model = requestModel(requestBody, nodeResponse);
+    const snapshot = requestBody.snapshot ?? null;
+    const expected: JsonRecord = { action: nodeResponse.action };
+    if (typeof nodeResponse.cardId === "number") expected.cardId = nodeResponse.cardId;
+    if (typeof nodeResponse.ev === "number") expected.ev = nodeResponse.ev;
+    return {
+      kind: "peg",
+      expected,
+      inputText: compactRustDecisionInput("peg", model, snapshot),
+      snapshot,
+    };
+  }
+
+  return null;
+}
+
+export function shouldRunRustShadow(kind: string, requestBody: JsonRecord, nodeResponse: JsonRecord): boolean {
   if (!RUST_SHADOW_ENABLED) return false;
   const model = requestModel(requestBody, nodeResponse);
   if (!RUST_SHADOW_MODELS.has(model)) return false;
+  if (!expectedRustDecision(kind, requestBody, nodeResponse)?.inputText) return false;
   if (RUST_SHADOW_SAMPLE_RATE < 1 && Math.random() >= RUST_SHADOW_SAMPLE_RATE) {
     rustShadowSampledOut += 1;
     return false;
@@ -143,8 +285,11 @@ function runRustShadowProcess(input: JsonRecord): Promise<{ durationMs: number; 
   });
 }
 
-function summarizeParity(nodeResponse: JsonRecord, rustResponse: JsonRecord): string {
+function summarizeParity(expected: ExpectedRustDecision | null, nodeResponse: JsonRecord, rustResponse: JsonRecord): string {
   if (rustResponse.supported === false) return "unsupported";
+  if (expected && rustResponse.decision) {
+    return stableJson(expected.expected) === stableJson(rustResponse.decision) ? "match" : "mismatch";
+  }
   return stableJson(nodeResponse) === stableJson(rustResponse) ? "match" : "mismatch";
 }
 
@@ -195,6 +340,7 @@ export async function runRustShadowRequest(
 ): Promise<RustShadowRecord> {
   const model = requestModel(requestBody, nodeResponse);
   const action = typeof requestBody.action === "string" ? requestBody.action : null;
+  const expected = expectedRustDecision(kind, requestBody, nodeResponse);
   const base = {
     kind,
     action,
@@ -213,12 +359,13 @@ export async function runRustShadowRequest(
       model,
       request: requestBody,
       nodeResponse,
+      decision: expected,
     });
     return {
       ...base,
       rustDurationMs: rust.durationMs,
       rustStatus: rust.response.supported === false ? "unsupported" : "ok",
-      parityStatus: summarizeParity(nodeResponse, rust.response),
+      parityStatus: summarizeParity(expected, nodeResponse, rust.response),
       rustResponse: rust.response,
       error: typeof rust.response.reason === "string" ? rust.response.reason : null,
     };

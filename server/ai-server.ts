@@ -276,7 +276,7 @@ function scheduleRustShadow(
   nodeResponse: JsonRecord,
   nodeDurationMs: number,
 ): void {
-  if (!shouldRunRustShadow(requestBody, nodeResponse)) return;
+  if (!shouldRunRustShadow(kind, requestBody, nodeResponse)) return;
   void (async () => {
     const record = await runRustShadowRequest(kind, requestBody, nodeResponse, nodeDurationMs);
     persistRustShadowRecord(await ensureDatabase(), DATA_DIR, record);

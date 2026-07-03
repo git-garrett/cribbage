@@ -141,8 +141,19 @@ export async function handleGameAction(requestBody: JsonRecord): Promise<JsonRec
         const needsAiDecision = game.advanceForcedPeggingToHumanOrDecision();
         if (needsAiDecision) {
           await ensureOpponentModel(game.opponent as Opponent);
+          const pegDecisionSnapshot = process.env.CRIBBAGE_RUST_SHADOW === "1" ? game.snapshot() : null;
+          const pegRecommendation = pegDecisionSnapshot ? game.recommendAiPeggingAction() : null;
           game.advancePeggingToHuman();
           game.recordAiPeggingThinkTime(performance.now() - startedAt);
+          return {
+            ...gamePayload(game),
+            pegRecommendation: pegRecommendation
+              ? {
+                  ...pegRecommendation,
+                  decisionSnapshot: pegDecisionSnapshot,
+                }
+              : null,
+          };
         }
         break;
       }

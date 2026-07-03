@@ -1,6 +1,11 @@
 use std::io::{self, Read};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod artifacts;
+mod board;
+mod cards;
+mod model;
+
 fn json_escape(value: &str) -> String {
     let mut output = String::with_capacity(value.len() + 8);
     for ch in value.chars() {
@@ -73,6 +78,213 @@ fn main() {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or(0);
+
+    if kind == "self-test" {
+        match cards::self_test() {
+            Ok(()) => {
+                println!(
+                    concat!(
+                        "{{",
+                        "\"ok\":true,",
+                        "\"engine\":\"rust-14.8-shadow\",",
+                        "\"kind\":\"self-test\",",
+                        "\"supported\":true,",
+                        "\"completedAtUnixMs\":{}",
+                        "}}"
+                    ),
+                    now_ms
+                );
+            }
+            Err(error) => {
+                println!(
+                    concat!(
+                        "{{",
+                        "\"ok\":false,",
+                        "\"engine\":\"rust-14.8-shadow\",",
+                        "\"kind\":\"self-test\",",
+                        "\"supported\":true,",
+                        "\"completedAtUnixMs\":{},",
+                        "\"error\":\"{}\"",
+                        "}}"
+                    ),
+                    now_ms,
+                    json_escape(&error)
+                );
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if kind == "pairwise-self-test" {
+        let root = std::env::var("CRIBBAGE_RUST_MODEL_ROOT").unwrap_or_else(|_| ".".to_string());
+        match artifacts::pairwise_self_test(&root) {
+            Ok(()) => {
+                println!(
+                    concat!(
+                        "{{",
+                        "\"ok\":true,",
+                        "\"engine\":\"rust-14.8-shadow\",",
+                        "\"kind\":\"pairwise-self-test\",",
+                        "\"supported\":true,",
+                        "\"completedAtUnixMs\":{}",
+                        "}}"
+                    ),
+                    now_ms
+                );
+            }
+            Err(error) => {
+                println!(
+                    concat!(
+                        "{{",
+                        "\"ok\":false,",
+                        "\"engine\":\"rust-14.8-shadow\",",
+                        "\"kind\":\"pairwise-self-test\",",
+                        "\"supported\":true,",
+                        "\"completedAtUnixMs\":{},",
+                        "\"error\":\"{}\"",
+                        "}}"
+                    ),
+                    now_ms,
+                    json_escape(&error)
+                );
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if kind == "empirical-self-test" {
+        let root = std::env::var("CRIBBAGE_RUST_MODEL_ROOT").unwrap_or_else(|_| ".".to_string());
+        match artifacts::empirical_self_test(&root) {
+            Ok(()) => {
+                println!(
+                    concat!(
+                        "{{",
+                        "\"ok\":true,",
+                        "\"engine\":\"rust-14.8-shadow\",",
+                        "\"kind\":\"empirical-self-test\",",
+                        "\"supported\":true,",
+                        "\"completedAtUnixMs\":{}",
+                        "}}"
+                    ),
+                    now_ms
+                );
+            }
+            Err(error) => {
+                println!(
+                    concat!(
+                        "{{",
+                        "\"ok\":false,",
+                        "\"engine\":\"rust-14.8-shadow\",",
+                        "\"kind\":\"empirical-self-test\",",
+                        "\"supported\":true,",
+                        "\"completedAtUnixMs\":{},",
+                        "\"error\":\"{}\"",
+                        "}}"
+                    ),
+                    now_ms,
+                    json_escape(&error)
+                );
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if kind == "model13-hold-self-test" {
+        let root = std::env::var("CRIBBAGE_RUST_MODEL_ROOT").unwrap_or_else(|_| ".".to_string());
+        match artifacts::model13_hold_self_test(&root) {
+            Ok(()) => {
+                println!(
+                    concat!(
+                        "{{",
+                        "\"ok\":true,",
+                        "\"engine\":\"rust-14.8-shadow\",",
+                        "\"kind\":\"model13-hold-self-test\",",
+                        "\"supported\":true,",
+                        "\"completedAtUnixMs\":{}",
+                        "}}"
+                    ),
+                    now_ms
+                );
+            }
+            Err(error) => {
+                println!(
+                    concat!(
+                        "{{",
+                        "\"ok\":false,",
+                        "\"engine\":\"rust-14.8-shadow\",",
+                        "\"kind\":\"model13-hold-self-test\",",
+                        "\"supported\":true,",
+                        "\"completedAtUnixMs\":{},",
+                        "\"error\":\"{}\"",
+                        "}}"
+                    ),
+                    now_ms,
+                    json_escape(&error)
+                );
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if let Some(input_text) = extract_json_string(&input, "inputText") {
+        let root = std::env::var("CRIBBAGE_RUST_MODEL_ROOT").unwrap_or_else(|_| ".".to_string());
+        match model::parse_decision_input(&input_text)
+            .and_then(|decision_input| model::evaluate_decision(&decision_input, &root))
+        {
+            Ok(decision) => {
+                println!(
+                    concat!(
+                        "{{",
+                        "\"ok\":true,",
+                        "\"engine\":\"rust-14.8-shadow\",",
+                        "\"supported\":true,",
+                        "\"model\":\"{}\",",
+                        "\"kind\":\"{}\",",
+                        "\"action\":\"{}\",",
+                        "\"decision\":{},",
+                        "\"requestBytes\":{},",
+                        "\"completedAtUnixMs\":{}",
+                        "}}"
+                    ),
+                    json_escape(&model),
+                    json_escape(&kind),
+                    json_escape(&action),
+                    model::decision_json(&decision),
+                    input.len(),
+                    now_ms
+                );
+            }
+            Err(error) => {
+                println!(
+                    concat!(
+                        "{{",
+                        "\"ok\":false,",
+                        "\"engine\":\"rust-14.8-shadow\",",
+                        "\"supported\":true,",
+                        "\"model\":\"{}\",",
+                        "\"kind\":\"{}\",",
+                        "\"action\":\"{}\",",
+                        "\"requestBytes\":{},",
+                        "\"completedAtUnixMs\":{},",
+                        "\"error\":\"{}\"",
+                        "}}"
+                    ),
+                    json_escape(&model),
+                    json_escape(&kind),
+                    json_escape(&action),
+                    input.len(),
+                    now_ms,
+                    json_escape(&error)
+                );
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
 
     println!(
         concat!(
