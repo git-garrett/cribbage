@@ -563,7 +563,12 @@ function buildLeaderboardSummary(rows: JsonRecord[]): JsonRecord {
     Number(b.margin) - Number(a.margin) ||
     String(a.endedAt).localeCompare(String(b.endedAt))
   ));
-  const highSkunkCount = Math.max(0, ...playerStats.map((player) => player.skunks));
+  const skunkedAi = playerStats.filter((player) => player.skunks > 0).sort((a, b) => (
+    b.skunks - a.skunks ||
+    b.winRate - a.winRate ||
+    b.games - a.games ||
+    a.player.localeCompare(b.player)
+  ));
   return {
     generatedAt: new Date().toISOString(),
     source: "server-game-uploads",
@@ -573,7 +578,7 @@ function buildLeaderboardSummary(rows: JsonRecord[]): JsonRecord {
     playerStats,
     winRate14_3: playerStats,
     bestWins,
-    mostSkunks: highSkunkCount > 0 ? playerStats.filter((player) => player.skunks === highSkunkCount) : [],
+    mostSkunks: skunkedAi,
   };
 }
 
