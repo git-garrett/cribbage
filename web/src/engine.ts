@@ -1396,10 +1396,17 @@ export class CribbageGame {
     });
   }
 
-  completePendingDecisionReviews(): number {
+  completePendingDecisionReviews(limit = Number.POSITIVE_INFINITY): number {
+    const maxReviews = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : Number.POSITIVE_INFINITY;
     let completed = 0;
+    let attempted = 0;
     const remaining: PendingPeggingReview[] = [];
     for (const pending of this.pendingPeggingReviews) {
+      if (attempted >= maxReviews) {
+        remaining.push(pending);
+        continue;
+      }
+      attempted += 1;
       const event = this.analyticsEvents.find((candidate) => candidate.id === pending.eventId);
       if (!event || event.type !== "pegging" || event.action !== "play") continue;
       try {

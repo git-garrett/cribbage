@@ -166,7 +166,7 @@ export async function handleGameAction(requestBody: JsonRecord): Promise<JsonRec
         break;
       case "complete-decision-reviews":
         await ensureReviewModel();
-        game.completePendingDecisionReviews();
+        game.completePendingDecisionReviews(typeof payload.limit === "number" ? payload.limit : undefined);
         break;
       case "continue-scoring":
         game.continueScoring();

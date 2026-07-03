@@ -154,6 +154,7 @@ const state: {
   aiThinking: boolean;
   modelLoading: boolean;
   completingReviews: boolean;
+  reviewProgress: { total: number; remaining: number } | null;
   noticeText: string;
   noticeHistory: string[];
   noticeHistoryIndex: number | null;
@@ -204,6 +205,7 @@ const state: {
   aiThinking: false,
   modelLoading: false,
   completingReviews: false,
+  reviewProgress: null,
   noticeText: "",
   noticeHistory: [],
   noticeHistoryIndex: null,
@@ -238,6 +240,7 @@ function resetTransientGameUi(): void {
   state.aiThinking = false;
   state.modelLoading = false;
   state.completingReviews = false;
+  state.reviewProgress = null;
   state.noticeText = "";
   state.noticeHistory = [];
   state.noticeHistoryIndex = null;
@@ -1973,7 +1976,9 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       return serverGameAction("acknowledge-pegging-reset");
     }
     if (path === "/api/complete-decision-reviews") {
-      return serverGameAction("complete-decision-reviews");
+      return serverGameAction("complete-decision-reviews", {
+        limit: typeof body?.limit === "number" ? body.limit : undefined,
+      });
     }
     if (path === "/api/prepare-next-hand-ai-discard") {
       const response = await serverJson<ServerAiDiscardPreparationResponse>("/api/game/action", {
@@ -2510,11 +2515,28 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
     const pendingNotice = document.createElement("div");
     pendingNotice.className = "decision-review-pending";
     const canAnalyze = canAnalyzeCurrentGameDecisionReviews(end.gameId);
+    const pendingBody = document.createElement("div");
+    pendingBody.className = "decision-review-pending-body";
     const pendingText = document.createElement("span");
     pendingText.textContent = canAnalyze
       ? `${pending.length} user peg play${pending.length === 1 ? "" : "s"} waiting for analysis.`
       : `${pending.length} user peg play${pending.length === 1 ? "" : "s"} not analyzed.`;
-    pendingNotice.append(pendingText);
+    pendingBody.append(pendingText);
+    if (state.completingReviews && state.reviewProgress) {
+      const total = Math.max(1, state.reviewProgress.total);
+      const remaining = Math.max(0, Math.min(total, state.reviewProgress.remaining));
+      const completed = Math.max(0, total - remaining);
+      const progressRow = document.createElement("div");
+      progressRow.className = "decision-review-progress";
+      const progress = document.createElement("progress");
+      progress.max = total;
+      progress.value = completed;
+      const label = document.createElement("span");
+      label.textContent = `Analyzed ${completed} of ${total}`;
+      progressRow.append(progress, label);
+      pendingBody.append(progressRow);
+    }
+    pendingNotice.append(pendingBody);
     if (canAnalyze) {
       const analyze = document.createElement("button");
       analyze.type = "button";
@@ -4173,7 +4195,7 @@ function playAreaTitle(game: GameState): string {
       ? "Select two cards to discard to your crib"
       : "Select two cards to discard to AI's crib";
   }
-  if (game.phase === "ai_discarding") return "Waiting for AI to discard";
+  if (game.phase === "ai_discarding") return "";
   if (game.phase === "pegging") return "";
   if (game.phase === "pegging_complete") return "Pegging complete";
   return "";
@@ -4568,16 +4590,27 @@ async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
 
 async function analyzeCurrentGameDecisionReviews(): Promise<void> {
   if (!state.game || state.game.phase !== "game_over" || state.pending || state.completingReviews) return;
-  if (!(currentSnapshot?.pendingPeggingReviews?.length)) return;
+  const total = currentSnapshot?.pendingPeggingReviews?.length ?? 0;
+  if (!total) return;
   state.completingReviews = true;
+  state.reviewProgress = { total, remaining: total };
   render(state.game);
   try {
-    const next = await api("/api/complete-decision-reviews", {});
-    render(next);
+    for (;;) {
+      const beforeRemaining = currentSnapshot?.pendingPeggingReviews?.length ?? 0;
+      if (!beforeRemaining) break;
+      const next = await api("/api/complete-decision-reviews", { limit: 1 });
+      const remaining = currentSnapshot?.pendingPeggingReviews?.length ?? 0;
+      state.reviewProgress = { total, remaining };
+      render(next);
+      if (!remaining || remaining >= beforeRemaining) break;
+      await waitMs(35);
+    }
   } catch (error) {
     showServerBusy(error, () => analyzeCurrentGameDecisionReviews());
   } finally {
     state.completingReviews = false;
+    state.reviewProgress = null;
     render(state.game);
   }
 }

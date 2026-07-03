@@ -143,7 +143,8 @@ function failActiveAndQueued(error: Error): void {
 
 function processAiQueue(): void {
   if (activeAiJob || !aiJobQueue.length) return;
-  activeAiJob = aiJobQueue.shift() ?? null;
+  const nextIndex = nextAiJobIndex();
+  activeAiJob = aiJobQueue.splice(nextIndex, 1)[0] ?? null;
   if (!activeAiJob) return;
   getAiWorker().postMessage({
     id: activeAiJob.id,
@@ -152,8 +153,21 @@ function processAiQueue(): void {
   });
 }
 
+function isLowPriorityAiJob(job: Pick<QueuedAiJob, "kind" | "requestBody">): boolean {
+  return job.kind === "game-action" && job.requestBody.action === "complete-decision-reviews";
+}
+
+function nextAiJobIndex(): number {
+  const liveIndex = aiJobQueue.findIndex((job) => !isLowPriorityAiJob(job));
+  return liveIndex === -1 ? 0 : liveIndex;
+}
+
 function runAiJob(kind: AiJobKind, requestBody: JsonRecord): Promise<JsonRecord> {
-  if (aiJobQueue.length >= AI_QUEUE_MAX_WAITING) throw new ServerBusyError();
+  const lowPriority = isLowPriorityAiJob({ kind, requestBody });
+  const liveWaiting = aiJobQueue.filter((job) => !isLowPriorityAiJob(job)).length;
+  if (lowPriority ? aiJobQueue.length >= AI_QUEUE_MAX_WAITING : liveWaiting >= AI_QUEUE_MAX_WAITING) {
+    throw new ServerBusyError();
+  }
   return new Promise((resolve, reject) => {
     aiJobQueue.push({
       id: nextAiJobId++,
