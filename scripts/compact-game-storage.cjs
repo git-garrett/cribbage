@@ -132,6 +132,8 @@ function ensureCompactSchema(db) {
       role INTEGER,
       model TEXT,
       selected_ev REAL,
+      selected_win_probability REAL,
+      legal_count INTEGER,
       action INTEGER NOT NULL,
       card INTEGER,
       count_before INTEGER,
@@ -149,6 +151,9 @@ function ensureCompactSchema(db) {
       role INTEGER NOT NULL,
       model TEXT,
       selected_ev REAL,
+      selected_win_probability REAL,
+      recommended_win_probability REAL,
+      win_probability_delta REAL,
       cards BLOB,
       hand_before BLOB,
       remaining_hand BLOB,
@@ -177,10 +182,15 @@ function ensureCompactSchema(db) {
   if (!pegColumns.has("role")) db.exec("ALTER TABLE compact_peg_plays ADD COLUMN role INTEGER");
   if (!pegColumns.has("model")) db.exec("ALTER TABLE compact_peg_plays ADD COLUMN model TEXT");
   if (!pegColumns.has("selected_ev")) db.exec("ALTER TABLE compact_peg_plays ADD COLUMN selected_ev REAL");
+  if (!pegColumns.has("selected_win_probability")) db.exec("ALTER TABLE compact_peg_plays ADD COLUMN selected_win_probability REAL");
+  if (!pegColumns.has("legal_count")) db.exec("ALTER TABLE compact_peg_plays ADD COLUMN legal_count INTEGER");
   if (!pegColumns.has("score_components")) db.exec("ALTER TABLE compact_peg_plays ADD COLUMN score_components BLOB");
   if (!pegColumns.has("selected_ev_components")) db.exec("ALTER TABLE compact_peg_plays ADD COLUMN selected_ev_components BLOB");
   const discardColumns = new Set(db.prepare("PRAGMA table_info(compact_discards)").all().map((column) => column.name));
   if (!discardColumns.has("selected_ev_components")) db.exec("ALTER TABLE compact_discards ADD COLUMN selected_ev_components BLOB");
+  if (!discardColumns.has("selected_win_probability")) db.exec("ALTER TABLE compact_discards ADD COLUMN selected_win_probability REAL");
+  if (!discardColumns.has("recommended_win_probability")) db.exec("ALTER TABLE compact_discards ADD COLUMN recommended_win_probability REAL");
+  if (!discardColumns.has("win_probability_delta")) db.exec("ALTER TABLE compact_discards ADD COLUMN win_probability_delta REAL");
 }
 
 function eventsByHand(record) {
@@ -308,6 +318,8 @@ function compactPegPlays(record, events) {
       role: roleCode(event.role),
       model: event.model ?? null,
       selectedEv: event.selectedEv ?? null,
+      selectedWinProbability: event.selectedWinProbability ?? null,
+      legalCount: event.legalCount ?? null,
       action: ACTION[event.action] ?? 0,
       card: cardId(event.card),
       countBefore: event.countBefore ?? null,
@@ -333,6 +345,9 @@ function compactDiscards(record, events) {
       role: roleCode(event.role),
       model: event.model ?? null,
       selectedEv: event.selectedEv ?? null,
+      selectedWinProbability: event.selectedWinProbability ?? null,
+      recommendedWinProbability: event.recommendedWinProbability ?? null,
+      winProbabilityDelta: event.winProbabilityDelta ?? null,
       cards: cardBlob(event.cards),
       handBefore: cardBlob(event.handBeforeDiscard),
       remainingHand: cardBlob(event.remainingHand),
@@ -389,15 +404,16 @@ function insertCompactGameRecords(db, { runId, matchupId, records }) {
   const gameDelete = db.prepare("DELETE FROM compact_games WHERE game_id = ?");
   const pegInsert = db.prepare(`
     INSERT OR REPLACE INTO compact_peg_plays (
-      game_id, hand_number, sequence, player, role, model, selected_ev, action, card,
+      game_id, hand_number, sequence, player, role, model, selected_ev, selected_win_probability, legal_count, action, card,
       count_before, count_after, points, left_score, right_score, score_components, selected_ev_components
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const discardInsert = db.prepare(`
     INSERT OR REPLACE INTO compact_discards (
-      game_id, hand_number, player, role, model, selected_ev, cards, hand_before,
+      game_id, hand_number, player, role, model, selected_ev, selected_win_probability,
+      recommended_win_probability, win_probability_delta, cards, hand_before,
       remaining_hand, crib_after_discard, left_score, right_score, selected_ev_components
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   let games = 0;
   let hands = 0;
@@ -479,6 +495,9 @@ function insertCompactGameRecords(db, { runId, matchupId, records }) {
           discard.role,
           discard.model,
           discard.selectedEv,
+          discard.selectedWinProbability,
+          discard.recommendedWinProbability,
+          discard.winProbabilityDelta,
           discard.cards,
           discard.handBefore,
           discard.remainingHand,
@@ -497,6 +516,8 @@ function insertCompactGameRecords(db, { runId, matchupId, records }) {
           play.role,
           play.model,
           play.selectedEv,
+          play.selectedWinProbability,
+          play.legalCount,
           play.action,
           play.card,
           play.countBefore,

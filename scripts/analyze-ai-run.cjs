@@ -400,6 +400,121 @@ function summarizeEv(bucket) {
   };
 }
 
+function hasColumn(db, tableName, columnName) {
+  return db.prepare(`PRAGMA table_info(${tableName})`).all().some((column) => column.name === columnName);
+}
+
+function summarizeWinProbabilityBucket(bucket) {
+  const avgPredicted = mean(bucket.predicted);
+  const actualWinRate = mean(bucket.actual);
+  const errors = bucket.actual.map((actual, index) => actual - bucket.predicted[index]);
+  return {
+    kind: bucket.kind,
+    model: bucket.model,
+    role: bucket.role,
+    bucket: bucket.bucket,
+    rows: bucket.predicted.length,
+    avgPredicted,
+    actualWinRate,
+    miss: actualWinRate - avgPredicted,
+    brier: mean(errors.map((error) => error ** 2)),
+    meanAbsError: mean(errors.map((error) => Math.abs(error))),
+  };
+}
+
+function winProbabilityCalibration(db, runIds) {
+  const hasDiscardWinProbability = hasColumn(db, "compact_discards", "selected_win_probability");
+  const hasPeggingWinProbability = hasColumn(db, "compact_peg_plays", "selected_win_probability");
+  if (!hasDiscardWinProbability && !hasPeggingWinProbability) {
+    return {
+      note: "Compact decision rows do not have selected_win_probability yet.",
+      rows: [],
+      buckets: [],
+    };
+  }
+  const runPlaceholders = placeholders(runIds);
+  const rows = [];
+  if (hasDiscardWinProbability) {
+    rows.push(...db.prepare(`
+      SELECT
+        'discard' AS kind,
+        d.game_id,
+        d.player,
+        d.role,
+        d.model,
+        d.selected_win_probability AS selected_win_probability,
+        g.winner
+      FROM compact_discards d
+      JOIN compact_games g ON g.game_id = d.game_id
+      WHERE g.run_id IN (${runPlaceholders})
+        AND d.selected_win_probability IS NOT NULL
+        AND g.winner IS NOT NULL
+    `).all(...runIds));
+  }
+  if (hasPeggingWinProbability) {
+    rows.push(...db.prepare(`
+      SELECT
+        'pegging' AS kind,
+        p.game_id,
+        p.player,
+        p.role,
+        p.model,
+        p.selected_win_probability AS selected_win_probability,
+        g.winner
+      FROM compact_peg_plays p
+      JOIN compact_games g ON g.game_id = p.game_id
+      WHERE g.run_id IN (${runPlaceholders})
+        AND p.action = 0
+        AND COALESCE(p.legal_count, 0) > 1
+        AND p.selected_win_probability IS NOT NULL
+        AND p.player IS NOT NULL
+        AND g.winner IS NOT NULL
+    `).all(...runIds));
+  }
+
+  const summaries = new Map();
+  const buckets = new Map();
+  function add(target, key, row, bucketLabel = null) {
+    if (!target.has(key)) {
+      target.set(key, {
+        kind: row.kind,
+        model: row.model,
+        role: row.role === 1 ? "dealer" : "pone",
+        bucket: bucketLabel,
+        predicted: [],
+        actual: [],
+      });
+    }
+    const item = target.get(key);
+    const predicted = Math.max(0, Math.min(1, row.selected_win_probability));
+    item.predicted.push(predicted);
+    item.actual.push(row.winner === row.player ? 1 : 0);
+  }
+
+  for (const row of rows) {
+    const role = row.role === 1 ? "dealer" : "pone";
+    add(summaries, `${row.kind}:${row.model}:${role}`, row);
+    const predicted = Math.max(0, Math.min(1, row.selected_win_probability));
+    const bucketIndex = Math.min(9, Math.floor(predicted * 10));
+    const bucketLabel = `${(bucketIndex / 10).toFixed(1)}-${((bucketIndex + 1) / 10).toFixed(1)}`;
+    add(buckets, `${row.kind}:${row.model}:${role}:${bucketLabel}`, row, bucketLabel);
+  }
+
+  return {
+    note: "Win-probability calibration compares each model decision's selected predicted win probability to the eventual game result from that player's perspective.",
+    rows: [...summaries.values()]
+      .map(summarizeWinProbabilityBucket)
+      .sort((a, b) => a.kind.localeCompare(b.kind) || a.role.localeCompare(b.role) || a.model.localeCompare(b.model)),
+    buckets: [...buckets.values()]
+      .map(summarizeWinProbabilityBucket)
+      .sort((a, b) =>
+        a.kind.localeCompare(b.kind) ||
+        a.model.localeCompare(b.model) ||
+        a.role.localeCompare(b.role) ||
+        a.bucket.localeCompare(b.bucket)),
+  };
+}
+
 function main() {
   const args = parseArgs(process.argv);
   if (!fs.existsSync(args.dbPath)) throw new Error(`SQLite database not found: ${args.dbPath}`);
@@ -434,6 +549,7 @@ function main() {
   const scores = scoreSamplesByModel(games, hands);
   const completedHands = completedDecisionHands(games, hands);
   const ev = evCalibration(db, runIds, completedHands);
+  const winProbability = winProbabilityCalibration(db, runIds);
   db.close();
 
   const rightWins = games.filter((game) => game.winner === 1).length;
@@ -473,6 +589,7 @@ function main() {
       excluded: ev.skipped,
       rows: evRows,
     },
+    winProbability,
   };
 
   if (args.json) {
@@ -530,6 +647,41 @@ function main() {
       fmt(row.meanAbsError),
     ]),
   ));
+  lines.push("");
+  lines.push("Win-probability calibration note: compares selected decision win probability to the eventual game result from that player's perspective.");
+  if (!winProbability.rows.length) {
+    lines.push("No decision win-probability rows found for these run(s). Rows recorded before this logging change are expected to be empty.");
+  } else {
+    lines.push(table(
+      ["Kind", "Role", "Model", "Rows", "Avg predicted", "Actual win rate", "Actual - Pred", "Brier", "Mean abs error"],
+      winProbability.rows.map((row) => [
+        row.kind,
+        row.role,
+        row.model,
+        row.rows,
+        pct(row.avgPredicted),
+        pct(row.actualWinRate),
+        signed(row.miss, 4),
+        fmt(row.brier, 4),
+        fmt(row.meanAbsError, 4),
+      ]),
+    ));
+    lines.push("");
+    lines.push(table(
+      ["Kind", "Role", "Model", "Pred bucket", "Rows", "Avg predicted", "Actual win rate", "Actual - Pred", "Brier"],
+      winProbability.buckets.map((row) => [
+        row.kind,
+        row.role,
+        row.model,
+        row.bucket,
+        row.rows,
+        pct(row.avgPredicted),
+        pct(row.actualWinRate),
+        signed(row.miss, 4),
+        fmt(row.brier, 4),
+      ]),
+    ));
+  }
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 

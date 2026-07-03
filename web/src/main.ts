@@ -161,12 +161,19 @@ const state: {
   noticeResultLines: string[];
   noticeUpdatedAt: number;
   noticeTimer: number | null;
-  dealCutRevealStage: "human" | "ai" | null;
+  dealCutRevealStage: "cutting" | "human" | "ai" | null;
   dealCutResolve: (() => void) | null;
   dealAnimation: { key: string; dealer: string; pone: string } | null;
   animatedDealKeys: Set<string>;
   animatedTurnCutCardKeys: Set<string>;
-  turnCutRevealStage: "user-cut" | "ai-cut" | "user-turn" | "ai-turn" | "revealed" | null;
+  turnCutRevealStage:
+    | "user-cut"
+    | "user-cutting"
+    | "ai-cutting"
+    | "user-turn"
+    | "ai-turn"
+    | "revealed"
+    | null;
   turnCutResolve: (() => void) | null;
   cutForDealPreparation: { key: string; promise: Promise<ServerCutForDealPreparationResponse> } | null;
   aiDiscardPreparation: { key: string; promise: Promise<AiDiscardPreparationResult> } | null;
@@ -2076,7 +2083,7 @@ function appendCutDealerBadge(label: HTMLElement, game: GameState, player: "User
   label.append(badge);
 }
 
-function renderDealCut(game: GameState, revealStage: "human" | "ai" | null = null): void {
+function renderDealCut(game: GameState, revealStage: "cutting" | "human" | "ai" | null = null): void {
   els.plays.innerHTML = "";
   els.plays.hidden = false;
   const row = document.createElement("div");
@@ -2085,7 +2092,8 @@ function renderDealCut(game: GameState, revealStage: "human" | "ai" | null = nul
   const showAiCut = Boolean(game.cutForDeal?.ai && (!revealStage || revealStage === "ai"));
   const deck = cardBack();
   deck.classList.add("cut-deck");
-  if (!state.dealCutResolve) deck.classList.add("cut-deck-cutting");
+  if (revealStage === "cutting") deck.classList.add("cut-deck-cutting");
+  else if (revealStage === "human" || revealStage === "ai") deck.classList.add("cut-deck-cut");
   deck.setAttribute("role", "button");
   deck.setAttribute("aria-label", state.dealCutResolve ? "Continue to deal" : "Cut deck for deal");
   deck.tabIndex = state.pending ? -1 : 0;
@@ -2165,8 +2173,14 @@ function renderTurnCut(game: GameState): void {
   cutSlot.className = "cut-slot cut-slot-ai";
   const deck = cardBack();
   deck.classList.add("turn-cut-deck");
-  if (state.turnCutRevealStage === "user-cut" || state.turnCutRevealStage === "ai-cut") {
+  if (state.turnCutRevealStage === "user-cutting" || state.turnCutRevealStage === "ai-cutting") {
     deck.classList.add("turn-cut-deck-cutting");
+  } else if (
+    state.turnCutRevealStage === "user-turn" ||
+    state.turnCutRevealStage === "ai-turn" ||
+    state.turnCutRevealStage === "revealed"
+  ) {
+    deck.classList.add("turn-cut-deck-cut");
   }
   const userCanAct = state.turnCutRevealStage === "user-cut" ||
     state.turnCutRevealStage === "user-turn" ||
@@ -2192,7 +2206,8 @@ function renderTurnCut(game: GameState): void {
   const label = document.createElement("div");
   label.className = "turn-cut-label";
   if (state.turnCutRevealStage === "user-cut") label.textContent = "Cut the deck";
-  else if (state.turnCutRevealStage === "ai-cut") label.textContent = "AI cuts the deck";
+  else if (state.turnCutRevealStage === "user-cutting") label.textContent = "Cutting the deck";
+  else if (state.turnCutRevealStage === "ai-cutting") label.textContent = "AI cuts the deck";
   else if (state.turnCutRevealStage === "user-turn") label.textContent = "Turn the cut card";
   else if (state.turnCutRevealStage === "ai-turn") label.textContent = "AI turns the cut card";
   else label.textContent = "Cut card";
@@ -4107,9 +4122,11 @@ function shortDate(value: string): string {
 
 function playAreaTitle(game: GameState): string {
   if (state.dealAnimation) return "";
+  if (state.dealCutRevealStage === "cutting") return "Cutting the deck";
   if (state.dealCutRevealStage) return "Cut result";
   if (state.turnCutRevealStage === "user-cut") return "Cut the deck for AI";
-  if (state.turnCutRevealStage === "ai-cut") return "AI cuts the deck";
+  if (state.turnCutRevealStage === "user-cutting") return "Cutting the deck";
+  if (state.turnCutRevealStage === "ai-cutting") return "AI cuts the deck";
   if (state.turnCutRevealStage === "user-turn") return "Turn the cut card";
   if (state.turnCutRevealStage === "ai-turn") return "AI turns the cut card";
   if (state.turnCutRevealStage === "revealed") return "Cut card";
@@ -4282,7 +4299,7 @@ function shouldAdvancePeggingAi(game: GameState): boolean {
 }
 
 function shouldShowAiThinkingForPegging(game: GameState): boolean {
-  return shouldAdvancePeggingAi(game) && game.aiLegalCardIds.length > 1;
+  return shouldAdvancePeggingAi(game);
 }
 
 function shouldAutoHumanGo(game: GameState): boolean {
@@ -4374,13 +4391,17 @@ async function playTurnCardReveal(game: GameState): Promise<void> {
     render(game);
     await waitForPaint();
     await waitForTurnCutInteraction();
+    state.turnCutRevealStage = "user-cutting";
+    render(game);
+    await waitForPaint();
+    await waitMs(580);
     state.turnCutRevealStage = "ai-turn";
     state.resultOverride = ["AI turns the cut card."];
     render(game);
     await waitForPaint();
     await waitMs(750);
   } else {
-    state.turnCutRevealStage = "ai-cut";
+    state.turnCutRevealStage = "ai-cutting";
     state.resultOverride = ["AI cuts the deck."];
     render(game);
     await waitForPaint();
@@ -4411,6 +4432,10 @@ async function playTurnCutWhileFinishingDiscard(game: GameState | null): Promise
     render(game);
     await waitForPaint();
     await waitForTurnCutInteraction();
+    state.turnCutRevealStage = "user-cutting";
+    render(game);
+    await waitForPaint();
+    await waitMs(580);
     state.turnCutRevealStage = "ai-turn";
     state.resultOverride = ["AI turns the cut card."];
     render(game);
@@ -4424,7 +4449,7 @@ async function playTurnCutWhileFinishingDiscard(game: GameState | null): Promise
     await confirmed;
     return "confirmed";
   }
-  state.turnCutRevealStage = "ai-cut";
+  state.turnCutRevealStage = "ai-cutting";
   state.resultOverride = ["AI cuts the deck."];
   render(game);
   await waitForPaint();
@@ -4512,6 +4537,7 @@ function scheduleDecisionReviewCompletion(game = state.game): void {
   if (state.completingReviews) return;
   if (
     !game ||
+    (game.phase === "pegging" && game.turn === "AI") ||
     game.peggingResetPending ||
     !(currentSnapshot?.pendingPeggingReviews?.length) ||
     state.pending
@@ -4707,10 +4733,12 @@ els.gameOverClose.addEventListener("click", () => {
 async function cutForDeal(): Promise<void> {
   if (state.pending) return;
   state.pending = true;
+  state.dealCutRevealStage = "cutting";
   render(state.game);
   await waitForPaint();
   try {
     state.resultOverride = null;
+    const cutAnimation = waitMs(580);
     const preparedCut = preparedCutForDealFor(state.game);
     let next: GameState;
     if (preparedCut) {
@@ -4723,6 +4751,7 @@ async function cutForDeal(): Promise<void> {
     } else {
       next = await api("/api/cut-for-deal", {});
     }
+    await cutAnimation;
     state.selected.clear();
     if (next.cutForDeal?.human && next.cutForDeal.ai) {
       state.dealCutRevealStage = "human";

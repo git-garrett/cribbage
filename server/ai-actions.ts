@@ -138,9 +138,12 @@ export async function handleGameAction(requestBody: JsonRecord): Promise<JsonRec
         break;
       case "advance-pegging": {
         const startedAt = performance.now();
-        await ensureOpponentModel(game.opponent as Opponent);
-        game.advancePeggingToHuman();
-        game.recordAiPeggingThinkTime(performance.now() - startedAt);
+        const needsAiDecision = game.advanceForcedPeggingToHumanOrDecision();
+        if (needsAiDecision) {
+          await ensureOpponentModel(game.opponent as Opponent);
+          game.advancePeggingToHuman();
+          game.recordAiPeggingThinkTime(performance.now() - startedAt);
+        }
         break;
       }
       case "acknowledge-pegging-reset":

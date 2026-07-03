@@ -475,6 +475,9 @@ export type AnalyticsEvent =
       dealer?: PlayerKey;
       model?: Opponent;
       selectedEv?: number;
+      selectedWinProbability?: number;
+      recommendedWinProbability?: number;
+      winProbabilityDelta?: number;
       selectedEvComponents?: AnalyticsEvComponents;
       review?: AnalyticsDecisionReview;
     }
@@ -500,6 +503,8 @@ export type AnalyticsEvent =
       message: string;
       model?: Opponent;
       selectedEv?: number;
+      selectedWinProbability?: number;
+      legalCount?: number;
       selectedEvComponents?: AnalyticsEvComponents;
       scoreComponents?: AnalyticsScoreComponents;
       review?: AnalyticsDecisionReview;
@@ -790,7 +795,7 @@ export class CribbageGame {
     human: null,
     ai: null,
   };
-  pegDecisionEvs: Record<PlayerKey, { cardId: number; model: Opponent; ev: number } | null> = {
+  pegDecisionEvs: Record<PlayerKey, { cardId: number; model: Opponent; ev: number; winProbability?: number } | null> = {
     human: null,
     ai: null,
   };
@@ -1252,6 +1257,37 @@ export class CribbageGame {
     this.advanceUntilHuman();
   }
 
+  advanceForcedPeggingToHumanOrDecision(): boolean {
+    while (this.phase === "pegging") {
+      if (this.peggingResetPending) return false;
+      if (this.dealer.hand.length + this.pone.hand.length === 0) {
+        this.finishPegging();
+        this.phase = "pegging_complete";
+        return false;
+      }
+      const player = this.currentPlayer();
+      const legal = this.legalCards(player);
+      if (player === this.human) {
+        if (legal.length === 0) {
+          this.sayGo(player);
+          continue;
+        }
+        this.logEvent("User turn.");
+        return false;
+      }
+      if (legal.length === 0) {
+        this.sayGo(player);
+        continue;
+      }
+      if (legal.length === 1) {
+        this.playCard(player, legal[0]);
+        continue;
+      }
+      return true;
+    }
+    return false;
+  }
+
   acknowledgePeggingReset(): void {
     if (!this.peggingResetPending) return;
     this.peggingResetPending = false;
@@ -1506,7 +1542,16 @@ export class CribbageGame {
     const engine = this.playerEngines[player.key];
     const analysis = analyzeDiscardChoice(player.hand, player.hand.slice(0, 2), myCrib, engine, { game: this, player });
     this.pegTableLeads[player.key] = analysis.recommendedPegTableLead;
-    return { cards: analysis.recommended, analysis };
+    return {
+      cards: analysis.recommended,
+      analysis: {
+        ...analysis,
+        selectedEv: analysis.recommendedEv,
+        selectedPegTableLead: analysis.recommendedPegTableLead,
+        selectedWinProbability: analysis.recommendedWinProbability,
+        selectedComponents: analysis.recommendedComponents,
+      },
+    };
   }
 
   private beginPegging(): void {
@@ -1614,6 +1659,7 @@ export class CribbageGame {
         cardId: outcomeLead.card.id,
         model: engine,
         ev: roundEv(outcomeLead.ev),
+        winProbability: roundProbability(outcomeLead.winProbability),
       };
       return outcomeLead.card;
     }
@@ -1633,7 +1679,12 @@ export class CribbageGame {
     }
     if (usesExhaustivePegging(engine)) {
       const decision = this.chooseExhaustivePegPlay(player, legal);
-      this.pegDecisionEvs[player.key] = { cardId: decision.card.id, model: engine, ev: roundEv(decision.ev) };
+      this.pegDecisionEvs[player.key] = {
+        cardId: decision.card.id,
+        model: engine,
+        ev: roundEv(decision.ev),
+        winProbability: decision.winProbability === undefined ? undefined : roundProbability(decision.winProbability),
+      };
       return decision.card;
     }
     const card = legal.reduce((best, candidate) => {
@@ -1649,7 +1700,7 @@ export class CribbageGame {
     return card;
   }
 
-  private chooseExhaustivePegPlay(player: PlayerState, legal: Card[]): { card: Card; ev: number } {
+  private chooseExhaustivePegPlay(player: PlayerState, legal: Card[]): { card: Card; ev: number; winProbability?: number } {
     const opponent = player === this.human ? this.ai : this.human;
     const engine = this.playerEngines[player.key];
     const cacheKey = usesModel13LivePegging(engine)
@@ -1658,7 +1709,7 @@ export class CribbageGame {
     const cached = cacheKey ? MODEL13_PEGGING_DECISION_CACHE.get(cacheKey) : null;
     if (cached) {
       const cachedCard = legal.find((card) => card.id === cached.cardId);
-      if (cachedCard) return { card: cachedCard, ev: cached.ev };
+      if (cachedCard) return { card: cachedCard, ev: cached.ev, winProbability: cached.winProbability };
     }
     const knownCards = [
       ...player.hand,
@@ -1676,6 +1727,7 @@ export class CribbageGame {
       engine,
     );
     let bestCard = legal[0];
+    let bestDecision: ReturnType<typeof exhaustivePeggingCandidateScore> | null = null;
     let bestScore = Number.NEGATIVE_INFINITY;
 
     for (const card of legal) {
@@ -1689,14 +1741,21 @@ export class CribbageGame {
       if (compareTuple(key, bestKey) > 0) {
         bestScore = decision.choiceScore;
         bestCard = card;
+        bestDecision = decision;
       }
     }
+    if (!bestDecision) bestDecision = exhaustivePeggingCandidateScore(this, player, bestCard, opponentHands, engine);
     const decision = {
       card: bestCard,
-      ev: exhaustivePeggingPointEv(this, player, bestCard, opponentHands),
+      ev: bestDecision.pointEv,
+      winProbability: bestDecision.winProbability,
     };
     if (cacheKey) {
-      MODEL13_PEGGING_DECISION_CACHE.set(cacheKey, { cardId: decision.card.id, ev: decision.ev });
+      MODEL13_PEGGING_DECISION_CACHE.set(cacheKey, {
+        cardId: decision.card.id,
+        ev: decision.ev,
+        winProbability: decision.winProbability,
+      });
       trimModel13PeggingDecisionCache();
     }
     return decision;
@@ -1706,9 +1765,17 @@ export class CribbageGame {
     const pendingReviewSnapshot = reviewDecision && player === this.human ? this.reviewSnapshot() : null;
     const engine = this.playerEngines[player.key];
     const pendingEv = this.pegDecisionEvs[player.key];
+    const legalCount = this.legalCards(player).length;
     const selectedEv = pendingEv?.cardId === card.id && pendingEv.model === engine
       ? pendingEv.ev
       : roundEv(peggingPlayEv(this, player, card, engine, this.pegTableLeads[player.key]));
+    const selectedWinProbability = pendingEv?.cardId === card.id &&
+        pendingEv.model === engine &&
+        pendingEv.winProbability !== undefined
+      ? pendingEv.winProbability
+      : legalCount > 1
+        ? roundProbability(peggingPlayReviewValues(this, player, card, engine).winProbability)
+        : undefined;
     const selectedEvComponents = shouldLogScoreComponents()
       ? peggingPlayEvComponents(this, player, card, engine)
       : undefined;
@@ -1751,6 +1818,8 @@ export class CribbageGame {
       message: `${this.name(player)} played ${this.cardLabel(card)}: ${this.count}`,
       model: engine,
       selectedEv,
+      selectedWinProbability,
+      legalCount,
       selectedEvComponents,
       scoreComponents: playScoreComponents,
     });
@@ -1991,6 +2060,18 @@ export class CribbageGame {
     const analysis = discardAnalysis ??
       analyzeDiscardChoice(handBeforeDiscard, cards, player === this.dealer, engine, { game: this, player });
     this.pegTableLeads[player.key] = analysis.selectedPegTableLead;
+    const selectedWinProbability = analysis.selectedWinProbability ?? discardChoiceWinProbability(
+      this,
+      player,
+      analysis.selectedComponents,
+      engine,
+    );
+    const recommendedWinProbability = analysis.recommendedWinProbability ?? discardChoiceWinProbability(
+      this,
+      player,
+      analysis.recommendedComponents,
+      engine,
+    );
     const selectedEvComponents = shouldLogScoreComponents()
       ? selectedDiscardEvComponents(handBeforeDiscard, cards, player === this.dealer, engine)
       : undefined;
@@ -2011,6 +2092,9 @@ export class CribbageGame {
       dealer: this.dealer.key,
       model: engine,
       selectedEv: roundEv(analysis.selectedEv),
+      selectedWinProbability: roundProbability(selectedWinProbability),
+      recommendedWinProbability: roundProbability(recommendedWinProbability),
+      winProbabilityDelta: roundProbability(recommendedWinProbability - selectedWinProbability),
       selectedEvComponents,
       review,
     });
@@ -2444,7 +2528,7 @@ const PAIRWISE_PEGGING_OUTCOME_CACHE = new Map<string, PeggingOutcomeSummary | n
 const PAIRWISE_PEGGING_OUTCOME_CACHE_LIMIT = 5000;
 const OPPONENT_RANK_HANDS_CACHE = new Map<string, WeightedRankHand[]>();
 const OPPONENT_RANK_HANDS_CACHE_LIMIT = 10000;
-const MODEL13_PEGGING_DECISION_CACHE = new Map<string, { cardId: number; ev: number }>();
+const MODEL13_PEGGING_DECISION_CACHE = new Map<string, { cardId: number; ev: number; winProbability?: number }>();
 const MODEL13_PEGGING_DECISION_CACHE_LIMIT = 500;
 const MODEL13_OPTIMAL_PEGGING_TREE_CACHE = new Map<string, PeggingOutcomeDistribution>();
 const MODEL13_OPTIMAL_PEGGING_TREE_CACHE_LIMIT = model13TreeCacheLimit();
@@ -3784,7 +3868,7 @@ function choosePeggingOutcomeLead(
   player: PlayerState,
   legal: Card[],
   engine: Opponent,
-): { card: Card; ev: number } | null {
+): { card: Card; ev: number; winProbability: number } | null {
   if (
     (usesModel13LivePegging(engine) && !usesTripolicyDiscardModel(engine) && !usesSixCardDiscardModel(engine)) ||
     !usesPeggingOutcomeTables(engine) ||
@@ -3821,7 +3905,7 @@ function choosePeggingOutcomeLead(
       }
     }
   }
-  return best ? { card: best.card, ev: best.ev } : null;
+  return best ? { card: best.card, ev: best.ev, winProbability: best.score } : null;
 }
 
 function peggingOutcomeWinProbability(
@@ -4443,19 +4527,21 @@ function exhaustivePeggingCandidateScore(
   card: Card,
   opponentHands: WeightedRankHand[],
   engine: Opponent,
-): { choiceScore: number; pointEv: number } {
+): { choiceScore: number; pointEv: number; winProbability?: number } {
   if (usesModel13LivePegging(engine)) {
     const distribution = optimalPeggingOutcomeDistributionForCandidate(game, player, card, opponentHands);
+    const winProbability = expectedWinProbabilityAfterPegging(game, player, distribution);
     return {
-      choiceScore: expectedWinProbabilityAfterPegging(game, player, distribution),
+      choiceScore: winProbability,
       pointEv: peggingDistributionPointEv(distribution),
+      winProbability,
     };
   }
   const pointEv = exhaustivePeggingPointEv(game, player, card, opponentHands);
   if (!usesWinProbabilityPegging(engine)) return { choiceScore: pointEv, pointEv };
   const distribution = peggingOutcomeDistributionForCandidate(game, player, card, opponentHands);
   const winProbability = expectedWinProbabilityAfterPegging(game, player, distribution);
-  return { choiceScore: winProbability, pointEv };
+  return { choiceScore: winProbability, pointEv, winProbability };
 }
 
 function exhaustivePeggingPointEv(

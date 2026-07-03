@@ -1942,8 +1942,11 @@ button:disabled {
 }
 
 .deal-cut-row .cut-deck-cutting::after,
+.deal-cut-row .cut-deck-cut::after,
 .pegging-row .turn-cut-deck-cutting::after,
-.played-active.pegging-row .turn-cut-deck-cutting::after {
+.pegging-row .turn-cut-deck-cut::after,
+.played-active.pegging-row .turn-cut-deck-cutting::after,
+.played-active.pegging-row .turn-cut-deck-cut::after {
   content: "";
   position: absolute;
   top: -1px;
@@ -1957,9 +1960,21 @@ button:disabled {
     linear-gradient(135deg, transparent 75%, rgba(255, 255, 255, 0.2) 75%) 0 0 / 12px 12px,
     #315f9c;
   box-shadow: 0 10px 16px rgba(18, 35, 28, 0.22);
-  animation: deck-cut-slide 0.58s ease both;
   pointer-events: none;
   transform-origin: 70% 100%;
+}
+
+.deal-cut-row .cut-deck-cut::after,
+.pegging-row .turn-cut-deck-cut::after,
+.played-active.pegging-row .turn-cut-deck-cut::after {
+  opacity: 0.9;
+  transform: translate(36%, -23%) rotate(7deg);
+}
+
+.deal-cut-row .cut-deck-cutting::after,
+.pegging-row .turn-cut-deck-cutting::after,
+.played-active.pegging-row .turn-cut-deck-cutting::after {
+  animation: deck-cut-slide 0.58s ease both;
 }
 
 .pegging-row .turn-cut-deck:focus-visible,
