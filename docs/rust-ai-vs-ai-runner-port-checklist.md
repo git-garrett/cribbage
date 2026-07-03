@@ -67,6 +67,8 @@ Progress:
 - [x] Confirmed existing `RuntimeTables` cache is process-global via `OnceLock`.
 - [x] 14.8.1 parity mode and 15.0 strength mode remain separated in `model.rs`.
 - [ ] Port or bind 13.0 discard behavior, which still uses the legacy Schell discard table rather than the empirical 14.8 discard path.
+- [ ] Port 13.0 pegging behavior without accidentally inheriting later 14.x known-card post-pegging WP context.
+- [ ] Preserve 13.0 opponent-hand weighting semantics; it uses the model-13 hold table but does not use the later corrected-discard availability weighting.
 
 ## Phase 4: Compact Game Storage
 
