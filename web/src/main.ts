@@ -2497,7 +2497,23 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   if (pending.length) {
     const pendingNotice = document.createElement("div");
     pendingNotice.className = "decision-review-pending";
-    pendingNotice.textContent = `${pending.length} user peg play${pending.length === 1 ? "" : "s"} still being analyzed. This report will fill in as analysis completes.`;
+    const canAnalyze = canAnalyzeCurrentGameDecisionReviews(end.gameId);
+    const pendingText = document.createElement("span");
+    pendingText.textContent = canAnalyze
+      ? `${pending.length} user peg play${pending.length === 1 ? "" : "s"} waiting for analysis.`
+      : `${pending.length} user peg play${pending.length === 1 ? "" : "s"} not analyzed.`;
+    pendingNotice.append(pendingText);
+    if (canAnalyze) {
+      const analyze = document.createElement("button");
+      analyze.type = "button";
+      analyze.className = "decision-review-analyze";
+      analyze.textContent = state.completingReviews ? "Analyzing" : "Analyze";
+      analyze.disabled = state.completingReviews || state.pending;
+      analyze.addEventListener("click", () => {
+        void analyzeCurrentGameDecisionReviews();
+      });
+      pendingNotice.append(analyze);
+    }
     section.append(pendingNotice);
   }
 
@@ -2554,6 +2570,14 @@ function pendingDecisionReviews(events: AnalyticsEvent[], gameId: string): Peggi
     event.action === "play" &&
     event.player === "human" &&
     !event.review,
+  );
+}
+
+function canAnalyzeCurrentGameDecisionReviews(gameId: string): boolean {
+  return Boolean(
+    state.game?.phase === "game_over" &&
+      currentSnapshot?.gameId === gameId &&
+      (currentSnapshot.pendingPeggingReviews?.length ?? 0) > 0,
   );
 }
 
@@ -4290,8 +4314,6 @@ function render(game: GameState | null): void {
     els.newGame.disabled = !canStartNewGame;
     els.continuePegging.disabled = false;
   }
-
-  if (!state.pending) scheduleDecisionReviewCompletion(game);
 }
 
 function shouldAdvancePeggingAi(game: GameState): boolean {
@@ -4308,19 +4330,18 @@ function shouldAutoHumanGo(game: GameState): boolean {
 
 async function withDelayedAiThinking<T>(game: GameState, action: () => Promise<T>): Promise<T> {
   const shouldShow = shouldShowAiThinkingForPegging(game);
-  let shown = false;
-  const timer = shouldShow
-    ? window.setTimeout(() => {
-        shown = true;
-        setAiThinking(true);
-        render(state.game);
-      }, 180)
-    : 0;
+  const shownAt = shouldShow ? performance.now() : 0;
+  if (shouldShow) {
+    setAiThinking(true);
+    render(state.game);
+    await waitForPaint();
+  }
   try {
     return await action();
   } finally {
-    if (timer) window.clearTimeout(timer);
-    if (shown) {
+    if (shouldShow) {
+      const elapsed = performance.now() - shownAt;
+      if (elapsed < 160) await waitMs(160 - elapsed);
       setAiThinking(false);
       render(state.game);
     }
@@ -4525,7 +4546,6 @@ async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
       await waitForPaint();
       current = await withDelayedAiThinking(current, () => api("/api/advance-pegging", {}));
       render(current);
-      scheduleDecisionReviewCompletion(current);
       continue;
     }
     return current;
@@ -4533,28 +4553,20 @@ async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
   throw new Error("Pegging continuation did not settle.");
 }
 
-function scheduleDecisionReviewCompletion(game = state.game): void {
-  if (state.completingReviews) return;
-  if (
-    !game ||
-    (game.phase === "pegging" && game.turn === "AI") ||
-    game.peggingResetPending ||
-    !(currentSnapshot?.pendingPeggingReviews?.length) ||
-    state.pending
-  ) {
-    return;
-  }
+async function analyzeCurrentGameDecisionReviews(): Promise<void> {
+  if (!state.game || state.game.phase !== "game_over" || state.pending || state.completingReviews) return;
+  if (!(currentSnapshot?.pendingPeggingReviews?.length)) return;
   state.completingReviews = true;
-  window.setTimeout(() => {
-    api("/api/complete-decision-reviews", {})
-      .then((next) => render(next))
-      .catch((error) => {
-        showServerBusy(error, () => scheduleDecisionReviewCompletion(game));
-      })
-      .finally(() => {
-        state.completingReviews = false;
-      });
-  }, 0);
+  render(state.game);
+  try {
+    const next = await api("/api/complete-decision-reviews", {});
+    render(next);
+  } catch (error) {
+    showServerBusy(error, () => analyzeCurrentGameDecisionReviews());
+  } finally {
+    state.completingReviews = false;
+    render(state.game);
+  }
 }
 
 els.menuToggle.addEventListener("click", () => {
@@ -5148,7 +5160,6 @@ async function initializeGameState(): Promise<void> {
     markAppReady();
     if (initialGame.phase === "ai_discarding") finishDiscardInBackground(interactionEpoch);
     else await continuePeggingAfterRender(initialGame);
-    scheduleDecisionReviewCompletion(initialGame);
   } catch (error) {
     markAppReady();
     showServerBusy(error, () => initializeGameState());

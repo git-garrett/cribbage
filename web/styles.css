@@ -1115,6 +1115,27 @@ button:disabled {
   gap: 6px;
 }
 
+.decision-review-pending {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: var(--menu-font);
+}
+
+.decision-review-analyze {
+  min-height: 32px;
+  padding: 5px 10px;
+  font-size: var(--fine-font);
+  white-space: nowrap;
+}
+
 .decision-review-empty {
   display: grid;
   gap: 3px;
@@ -1330,6 +1351,12 @@ button:disabled {
 
 .decision-review-content .decision-ev-summary em {
   color: var(--ink);
+}
+
+.decision-review-content .decision-review-pending {
+  border-color: var(--line);
+  background: var(--surface-soft);
+  color: var(--muted);
 }
 
 .decision-review-content .decision-outcome-impact {
