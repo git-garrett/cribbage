@@ -23,9 +23,19 @@ struct PhaseStats {
     max: f64,
 }
 
+#[derive(Clone, Copy)]
+struct CycleFastPathCutoffs {
+    pone: u8,
+    dealer: u8,
+}
+
+const CYCLE_FAST_PATH_QUANTILE: f64 = 0.999;
+const ZERO_DISTRIBUTION: [(u8, f64); 1] = [(0, 1.0)];
+
 pub struct BoardModel {
     distributions: HashMap<ScorePhase, Vec<(u8, f64)>>,
     cycle_delta_cache: HashMap<Role, Vec<((u8, u8), f64)>>,
+    cycle_fast_path_cutoffs: CycleFastPathCutoffs,
     memo: HashMap<(u8, u8, Role, ScorePhase), f64>,
     use_heuristic_before_90: bool,
     joint_future_pegging: bool,
@@ -55,9 +65,12 @@ impl BoardModel {
         ] {
             distributions.insert(phase, score_phase_distribution(phase_stats(phase)));
         }
+        let cycle_fast_path_cutoffs =
+            cycle_fast_path_cutoffs(&distributions, CYCLE_FAST_PATH_QUANTILE);
         BoardModel {
             distributions,
             cycle_delta_cache: HashMap::new(),
+            cycle_fast_path_cutoffs,
             memo: HashMap::new(),
             use_heuristic_before_90,
             joint_future_pegging,
@@ -112,8 +125,8 @@ impl BoardModel {
         self.memo.insert(key, 0.5);
 
         if self.joint_future_pegging && phase == ScorePhase::PeggingPone {
-            let probability = if self.cycle_terminal_impossible(my, opponent, perspective_role) {
-                self.future_terminal_safe_cycle_win_probability(my, opponent, perspective_role)
+            let probability = if self.cycle_fast_path_allowed(my, opponent, perspective_role) {
+                self.future_cycle_win_probability(my, opponent, perspective_role)
             } else {
                 self.future_joint_pegging_win_probability(my, opponent, perspective_role)
             };
@@ -165,7 +178,7 @@ impl BoardModel {
         probability
     }
 
-    fn future_terminal_safe_cycle_win_probability(
+    fn future_cycle_win_probability(
         &mut self,
         my: u8,
         opponent: u8,
@@ -173,7 +186,7 @@ impl BoardModel {
     ) -> f64 {
         let next_role = next_perspective_role(perspective_role, ScorePhase::Crib);
         let deltas = self.cycle_delta_distribution(perspective_role);
-        if !self.cycle_terminal_impossible(my, opponent, next_role) {
+        if !self.cycle_fast_path_allowed(my, opponent, next_role) {
             let mut probability = 0.0;
             for ((my_delta, opponent_delta), weight) in deltas {
                 probability += weight
@@ -280,25 +293,19 @@ impl BoardModel {
         probability
     }
 
-    fn cycle_terminal_impossible(&self, my: u8, opponent: u8, perspective_role: Role) -> bool {
-        let pone_cycle_max = self.max_points(ScorePhase::PeggingPone) as u16
-            + self.max_points(ScorePhase::HandPone) as u16;
-        let dealer_cycle_max = self.max_points(ScorePhase::PeggingDealer) as u16
-            + self.max_points(ScorePhase::HandDealer) as u16
-            + self.max_points(ScorePhase::Crib) as u16;
-        let (my_max, opponent_max) = if perspective_role == Role::Pone {
-            (pone_cycle_max, dealer_cycle_max)
+    fn cycle_fast_path_allowed(&self, my: u8, opponent: u8, perspective_role: Role) -> bool {
+        let (my_cutoff, opponent_cutoff) = if perspective_role == Role::Pone {
+            (
+                self.cycle_fast_path_cutoffs.pone,
+                self.cycle_fast_path_cutoffs.dealer,
+            )
         } else {
-            (dealer_cycle_max, pone_cycle_max)
+            (
+                self.cycle_fast_path_cutoffs.dealer,
+                self.cycle_fast_path_cutoffs.pone,
+            )
         };
-        (my as u16) + my_max < 121 && (opponent as u16) + opponent_max < 121
-    }
-
-    fn max_points(&self, phase: ScorePhase) -> u8 {
-        self.distributions
-            .get(&phase)
-            .and_then(|distribution| distribution.iter().map(|(points, _)| *points).max())
-            .unwrap_or(0)
+        (my as u16) + (my_cutoff as u16) < 121 && (opponent as u16) + (opponent_cutoff as u16) < 121
     }
 
     fn cycle_delta_distribution(&mut self, perspective_role: Role) -> Vec<((u8, u8), f64)> {
@@ -390,6 +397,69 @@ fn apply_cycle_delta_phase(
 
 fn add_cycle_state(states: &mut HashMap<(u8, u8), f64>, key: (u8, u8), weight: f64) {
     *states.entry(key).or_insert(0.0) += weight;
+}
+
+fn cycle_fast_path_cutoffs(
+    distributions: &HashMap<ScorePhase, Vec<(u8, f64)>>,
+    quantile: f64,
+) -> CycleFastPathCutoffs {
+    let pone = percentile_points(
+        &convolve_score_distributions(
+            distribution_or_zero(distributions, ScorePhase::PeggingPone),
+            distribution_or_zero(distributions, ScorePhase::HandPone),
+        ),
+        quantile,
+    );
+    let dealer = percentile_points(
+        &convolve_score_distributions(
+            &convolve_score_distributions(
+                distribution_or_zero(distributions, ScorePhase::PeggingDealer),
+                distribution_or_zero(distributions, ScorePhase::HandDealer),
+            ),
+            distribution_or_zero(distributions, ScorePhase::Crib),
+        ),
+        quantile,
+    );
+    CycleFastPathCutoffs { pone, dealer }
+}
+
+fn distribution_or_zero(
+    distributions: &HashMap<ScorePhase, Vec<(u8, f64)>>,
+    phase: ScorePhase,
+) -> &[(u8, f64)] {
+    distributions
+        .get(&phase)
+        .map(Vec::as_slice)
+        .unwrap_or(&ZERO_DISTRIBUTION)
+}
+
+fn convolve_score_distributions(left: &[(u8, f64)], right: &[(u8, f64)]) -> Vec<(u8, f64)> {
+    let mut states = HashMap::new();
+    for (left_points, left_weight) in left {
+        for (right_points, right_weight) in right {
+            *states.entry(*left_points + *right_points).or_insert(0.0) +=
+                *left_weight * *right_weight;
+        }
+    }
+    let mut distribution = states.into_iter().collect::<Vec<_>>();
+    distribution.sort_by_key(|(points, _)| *points);
+    distribution
+}
+
+fn percentile_points(distribution: &[(u8, f64)], quantile: f64) -> u8 {
+    let target = quantile.clamp(0.0, 1.0);
+    let mut cumulative = 0.0;
+    for (points, weight) in distribution {
+        cumulative += *weight;
+        if cumulative >= target {
+            return *points;
+        }
+    }
+    distribution
+        .iter()
+        .map(|(points, _)| *points)
+        .max()
+        .unwrap_or(0)
 }
 
 pub fn next_score_phase(phase: ScorePhase) -> ScorePhase {
@@ -497,13 +567,29 @@ mod tests {
         distributions.insert(ScorePhase::HandPone, vec![(pone_hand, 1.0)]);
         distributions.insert(ScorePhase::HandDealer, vec![(dealer_hand, 1.0)]);
         distributions.insert(ScorePhase::Crib, vec![(crib, 1.0)]);
+        let cycle_fast_path_cutoffs =
+            cycle_fast_path_cutoffs(&distributions, CYCLE_FAST_PATH_QUANTILE);
         BoardModel {
             distributions,
             cycle_delta_cache: HashMap::new(),
+            cycle_fast_path_cutoffs,
             memo: HashMap::new(),
             use_heuristic_before_90: false,
             joint_future_pegging: true,
         }
+    }
+
+    #[test]
+    fn cycle_fast_path_uses_999th_percentile_cutoffs() {
+        let board = BoardModel::joint_pegging_without_early_heuristic();
+        assert_eq!(board.cycle_fast_path_cutoffs.pone, 24);
+        assert_eq!(board.cycle_fast_path_cutoffs.dealer, 34);
+        assert!(board.cycle_fast_path_allowed(96, 86, Role::Pone));
+        assert!(!board.cycle_fast_path_allowed(97, 86, Role::Pone));
+        assert!(!board.cycle_fast_path_allowed(96, 87, Role::Pone));
+        assert!(board.cycle_fast_path_allowed(86, 96, Role::Dealer));
+        assert!(!board.cycle_fast_path_allowed(87, 96, Role::Dealer));
+        assert!(!board.cycle_fast_path_allowed(86, 97, Role::Dealer));
     }
 
     #[test]
