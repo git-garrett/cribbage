@@ -79,10 +79,10 @@ Environment=PORT=${REMOTE_PORT_APP}
 Environment=CRIBBAGE_STATIC_DIR=${REMOTE_APP_DIR}/dist
 Environment=CRIBBAGE_DB_PATH=${REMOTE_DATA_DIR}/cribbage-server.sqlite
 Environment=CRIBBAGE_RUST_PRIMARY=${CRIBBAGE_RUST_PRIMARY:-0}
-Environment=CRIBBAGE_RUST_PRIMARY_MODELS=${CRIBBAGE_RUST_PRIMARY_MODELS:-schell_table-peg_table-13.0,schell_table-peg_table-14.3,schell_table-peg_table-15.0}
+Environment=CRIBBAGE_RUST_PRIMARY_MODELS=${CRIBBAGE_RUST_PRIMARY_MODELS:-schell_table-peg_table-13.0,schell_table-peg_table-14.3,schell_table-peg_table-15.0,schell_table-peg_table-15.1}
 Environment=CRIBBAGE_RUST_SHADOW=${CRIBBAGE_RUST_SHADOW:-0}
 Environment=CRIBBAGE_RUST_SHADOW_BIN=${REMOTE_APP_DIR}/rust/cribbage-shadow-engine/cribbage-shadow-engine
-Environment=CRIBBAGE_RUST_SHADOW_MODELS=${CRIBBAGE_RUST_SHADOW_MODELS:-schell_table-peg_table-13.0,schell_table-peg_table-14.3,schell_table-peg_table-14.8,schell_table-peg_table-14.8.1,schell_table-peg_table-15.0}
+Environment=CRIBBAGE_RUST_SHADOW_MODELS=${CRIBBAGE_RUST_SHADOW_MODELS:-schell_table-peg_table-13.0,schell_table-peg_table-14.3,schell_table-peg_table-14.8,schell_table-peg_table-14.8.1,schell_table-peg_table-15.0,schell_table-peg_table-15.1}
 Environment=CRIBBAGE_RUST_SHADOW_TIMEOUT_MS=${CRIBBAGE_RUST_SHADOW_TIMEOUT_MS:-5000}
 Environment=CRIBBAGE_RUST_SHADOW_PERSISTENT=${CRIBBAGE_RUST_SHADOW_PERSISTENT:-1}
 Environment=CRIBBAGE_RUST_SHADOW_SAMPLE_RATE=${CRIBBAGE_RUST_SHADOW_SAMPLE_RATE:-1}

@@ -6,6 +6,7 @@ pub const MODEL_14_3: &str = "schell_table-peg_table-14.3";
 pub const MODEL_14_8: &str = "schell_table-peg_table-14.8";
 pub const MODEL_14_8_1: &str = "schell_table-peg_table-14.8.1";
 pub const MODEL_15_0: &str = "schell_table-peg_table-15.0";
+pub const MODEL_15_1: &str = "schell_table-peg_table-15.1";
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ModelId {
@@ -14,6 +15,7 @@ pub enum ModelId {
     Schell148,
     Schell1481,
     Schell150,
+    Schell151,
 }
 
 impl ModelId {
@@ -24,6 +26,7 @@ impl ModelId {
             ModelId::Schell148 => MODEL_14_8,
             ModelId::Schell1481 => MODEL_14_8_1,
             ModelId::Schell150 => MODEL_15_0,
+            ModelId::Schell151 => MODEL_15_1,
         }
     }
 
@@ -34,6 +37,7 @@ impl ModelId {
             ModelId::Schell148 => "Schell Table + Peg Table 14.8",
             ModelId::Schell1481 => "Schell Table + Peg Table 14.8.1",
             ModelId::Schell150 => "Schell Table + Peg Table 15.0",
+            ModelId::Schell151 => "Schell Table + Peg Table 15.1",
         }
     }
 
@@ -45,11 +49,12 @@ impl ModelId {
                 | ModelId::Schell148
                 | ModelId::Schell1481
                 | ModelId::Schell150
+                | ModelId::Schell151
         )
     }
 
     pub fn is_strength_model(self) -> bool {
-        matches!(self, ModelId::Schell150)
+        matches!(self, ModelId::Schell150 | ModelId::Schell151)
     }
 }
 
@@ -69,6 +74,7 @@ impl FromStr for ModelId {
             MODEL_14_8 => Ok(ModelId::Schell148),
             MODEL_14_8_1 => Ok(ModelId::Schell1481),
             MODEL_15_0 => Ok(ModelId::Schell150),
+            MODEL_15_1 => Ok(ModelId::Schell151),
             other => Err(format!("unsupported model id: {}", other)),
         }
     }
@@ -87,6 +93,8 @@ mod tests {
             MODEL_14_8_1
         );
         assert!(ModelId::Schell150.has_native_rust_decisions());
+        assert!(ModelId::Schell151.has_native_rust_decisions());
         assert!(ModelId::Schell13.has_native_rust_decisions());
+        assert_eq!(MODEL_15_1.parse::<ModelId>().unwrap().as_str(), MODEL_15_1);
     }
 }

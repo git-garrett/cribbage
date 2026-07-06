@@ -16,7 +16,7 @@ use crate::cards::{
     rank_counts, remaining_rank_counts, score_count, score_flush_and_right_jack, score_hand,
     score_hand_rank_only, Card,
 };
-use crate::model_id::{MODEL_13_0, MODEL_14_3, MODEL_14_8, MODEL_14_8_1, MODEL_15_0};
+use crate::model_id::{MODEL_13_0, MODEL_14_3, MODEL_14_8, MODEL_14_8_1, MODEL_15_0, MODEL_15_1};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DecisionKind {
@@ -304,10 +304,15 @@ fn is_supported_rust_model(model: &str) -> bool {
         || model == MODEL_14_8
         || model == MODEL_14_8_1
         || model == MODEL_15_0
+        || model == MODEL_15_1
 }
 
 fn is_strength_model(input: &DecisionInput) -> bool {
-    input.model == MODEL_15_0
+    input.model == MODEL_15_0 || input.model == MODEL_15_1
+}
+
+fn uses_joint_future_pegging(input: &DecisionInput) -> bool {
+    input.model == MODEL_15_1
 }
 
 fn groups_equivalent_discard_candidates(input: &DecisionInput) -> bool {
@@ -315,7 +320,9 @@ fn groups_equivalent_discard_candidates(input: &DecisionInput) -> bool {
 }
 
 fn board_model_for_input(input: &DecisionInput) -> BoardModel {
-    if is_strength_model(input) {
+    if uses_joint_future_pegging(input) {
+        BoardModel::joint_pegging_without_early_heuristic()
+    } else if is_strength_model(input) {
         BoardModel::without_early_heuristic()
     } else {
         BoardModel::new()
@@ -918,9 +925,9 @@ fn model13_discard_candidate_win_probability(
         for ((my_base, opponent_base), base_weight) in &base_outcomes.entries {
             let weight = normalized_pegging_weight * *base_weight;
             total += weight
-                * board.future_win_probability(
-                    (player_score + *my_pegging + *my_base) as f64,
-                    (opponent_score + *opponent_pegging + *opponent_base) as f64,
+                * board.future_win_probability_from_scores(
+                    player_score + *my_pegging + *my_base,
+                    opponent_score + *opponent_pegging + *opponent_base,
                     next_role,
                     ScorePhase::PeggingPone,
                 );
@@ -1301,9 +1308,9 @@ fn model143_discard_candidate_win_probability(
         for ((my_base, opponent_base), base_weight) in &base_outcomes.entries {
             let weight = normalized_pegging_weight * *base_weight;
             total += weight
-                * board.future_win_probability(
-                    (player_score + *my_pegging + *my_base) as f64,
-                    (opponent_score + *opponent_pegging + *opponent_base) as f64,
+                * board.future_win_probability_from_scores(
+                    player_score + *my_pegging + *my_base,
+                    opponent_score + *opponent_pegging + *opponent_base,
                     next_role,
                     ScorePhase::PeggingPone,
                 );
@@ -1842,9 +1849,9 @@ fn evaluate_discard_candidate(
             &accumulator.win_probability_outcomes.entries
         {
             win_probability_total += *weight
-                * board.future_win_probability(
-                    *my_score as f64,
-                    *future_opponent_score as f64,
+                * board.future_win_probability_from_scores(
+                    i32::from(*my_score),
+                    i32::from(*future_opponent_score),
                     next_role,
                     ScorePhase::PeggingPone,
                 );
@@ -3148,7 +3155,7 @@ fn expected_win_probability_for_distribution(
     for ((my_pegging, opponent_pegging), weight) in &distribution.outcomes.entries {
         let my_score = root_scores[player_index(perspective)] + *my_pegging;
         let opponent_score = root_scores[player_index(opponent)] + *opponent_pegging;
-        total += *weight * evaluator.win_probability(my_score as f64, opponent_score as f64);
+        total += *weight * evaluator.win_probability(my_score, opponent_score);
     }
     total / distribution.total_weight
 }
@@ -3192,9 +3199,9 @@ fn post_pegging_win_context(
 }
 
 impl PeggingWinEvaluator {
-    fn win_probability(&mut self, my_score: f64, opponent_score: f64) -> f64 {
+    fn win_probability(&mut self, my_score: i32, opponent_score: i32) -> f64 {
         match &mut self.mode {
-            PeggingWinMode::HistoricPhase => self.board.future_win_probability(
+            PeggingWinMode::HistoricPhase => self.board.future_win_probability_from_scores(
                 my_score,
                 opponent_score,
                 self.perspective_role,
@@ -3280,16 +3287,16 @@ fn upcoming_crib_score_distribution(input: &DecisionInput) -> Vec<(i32, f64)> {
 
 fn post_pegging_win_probability(
     context: &mut PostPeggingWinContext,
-    my_score: f64,
-    opponent_score: f64,
+    my_score: i32,
+    opponent_score: i32,
 ) -> f64 {
-    if my_score >= 121.0 {
+    if my_score >= 121 {
         return 1.0;
     }
-    if opponent_score >= 121.0 {
+    if opponent_score >= 121 {
         return 0.0;
     }
-    let key = (my_score.round() as i32, opponent_score.round() as i32);
+    let key = (my_score, opponent_score);
     if let Some(cached) = context.memo.get(&key) {
         return *cached;
     }
@@ -3298,66 +3305,66 @@ fn post_pegging_win_probability(
     for (pone_score, pone_weight) in &context.pone_hand {
         let after_pone_my = my_score
             + if context.pone_is_perspective {
-                *pone_score as f64
+                *pone_score
             } else {
-                0.0
+                0
             };
         let after_pone_opponent = opponent_score
             + if context.pone_is_perspective {
-                0.0
+                0
             } else {
-                *pone_score as f64
+                *pone_score
             };
-        if after_pone_my >= 121.0 {
+        if after_pone_my >= 121 {
             total += *pone_weight;
             total_weight += *pone_weight;
             continue;
         }
-        if after_pone_opponent >= 121.0 {
+        if after_pone_opponent >= 121 {
             total_weight += *pone_weight;
             continue;
         }
         for (dealer_score, dealer_weight) in &context.dealer_hand {
             let after_dealer_my = after_pone_my
                 + if context.dealer_is_perspective {
-                    *dealer_score as f64
+                    *dealer_score
                 } else {
-                    0.0
+                    0
                 };
             let after_dealer_opponent = after_pone_opponent
                 + if context.dealer_is_perspective {
-                    0.0
+                    0
                 } else {
-                    *dealer_score as f64
+                    *dealer_score
                 };
-            if after_dealer_my >= 121.0 {
+            if after_dealer_my >= 121 {
                 total += *pone_weight * *dealer_weight;
                 total_weight += *pone_weight * *dealer_weight;
                 continue;
             }
-            if after_dealer_opponent >= 121.0 {
+            if after_dealer_opponent >= 121 {
                 total_weight += *pone_weight * *dealer_weight;
                 continue;
             }
             for (crib_score, crib_weight) in &context.crib {
                 let after_crib_my = after_dealer_my
                     + if context.dealer_is_perspective {
-                        *crib_score as f64
+                        *crib_score
                     } else {
-                        0.0
+                        0
                     };
                 let after_crib_opponent = after_dealer_opponent
                     + if context.dealer_is_perspective {
-                        0.0
+                        0
                     } else {
-                        *crib_score as f64
+                        *crib_score
                     };
                 let weight = *pone_weight * *dealer_weight * *crib_weight;
-                if after_crib_my >= 121.0 {
+                if after_crib_my >= 121 {
                     total += weight;
-                } else if after_crib_opponent < 121.0 {
+                } else if after_crib_opponent < 121 {
                     total += weight
-                        * context.board.future_win_probability(
+                        * context.board.future_win_probability_from_scores(
                             after_crib_my,
                             after_crib_opponent,
                             next_perspective_role(context.perspective_role, ScorePhase::Crib),
@@ -3371,7 +3378,7 @@ fn post_pegging_win_probability(
     let probability = if total_weight > 0.0 {
         total / total_weight
     } else {
-        context.board.future_win_probability(
+        context.board.future_win_probability_from_scores(
             my_score,
             opponent_score,
             context.perspective_role,
