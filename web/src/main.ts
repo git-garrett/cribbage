@@ -2565,14 +2565,10 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   section.className = "decision-review";
   const title = document.createElement("h3");
   title.textContent = "Decision review";
-  const model = document.createElement("p");
-  model.textContent = "Compared to AI analysis.";
-  section.append(title, model);
+  section.append(title);
 
   const mistakes = sortedDecisionMistakes(events, end.gameId);
   const pending = pendingDecisionReviews(events, end.gameId);
-  const totals = decisionEvTotals(mistakes);
-  section.append(decisionEvSummary(totals), decisionWinProbabilityImpact(totals));
 
   if (pending.length) {
     const pendingNotice = document.createElement("div");
@@ -2582,7 +2578,7 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
     pendingBody.className = "decision-review-pending-body";
     const pendingText = document.createElement("span");
     pendingText.textContent = canAnalyze
-      ? `${pending.length} user decision${pending.length === 1 ? "" : "s"} waiting for analysis.`
+      ? "Analyze your errors and learn how to improve:"
       : `${pending.length} user decision${pending.length === 1 ? "" : "s"} not analyzed.`;
     pendingBody.append(pendingText);
     if (state.completingReviews && state.reviewProgress) {
@@ -2612,14 +2608,18 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
       pendingNotice.append(analyze);
     }
     section.append(pendingNotice);
+    return section;
   }
+
+  const model = document.createElement("p");
+  model.textContent = "Compared to AI analysis.";
+  const totals = decisionEvTotals(mistakes);
+  section.append(model, decisionEvSummary(totals), decisionWinProbabilityImpact(totals));
 
   if (!mistakes.length) {
     const empty = document.createElement("div");
     empty.className = "decision-review-empty";
-    empty.textContent = pending.length
-      ? "No completed user discards or peg plays have been flagged yet."
-      : "No user discards or peg plays were flagged by AI analysis.";
+    empty.textContent = "No user discards or peg plays were flagged by AI analysis.";
     section.append(empty);
     return section;
   }
