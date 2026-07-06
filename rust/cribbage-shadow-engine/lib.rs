@@ -1,6 +1,7 @@
 pub mod artifacts;
 pub mod board;
 pub mod cards;
+pub mod decision;
 pub mod game;
 pub mod model;
 pub mod model_id;

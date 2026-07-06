@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { MODEL_14_8, MODEL_14_8_1 } from "./ai-constants";
+import { MODEL_13, MODEL_14_3, MODEL_14_8, MODEL_14_8_1 } from "./ai-constants";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -46,7 +46,7 @@ const RUST_SHADOW_MAX_IN_FLIGHT = Math.max(
   Number.parseInt(process.env.CRIBBAGE_RUST_SHADOW_MAX_IN_FLIGHT || "2", 10) || 2,
 );
 const RUST_SHADOW_MODELS = new Set(
-  (process.env.CRIBBAGE_RUST_SHADOW_MODELS || `${MODEL_14_8},${MODEL_14_8_1}`)
+  (process.env.CRIBBAGE_RUST_SHADOW_MODELS || `${MODEL_13},${MODEL_14_3},${MODEL_14_8},${MODEL_14_8_1}`)
     .split(",")
     .map((model) => model.trim())
     .filter(Boolean),
@@ -62,6 +62,12 @@ type PendingRustRequest = {
   startedAt: number | null;
   timer: NodeJS.Timeout | null;
   settled: boolean;
+};
+
+export type RustPrimaryDecisionResult = {
+  durationMs: number;
+  response: JsonRecord;
+  decision: JsonRecord;
 };
 
 let rustWorker: ChildProcessWithoutNullStreams | null = null;
@@ -93,6 +99,10 @@ function requestModel(requestBody: JsonRecord, nodeResponse: JsonRecord): string
   if (typeof responseSnapshot?.opponent === "string") return responseSnapshot.opponent;
   if (typeof payload?.opponent === "string") return payload.opponent;
   return "";
+}
+
+export function requestModelForPayload(requestBody: JsonRecord, responseBody: JsonRecord = {}): string {
+  return requestModel(requestBody, responseBody);
 }
 
 function requestGameId(requestBody: JsonRecord, nodeResponse: JsonRecord): string | null {
@@ -173,6 +183,10 @@ function compactRustDecisionInput(kind: "discard" | "peg", model: string, snapsh
       : "-",
   };
   return Object.entries(fields).map(([key, value]) => `${key}=${value}`).join(";");
+}
+
+export function compactRustPrimaryDecisionInput(kind: "discard" | "peg", model: string, snapshotValue: unknown): string | null {
+  return compactRustDecisionInput(kind, model, snapshotValue);
 }
 
 function expectedRustDecision(kind: string, requestBody: JsonRecord, nodeResponse: JsonRecord): ExpectedRustDecision | null {
@@ -402,6 +416,37 @@ function runRustShadowWorker(input: JsonRecord): Promise<{ durationMs: number; r
 
 function runRustShadowEngine(input: JsonRecord): Promise<{ durationMs: number; response: JsonRecord }> {
   return RUST_SHADOW_PERSISTENT ? runRustShadowWorker(input) : runRustShadowProcess(input);
+}
+
+export async function runRustPrimaryDecision(
+  kind: "discard" | "peg",
+  action: string,
+  model: string,
+  snapshot: unknown,
+): Promise<RustPrimaryDecisionResult> {
+  const inputText = compactRustDecisionInput(kind, model, snapshot);
+  if (!inputText) throw new Error("Unable to build Rust primary decision input.");
+  const rust = await runRustShadowEngine({
+    kind,
+    action,
+    model,
+    decision: {
+      kind,
+      expected: {},
+      inputText,
+    },
+  });
+  if (rust.response.supported === false) {
+    throw new Error(typeof rust.response.reason === "string" ? rust.response.reason : "Rust primary decision unsupported.");
+  }
+  if (rust.response.ok !== true || !rust.response.decision || typeof rust.response.decision !== "object") {
+    throw new Error(typeof rust.response.error === "string" ? rust.response.error : "Rust primary decision failed.");
+  }
+  return {
+    durationMs: rust.durationMs,
+    response: rust.response,
+    decision: rust.response.decision as JsonRecord,
+  };
 }
 
 function summarizeParity(expected: ExpectedRustDecision | null, nodeResponse: JsonRecord, rustResponse: JsonRecord): string {

@@ -94,28 +94,30 @@ impl BoardModel {
         for (points, weight) in distribution {
             if perspective_scores {
                 let next_my = my.saturating_add(points);
-                probability += weight * if next_my >= 121 {
-                    1.0
-                } else {
-                    self.future_win_probability(
-                        next_my as f64,
-                        opponent as f64,
-                        next_perspective_role(perspective_role, phase),
-                        next_score_phase(phase),
-                    )
-                };
+                probability += weight
+                    * if next_my >= 121 {
+                        1.0
+                    } else {
+                        self.future_win_probability(
+                            next_my as f64,
+                            opponent as f64,
+                            next_perspective_role(perspective_role, phase),
+                            next_score_phase(phase),
+                        )
+                    };
             } else {
                 let next_opponent = opponent.saturating_add(points);
-                probability += weight * if next_opponent >= 121 {
-                    0.0
-                } else {
-                    self.future_win_probability(
-                        my as f64,
-                        next_opponent as f64,
-                        next_perspective_role(perspective_role, phase),
-                        next_score_phase(phase),
-                    )
-                };
+                probability += weight
+                    * if next_opponent >= 121 {
+                        0.0
+                    } else {
+                        self.future_win_probability(
+                            my as f64,
+                            next_opponent as f64,
+                            next_perspective_role(perspective_role, phase),
+                            next_score_phase(phase),
+                        )
+                    };
             }
         }
         self.memo.insert(key, probability);
@@ -145,6 +147,13 @@ pub fn next_perspective_role(role: Role, phase: ScorePhase) -> Role {
 
 pub fn score_phase_average(phase: ScorePhase) -> f64 {
     phase_stats(phase).average
+}
+
+pub fn score_phase_distribution_for_phase(phase: ScorePhase) -> Vec<(i32, f64)> {
+    score_phase_distribution(phase_stats(phase))
+        .into_iter()
+        .map(|(score, weight)| (i32::from(score), weight))
+        .collect()
 }
 
 fn heuristic_win_probability(my_score: f64, opponent_score: f64, perspective_role: Role) -> f64 {

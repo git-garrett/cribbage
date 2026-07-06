@@ -120,17 +120,29 @@ pub fn response_for_input(input: &str) -> Response {
 
     if kind == "pairwise-self-test" {
         let root = std::env::var("CRIBBAGE_RUST_MODEL_ROOT").unwrap_or_else(|_| ".".to_string());
-        return self_test_response("pairwise-self-test", artifacts::pairwise_self_test(&root), now_ms);
+        return self_test_response(
+            "pairwise-self-test",
+            artifacts::pairwise_self_test(&root),
+            now_ms,
+        );
     }
 
     if kind == "empirical-self-test" {
         let root = std::env::var("CRIBBAGE_RUST_MODEL_ROOT").unwrap_or_else(|_| ".".to_string());
-        return self_test_response("empirical-self-test", artifacts::empirical_self_test(&root), now_ms);
+        return self_test_response(
+            "empirical-self-test",
+            artifacts::empirical_self_test(&root),
+            now_ms,
+        );
     }
 
     if kind == "model13-hold-self-test" {
         let root = std::env::var("CRIBBAGE_RUST_MODEL_ROOT").unwrap_or_else(|_| ".".to_string());
-        return self_test_response("model13-hold-self-test", artifacts::model13_hold_self_test(&root), now_ms);
+        return self_test_response(
+            "model13-hold-self-test",
+            artifacts::model13_hold_self_test(&root),
+            now_ms,
+        );
     }
 
     if let Some(input_text) = extract_json_string(input, "inputText") {
@@ -141,18 +153,18 @@ pub fn response_for_input(input: &str) -> Response {
             Ok(decision) => Response {
                 json: format!(
                     concat!(
-                    "{{",
-                    "\"ok\":true,",
-                    "\"engine\":\"rust-14.8-shadow\",",
-                    "\"supported\":true,",
-                    "\"model\":\"{}\",",
-                    "\"kind\":\"{}\",",
-                    "\"action\":\"{}\",",
-                    "\"decision\":{},",
-                    "\"requestBytes\":{},",
-                    "\"completedAtUnixMs\":{}",
-                    "}}"
-                ),
+                        "{{",
+                        "\"ok\":true,",
+                        "\"engine\":\"rust-14.8-shadow\",",
+                        "\"supported\":true,",
+                        "\"model\":\"{}\",",
+                        "\"kind\":\"{}\",",
+                        "\"action\":\"{}\",",
+                        "\"decision\":{},",
+                        "\"requestBytes\":{},",
+                        "\"completedAtUnixMs\":{}",
+                        "}}"
+                    ),
                     json_escape(&model),
                     json_escape(&kind),
                     json_escape(&action),
@@ -165,18 +177,18 @@ pub fn response_for_input(input: &str) -> Response {
             Err(error) => Response {
                 json: format!(
                     concat!(
-                    "{{",
-                    "\"ok\":false,",
-                    "\"engine\":\"rust-14.8-shadow\",",
-                    "\"supported\":true,",
-                    "\"model\":\"{}\",",
-                    "\"kind\":\"{}\",",
-                    "\"action\":\"{}\",",
-                    "\"requestBytes\":{},",
-                    "\"completedAtUnixMs\":{},",
-                    "\"error\":\"{}\"",
-                    "}}"
-                ),
+                        "{{",
+                        "\"ok\":false,",
+                        "\"engine\":\"rust-14.8-shadow\",",
+                        "\"supported\":true,",
+                        "\"model\":\"{}\",",
+                        "\"kind\":\"{}\",",
+                        "\"action\":\"{}\",",
+                        "\"requestBytes\":{},",
+                        "\"completedAtUnixMs\":{},",
+                        "\"error\":\"{}\"",
+                        "}}"
+                    ),
                     json_escape(&model),
                     json_escape(&kind),
                     json_escape(&action),
@@ -192,18 +204,18 @@ pub fn response_for_input(input: &str) -> Response {
     Response {
         json: format!(
             concat!(
-            "{{",
-            "\"ok\":true,",
-            "\"engine\":\"rust-14.8-shadow\",",
-            "\"supported\":false,",
-            "\"model\":\"{}\",",
-            "\"kind\":\"{}\",",
-            "\"action\":\"{}\",",
-            "\"requestBytes\":{},",
-            "\"completedAtUnixMs\":{},",
-            "\"reason\":\"14.8 Rust decision logic is not ported yet\"",
-            "}}"
-        ),
+                "{{",
+                "\"ok\":true,",
+                "\"engine\":\"rust-14.8-shadow\",",
+                "\"supported\":false,",
+                "\"model\":\"{}\",",
+                "\"kind\":\"{}\",",
+                "\"action\":\"{}\",",
+                "\"requestBytes\":{},",
+                "\"completedAtUnixMs\":{},",
+                "\"reason\":\"14.8 Rust decision logic is not ported yet\"",
+                "}}"
+            ),
             json_escape(&model),
             json_escape(&kind),
             json_escape(&action),

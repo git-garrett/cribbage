@@ -1,4 +1,6 @@
-pub const RANKS: [&str; 13] = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+pub const RANKS: [&str; 13] = [
+    "A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K",
+];
 pub const SUIT_ASCII: [&str; 4] = ["d", "c", "h", "s"];
 pub const SUIT_NAMES: [&str; 4] = ["diamonds", "clubs", "hearts", "spades"];
 pub const VALUES: [u8; 13] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10];
@@ -27,7 +29,10 @@ impl Card {
     }
 
     pub fn label(&self) -> String {
-        format!("{}{}", RANKS[self.rank as usize], SUIT_ASCII[self.suit as usize])
+        format!(
+            "{}{}",
+            RANKS[self.rank as usize], SUIT_ASCII[self.suit as usize]
+        )
     }
 }
 
@@ -36,7 +41,9 @@ pub fn cards_from_ids(ids: &[u8]) -> Result<Vec<Card>, String> {
 }
 
 pub fn full_deck() -> Vec<Card> {
-    (0u8..52).map(|id| Card::new(id).expect("full deck id in range")).collect()
+    (0u8..52)
+        .map(|id| Card::new(id).expect("full deck id in range"))
+        .collect()
 }
 
 pub fn peg_card_for_rank(rank: u8) -> Card {
@@ -65,7 +72,10 @@ pub fn remaining_rank_counts(known_cards: &[Card]) -> [u8; 13] {
 }
 
 pub fn rank_count_key(counts: &[u8; 13]) -> String {
-    counts.iter().map(|count| char::from(b'0' + *count)).collect()
+    counts
+        .iter()
+        .map(|count| char::from(b'0' + *count))
+        .collect()
 }
 
 pub fn rank_counts_from_key(key: &str) -> Result<[u8; 13], String> {
@@ -171,7 +181,13 @@ pub fn combinations_indices(len: usize, size: usize) -> Vec<Vec<usize>> {
     let mut result = Vec::new();
     let mut selected = Vec::new();
 
-    fn visit(start: usize, len: usize, size: usize, selected: &mut Vec<usize>, result: &mut Vec<Vec<usize>>) {
+    fn visit(
+        start: usize,
+        len: usize,
+        size: usize,
+        selected: &mut Vec<usize>,
+        result: &mut Vec<Vec<usize>>,
+    ) {
         if selected.len() == size {
             result.push(selected.clone());
             return;
@@ -205,7 +221,13 @@ pub fn cards_for_rank_counts(available: &[Card], ranks: &[u8; 13]) -> Vec<Vec<Ca
     let groups: Vec<(usize, usize)> = ranks
         .iter()
         .enumerate()
-        .filter_map(|(rank, count)| if *count > 0 { Some((rank, *count as usize)) } else { None })
+        .filter_map(|(rank, count)| {
+            if *count > 0 {
+                Some((rank, *count as usize))
+            } else {
+                None
+            }
+        })
         .collect();
     if groups.is_empty() {
         return vec![Vec::new()];

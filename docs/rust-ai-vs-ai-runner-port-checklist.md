@@ -17,9 +17,34 @@ Initial target:
 - [x] Rust 14.8.1 sidecar parity fixtures pass against Node for discard and pegging decisions.
 - [x] Rust-only strength model is numbered `schell_table-peg_table-15.0`.
 - [x] Rust shadow engine is organized as a Cargo workspace/member crate while preserving the existing `rustc` build path.
-- [ ] Rust has decision logic but not full game lifecycle/scoring orchestration.
-- [ ] Rust has no compact SQLite writer yet.
-- [ ] Rust has no AI-vs-AI multi-worker runner yet.
+- [x] Rust has decision logic and full model-driven game lifecycle/scoring orchestration for native Rust models.
+- [x] Rust has a compact SQLite writer using the system `sqlite3` CLI.
+- [x] Rust has a persisted AI-vs-AI multi-worker runner.
+
+## 13v15 Rust Run Readiness Todo
+
+- [x] Port 13.0 native Rust discard decisions:
+  - [x] Match 13.0 rank-cut discard scoring semantics from `analyzeDiscardChoice` using the rank crib score/histogram artifacts.
+  - [x] Use the 13.0 pairwise pegging outcome table path without 14.x empirical discard/keep behavior.
+  - [x] Preserve 13.0 opponent-hand weighting and avoid 14.x known-card post-pegging WP changes.
+  - [x] Compare 13.0 discard fixtures against Node.
+- [x] Port 13.0 native Rust pegging decisions:
+  - [x] Confirm Rust optimal pegging recursion uses the 13.0 historic phase continuation, not 14.x/15.0 known-card post-pegging WP.
+  - [x] Preserve the 13.0 first-pone-lead peg-table shortcut and its point-EV telemetry path.
+  - [x] Compare 13.0 pegging fixtures against Node.
+- [x] Enable `ModelPlayout` for `schell_table-peg_table-13.0`.
+- [x] Add persisted Rust runner output:
+  - [x] Write `status.json`.
+  - [x] Stream completed games into compact SQLite tables.
+  - [x] Preserve fields consumed by `scripts/analyze-ai-run.cjs`, including discard/pegging EV and selected WP.
+- [x] Add worker controls:
+  - [x] Support worker count with deterministic game-index partitioning.
+  - [ ] Support explicit memo/cache sizing flags. Current Rust path uses per-decision/local memoization and process-global runtime table caching.
+  - [x] Run local worker smoke: two workers completed the 2-game 15.0 vs 13.0 smoke materially faster than one worker.
+- [x] Run 13.0 vs 15.0 smoke QA:
+  - [x] One-game fixed-seed smoke.
+  - [x] Small persisted two-worker smoke run readable by current analysis scripts.
+  - [ ] Only then stop the current Node run and start the Rust 13v15 run.
 
 ## Phase 1: Crate And Module Structure
 
@@ -45,17 +70,17 @@ Progress:
 - [x] Added Cargo tests for TypeScript-compatible LCG shuffle/deal order, discard transition, 31 reset, and last-card pegging.
 - [x] Added fixed-seed naive-policy full-game smoke that reaches `GameOver`.
 - [ ] Add cut-for-deal support.
-- [ ] Add model-driven autoplay over the Rust decision API.
-- [ ] Add compact analytics/event capture needed by the DB writer.
-- [x] Added `playout` module that can drive full games through the existing Rust decision API for native Rust models only: 14.8, 14.8.1, and 15.0.
+- [x] Add model-driven autoplay over the Rust decision API.
+- [x] Add compact analytics/event capture needed by the DB writer.
+- [x] Added `playout` module that can drive full games through the existing Rust decision API for native Rust models: 13.0, 14.8, 14.8.1, and 15.0.
 - [ ] Add artifact-backed smoke/parity tests for native model playout.
-- [ ] Extend playout to 13.0 once the 13.0 Rust decision path is available.
+- [x] Extend playout to 13.0 once the 13.0 Rust decision path is available.
 
 ## Phase 3: Model Dispatch
 
 - [x] Define a Rust `ModelId` enum/string mapping for 13.0, 14.8.1, and 15.0.
-- [ ] Implement 13.0 discard/pegging behavior or bind to existing Rust components where already ported.
-- [ ] Keep 14.8.1 exact parity mode separate from 15.0 strength mode.
+- [x] Implement 13.0 discard/pegging behavior or bind to existing Rust components where already ported.
+- [x] Keep 14.8.1 exact parity mode separate from 15.0 strength mode.
 - [x] Add model-resource loading cache per process.
 - [ ] Add model fixture tests: 13.0, 14.8.1, and 15.0 discard decisions.
 - [ ] Add model fixture tests: 13.0, 14.8.1, and 15.0 pegging decisions.
@@ -66,34 +91,41 @@ Progress:
 - [x] Marked native Rust decision support explicitly: 14.8, 14.8.1, and 15.0 supported; 13.0 parsed but still pending.
 - [x] Confirmed existing `RuntimeTables` cache is process-global via `OnceLock`.
 - [x] 14.8.1 parity mode and 15.0 strength mode remain separated in `model.rs`.
-- [ ] Port or bind 13.0 discard behavior, which still uses the legacy Schell discard table rather than the empirical 14.8 discard path.
-- [ ] Port 13.0 pegging behavior without accidentally inheriting later 14.x known-card post-pegging WP context.
-- [ ] Preserve 13.0 opponent-hand weighting semantics; it uses the model-13 hold table but does not use the later corrected-discard availability weighting.
+- [x] Port 13.0 discard behavior using the active 13.0 rank-cut discard path rather than the empirical 14.8 discard path.
+- [x] Port 13.0 pegging behavior without accidentally inheriting later 14.x known-card post-pegging WP context.
+- [x] Preserve 13.0 opponent-hand weighting semantics; it uses the model-13 hold table but does not use the later corrected-discard availability weighting.
 
 ## Phase 4: Compact Game Storage
 
-- [ ] Reproduce `benchmarks/ai-db/cribbage-games.sqlite` schema writes from Rust.
-- [ ] Port compact rows for games, hands, discards, peg plays, and run metadata.
-- [ ] Preserve decision EV fields used by `scripts/analyze-ai-run.cjs`.
-- [ ] Preserve selected win-probability fields for discard and pegging decisions.
+- [x] Reproduce `benchmarks/ai-db/cribbage-games.sqlite` schema writes from Rust.
+- [x] Port compact rows for games, hands, discards, peg plays, and run metadata.
+- [x] Preserve decision EV fields used by `scripts/analyze-ai-run.cjs`.
+- [x] Preserve selected win-probability fields for discard and pegging decisions.
 - [ ] Preserve score component fields and final-hand exclusion semantics.
 - [ ] Add DB fixture tests comparing Rust-written rows to Node-written rows for a small fixed run.
 
 ## Phase 5: Runner CLI
 
-- [ ] Add Rust runner command equivalent to `scripts/smoke-four-model-ai.cjs <outDir> <games> <workers> <oldMb> <batchGames>`.
-- [ ] Support explicit model pair selection.
-- [ ] Support run ID, output directory, seed, total games, worker count, batch size, and DB path flags.
-- [ ] Write `status.json` with current fields used by `scripts/report-background-status.cjs`.
-- [ ] Write batch files or a deliberate replacement artifact shape.
-- [ ] Stream active games into DB so interrupted runs retain completed games.
+- [x] Add Rust runner command for explicit model-pair runs with output directory, DB, run ID, seed, games, and workers.
+- [x] Support explicit model pair selection.
+- [x] Support run ID, output directory, seed, total games, worker count, and DB path flags.
+- [x] Write `status.json` with current fields used by `scripts/report-background-status.cjs`.
+- [x] Deliberately replace JSON batch artifacts with compact SQLite rows plus status JSON for Rust runs.
+- [x] Stream active games into DB so interrupted runs retain completed games.
 - [ ] Support graceful stop/resume from existing status/DB state.
+
+Progress:
+
+- [x] Added `cribbage-runner` Cargo binary with `--left`, `--right`, `--games`, `--seed`, `--model-root`, and `--max-steps`.
+- [x] Runner fails fast for 13.0 because native Rust decisions are not implemented yet.
+- [x] Runner writes compact SQLite rows and `status.json`.
+- [x] Runner supports multi-threaded worker execution.
 
 ## Phase 6: Concurrency And Performance
 
-- [ ] Benchmark single-thread Rust full-game simulation.
-- [ ] Implement worker pool with deterministic seed partitioning.
-- [ ] Measure optimal worker count on local hardware.
+- [x] Benchmark single-thread Rust full-game simulation.
+- [x] Implement worker pool with deterministic seed partitioning.
+- [ ] Measure optimal worker count on local hardware beyond the two-game smoke.
 - [ ] Measure optimal worker count on production/server hardware.
 - [ ] Add bounded memory/resource cache sizing.
 - [ ] Profile discard path, pegging path, DB writes, and serialization separately.
@@ -101,7 +133,7 @@ Progress:
 
 ## Phase 7: Analysis Compatibility
 
-- [ ] Run `scripts/analyze-ai-run.cjs` unchanged against a Rust-generated smoke run.
+- [x] Run `scripts/analyze-ai-run.cjs` unchanged against a Rust-generated smoke run.
 - [ ] Run `scripts/report-background-status.cjs` unchanged against a Rust-generated active run.
 - [ ] Verify EV tables, WP calibration, bucket tables, score components, and confidence rows are populated.
 - [ ] Verify aggregate analysis across Node and Rust runs behaves correctly.

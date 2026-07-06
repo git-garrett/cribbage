@@ -8,7 +8,7 @@ const ts = require("typescript");
 
 const root = path.resolve(__dirname, "..");
 const enginePath = path.join(root, "web", "src", "engine.ts");
-const MODEL = "schell_table-peg_table-14.8.1";
+const MODEL = process.env.MODEL || "schell_table-peg_table-14.8.1";
 
 function loadEngine() {
   installLocalAssetFetch();

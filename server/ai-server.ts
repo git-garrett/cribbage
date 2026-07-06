@@ -4,9 +4,12 @@ import { createReadStream } from "node:fs";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { Worker } from "node:worker_threads";
+import { CribbageGame, WinGame, type GameSnapshot } from "../web/src/engine";
 import { MODEL, MODEL_13, MODEL_14_3 } from "./ai-constants";
 import {
   persistRustShadowRecord,
+  requestModelForPayload,
+  runRustPrimaryDecision,
   runRustShadowRequest,
   shouldRunRustShadow,
   rustShadowStatus,
@@ -24,6 +27,13 @@ const MARKETING_HOSTS = new Set(["strongcribbage.com"]);
 const AI_QUEUE_MAX_WAITING = Number(process.env.AI_QUEUE_MAX_WAITING || 4);
 const LEADERBOARD_MODELS = [MODEL_13, MODEL_14_3] as const;
 const PUBLIC_GAME_MODELS = [MODEL_13, MODEL_14_3] as const;
+const RUST_PRIMARY_ENABLED = process.env.CRIBBAGE_RUST_PRIMARY === "1";
+const RUST_PRIMARY_MODELS = new Set(
+  (process.env.CRIBBAGE_RUST_PRIMARY_MODELS || `${MODEL_13},${MODEL_14_3}`)
+    .split(",")
+    .map((model) => model.trim())
+    .filter(Boolean),
+);
 
 type JsonRecord = Record<string, unknown>;
 type AiJobKind = "game-action" | "ai-discard" | "ai-peg" | "model-status";
@@ -41,6 +51,7 @@ let aiWorker: Worker | null = null;
 let nextAiJobId = 1;
 let activeAiJob: QueuedAiJob | null = null;
 const aiJobQueue: QueuedAiJob[] = [];
+const rustPrimaryNodeFallbackKeys = new Map<string, number>();
 
 function jsonResponse(response: ServerResponse, status: number, payload: unknown): void {
   const body = `${JSON.stringify(payload)}\n`;
@@ -180,6 +191,63 @@ function runAiJob(kind: AiJobKind, requestBody: JsonRecord): Promise<JsonRecord>
   });
 }
 
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as JsonRecord)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function gamePayload(game: CribbageGame): JsonRecord {
+  return {
+    state: game.state(),
+    snapshot: game.snapshot(),
+  };
+}
+
+function requestSnapshot(requestBody: JsonRecord): GameSnapshot | null {
+  const snapshot = requestBody.snapshot;
+  return snapshot && typeof snapshot === "object" ? snapshot as GameSnapshot : null;
+}
+
+function requestGameIdValue(requestBody: JsonRecord): string | null {
+  const snapshot = requestBody.snapshot as { gameId?: string } | undefined;
+  return typeof snapshot?.gameId === "string" && snapshot.gameId ? snapshot.gameId : null;
+}
+
+function rustPrimaryRequestKey(kind: AiJobKind, requestBody: JsonRecord): string {
+  return stableJson({
+    kind,
+    action: requestBody.action ?? null,
+    payload: requestBody.payload ?? null,
+    snapshot: requestBody.snapshot ?? null,
+  });
+}
+
+function cleanupRustPrimaryFallbackKeys(): void {
+  const now = Date.now();
+  for (const [key, expiresAt] of rustPrimaryNodeFallbackKeys) {
+    if (expiresAt <= now) rustPrimaryNodeFallbackKeys.delete(key);
+  }
+}
+
+function consumeRustPrimaryNodeFallback(kind: AiJobKind, requestBody: JsonRecord): boolean {
+  cleanupRustPrimaryFallbackKeys();
+  const key = rustPrimaryRequestKey(kind, requestBody);
+  const expiresAt = rustPrimaryNodeFallbackKeys.get(key);
+  if (!expiresAt || expiresAt <= Date.now()) return false;
+  rustPrimaryNodeFallbackKeys.delete(key);
+  return true;
+}
+
+function markRustPrimaryNodeFallback(kind: AiJobKind, requestBody: JsonRecord): void {
+  rustPrimaryNodeFallbackKeys.set(rustPrimaryRequestKey(kind, requestBody), Date.now() + 120_000);
+}
+
 async function ensureDatabase(): Promise<DatabaseSyncLike | null> {
   if (databasePromise) return databasePromise;
   databasePromise = (async () => {
@@ -240,6 +308,20 @@ async function ensureDatabase(): Promise<DatabaseSyncLike | null> {
           rust_response_json TEXT,
           error TEXT
         );
+        CREATE TABLE IF NOT EXISTS rust_primary_fallbacks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          kind TEXT NOT NULL,
+          action TEXT,
+          tag TEXT,
+          model TEXT NOT NULL,
+          game_id TEXT,
+          received_at TEXT NOT NULL,
+          stage TEXT NOT NULL,
+          rust_duration_ms INTEGER,
+          request_json TEXT NOT NULL,
+          rust_response_json TEXT,
+          error TEXT
+        );
       `);
       return db;
     } catch (error) {
@@ -284,12 +366,60 @@ async function persistAiRequest(kind: string, requestBody: JsonRecord, responseB
   );
 }
 
+async function persistRustPrimaryFallback(
+  kind: AiJobKind,
+  requestBody: JsonRecord,
+  stage: string,
+  error: string | null,
+  rustDurationMs: number | null = null,
+  rustResponse: JsonRecord | null = null,
+): Promise<void> {
+  const db = await ensureDatabase();
+  const model = requestModelForPayload(requestBody);
+  const record = {
+    kind,
+    action: typeof requestBody.action === "string" ? requestBody.action : null,
+    tag: typeof requestBody.tag === "string" ? requestBody.tag : null,
+    model: model || MODEL,
+    gameId: requestGameIdValue(requestBody),
+    receivedAt: new Date().toISOString(),
+    stage,
+    rustDurationMs: rustDurationMs === null ? null : Math.round(rustDurationMs),
+    request: requestBody,
+    rustResponse,
+    error,
+  };
+  if (!db) {
+    await mkdir(DATA_DIR, { recursive: true });
+    await appendFile(join(DATA_DIR, "rust-primary-fallbacks.jsonl"), `${JSON.stringify(record)}\n`);
+    return;
+  }
+  db.prepare(`
+    INSERT INTO rust_primary_fallbacks
+      (kind, action, tag, model, game_id, received_at, stage, rust_duration_ms, request_json, rust_response_json, error)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    record.kind,
+    record.action,
+    record.tag,
+    record.model,
+    record.gameId,
+    record.receivedAt,
+    record.stage,
+    record.rustDurationMs,
+    JSON.stringify(record.request),
+    record.rustResponse === null ? null : JSON.stringify(record.rustResponse),
+    record.error,
+  );
+}
+
 function scheduleRustShadow(
   kind: AiJobKind,
   requestBody: JsonRecord,
   nodeResponse: JsonRecord,
   nodeDurationMs: number,
 ): void {
+  if (RUST_PRIMARY_ENABLED) return;
   if (!shouldRunRustShadow(kind, requestBody, nodeResponse)) return;
   void (async () => {
     const record = await runRustShadowRequest(kind, requestBody, nodeResponse, nodeDurationMs);
@@ -600,6 +730,166 @@ async function leaderboardSummary(): Promise<JsonRecord> {
   return buildLeaderboardSummary(uploadedGameLeaderboardRows(db));
 }
 
+function isRustPrimaryModel(model: string): boolean {
+  return RUST_PRIMARY_ENABLED && RUST_PRIMARY_MODELS.has(model);
+}
+
+function rustDiscardRecommendation(decision: JsonRecord): { cardIds: number[]; bestLead: number | null } {
+  const cardIds = Array.isArray(decision.cardIds)
+    ? decision.cardIds.filter((value): value is number => typeof value === "number")
+    : [];
+  if (cardIds.length !== 2) throw new Error("Rust discard decision did not return two card ids.");
+  return {
+    cardIds,
+    bestLead: typeof decision.bestLead === "number" ? decision.bestLead : null,
+  };
+}
+
+function rustPegCardId(decision: JsonRecord): number | null {
+  if (decision.action === "go") return null;
+  if (decision.action !== "play" || typeof decision.cardId !== "number") {
+    throw new Error("Rust peg decision did not return a playable card.");
+  }
+  return decision.cardId;
+}
+
+async function rustPrimaryDiscardRecommendation(
+  action: string,
+  model: string,
+  game: CribbageGame,
+): Promise<{ cardIds: number[]; bestLead: number | null }> {
+  const rust = await runRustPrimaryDecision("discard", action, model, game.snapshot());
+  return rustDiscardRecommendation(rust.decision);
+}
+
+async function handleRustPrimaryGameAction(requestBody: JsonRecord): Promise<JsonRecord | null> {
+  const action = typeof requestBody.action === "string" ? requestBody.action : "";
+  if (!["prepare-cut-for-deal", "prepare-ai-discard", "prepare-next-hand-ai-discard", "advance-pegging"].includes(action)) {
+    return null;
+  }
+  const snapshot = requestSnapshot(requestBody);
+  if (!snapshot) return null;
+  const model = requestModelForPayload(requestBody);
+  if (!isRustPrimaryModel(model)) return null;
+
+  const kind: AiJobKind = "game-action";
+  if (consumeRustPrimaryNodeFallback(kind, requestBody)) {
+    await persistRustPrimaryFallback(kind, requestBody, "node-fallback-retry", null);
+    return null;
+  }
+
+  const startedAt = performance.now();
+  try {
+    const game = CribbageGame.restore(snapshot);
+    if (action === "prepare-cut-for-deal") {
+      if (game.phase !== "cut_for_deal") throw new Error("It is not time to cut for deal.");
+      game.cutForDeal();
+      const recommendation = game.phase === "discard"
+        ? await rustPrimaryDiscardRecommendation(action, model, game)
+        : null;
+      return {
+        ...gamePayload(game),
+        recommendation,
+      };
+    }
+
+    if (action === "prepare-ai-discard") {
+      const recommendation = await rustPrimaryDiscardRecommendation(action, model, game);
+      return {
+        ...gamePayload(game),
+        recommendation,
+      };
+    }
+
+    if (action === "prepare-next-hand-ai-discard") {
+      if (!["score_pone", "score_dealer", "score_crib"].includes(game.phase)) {
+        throw new Error("The next hand is not ready to prepare.");
+      }
+      while (game.phase !== "discard" && game.phase !== "game_over") {
+        try {
+          game.continueScoring();
+        } catch (error) {
+          if (error instanceof WinGame) break;
+          throw error;
+        }
+      }
+      if (game.phase === "game_over") throw new Error("Game ends before the next hand.");
+      const recommendation = await rustPrimaryDiscardRecommendation(action, model, game);
+      return {
+        ...gamePayload(game),
+        recommendation,
+      };
+    }
+
+    if (action === "advance-pegging") {
+      const needsAiDecision = game.advanceForcedPeggingToHumanOrDecision();
+      if (needsAiDecision) {
+        const decisionSnapshot = game.snapshot();
+        const rust = await runRustPrimaryDecision("peg", action, model, decisionSnapshot);
+        const cardId = rustPegCardId(rust.decision);
+        if (cardId === null) {
+          game.aiPeggingGo();
+        } else {
+          game.playAiPeggingCard(cardId);
+        }
+        game.advancePeggingToHuman();
+        game.recordAiPeggingThinkTime(performance.now() - startedAt);
+      }
+      return gamePayload(game);
+    }
+
+    return null;
+  } catch (error) {
+    markRustPrimaryNodeFallback(kind, requestBody);
+    await persistRustPrimaryFallback(
+      kind,
+      requestBody,
+      "rust-failure",
+      error instanceof Error ? error.message : String(error),
+      performance.now() - startedAt,
+    );
+    throw new ServerBusyError();
+  }
+}
+
+async function handleRustPrimaryDirectDecision(kind: "ai-discard" | "ai-peg", requestBody: JsonRecord): Promise<JsonRecord | null> {
+  const snapshot = requestSnapshot(requestBody);
+  if (!snapshot) return null;
+  const model = requestModelForPayload(requestBody);
+  if (!isRustPrimaryModel(model)) return null;
+  if (consumeRustPrimaryNodeFallback(kind, requestBody)) {
+    await persistRustPrimaryFallback(kind, requestBody, "node-fallback-retry", null);
+    return null;
+  }
+  const startedAt = performance.now();
+  try {
+    const rustKind = kind === "ai-discard" ? "discard" : "peg";
+    const rust = await runRustPrimaryDecision(rustKind, kind, model, snapshot);
+    if (rustKind === "discard") {
+      return {
+        ...rustDiscardRecommendation(rust.decision),
+        model,
+      };
+    }
+    return {
+      action: rust.decision.action,
+      ...(typeof rust.decision.cardId === "number" ? { cardId: rust.decision.cardId } : {}),
+      ...(typeof rust.decision.ev === "number" ? { ev: rust.decision.ev } : {}),
+      model,
+    };
+  } catch (error) {
+    markRustPrimaryNodeFallback(kind, requestBody);
+    await persistRustPrimaryFallback(
+      kind,
+      requestBody,
+      "rust-failure",
+      error instanceof Error ? error.message : String(error),
+      performance.now() - startedAt,
+    );
+    throw new ServerBusyError();
+  }
+}
+
 async function handleApi(request: IncomingMessage, response: ServerResponse, pathname: string): Promise<void> {
   if (request.method === "GET" && pathname === "/health") {
     jsonResponse(response, 200, {
@@ -625,6 +915,11 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, pat
         maxWaiting: AI_QUEUE_MAX_WAITING,
       },
       rustShadow: rustShadowStatus(),
+      rustPrimary: {
+        enabled: RUST_PRIMARY_ENABLED,
+        models: [...RUST_PRIMARY_MODELS],
+        pendingNodeFallbacks: rustPrimaryNodeFallbackKeys.size,
+      },
     });
     return;
   }
@@ -636,6 +931,11 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, pat
   const requestBody = await readRequestJson(request);
   const startedAt = performance.now();
   if (pathname === "/api/game/action") {
+    const rustPayload = await handleRustPrimaryGameAction(requestBody);
+    if (rustPayload) {
+      jsonResponse(response, 200, rustPayload);
+      return;
+    }
     const publicRequest = await publicGameActionRequest(request, requestBody);
     const payload = await runAiJob("game-action", publicRequest);
     scheduleRustShadow("game-action", publicRequest, payload, performance.now() - startedAt);
@@ -643,6 +943,11 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, pat
     return;
   }
   if (pathname === "/api/ai/discard") {
+    const rustPayload = await handleRustPrimaryDirectDecision("ai-discard", requestBody);
+    if (rustPayload) {
+      jsonResponse(response, 200, rustPayload);
+      return;
+    }
     const payload = await runAiJob("ai-discard", requestBody);
     await persistAiRequest("discard", requestBody, payload, performance.now() - startedAt);
     scheduleRustShadow("ai-discard", requestBody, payload, performance.now() - startedAt);
@@ -650,6 +955,11 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, pat
     return;
   }
   if (pathname === "/api/ai/peg") {
+    const rustPayload = await handleRustPrimaryDirectDecision("ai-peg", requestBody);
+    if (rustPayload) {
+      jsonResponse(response, 200, rustPayload);
+      return;
+    }
     const payload = await runAiJob("ai-peg", requestBody);
     await persistAiRequest("peg", requestBody, payload, performance.now() - startedAt);
     scheduleRustShadow("ai-peg", requestBody, payload, performance.now() - startedAt);

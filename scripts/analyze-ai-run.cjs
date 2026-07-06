@@ -182,6 +182,11 @@ function scoreSamplesByModel(games, hands) {
         handDealer: [],
         handPone: [],
         crib: [],
+        availablePeggingDealer: [],
+        availablePeggingPone: [],
+        availableHandDealer: [],
+        availableHandPone: [],
+        availableCrib: [],
       });
     }
     return byModel.get(model);
@@ -200,13 +205,20 @@ function scoreSamplesByModel(games, hands) {
       const samples = bucket(model);
       const pegging = sideScore(hand, side, "pegging_points") ?? 0;
       const handPoints = sideScore(hand, side, "hand_points") ?? 0;
+      const availablePegging = sideScore(hand, side, "available_pegging_points") ?? 0;
+      const availableHandPoints = sideScore(hand, side, "available_hand_points") ?? 0;
       if (hand.dealer === side) {
         samples.peggingDealer.push(pegging);
         samples.handDealer.push(handPoints);
         samples.crib.push(hand.crib_points ?? 0);
+        samples.availablePeggingDealer.push(availablePegging);
+        samples.availableHandDealer.push(availableHandPoints);
+        samples.availableCrib.push(hand.available_crib_points ?? 0);
       } else {
         samples.peggingPone.push(pegging);
         samples.handPone.push(handPoints);
+        samples.availablePeggingPone.push(availablePegging);
+        samples.availableHandPone.push(availableHandPoints);
       }
     }
   }
@@ -568,11 +580,24 @@ function main() {
     ["Hand pone", "handPone"],
     ["Crib", "crib"],
   ];
+  const availableScoreMetrics = [
+    ["Available peg dealer", "availablePeggingDealer"],
+    ["Available peg pone", "availablePeggingPone"],
+    ["Available hand dealer", "availableHandDealer"],
+    ["Available hand pone", "availableHandPone"],
+    ["Available crib", "availableCrib"],
+  ];
   const scoring = scoreMetrics.map(([label, key]) => {
     const leftValues = scores.get(leftModel)?.[key] ?? [];
     const rightValues = scores.get(rightModel)?.[key] ?? [];
     return { label, key, leftN: leftValues.length, rightN: rightValues.length, ...meanComparison(leftValues, rightValues) };
   });
+  const availableEventScoring = availableScoreMetrics.map(([label, key]) => {
+    const leftValues = scores.get(leftModel)?.[key] ?? [];
+    const rightValues = scores.get(rightModel)?.[key] ?? [];
+    return { label, key, leftN: leftValues.length, rightN: rightValues.length, ...meanComparison(leftValues, rightValues) };
+  });
+  const hasAvailableEventScoring = availableEventScoring.some((row) => row.leftMean !== 0 || row.rightMean !== 0);
   const evRows = ev.buckets.map(summarizeEv);
 
   const report = {
@@ -587,6 +612,10 @@ function main() {
     winRate: { [leftModel]: leftWins / games.length, [rightModel]: rightWins / games.length },
     winConfidence,
     scoring,
+    availableEventScoring: hasAvailableEventScoring ? {
+      note: "Available-event scoring credits the full scoring event that ended the game, even if it overkills 121, while excluding later hypothetical scoring events.",
+      rows: availableEventScoring,
+    } : null,
     ev: {
       note: "EV calibration excludes all decisions from each game's final hand so end-of-game cutoffs do not count skipped future value as realized zero.",
       componentNote: "Compact rows store total discard EV and future net pegging-decision EV, not separate hand/crib/peg EV components.",
@@ -635,6 +664,23 @@ function main() {
     ]),
   ));
   lines.push("");
+  if (hasAvailableEventScoring) {
+    lines.push("Available-event scoring note: credits the full scoring event that ended the game, even if it overkills 121, while excluding later hypothetical scoring events.");
+    lines.push(table(
+      ["Metric", `${leftModel} avg`, "N", `${rightModel} avg`, "N", `${rightModel} - ${leftModel}`, "Leader", "Leader confidence"],
+      availableEventScoring.map((row) => [
+        row.label,
+        fmt(row.leftMean),
+        row.leftN,
+        fmt(row.rightMean),
+        row.rightN,
+        signed(row.diff),
+        row.diff >= 0 ? rightModel : leftModel,
+        pct(row.confidence),
+      ]),
+    ));
+    lines.push("");
+  }
   lines.push("EV calibration note: excludes every decision from each game's final hand so end-of-game cutoffs do not count skipped future value as realized zero.");
   lines.push("EV component note: compact rows currently store total discard EV and future net pegging-decision EV, not separate hand/crib/peg EV components.");
   lines.push(`Excluded final-hand EV rows: discard ${ev.skipped.discardFinalHand}, peg ${ev.skipped.pegFinalHand}`);

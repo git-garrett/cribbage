@@ -104,7 +104,10 @@ impl CribbageGame {
     }
 
     pub fn random(&mut self) -> f64 {
-        self.rng_state = self.rng_state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        self.rng_state = self
+            .rng_state
+            .wrapping_mul(1_664_525)
+            .wrapping_add(1_013_904_223);
         f64::from(self.rng_state) / 4_294_967_296.0
     }
 
@@ -360,8 +363,14 @@ mod tests {
     #[test]
     fn start_hand_deals_dealer_then_pone_then_turn_card() {
         let game = CribbageGame::new_with_seed(0x9e3779b9, Side::Left);
-        assert_eq!(ids(&game.player(Side::Left).hand), vec![29, 11, 42, 16, 24, 9]);
-        assert_eq!(ids(&game.player(Side::Right).hand), vec![51, 15, 22, 32, 44, 48]);
+        assert_eq!(
+            ids(&game.player(Side::Left).hand),
+            vec![29, 11, 42, 16, 24, 9]
+        );
+        assert_eq!(
+            ids(&game.player(Side::Right).hand),
+            vec![51, 15, 22, 32, 44, 48]
+        );
         assert_eq!(game.turn_card.id, 41);
         assert_eq!(game.dealer, Side::Left);
         assert_eq!(game.pone, Side::Right);
@@ -445,7 +454,8 @@ mod tests {
                 }
                 Phase::GameOver => {
                     assert!(
-                        game.player(Side::Left).score == 121 || game.player(Side::Right).score == 121
+                        game.player(Side::Left).score == 121
+                            || game.player(Side::Right).score == 121
                     );
                     assert!(game.hand_number > 1);
                     return;

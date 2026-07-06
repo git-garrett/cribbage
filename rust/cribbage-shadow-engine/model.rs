@@ -2,15 +2,21 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::OnceLock;
 
-use crate::artifacts::{EmpiricalDiscardKeepTable, EmpiricalEntry, EmpiricalRoleTable, Model13HoldTable, PairwiseTable};
-use crate::board::{next_perspective_role, next_score_phase, score_phase_average, BoardModel, Role, ScorePhase};
+use crate::artifacts::{
+    CribRankDiscardTables, CribTripolicyTable, EmpiricalDiscardKeepTable, EmpiricalEntry,
+    EmpiricalRoleTable, Model13HoldTable, PairwiseTable, TripolicyPolicy,
+};
+use crate::board::{
+    next_perspective_role, next_score_phase, score_phase_average,
+    score_phase_distribution_for_phase, BoardModel, Role, ScorePhase,
+};
 use crate::cards::{
     cards_for_rank_counts, cards_for_rank_counts_for_scoring, cards_from_ids, full_deck,
     legal_peg_ranks, peg_card_for_rank, rank_combination_count, rank_count_key, rank_count_total,
     rank_counts, remaining_rank_counts, score_count, score_flush_and_right_jack, score_hand,
     score_hand_rank_only, Card,
 };
-use crate::model_id::{MODEL_14_8, MODEL_14_8_1, MODEL_15_0};
+use crate::model_id::{MODEL_13_0, MODEL_14_3, MODEL_14_8, MODEL_14_8_1, MODEL_15_0};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DecisionKind {
@@ -51,11 +57,14 @@ pub enum Decision {
     Discard {
         card_ids: Vec<u8>,
         best_lead: Option<u8>,
+        ev: Option<f64>,
+        win_probability: Option<f64>,
     },
     Peg {
         action: String,
         card_id: Option<u8>,
         ev: Option<f64>,
+        win_probability: Option<f64>,
     },
 }
 
@@ -132,7 +141,10 @@ struct DiscardMemo {
 struct RuntimeTables {
     empirical: EmpiricalDiscardKeepTable,
     pairwise: PairwiseTable,
+    pairwise14: PairwiseTable,
     hold: Model13HoldTable,
+    crib_rank: CribRankDiscardTables,
+    crib_tripolicy14: CribTripolicyTable,
 }
 
 static RUNTIME_TABLES: OnceLock<RuntimeTables> = OnceLock::new();
@@ -228,6 +240,17 @@ struct PostPeggingWinContext {
     board: BoardModel,
 }
 
+enum PeggingWinMode {
+    HistoricPhase,
+    KnownCards(PostPeggingWinContext),
+}
+
+struct PeggingWinEvaluator {
+    perspective_role: Role,
+    board: BoardModel,
+    mode: PeggingWinMode,
+}
+
 pub fn parse_decision_input(input_text: &str) -> Result<DecisionInput, String> {
     let mut fields = HashMap::new();
     for part in input_text.split(';') {
@@ -276,7 +299,11 @@ pub fn evaluate_decision(input: &DecisionInput, root: &str) -> Result<Decision, 
 }
 
 fn is_supported_rust_model(model: &str) -> bool {
-    model == MODEL_14_8 || model == MODEL_14_8_1 || model == MODEL_15_0
+    model == MODEL_13_0
+        || model == MODEL_14_3
+        || model == MODEL_14_8
+        || model == MODEL_14_8_1
+        || model == MODEL_15_0
 }
 
 fn is_strength_model(input: &DecisionInput) -> bool {
@@ -297,14 +324,27 @@ fn board_model_for_input(input: &DecisionInput) -> BoardModel {
 
 pub fn decision_json(decision: &Decision) -> String {
     match decision {
-        Decision::Discard { card_ids, best_lead } => {
-            let ids = card_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",");
+        Decision::Discard {
+            card_ids,
+            best_lead,
+            ..
+        } => {
+            let ids = card_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
             match best_lead {
                 Some(lead) => format!("{{\"cardIds\":[{}],\"bestLead\":{}}}", ids, lead),
                 None => format!("{{\"cardIds\":[{}],\"bestLead\":null}}", ids),
             }
         }
-        Decision::Peg { action, card_id, ev } => {
+        Decision::Peg {
+            action,
+            card_id,
+            ev,
+            win_probability: _,
+        } => {
             if action == "go" {
                 return "{\"action\":\"go\"}".to_string();
             }
@@ -322,13 +362,25 @@ pub fn decision_json(decision: &Decision) -> String {
 
 fn recommend_discard(input: &DecisionInput, root: &str) -> Result<Decision, String> {
     if !is_supported_rust_model(&input.model) {
-        return Err(format!("unsupported model for Rust discard: {}", input.model));
+        return Err(format!(
+            "unsupported model for Rust discard: {}",
+            input.model
+        ));
     }
     if input.player != PlayerKey::Ai {
         return Err("Rust shadow discard currently supports AI decisions only".to_string());
     }
     if input.ai_hand.len() != 6 {
-        return Err(format!("discard requires six AI cards, got {}", input.ai_hand.len()));
+        return Err(format!(
+            "discard requires six AI cards, got {}",
+            input.ai_hand.len()
+        ));
+    }
+    if input.model == MODEL_13_0 {
+        return recommend_discard_model13(input, root);
+    }
+    if input.model == MODEL_14_3 {
+        return recommend_discard_model143(input, root);
     }
     let tables = runtime_tables(root)?;
     let mut seen_cards = [false; 52];
@@ -377,8 +429,9 @@ fn recommend_discard(input: &DecisionInput, root: &str) -> Result<Decision, Stri
         let should_replace = match &recommended {
             None => true,
             Some((_, current)) => {
-                evaluation.win_probability > current.win_probability ||
-                    (evaluation.win_probability == current.win_probability && evaluation.total_ev > current.total_ev)
+                evaluation.win_probability > current.win_probability
+                    || (evaluation.win_probability == current.win_probability
+                        && evaluation.total_ev > current.total_ev)
             }
         };
         if should_replace {
@@ -391,13 +444,22 @@ fn recommend_discard(input: &DecisionInput, root: &str) -> Result<Decision, Stri
     };
     Ok(Decision::Discard {
         card_ids: discard.iter().map(|card| card.id).collect(),
-        best_lead: if evaluation.best_lead >= 0 { Some(evaluation.best_lead as u8) } else { None },
+        best_lead: if evaluation.best_lead >= 0 {
+            Some(evaluation.best_lead as u8)
+        } else {
+            None
+        },
+        ev: Some(evaluation.total_ev),
+        win_probability: Some(evaluation.win_probability),
     })
 }
 
 fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> {
     if !is_supported_rust_model(&input.model) {
-        return Err(format!("unsupported model for Rust pegging: {}", input.model));
+        return Err(format!(
+            "unsupported model for Rust pegging: {}",
+            input.model
+        ));
     }
     if input.player != PlayerKey::Ai {
         return Err("Rust shadow pegging currently supports AI decisions only".to_string());
@@ -416,6 +478,7 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
             action: "go".to_string(),
             card_id: None,
             ev: None,
+            win_probability: None,
         });
     }
     if legal.len() == 1 {
@@ -426,15 +489,19 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
             action: "play".to_string(),
             card_id: Some(card.id),
             ev: Some(score_count(&plays) as f64),
+            win_probability: None,
         });
     }
 
     let tables = runtime_tables(root)?;
-    if !is_strength_model(input) &&
-        input.role == Role::Pone &&
-        input.count == 0 &&
-        input.plays.is_empty() &&
-        input.ai_hand.len() == 4
+    if input.model == MODEL_13_0 {
+        return recommend_peg_model13(input, &tables);
+    }
+    if !is_strength_model(input)
+        && input.role == Role::Pone
+        && input.count == 0
+        && input.plays.is_empty()
+        && input.ai_hand.len() == 4
     {
         if let Some(lead_rank) = input.peg_lead {
             if let Some(card) = legal.iter().copied().find(|card| card.rank == lead_rank) {
@@ -443,6 +510,7 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
                     action: "play".to_string(),
                     card_id: Some(card.id),
                     ev: Some(ev),
+                    win_probability: None,
                 });
             }
         }
@@ -457,8 +525,9 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
         &input.human_table,
         opponent_role,
         &tables.hold,
+        true,
     );
-    let mut post_context = post_pegging_win_context(input, &tables.hold);
+    let mut evaluator = known_card_pegging_win_evaluator(input, &tables.hold);
     let mut best_card = legal[0];
     let mut best_score = f64::NEG_INFINITY;
     let mut best_decision: Option<(f64, f64)> = None;
@@ -468,9 +537,10 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
             input,
             *card,
             &opponent_hands,
-            &mut post_context,
+            &mut evaluator,
         );
-        let win_probability = expected_win_probability_after_pegging(input, &distribution, &mut post_context);
+        let win_probability =
+            expected_win_probability_after_pegging(input, &distribution, &mut evaluator);
         let point_ev = pegging_distribution_point_ev(&distribution);
         let immediate = {
             let mut plays = input.plays.clone();
@@ -494,23 +564,1067 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
         }
     }
 
-    let (ev, _) = best_decision.unwrap_or_else(|| {
+    let (ev, win_probability) = best_decision.unwrap_or_else(|| {
         let distribution = optimal_pegging_outcome_distribution_for_candidate(
             input,
             best_card,
             &opponent_hands,
-            &mut post_context,
+            &mut evaluator,
         );
         (
             pegging_distribution_point_ev(&distribution),
-            expected_win_probability_after_pegging(input, &distribution, &mut post_context),
+            expected_win_probability_after_pegging(input, &distribution, &mut evaluator),
         )
     });
     Ok(Decision::Peg {
         action: "play".to_string(),
         card_id: Some(best_card.id),
         ev: Some(ev),
+        win_probability: Some(win_probability),
     })
+}
+
+#[derive(Clone)]
+struct Model13PeggingOption {
+    my_ev: f64,
+    opponent_ev: f64,
+    best_lead: i8,
+    hist: WeightedPairI32,
+    total_weight: f64,
+}
+
+fn recommend_discard_model13(input: &DecisionInput, root: &str) -> Result<Decision, String> {
+    let tables = runtime_tables(root)?;
+    let mut seen_cards = [false; 52];
+    for card in &input.ai_hand {
+        seen_cards[card.id as usize] = true;
+    }
+    let deck: Vec<Card> = full_deck()
+        .into_iter()
+        .filter(|card| !seen_cards[card.id as usize])
+        .collect();
+    let role = input.role;
+    let mut board = BoardModel::new();
+    let crib_flush_bonus_by_suit = crib_flush_bonuses_by_suit(&input.ai_hand);
+    let mut recommended: Option<(Vec<Card>, CandidateEvaluation)> = None;
+
+    for discard_indices in crate::cards::combinations_indices(input.ai_hand.len(), 2) {
+        let mut is_discarded = vec![false; input.ai_hand.len()];
+        for index in &discard_indices {
+            is_discarded[*index] = true;
+        }
+        let discard: Vec<Card> = discard_indices
+            .iter()
+            .map(|index| input.ai_hand[*index])
+            .collect();
+        let keep: Vec<Card> = input
+            .ai_hand
+            .iter()
+            .enumerate()
+            .filter_map(|(index, card)| {
+                if is_discarded[index] {
+                    None
+                } else {
+                    Some(*card)
+                }
+            })
+            .collect();
+        let Some(evaluation) = evaluate_discard_candidate_model13(
+            &input.ai_hand,
+            &keep,
+            &discard,
+            &deck,
+            role,
+            input.ai_score,
+            input.human_score,
+            &crib_flush_bonus_by_suit,
+            tables,
+            &mut board,
+        ) else {
+            continue;
+        };
+        let should_replace = match &recommended {
+            None => true,
+            Some((_, current)) => {
+                evaluation.win_probability > current.win_probability
+                    || (evaluation.win_probability == current.win_probability
+                        && evaluation.total_ev > current.total_ev)
+            }
+        };
+        if should_replace {
+            recommended = Some((discard, evaluation));
+        }
+    }
+
+    let Some((discard, evaluation)) = recommended else {
+        return Err("no 13.0 discard candidate evaluated".to_string());
+    };
+    Ok(Decision::Discard {
+        card_ids: discard.iter().map(|card| card.id).collect(),
+        best_lead: if evaluation.best_lead >= 0 {
+            Some(evaluation.best_lead as u8)
+        } else {
+            None
+        },
+        ev: Some(evaluation.total_ev),
+        win_probability: Some(evaluation.win_probability),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evaluate_discard_candidate_model13(
+    full_hand: &[Card],
+    keep: &[Card],
+    discard: &[Card],
+    deck: &[Card],
+    role: Role,
+    player_score: i32,
+    opponent_score: i32,
+    crib_flush_bonus_by_suit: &[f64; 4],
+    tables: &RuntimeTables,
+    board: &mut BoardModel,
+) -> Option<CandidateEvaluation> {
+    let (hand_score, crib_score) = model13_rank_cut_discard_scores(
+        keep,
+        discard,
+        deck,
+        role,
+        crib_flush_bonus_by_suit,
+        &tables.crib_rank,
+    );
+    let pegging_options = model13_pegging_discard_options(keep, role, full_hand, &tables.pairwise);
+    if pegging_options.is_empty() {
+        return None;
+    }
+    let mut best: Option<CandidateEvaluation> = None;
+    for pegging in pegging_options {
+        let net_pegging = pegging.my_ev - pegging.opponent_ev;
+        let total_ev = (if role == Role::Dealer {
+            hand_score + crib_score
+        } else {
+            hand_score - crib_score
+        }) + net_pegging;
+        let win_probability = model13_discard_candidate_win_probability(
+            full_hand,
+            keep,
+            discard,
+            deck,
+            role,
+            &pegging,
+            player_score,
+            opponent_score,
+            &tables.crib_rank,
+            board,
+        );
+        let candidate = CandidateEvaluation {
+            win_probability,
+            total_ev,
+            best_lead: pegging.best_lead,
+        };
+        let should_replace = match &best {
+            None => true,
+            Some(current) => {
+                candidate.win_probability > current.win_probability
+                    || (candidate.win_probability == current.win_probability
+                        && candidate.total_ev > current.total_ev)
+            }
+        };
+        if should_replace {
+            best = Some(candidate);
+        }
+    }
+    best
+}
+
+fn recommend_peg_model13(
+    input: &DecisionInput,
+    tables: &RuntimeTables,
+) -> Result<Decision, String> {
+    let legal: Vec<Card> = input
+        .ai_hand
+        .iter()
+        .copied()
+        .filter(|card| input.count + card.value <= 31)
+        .collect();
+    if input.role == Role::Pone
+        && input.count == 0
+        && input.plays.is_empty()
+        && input.ai_hand.len() == 4
+    {
+        if let Some(lead_rank) = input.peg_lead {
+            if let Some(card) = legal.iter().copied().find(|card| card.rank == lead_rank) {
+                let ev = exhaustive_pegging_play_ev_with_weighting(input, card, tables, false);
+                return Ok(Decision::Peg {
+                    action: "play".to_string(),
+                    card_id: Some(card.id),
+                    ev: Some(ev),
+                    win_probability: None,
+                });
+            }
+        }
+    }
+    let opponent_role = other_role(input.role);
+    let known_cards = known_cards_for_pegging(input);
+    let available_ranks = remaining_rank_counts(&known_cards);
+    let opponent_hands = opponent_rank_hands_for_engine(
+        &available_ranks,
+        input.human_hand_count as u8,
+        &input.human_table,
+        opponent_role,
+        &tables.hold,
+        false,
+    );
+    let mut evaluator = historic_phase_pegging_win_evaluator(input);
+    let mut best_card = legal[0];
+    let mut best_score = f64::NEG_INFINITY;
+    let mut best_decision: Option<(f64, f64)> = None;
+
+    for card in &legal {
+        let distribution = optimal_pegging_outcome_distribution_for_candidate(
+            input,
+            *card,
+            &opponent_hands,
+            &mut evaluator,
+        );
+        let win_probability =
+            expected_win_probability_after_pegging(input, &distribution, &mut evaluator);
+        let point_ev = pegging_distribution_point_ev(&distribution);
+        let immediate = {
+            let mut plays = input.plays.clone();
+            plays.push(*card);
+            score_count(&plays) as f64
+        };
+        let key = [win_probability, immediate, (card.rank + 1) as f64];
+        let best_key = [
+            best_score,
+            {
+                let mut plays = input.plays.clone();
+                plays.push(best_card);
+                score_count(&plays) as f64
+            },
+            (best_card.rank + 1) as f64,
+        ];
+        if compare_tuple(&key, &best_key) > 0 {
+            best_score = win_probability;
+            best_card = *card;
+            best_decision = Some((point_ev, win_probability));
+        }
+    }
+
+    let (ev, win_probability) = best_decision.unwrap_or_else(|| {
+        let distribution = optimal_pegging_outcome_distribution_for_candidate(
+            input,
+            best_card,
+            &opponent_hands,
+            &mut evaluator,
+        );
+        (
+            pegging_distribution_point_ev(&distribution),
+            expected_win_probability_after_pegging(input, &distribution, &mut evaluator),
+        )
+    });
+    Ok(Decision::Peg {
+        action: "play".to_string(),
+        card_id: Some(best_card.id),
+        ev: Some(ev),
+        win_probability: Some(win_probability),
+    })
+}
+
+fn model13_rank_cut_discard_scores(
+    keep: &[Card],
+    discard: &[Card],
+    deck: &[Card],
+    role: Role,
+    crib_flush_bonus_by_suit: &[f64; 4],
+    crib_rank: &CribRankDiscardTables,
+) -> (f64, f64) {
+    let mut hand_total = 0.0;
+    let mut crib_total = 0.0;
+    for cut in deck {
+        hand_total += score_hand_rank_only(keep, *cut) as f64
+            + score_flush_and_right_jack(keep, *cut, false) as f64;
+        crib_total += model13_rank_cut_crib_score(discard, role, *cut, crib_rank);
+    }
+    let count = deck.len().max(1) as f64;
+    (
+        hand_total / count,
+        (crib_total / count) + expected_crib_flush_bonus(discard, crib_flush_bonus_by_suit),
+    )
+}
+
+fn model13_rank_cut_crib_score(
+    discard: &[Card],
+    role: Role,
+    cut: Card,
+    crib_rank: &CribRankDiscardTables,
+) -> f64 {
+    let discard_key = rank_count_key(&rank_counts(discard));
+    crib_rank
+        .rank_score(role_index(role), &discard_key, cut.rank)
+        .unwrap_or(0.0)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn model13_discard_candidate_win_probability(
+    full_hand: &[Card],
+    keep: &[Card],
+    discard: &[Card],
+    deck: &[Card],
+    role: Role,
+    pegging: &Model13PeggingOption,
+    player_score: i32,
+    opponent_score: i32,
+    crib_rank: &CribRankDiscardTables,
+    board: &mut BoardModel,
+) -> f64 {
+    let opponent_role = other_role(role);
+    let next_role = other_role(role);
+    let opponent_hand_distribution =
+        score_phase_distribution_for_phase(if opponent_role == Role::Dealer {
+            ScorePhase::HandDealer
+        } else {
+            ScorePhase::HandPone
+        });
+    let pegging_weight_total = pegging.total_weight.max(1.0);
+    let mut base_outcomes = WeightedPairI32::default();
+    for cut in deck {
+        let own_hand_score = score_hand_rank_only(keep, *cut) as i32
+            + score_flush_and_right_jack(keep, *cut, false) as i32;
+        let mut seen_cards = full_hand.to_vec();
+        seen_cards.push(*cut);
+        let crib_outcomes =
+            model13_crib_score_outcomes_for_cut(discard, *cut, role, &seen_cards, crib_rank);
+        let cut_weight = 1.0 / deck.len().max(1) as f64;
+        for (crib_score, crib_weight) in &crib_outcomes {
+            for (opponent_hand_score, opponent_hand_weight) in &opponent_hand_distribution {
+                let my_base = own_hand_score + if role == Role::Dealer { *crib_score } else { 0 };
+                let opponent_base =
+                    *opponent_hand_score + if role == Role::Dealer { 0 } else { *crib_score };
+                let key = (my_base, opponent_base);
+                add_weight_pair_i32(
+                    &mut base_outcomes,
+                    key,
+                    cut_weight * *crib_weight * *opponent_hand_weight,
+                );
+            }
+        }
+    }
+
+    let mut total = 0.0;
+    let mut total_weight = 0.0;
+    for ((my_pegging, opponent_pegging), pegging_weight) in &pegging.hist.entries {
+        let normalized_pegging_weight = *pegging_weight / pegging_weight_total;
+        for ((my_base, opponent_base), base_weight) in &base_outcomes.entries {
+            let weight = normalized_pegging_weight * *base_weight;
+            total += weight
+                * board.future_win_probability(
+                    (player_score + *my_pegging + *my_base) as f64,
+                    (opponent_score + *opponent_pegging + *opponent_base) as f64,
+                    next_role,
+                    ScorePhase::PeggingPone,
+                );
+            total_weight += weight;
+        }
+    }
+    if total_weight > 0.0 {
+        total / total_weight
+    } else {
+        0.5
+    }
+}
+
+fn model13_crib_score_outcomes_for_cut(
+    discard: &[Card],
+    cut: Card,
+    role: Role,
+    seen_cards: &[Card],
+    crib_rank: &CribRankDiscardTables,
+) -> Vec<(i32, f64)> {
+    let discard_key = rank_count_key(&rank_counts(discard));
+    let Some(entry) = crib_rank.histogram(role_index(role), &discard_key, cut.rank) else {
+        let fallback = model13_rank_cut_crib_score(discard, role, cut, crib_rank) as i32
+            + score_flush_and_right_jack(discard, cut, true) as i32;
+        return vec![(fallback, 1.0)];
+    };
+    let seen = card_id_set(seen_cards);
+    let available = full_deck()
+        .into_iter()
+        .filter(|card| !seen[card.id as usize])
+        .collect::<Vec<_>>();
+    let mut outcomes: BTreeMap<i32, f64> = BTreeMap::new();
+    let mut total_weight = 0.0;
+    for opponent_discard in &entry.opponent_discards {
+        let suited_discards = cards_for_rank_counts(&available, &opponent_discard.ranks);
+        if suited_discards.is_empty() {
+            continue;
+        }
+        let suited_weight = opponent_discard.weight / suited_discards.len() as f64;
+        for suited_discard in suited_discards {
+            let score =
+                opponent_discard.rank_score + crib_suit_bonus(discard, &suited_discard, cut);
+            *outcomes.entry(score).or_insert(0.0) += suited_weight;
+            total_weight += suited_weight;
+        }
+    }
+    if total_weight == 0.0 {
+        let fallback = model13_rank_cut_crib_score(discard, role, cut, crib_rank) as i32
+            + score_flush_and_right_jack(discard, cut, true) as i32;
+        return vec![(fallback, 1.0)];
+    }
+    normalized_score_outcomes(&outcomes, total_weight)
+}
+
+fn recommend_discard_model143(input: &DecisionInput, root: &str) -> Result<Decision, String> {
+    let tables = runtime_tables(root)?;
+    let mut seen_cards = [false; 52];
+    for card in &input.ai_hand {
+        seen_cards[card.id as usize] = true;
+    }
+    let deck: Vec<Card> = full_deck()
+        .into_iter()
+        .filter(|card| !seen_cards[card.id as usize])
+        .collect();
+    let role = input.role;
+    let opponent_role = other_role(role);
+    let next_role = other_role(role);
+    let cut_options = cut_rank_options(&deck);
+    let crib_flush_bonus_by_suit = crib_flush_bonuses_by_suit(&input.ai_hand);
+    let mut board = BoardModel::new();
+    let mut memo = DiscardMemo::default();
+    let mut recommended: Option<(Vec<Card>, CandidateEvaluation)> = None;
+
+    for discard_indices in crate::cards::combinations_indices(input.ai_hand.len(), 2) {
+        let mut is_discarded = vec![false; input.ai_hand.len()];
+        for index in &discard_indices {
+            is_discarded[*index] = true;
+        }
+        let discard: Vec<Card> = discard_indices
+            .iter()
+            .map(|index| input.ai_hand[*index])
+            .collect();
+        let keep: Vec<Card> = input
+            .ai_hand
+            .iter()
+            .enumerate()
+            .filter_map(|(index, card)| {
+                if is_discarded[index] {
+                    None
+                } else {
+                    Some(*card)
+                }
+            })
+            .collect();
+        let Some(evaluation) = evaluate_discard_candidate_model143(
+            &input.ai_hand,
+            &keep,
+            &discard,
+            &deck,
+            &cut_options,
+            role,
+            opponent_role,
+            next_role,
+            input.ai_score,
+            input.human_score,
+            &crib_flush_bonus_by_suit,
+            tables,
+            &mut memo,
+            &mut board,
+        ) else {
+            continue;
+        };
+        let should_replace = match &recommended {
+            None => true,
+            Some((_, current)) => {
+                evaluation.win_probability > current.win_probability
+                    || (evaluation.win_probability == current.win_probability
+                        && evaluation.total_ev > current.total_ev)
+            }
+        };
+        if should_replace {
+            recommended = Some((discard, evaluation));
+        }
+    }
+
+    let Some((discard, evaluation)) = recommended else {
+        return Err("no 14.3 discard candidate evaluated".to_string());
+    };
+    Ok(Decision::Discard {
+        card_ids: discard.iter().map(|card| card.id).collect(),
+        best_lead: if evaluation.best_lead >= 0 {
+            Some(evaluation.best_lead as u8)
+        } else {
+            None
+        },
+        ev: Some(evaluation.total_ev),
+        win_probability: Some(evaluation.win_probability),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evaluate_discard_candidate_model143(
+    full_hand: &[Card],
+    keep: &[Card],
+    discard: &[Card],
+    deck: &[Card],
+    cut_options: &[CutRankOption],
+    role: Role,
+    opponent_role: Role,
+    next_role: Role,
+    player_score: i32,
+    opponent_score: i32,
+    crib_flush_bonus_by_suit: &[f64; 4],
+    tables: &RuntimeTables,
+    memo: &mut DiscardMemo,
+    board: &mut BoardModel,
+) -> Option<CandidateEvaluation> {
+    let pegging_options =
+        model143_pegging_discard_options(keep, role, full_hand, &tables.pairwise14);
+    if pegging_options.is_empty() {
+        return None;
+    }
+    let mut best: Option<CandidateEvaluation> = None;
+    for crib_policy in [
+        TripolicyPolicy::Ev,
+        TripolicyPolicy::On,
+        TripolicyPolicy::Off,
+    ] {
+        let (hand_score, crib_score) = model143_rank_cut_discard_scores(
+            keep,
+            discard,
+            deck,
+            role,
+            crib_policy,
+            crib_flush_bonus_by_suit,
+            &tables.crib_tripolicy14,
+            &tables.crib_rank,
+        );
+        for pegging in &pegging_options {
+            let net_pegging = pegging.my_ev - pegging.opponent_ev;
+            let total_ev = (if role == Role::Dealer {
+                hand_score + crib_score
+            } else {
+                hand_score - crib_score
+            }) + net_pegging;
+            let win_probability = model143_discard_candidate_win_probability(
+                full_hand,
+                keep,
+                discard,
+                cut_options,
+                role,
+                opponent_role,
+                next_role,
+                pegging,
+                crib_policy,
+                player_score,
+                opponent_score,
+                tables,
+                memo,
+                board,
+            );
+            let candidate = CandidateEvaluation {
+                win_probability,
+                total_ev,
+                best_lead: pegging.best_lead,
+            };
+            let should_replace = match &best {
+                None => true,
+                Some(current) => {
+                    candidate.win_probability > current.win_probability
+                        || (candidate.win_probability == current.win_probability
+                            && candidate.total_ev > current.total_ev)
+                        || (candidate.win_probability == current.win_probability
+                            && candidate.total_ev == current.total_ev
+                            && lead_tie_value(candidate.best_lead)
+                                < lead_tie_value(current.best_lead))
+                }
+            };
+            if should_replace {
+                best = Some(candidate);
+            }
+        }
+    }
+    best
+}
+
+fn model143_rank_cut_discard_scores(
+    keep: &[Card],
+    discard: &[Card],
+    deck: &[Card],
+    role: Role,
+    crib_policy: TripolicyPolicy,
+    crib_flush_bonus_by_suit: &[f64; 4],
+    crib_tripolicy: &CribTripolicyTable,
+    crib_rank: &CribRankDiscardTables,
+) -> (f64, f64) {
+    let mut hand_total = 0.0;
+    let mut crib_total = 0.0;
+    for cut in deck {
+        hand_total += score_hand_rank_only(keep, *cut) as f64
+            + score_flush_and_right_jack(keep, *cut, false) as f64;
+        crib_total += model143_rank_cut_crib_score(
+            discard,
+            role,
+            *cut,
+            crib_policy,
+            crib_tripolicy,
+            crib_rank,
+        );
+    }
+    let count = deck.len().max(1) as f64;
+    (
+        hand_total / count,
+        (crib_total / count) + expected_crib_flush_bonus(discard, crib_flush_bonus_by_suit),
+    )
+}
+
+fn model143_rank_cut_crib_score(
+    discard: &[Card],
+    role: Role,
+    cut: Card,
+    crib_policy: TripolicyPolicy,
+    crib_tripolicy: &CribTripolicyTable,
+    crib_rank: &CribRankDiscardTables,
+) -> f64 {
+    let discard_key = rank_count_key(&rank_counts(discard));
+    crib_tripolicy
+        .entry(role_index(role), &discard_key, cut.rank, crib_policy)
+        .map(|entry| entry.average as f64)
+        .or_else(|| crib_rank.rank_score(role_index(role), &discard_key, cut.rank))
+        .unwrap_or(0.0)
+}
+
+fn model143_pegging_discard_options(
+    keep: &[Card],
+    role: Role,
+    known_cards: &[Card],
+    pairwise: &PairwiseTable,
+) -> Vec<Model13PeggingOption> {
+    let mut options = Vec::new();
+    for policy in [
+        TripolicyPolicy::Ev,
+        TripolicyPolicy::On,
+        TripolicyPolicy::Off,
+    ] {
+        if role == Role::Dealer {
+            if let Some(summary) = aggregate_pairwise_pegging_summary_policy(
+                keep,
+                role,
+                known_cards,
+                None,
+                pairwise,
+                policy,
+            ) {
+                options.push(summary);
+            }
+            continue;
+        }
+        let keep_ranks = rank_counts(keep);
+        for lead_rank in legal_peg_ranks(&keep_ranks, 0) {
+            if let Some(summary) = aggregate_pairwise_pegging_summary_policy(
+                keep,
+                role,
+                known_cards,
+                Some(lead_rank),
+                pairwise,
+                policy,
+            ) {
+                options.push(summary);
+            }
+        }
+    }
+    options
+}
+
+#[allow(clippy::too_many_arguments)]
+fn model143_discard_candidate_win_probability(
+    full_hand: &[Card],
+    keep: &[Card],
+    discard: &[Card],
+    cut_options: &[CutRankOption],
+    role: Role,
+    opponent_role: Role,
+    next_role: Role,
+    pegging: &Model13PeggingOption,
+    crib_policy: TripolicyPolicy,
+    player_score: i32,
+    opponent_score: i32,
+    tables: &RuntimeTables,
+    memo: &mut DiscardMemo,
+    board: &mut BoardModel,
+) -> f64 {
+    let pegging_weight_total = pegging.total_weight.max(1.0);
+    let mut base_outcomes = WeightedPairI32::default();
+    let available_cards = full_deck()
+        .into_iter()
+        .filter(|card| !full_hand.iter().any(|held| held.id == card.id))
+        .collect::<Vec<_>>();
+    for cut in cut_options {
+        let own_hand_score = (score_hand_rank_only(keep, cut.card) as f64
+            + expected_known_hand_suit_bonus_for_cut_rank(keep, cut, false))
+        .round() as i32;
+        let opponent_distribution = model143_opponent_hand_distribution_for_cut_rank(
+            full_hand,
+            cut,
+            opponent_role,
+            &available_cards,
+            &tables.hold,
+            memo,
+        );
+        let crib_outcomes = model143_crib_score_outcomes_for_cut_rank(
+            discard,
+            role,
+            cut,
+            full_hand,
+            &tables.crib_tripolicy14,
+            &tables.crib_rank,
+            crib_policy,
+        );
+        for (crib_score, crib_weight) in &crib_outcomes {
+            for (opponent_hand_score, opponent_hand_weight) in &opponent_distribution {
+                let my_base = own_hand_score + if role == Role::Dealer { *crib_score } else { 0 };
+                let opponent_base =
+                    *opponent_hand_score + if role == Role::Dealer { 0 } else { *crib_score };
+                add_weight_pair_i32(
+                    &mut base_outcomes,
+                    (my_base, opponent_base),
+                    cut.weight * *crib_weight * *opponent_hand_weight,
+                );
+            }
+        }
+    }
+
+    let mut total = 0.0;
+    let mut total_weight = 0.0;
+    for ((my_pegging, opponent_pegging), pegging_weight) in &pegging.hist.entries {
+        let normalized_pegging_weight = *pegging_weight / pegging_weight_total;
+        for ((my_base, opponent_base), base_weight) in &base_outcomes.entries {
+            let weight = normalized_pegging_weight * *base_weight;
+            total += weight
+                * board.future_win_probability(
+                    (player_score + *my_pegging + *my_base) as f64,
+                    (opponent_score + *opponent_pegging + *opponent_base) as f64,
+                    next_role,
+                    ScorePhase::PeggingPone,
+                );
+            total_weight += weight;
+        }
+    }
+    if total_weight > 0.0 {
+        total / total_weight
+    } else {
+        0.5
+    }
+}
+
+fn model143_opponent_hand_distribution_for_cut_rank(
+    full_hand: &[Card],
+    cut: &CutRankOption,
+    opponent_role: Role,
+    available_cards: &[Card],
+    hold: &Model13HoldTable,
+    memo: &mut DiscardMemo,
+) -> Vec<(i32, f64)> {
+    let cache_key = format!(
+        "14.3:{}:{}:{}:{}",
+        role_name(opponent_role),
+        card_set_key(full_hand),
+        cut.rank,
+        cut.cards
+            .iter()
+            .map(|card| card.id.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    if let Some(cached) = memo.opponent_hand_score_outcomes.get(&cache_key) {
+        return cached.clone();
+    }
+    let mut available_ranks = remaining_rank_counts(full_hand);
+    available_ranks[cut.rank as usize] = available_ranks[cut.rank as usize].saturating_sub(1);
+    let opponent_hands =
+        opponent_rank_hands_for_engine(&available_ranks, 4, &[], opponent_role, hold, true);
+    let mut outcomes: BTreeMap<i32, f64> = BTreeMap::new();
+    let mut total_weight = 0.0;
+    for hand in opponent_hands {
+        let rank_only_hand = cards_for_rank_counts_for_scoring(&hand.ranks);
+        let score = score_hand_rank_only(&rank_only_hand, cut.card) as f64
+            + expected_rank_hand_suit_bonus_for_cut_rank(&hand.ranks, cut, available_cards);
+        *outcomes.entry(score.round() as i32).or_insert(0.0) += hand.weight;
+        total_weight += hand.weight;
+    }
+    let result = if total_weight > 0.0 {
+        normalized_score_outcomes(&outcomes, total_weight)
+    } else {
+        vec![(
+            score_phase_average(if opponent_role == Role::Dealer {
+                ScorePhase::HandDealer
+            } else {
+                ScorePhase::HandPone
+            })
+            .round() as i32,
+            1.0,
+        )]
+    };
+    memo.opponent_hand_score_outcomes
+        .insert(cache_key, result.clone());
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn model143_crib_score_outcomes_for_cut_rank(
+    discard: &[Card],
+    role: Role,
+    cut: &CutRankOption,
+    seen_cards: &[Card],
+    crib_tripolicy: &CribTripolicyTable,
+    crib_rank: &CribRankDiscardTables,
+    policy: TripolicyPolicy,
+) -> Vec<(i32, f64)> {
+    let discard_key = rank_count_key(&rank_counts(discard));
+    let Some(entry) = crib_tripolicy.entry(role_index(role), &discard_key, cut.rank, policy) else {
+        let fallback = model143_rank_cut_crib_score(
+            discard,
+            role,
+            cut.card,
+            policy,
+            crib_tripolicy,
+            crib_rank,
+        ) + expected_known_hand_suit_bonus_for_cut_rank(discard, cut, true);
+        return vec![(fallback.round() as i32, 1.0)];
+    };
+    let mut available_ranks = remaining_rank_counts(seen_cards);
+    available_ranks[cut.rank as usize] = available_ranks[cut.rank as usize].saturating_sub(1);
+    let available_cards = full_deck()
+        .into_iter()
+        .filter(|card| !seen_cards.iter().any(|seen| seen.id == card.id))
+        .collect::<Vec<_>>();
+    let mut outcomes: BTreeMap<i32, f64> = BTreeMap::new();
+    let mut total_weight = 0.0;
+    for opponent_discard in &entry.opponent_discards {
+        let availability_scale = rank_combination_count(&opponent_discard.ranks, &available_ranks)
+            / rank_combination_count(&opponent_discard.ranks, &[4u8; 13]).max(1.0);
+        let adjusted_weight = opponent_discard.weight as f64 * availability_scale;
+        if adjusted_weight <= 0.0 {
+            continue;
+        }
+        let score = opponent_discard.rank_score as f64
+            + expected_crib_suit_bonus_for_cut_rank(
+                discard,
+                &opponent_discard.ranks,
+                cut,
+                &available_cards,
+            );
+        *outcomes.entry(score.round() as i32).or_insert(0.0) += adjusted_weight;
+        total_weight += adjusted_weight;
+    }
+    if total_weight == 0.0 {
+        let fallback = model143_rank_cut_crib_score(
+            discard,
+            role,
+            cut.card,
+            policy,
+            crib_tripolicy,
+            crib_rank,
+        ) + expected_known_hand_suit_bonus_for_cut_rank(discard, cut, true);
+        return vec![(fallback.round() as i32, 1.0)];
+    }
+    normalized_score_outcomes(&outcomes, total_weight)
+}
+
+fn model13_pegging_discard_options(
+    keep: &[Card],
+    role: Role,
+    known_cards: &[Card],
+    pairwise: &PairwiseTable,
+) -> Vec<Model13PeggingOption> {
+    if role == Role::Dealer {
+        return aggregate_pairwise_pegging_summary(keep, role, known_cards, None, pairwise)
+            .into_iter()
+            .collect();
+    }
+    let keep_ranks = rank_counts(keep);
+    let mut best: Option<Model13PeggingOption> = None;
+    for lead_rank in legal_peg_ranks(&keep_ranks, 0) {
+        let Some(summary) =
+            aggregate_pairwise_pegging_summary(keep, role, known_cards, Some(lead_rank), pairwise)
+        else {
+            continue;
+        };
+        let should_replace = match &best {
+            None => true,
+            Some(current) => compare_model13_lead_summary(&summary, current) > 0,
+        };
+        if should_replace {
+            best = Some(summary);
+        }
+    }
+    best.into_iter().collect()
+}
+
+fn aggregate_pairwise_pegging_summary(
+    keep: &[Card],
+    role: Role,
+    known_cards: &[Card],
+    lead_rank: Option<u8>,
+    pairwise: &PairwiseTable,
+) -> Option<Model13PeggingOption> {
+    let keep_key = rank_count_key(&rank_counts(keep));
+    let keep_id = pairwise.keep_id_by_key.get(&keep_key).copied()?;
+    let available = remaining_rank_counts(known_cards);
+    let range = if role == Role::Dealer {
+        pairwise.dealer_record_range(keep_id)?
+    } else {
+        pairwise.pone_record_range(keep_id, lead_rank? as usize)?
+    };
+    let mut hist = WeightedPairI32::default();
+    let mut total_weight = 0.0;
+    let mut my_total = 0.0;
+    let mut opponent_total = 0.0;
+    for index in range {
+        let record = if role == Role::Dealer {
+            pairwise.dealer_record(index)?
+        } else {
+            pairwise.pone_record(index)?
+        };
+        let weight = pairwise.opponent_keep_weight(&available, record.opponent_keep_id as usize);
+        if weight <= 0.0 {
+            continue;
+        }
+        let my_pegging = record.my_pegging as i32;
+        let opponent_pegging = record.opponent_pegging as i32;
+        add_weight_pair_i32(&mut hist, (my_pegging, opponent_pegging), weight);
+        total_weight += weight;
+        my_total += my_pegging as f64 * weight;
+        opponent_total += opponent_pegging as f64 * weight;
+    }
+    if total_weight == 0.0 {
+        return None;
+    }
+    Some(Model13PeggingOption {
+        my_ev: my_total / total_weight,
+        opponent_ev: opponent_total / total_weight,
+        best_lead: lead_rank.map(|rank| rank as i8).unwrap_or(-1),
+        hist,
+        total_weight,
+    })
+}
+
+fn aggregate_pairwise_pegging_summary_policy(
+    keep: &[Card],
+    role: Role,
+    known_cards: &[Card],
+    lead_rank: Option<u8>,
+    pairwise: &PairwiseTable,
+    policy: TripolicyPolicy,
+) -> Option<Model13PeggingOption> {
+    let keep_key = rank_count_key(&rank_counts(keep));
+    let keep_id = pairwise.keep_id_by_key.get(&keep_key).copied()?;
+    let available = remaining_rank_counts(known_cards);
+    let range = if role == Role::Dealer {
+        pairwise.dealer_record_range(keep_id)?
+    } else {
+        pairwise.pone_record_range(keep_id, lead_rank? as usize)?
+    };
+    let mut hist = WeightedPairI32::default();
+    let mut total_weight = 0.0;
+    let mut my_total = 0.0;
+    let mut opponent_total = 0.0;
+    for index in range {
+        let record = if role == Role::Dealer {
+            pairwise.dealer_record_for_policy(index, policy)?
+        } else {
+            pairwise.pone_record_for_policy(index, policy)?
+        };
+        let weight = pairwise.opponent_keep_weight(&available, record.opponent_keep_id as usize);
+        if weight <= 0.0 {
+            continue;
+        }
+        let my_pegging = record.my_pegging as i32;
+        let opponent_pegging = record.opponent_pegging as i32;
+        add_weight_pair_i32(&mut hist, (my_pegging, opponent_pegging), weight);
+        total_weight += weight;
+        my_total += my_pegging as f64 * weight;
+        opponent_total += opponent_pegging as f64 * weight;
+    }
+    if total_weight == 0.0 {
+        return None;
+    }
+    Some(Model13PeggingOption {
+        my_ev: my_total / total_weight,
+        opponent_ev: opponent_total / total_weight,
+        best_lead: lead_rank.map(|rank| rank as i8).unwrap_or(-1),
+        hist,
+        total_weight,
+    })
+}
+
+fn compare_model13_lead_summary(
+    candidate: &Model13PeggingOption,
+    current: &Model13PeggingOption,
+) -> i32 {
+    let candidate_net = candidate.my_ev - candidate.opponent_ev;
+    let current_net = current.my_ev - current.opponent_ev;
+    if candidate_net > current_net {
+        return 1;
+    }
+    if candidate_net < current_net {
+        return -1;
+    }
+    if candidate.my_ev > current.my_ev {
+        return 1;
+    }
+    if candidate.my_ev < current.my_ev {
+        return -1;
+    }
+    let candidate_value = if candidate.best_lead >= 0 {
+        peg_card_for_rank(candidate.best_lead as u8).value
+    } else {
+        0
+    };
+    let current_value = if current.best_lead >= 0 {
+        peg_card_for_rank(current.best_lead as u8).value
+    } else {
+        0
+    };
+    current_value.cmp(&candidate_value) as i32
+}
+
+fn crib_flush_bonuses_by_suit(hand: &[Card]) -> [f64; 4] {
+    const CRIB_FLUSH_BONUS_BY_SUIT_COUNT: [f64; 7] = [
+        0.094202898551,
+        0.072463768116,
+        0.054347826087,
+        0.0395256917,
+        0.02766798419,
+        0.018445322793,
+        0.011528326746,
+    ];
+    let mut suit_counts = [0usize; 4];
+    for card in hand {
+        suit_counts[card.suit as usize] += 1;
+    }
+    let mut bonuses = [0.0; 4];
+    for suit in 0..4 {
+        bonuses[suit] = *CRIB_FLUSH_BONUS_BY_SUIT_COUNT
+            .get(suit_counts[suit])
+            .unwrap_or(&0.0);
+    }
+    bonuses
+}
+
+fn expected_crib_flush_bonus(discard: &[Card], crib_flush_bonus_by_suit: &[f64; 4]) -> f64 {
+    if discard.len() != 2 || discard[0].suit != discard[1].suit {
+        return 0.0;
+    }
+    crib_flush_bonus_by_suit[discard[0].suit as usize]
+}
+
+fn card_id_set(cards: &[Card]) -> [bool; 52] {
+    let mut seen = [false; 52];
+    for card in cards {
+        seen[card.id as usize] = true;
+    }
+    seen
 }
 
 #[derive(Clone)]
@@ -540,7 +1654,13 @@ fn empirical_discard_candidate_groups(
         let keep: Vec<Card> = hand
             .iter()
             .enumerate()
-            .filter_map(|(index, card)| if is_discarded[index] { None } else { Some(*card) })
+            .filter_map(|(index, card)| {
+                if is_discarded[index] {
+                    None
+                } else {
+                    Some(*card)
+                }
+            })
             .collect();
         let key = if group_equivalent_candidates {
             empirical_discard_candidate_equivalence_key(
@@ -557,11 +1677,7 @@ fn empirical_discard_candidate_groups(
             card_set_key(&discard)
         };
         if !groups.iter().any(|group| group.key == key) {
-            groups.push(DiscardCandidateGroup {
-                key,
-                discard,
-                keep,
-            });
+            groups.push(DiscardCandidateGroup { key, discard, keep });
         }
     }
     groups
@@ -581,7 +1697,10 @@ fn empirical_discard_candidate_equivalence_key(
     let keep_ranks = rank_counts(keep);
     let keep_key = rank_count_key(&keep_ranks);
     let discard_key = rank_count_key(&rank_counts(discard));
-    let mut parts = vec![format!("keep={}", keep_key), format!("discard={}", discard_key)];
+    let mut parts = vec![
+        format!("keep={}", keep_key),
+        format!("discard={}", discard_key),
+    ];
     for cut in cut_options {
         if base_available_ranks[cut.rank as usize] == 0 {
             continue;
@@ -685,11 +1804,20 @@ fn evaluate_discard_candidate(
             accumulator.opponent_pegging_total += lead_cut.opponent_pegging_total * cut.weight;
             for ((own_base, opponent_base), base_weight) in lead_cut.base_outcomes.entries {
                 for (crib_score, crib_weight) in &crib.outcomes {
-                    let own_round_score = own_base + if role == Role::Dealer { *crib_score } else { 0 };
-                    let opponent_round_score = opponent_base + if role == Role::Dealer { 0 } else { *crib_score };
+                    let own_round_score =
+                        own_base + if role == Role::Dealer { *crib_score } else { 0 };
+                    let opponent_round_score =
+                        opponent_base + if role == Role::Dealer { 0 } else { *crib_score };
                     let scenario_weight = base_weight * *crib_weight * cut.weight;
-                    let key = score_pair_i32(player_score + own_round_score, opponent_score + opponent_round_score);
-                    add_weight_pair_u8(&mut accumulator.win_probability_outcomes, key, scenario_weight);
+                    let key = score_pair_i32(
+                        player_score + own_round_score,
+                        opponent_score + opponent_round_score,
+                    );
+                    add_weight_pair_u8(
+                        &mut accumulator.win_probability_outcomes,
+                        key,
+                        scenario_weight,
+                    );
                 }
             }
         }
@@ -702,21 +1830,24 @@ fn evaluate_discard_candidate(
         }
         let hand_score = accumulator.own_hand_total / accumulator.total_weight;
         let crib_score = accumulator.crib_total / accumulator.total_weight;
-        let net_pegging =
-            (accumulator.own_pegging_total - accumulator.opponent_pegging_total) / accumulator.total_weight;
+        let net_pegging = (accumulator.own_pegging_total - accumulator.opponent_pegging_total)
+            / accumulator.total_weight;
         let total_ev = (if role == Role::Dealer {
             hand_score + crib_score
         } else {
             hand_score - crib_score
         }) + net_pegging;
         let mut win_probability_total = 0.0;
-        for ((my_score, future_opponent_score), weight) in &accumulator.win_probability_outcomes.entries {
-            win_probability_total += *weight * board.future_win_probability(
-                *my_score as f64,
-                *future_opponent_score as f64,
-                next_role,
-                ScorePhase::PeggingPone,
-            );
+        for ((my_score, future_opponent_score), weight) in
+            &accumulator.win_probability_outcomes.entries
+        {
+            win_probability_total += *weight
+                * board.future_win_probability(
+                    *my_score as f64,
+                    *future_opponent_score as f64,
+                    next_role,
+                    ScorePhase::PeggingPone,
+                );
         }
         let win_probability = win_probability_total / accumulator.total_weight;
         let candidate = CandidateEvaluation {
@@ -727,13 +1858,12 @@ fn evaluate_discard_candidate(
         let should_replace = match &best {
             None => true,
             Some(current) => {
-                candidate.win_probability > current.win_probability ||
-                    (candidate.win_probability == current.win_probability && candidate.total_ev > current.total_ev) ||
-                    (
-                        candidate.win_probability == current.win_probability &&
-                            candidate.total_ev == current.total_ev &&
-                            lead_tie_value(candidate.best_lead) < lead_tie_value(current.best_lead)
-                    )
+                candidate.win_probability > current.win_probability
+                    || (candidate.win_probability == current.win_probability
+                        && candidate.total_ev > current.total_ev)
+                    || (candidate.win_probability == current.win_probability
+                        && candidate.total_ev == current.total_ev
+                        && lead_tie_value(candidate.best_lead) < lead_tie_value(current.best_lead))
             }
         };
         if should_replace {
@@ -758,7 +1888,11 @@ fn empirical_keep_lead_outcomes_for_cut_rank(
     memo: &mut DiscardMemo,
 ) -> BTreeMap<i8, LeadCutAccumulator> {
     let role_table = empirical_role(table, opponent_role);
-    let cache_key = format!("{}:{}", role_name(opponent_role), rank_count_key(available_ranks));
+    let cache_key = format!(
+        "{}:{}",
+        role_name(opponent_role),
+        rank_count_key(available_ranks)
+    );
     let entries = adjusted_empirical_entries(
         &role_table.keeps,
         available_ranks,
@@ -778,8 +1912,10 @@ fn empirical_keep_lead_outcomes_for_cut_rank(
         let pegging_options = if let Some(cached) = memo.pegging_options.get(&pegging_options_key) {
             cached.clone()
         } else {
-            let options = pairwise_pegging_options_for_keeps(pairwise, keep_ranks, role, &entry.ranks);
-            memo.pegging_options.insert(pegging_options_key, options.clone());
+            let options =
+                pairwise_pegging_options_for_keeps(pairwise, keep_ranks, role, &entry.ranks);
+            memo.pegging_options
+                .insert(pegging_options_key, options.clone());
             options
         };
         if pegging_options.is_empty() {
@@ -792,7 +1928,11 @@ fn empirical_keep_lead_outcomes_for_cut_rank(
                     let weight = entry.weight * *opponent_hand_weight * *own_hand_weight;
                     let own_base = *own_hand_score + pegging.own_pegging;
                     let opponent_base = *opponent_hand_score + pegging.opponent_pegging;
-                    add_weight_pair_i32(&mut accumulator.base_outcomes, (own_base, opponent_base), weight);
+                    add_weight_pair_i32(
+                        &mut accumulator.base_outcomes,
+                        (own_base, opponent_base),
+                        weight,
+                    );
                     accumulator.total_weight += weight;
                     accumulator.own_hand_total += *own_hand_score as f64 * weight;
                     accumulator.opponent_hand_total += *opponent_hand_score as f64 * weight;
@@ -815,7 +1955,11 @@ fn empirical_opponent_hand_score_outcomes_for_cut_rank(
         "{}:rank:{}:{}:{}",
         entry.key,
         cut.rank,
-        cut.cards.iter().map(|card| card.id.to_string()).collect::<Vec<_>>().join(","),
+        cut.cards
+            .iter()
+            .map(|card| card.id.to_string())
+            .collect::<Vec<_>>()
+            .join(","),
         ids_key(available_cards)
     );
     if let Some(cached) = memo.opponent_hand_score_outcomes.get(&cache_key) {
@@ -825,8 +1969,13 @@ fn empirical_opponent_hand_score_outcomes_for_cut_rank(
     let cut_card_weight = 1.0 / cut.cards.len().max(1) as f64;
     let mut total_weight = 0.0;
     for cut_card in &cut.cards {
-        let filtered: Vec<Card> = available_cards.iter().copied().filter(|card| card.id != cut_card.id).collect();
-        let card_outcomes = empirical_opponent_hand_score_outcomes(entry, *cut_card, &filtered, memo);
+        let filtered: Vec<Card> = available_cards
+            .iter()
+            .copied()
+            .filter(|card| card.id != cut_card.id)
+            .collect();
+        let card_outcomes =
+            empirical_opponent_hand_score_outcomes(entry, *cut_card, &filtered, memo);
         for (score, weight) in card_outcomes {
             let adjusted_weight = weight * cut_card_weight;
             *outcomes.entry(score).or_insert(0.0) += adjusted_weight;
@@ -838,7 +1987,8 @@ fn empirical_opponent_hand_score_outcomes_for_cut_rank(
     } else {
         Vec::new()
     };
-    memo.opponent_hand_score_outcomes.insert(cache_key, result.clone());
+    memo.opponent_hand_score_outcomes
+        .insert(cache_key, result.clone());
     result
 }
 
@@ -853,7 +2003,8 @@ fn empirical_opponent_hand_score_outcomes(
         return cached.clone();
     }
     let rank_score = score_hand_rank_only(&entry.scoring_cards, cut_card) as i32;
-    let suit_bonuses = rank_hand_suit_bonus_outcomes_for_cut_card(&entry.ranks, cut_card, available_cards);
+    let suit_bonuses =
+        rank_hand_suit_bonus_outcomes_for_cut_card(&entry.ranks, cut_card, available_cards);
     let mut outcomes: BTreeMap<i32, f64> = BTreeMap::new();
     for (bonus, weight) in &suit_bonuses {
         *outcomes.entry(rank_score + *bonus).or_insert(0.0) += *weight;
@@ -863,7 +2014,8 @@ fn empirical_opponent_hand_score_outcomes(
     } else {
         normalized_score_outcomes(&outcomes, 1.0)
     };
-    memo.opponent_hand_score_outcomes.insert(cache_key, result.clone());
+    memo.opponent_hand_score_outcomes
+        .insert(cache_key, result.clone());
     result
 }
 
@@ -877,18 +2029,24 @@ fn empirical_own_hand_score_outcomes_for_cut_rank(
         "{}:{}:{}",
         keep_key,
         cut.rank,
-        cut.cards.iter().map(|card| card.id.to_string()).collect::<Vec<_>>().join(",")
+        cut.cards
+            .iter()
+            .map(|card| card.id.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
     );
     if let Some(cached) = memo.own_hand_score_outcomes.get(&cache_key) {
         return cached.clone();
     }
     let mut outcomes: BTreeMap<i32, f64> = BTreeMap::new();
     for cut_card in &cut.cards {
-        let score = score_hand_rank_only(keep, *cut_card) + score_flush_and_right_jack(keep, *cut_card, false);
+        let score = score_hand_rank_only(keep, *cut_card)
+            + score_flush_and_right_jack(keep, *cut_card, false);
         *outcomes.entry(score as i32).or_insert(0.0) += 1.0;
     }
     let result = score_outcome_result(&outcomes, cut.cards.len().max(1) as f64);
-    memo.own_hand_score_outcomes.insert(cache_key, result.clone());
+    memo.own_hand_score_outcomes
+        .insert(cache_key, result.clone());
     result
 }
 
@@ -907,7 +2065,11 @@ fn empirical_crib_score_outcomes_for_cut_rank(
         role_name(opponent_role),
         card_set_key(discard),
         cut.rank,
-        cut.cards.iter().map(|card| card.id.to_string()).collect::<Vec<_>>().join(","),
+        cut.cards
+            .iter()
+            .map(|card| card.id.to_string())
+            .collect::<Vec<_>>()
+            .join(","),
         rank_count_key(available_ranks),
         ids_key(available_cards)
     );
@@ -918,7 +2080,11 @@ fn empirical_crib_score_outcomes_for_cut_rank(
     let cut_card_weight = 1.0 / cut.cards.len().max(1) as f64;
     let mut total_weight = 0.0;
     for cut_card in &cut.cards {
-        let filtered: Vec<Card> = available_cards.iter().copied().filter(|card| card.id != cut_card.id).collect();
+        let filtered: Vec<Card> = available_cards
+            .iter()
+            .copied()
+            .filter(|card| card.id != cut_card.id)
+            .collect();
         let card_result = empirical_crib_score_outcomes_for_cut_card(
             discard,
             opponent_role,
@@ -964,7 +2130,11 @@ fn empirical_crib_score_outcomes_for_cut_card(
         &role_table.discards,
         available_ranks,
         &mut memo.adjusted_discards,
-        &format!("{}:{}", role_name(opponent_role), rank_count_key(available_ranks)),
+        &format!(
+            "{}:{}",
+            role_name(opponent_role),
+            rank_count_key(available_ranks)
+        ),
         2,
         if role_table.distinct_suited_discard_rate != 0.0 {
             role_table.distinct_suited_discard_rate
@@ -986,13 +2156,16 @@ fn empirical_crib_score_outcomes_for_cut_card(
         let mut suited = Vec::new();
         let mut unsuited = Vec::new();
         for opponent_discard in suited_discards {
-            if rank_pair_can_be_suited(&entry.ranks) && opponent_discard[0].suit == opponent_discard[1].suit {
+            if rank_pair_can_be_suited(&entry.ranks)
+                && opponent_discard[0].suit == opponent_discard[1].suit
+            {
                 suited.push(opponent_discard);
             } else {
                 unsuited.push(opponent_discard);
             }
         }
-        let (suited_weight, unsuited_weight) = empirical_suited_split_weights(&entry, role_table, suited.len(), unsuited.len());
+        let (suited_weight, unsuited_weight) =
+            empirical_suited_split_weights(&entry, role_table, suited.len(), unsuited.len());
         for (group, group_weight) in [(&suited, suited_weight), (&unsuited, unsuited_weight)] {
             if group.is_empty() || group_weight <= 0.0 {
                 continue;
@@ -1036,7 +2209,8 @@ fn adjusted_empirical_entries(
         .iter()
         .filter_map(|entry| {
             let available_combinations = rank_combination_count(&entry.ranks, available_ranks);
-            let weight = entry.count as f64 * (available_combinations / entry.full_combination_count);
+            let weight =
+                entry.count as f64 * (available_combinations / entry.full_combination_count);
             if weight <= 0.0 {
                 return None;
             }
@@ -1062,7 +2236,11 @@ fn adjusted_empirical_entries(
                     key: rank_count_key(&ranks),
                     ranks,
                     count: 0,
-                    suited_rate: if fallback_size == 2 { Some(fallback_suited_rate) } else { None },
+                    suited_rate: if fallback_size == 2 {
+                        Some(fallback_suited_rate)
+                    } else {
+                        None
+                    },
                     full_combination_count: rank_combination_count(&ranks, &[4u8; 13]).max(1.0),
                     scoring_cards: cards_for_rank_counts_for_scoring(&ranks),
                     weight,
@@ -1124,7 +2302,11 @@ fn find_pairwise_record(
     opponent_keep_id: usize,
 ) -> Option<crate::artifacts::PairwiseRecord> {
     for index in range {
-        let record = if dealer { table.dealer_record(index) } else { table.pone_record(index) }?;
+        let record = if dealer {
+            table.dealer_record(index)
+        } else {
+            table.pone_record(index)
+        }?;
         let id = record.opponent_keep_id as usize;
         if id == opponent_keep_id {
             return Some(record);
@@ -1155,23 +2337,35 @@ fn rank_hand_suit_bonus_outcomes_for_cut_card(
         let cut_suit_jack_available = suit_counts[10][cut_card.suit as usize];
         let jack_denominator = crate::cards::choose(total_jacks, jack_count);
         if cut_suit_jack_available > 0 && jack_denominator != 0.0 {
-            knob_probability = crate::cards::choose(total_jacks - 1, jack_count - 1) / jack_denominator;
+            knob_probability =
+                crate::cards::choose(total_jacks - 1, jack_count - 1) / jack_denominator;
         }
     }
 
     let mut flush_by_suit = [0.0f64; 4];
     if ranks.iter().sum::<u8>() == 4 && ranks.iter().all(|count| *count <= 1) {
         for suit in 0..4 {
-            flush_by_suit[suit] = same_suit_rank_hand_probability(ranks, suit, &suit_counts, &rank_totals);
+            flush_by_suit[suit] =
+                same_suit_rank_hand_probability(ranks, suit, &suit_counts, &rank_totals);
         }
     }
     let flush_cut_probability = flush_by_suit[cut_card.suit as usize];
     let flush_other_probability = flush_by_suit
         .iter()
         .enumerate()
-        .filter_map(|(suit, probability)| if suit == cut_card.suit as usize { None } else { Some(*probability) })
+        .filter_map(|(suit, probability)| {
+            if suit == cut_card.suit as usize {
+                None
+            } else {
+                Some(*probability)
+            }
+        })
         .sum::<f64>();
-    let flush_cut_includes_knob = if jack_count > 0 { flush_cut_probability } else { 0.0 };
+    let flush_cut_includes_knob = if jack_count > 0 {
+        flush_cut_probability
+    } else {
+        0.0
+    };
     let knob_only_probability = (knob_probability - flush_cut_includes_knob).max(0.0);
     let no_bonus_probability =
         (1.0 - flush_cut_probability - flush_other_probability - knob_only_probability).max(0.0);
@@ -1207,6 +2401,103 @@ fn rank_suit_counts_excluding(available_cards: &[Card], excluded: Card) -> [[u8;
         counts[card.rank as usize][card.suit as usize] += 1;
     }
     counts
+}
+
+fn suit_probability(cards: &[Card], suit: u8) -> f64 {
+    if cards.is_empty() {
+        return 0.0;
+    }
+    cards.iter().filter(|card| card.suit == suit).count() as f64 / cards.len() as f64
+}
+
+fn expected_known_hand_suit_bonus_for_cut_rank(
+    hand: &[Card],
+    cut: &CutRankOption,
+    crib: bool,
+) -> f64 {
+    let mut points = 0.0;
+    for card in hand {
+        if card.rank == 10 {
+            points += suit_probability(&cut.cards, card.suit);
+        }
+    }
+    if !hand.is_empty() && hand.iter().all(|card| card.suit == hand[0].suit) {
+        let match_probability = suit_probability(&cut.cards, hand[0].suit);
+        if crib {
+            points += 5.0 * match_probability;
+        } else {
+            points += 4.0 + match_probability;
+        }
+    }
+    points
+}
+
+fn expected_rank_hand_suit_bonus_for_cut_rank(
+    ranks: &[u8; 13],
+    cut: &CutRankOption,
+    available_cards: &[Card],
+) -> f64 {
+    let mut total = 0.0;
+    for cut_card in &cut.cards {
+        let suit_counts = rank_suit_counts_excluding(available_cards, *cut_card);
+        let rank_totals = rank_totals_from_suit_counts(&suit_counts);
+        let mut points = 0.0;
+        let jack_count = ranks[10];
+        if jack_count > 0 {
+            points += jack_count as f64 * suit_counts[10][cut_card.suit as usize] as f64
+                / rank_totals[10].max(1) as f64;
+        }
+        for suit in 0..4 {
+            let flush_probability =
+                same_suit_rank_hand_probability(ranks, suit, &suit_counts, &rank_totals);
+            points += flush_probability
+                * if suit == cut_card.suit as usize {
+                    5.0
+                } else {
+                    4.0
+                };
+        }
+        total += points;
+    }
+    total / cut.cards.len().max(1) as f64
+}
+
+fn expected_crib_suit_bonus_for_cut_rank(
+    discard: &[Card],
+    opponent_ranks: &[u8; 13],
+    cut: &CutRankOption,
+    available_cards: &[Card],
+) -> f64 {
+    let mut total = 0.0;
+    for cut_card in &cut.cards {
+        let suit_counts = rank_suit_counts_excluding(available_cards, *cut_card);
+        let rank_totals = rank_totals_from_suit_counts(&suit_counts);
+        let mut points = 0.0;
+        for card in discard {
+            if card.rank == 10 && card.suit == cut_card.suit {
+                points += 1.0;
+            }
+        }
+        let opponent_jack_count = opponent_ranks[10];
+        if opponent_jack_count > 0 {
+            points += opponent_jack_count as f64 * suit_counts[10][cut_card.suit as usize] as f64
+                / rank_totals[10].max(1) as f64;
+        }
+        if discard.len() == 2
+            && discard[0].suit == cut_card.suit
+            && discard[1].suit == cut_card.suit
+        {
+            points += 5.0
+                * same_suit_rank_hand_probability(
+                    opponent_ranks,
+                    cut_card.suit as usize,
+                    &suit_counts,
+                    &rank_totals,
+                );
+        }
+        total += points;
+    }
+    total / cut.cards.len().max(1) as f64
 }
 
 fn rank_totals_from_suit_counts(counts: &[[u8; 4]; 13]) -> [u8; 13] {
@@ -1369,6 +2660,7 @@ fn opponent_rank_hands_for_engine(
     opponent_table: &[Card],
     opponent_role: Role,
     hold: &Model13HoldTable,
+    corrected_availability_weighting: bool,
 ) -> Vec<WeightedRankHand> {
     let hands = crate::cards::enumerate_rank_hands(available, size)
         .into_iter()
@@ -1383,7 +2675,11 @@ fn opponent_rank_hands_for_engine(
         .map(|card| card.rank)
         .collect::<Vec<_>>();
     let prefix_key = rank_prefix_key(&prefix_ranks);
-    let Some(context_records) = hold.context_records(role_index(opponent_role), &prefix_key, prefix_ranks.len() as u8) else {
+    let Some(context_records) = hold.context_records(
+        role_index(opponent_role),
+        &prefix_key,
+        prefix_ranks.len() as u8,
+    ) else {
         return hands;
     };
     let context_weights = context_records
@@ -1396,8 +2692,13 @@ fn opponent_rank_hands_for_engine(
             let key = rank_count_key(&hand.ranks);
             let hand_id = *hold.hand_id_by_key.get(&key)?;
             let count = *context_weights.get(&hand_id)? as f64;
-            let weight = count * (rank_combination_count(&hand.ranks, available) /
-                rank_combination_count(&hand.ranks, &[4u8; 13]).max(1.0));
+            let weight = if corrected_availability_weighting {
+                count
+                    * (rank_combination_count(&hand.ranks, available)
+                        / rank_combination_count(&hand.ranks, &[4u8; 13]).max(1.0))
+            } else {
+                count
+            };
             if weight > 0.0 {
                 Some(WeightedRankHand {
                     ranks: hand.ranks,
@@ -1411,6 +2712,15 @@ fn opponent_rank_hands_for_engine(
 }
 
 fn exhaustive_pegging_play_ev(input: &DecisionInput, card: Card, tables: &RuntimeTables) -> f64 {
+    exhaustive_pegging_play_ev_with_weighting(input, card, tables, true)
+}
+
+fn exhaustive_pegging_play_ev_with_weighting(
+    input: &DecisionInput,
+    card: Card,
+    tables: &RuntimeTables,
+    corrected_availability_weighting: bool,
+) -> f64 {
     let opponent_role = other_role(input.role);
     let known_cards = known_cards_for_pegging(input);
     let available = remaining_rank_counts(&known_cards);
@@ -1420,11 +2730,16 @@ fn exhaustive_pegging_play_ev(input: &DecisionInput, card: Card, tables: &Runtim
         &input.human_table,
         opponent_role,
         &tables.hold,
+        corrected_availability_weighting,
     );
     exhaustive_pegging_point_ev(input, card, &opponent_hands)
 }
 
-fn exhaustive_pegging_point_ev(input: &DecisionInput, card: Card, opponent_hands: &[WeightedRankHand]) -> f64 {
+fn exhaustive_pegging_point_ev(
+    input: &DecisionInput,
+    card: Card,
+    opponent_hands: &[WeightedRankHand],
+) -> f64 {
     let own_ranks = ranks_after_playing(&input.ai_hand, card);
     let mut weighted_total = 0.0;
     let mut total_weight = 0.0;
@@ -1442,15 +2757,24 @@ fn exhaustive_pegging_point_ev(input: &DecisionInput, card: Card, opponent_hands
             } else {
                 ranks_for_cards_with_extra(&input.plays, card)
             },
-            count: if count_after_play == 31 { 0 } else { count_after_play },
+            count: if count_after_play == 31 {
+                0
+            } else {
+                count_after_play
+            },
             current: PlayerKey::Human,
             go_player: None,
-            last_player: if count_after_play == 31 { None } else { Some(PlayerKey::Ai) },
+            last_player: if count_after_play == 31 {
+                None
+            } else {
+                Some(PlayerKey::Ai)
+            },
             perspective: PlayerKey::Ai,
         };
         let mut memo = HashMap::new();
         let result = simulate_pegging_future(state, &mut memo);
-        weighted_total += ((immediate_score * result.weight) + result.total) * possible_opponent_hand.weight;
+        weighted_total +=
+            ((immediate_score * result.weight) + result.total) * possible_opponent_hand.weight;
         total_weight += result.weight * possible_opponent_hand.weight;
     }
     if total_weight > 0.0 {
@@ -1471,7 +2795,11 @@ fn simulate_pegging_future(
     let remaining_cards = rank_count_total(&state.hands[0]) + rank_count_total(&state.hands[1]);
     if remaining_cards == 0 {
         let last_point = if state.last_player.is_some() && state.count != 0 {
-            perspective_score(state.perspective, state.last_player.expect("checked last player"), 1) as f64
+            perspective_score(
+                state.perspective,
+                state.last_player.expect("checked last player"),
+                1,
+            ) as f64
         } else {
             0.0
         };
@@ -1487,18 +2815,25 @@ fn simulate_pegging_future(
     if legal.is_empty() {
         if state.go_player.is_some() {
             let go_point = if state.last_player.is_some() && state.count != 31 {
-                perspective_score(state.perspective, state.last_player.expect("checked last player"), 1) as f64
+                perspective_score(
+                    state.perspective,
+                    state.last_player.expect("checked last player"),
+                    1,
+                ) as f64
             } else {
                 0.0
             };
-            let future = simulate_pegging_future(PegSimulationState {
-                plays: Vec::new(),
-                count: 0,
-                current: other_player(state.current),
-                go_player: None,
-                last_player: None,
-                ..state.clone()
-            }, memo);
+            let future = simulate_pegging_future(
+                PegSimulationState {
+                    plays: Vec::new(),
+                    count: 0,
+                    current: other_player(state.current),
+                    go_player: None,
+                    last_player: None,
+                    ..state.clone()
+                },
+                memo,
+            );
             let result = WeightedScore {
                 total: (go_point * future.weight) + future.total,
                 weight: future.weight,
@@ -1506,11 +2841,14 @@ fn simulate_pegging_future(
             memo.insert(key, result.clone());
             return result;
         }
-        let result = simulate_pegging_future(PegSimulationState {
-            current: other_player(state.current),
-            go_player: Some(state.current),
-            ..state.clone()
-        }, memo);
+        let result = simulate_pegging_future(
+            PegSimulationState {
+                current: other_player(state.current),
+                go_player: Some(state.current),
+                ..state.clone()
+            },
+            memo,
+        );
         memo.insert(key, result.clone());
         return result;
     }
@@ -1523,7 +2861,10 @@ fn simulate_pegging_future(
         hands[current_index][rank as usize] -= 1;
         let mut plays = state.plays.clone();
         plays.push(rank);
-        let play_cards = plays.iter().map(|played_rank| peg_card_for_rank(*played_rank)).collect::<Vec<_>>();
+        let play_cards = plays
+            .iter()
+            .map(|played_rank| peg_card_for_rank(*played_rank))
+            .collect::<Vec<_>>();
         let points = score_count(&play_cards) as f64;
         let next_count = state.count + peg_card_for_rank(rank).value;
         let next_state = if next_count == 31 {
@@ -1548,7 +2889,8 @@ fn simulate_pegging_future(
             }
         };
         let future = simulate_pegging_future(next_state, memo);
-        let signed_points = perspective_score(state.perspective, state.current, points as i32) as f64;
+        let signed_points =
+            perspective_score(state.perspective, state.current, points as i32) as f64;
         total += branch_weight * ((signed_points * future.weight) + future.total);
         weight += branch_weight * future.weight;
     }
@@ -1561,7 +2903,7 @@ fn optimal_pegging_outcome_distribution_for_candidate(
     input: &DecisionInput,
     card: Card,
     opponent_hands: &[WeightedRankHand],
-    post_context: &mut PostPeggingWinContext,
+    evaluator: &mut PeggingWinEvaluator,
 ) -> PeggingOutcomeDistribution {
     let own_ranks = ranks_after_playing(&input.ai_hand, card);
     let immediate_score = {
@@ -1573,7 +2915,13 @@ fn optimal_pegging_outcome_distribution_for_candidate(
     let root_scores = scores_from_input(input);
     let mut outcomes = PeggingOutcomeDistribution::default();
     if root_scores[player_index(PlayerKey::Ai)] + immediate_score >= 121 {
-        add_outcome_for_player(&mut outcomes, PlayerKey::Ai, PlayerKey::Ai, immediate_score, 1.0);
+        add_outcome_for_player(
+            &mut outcomes,
+            PlayerKey::Ai,
+            PlayerKey::Ai,
+            immediate_score,
+            1.0,
+        );
         outcomes.total_weight = 1.0;
         return outcomes;
     }
@@ -1587,17 +2935,25 @@ fn optimal_pegging_outcome_distribution_for_candidate(
             } else {
                 ranks_for_cards_with_extra(&input.plays, card)
             },
-            count: if count_after_play == 31 { 0 } else { count_after_play },
+            count: if count_after_play == 31 {
+                0
+            } else {
+                count_after_play
+            },
             current: PlayerKey::Human,
             go_player: None,
-            last_player: if count_after_play == 31 { None } else { Some(PlayerKey::Ai) },
+            last_player: if count_after_play == 31 {
+                None
+            } else {
+                Some(PlayerKey::Ai)
+            },
             perspective: PlayerKey::Ai,
             scores,
             root_scores,
             perspective_role: input.role,
         };
         let mut memo = HashMap::new();
-        let result = simulate_optimal_pegging_distribution(state, &mut memo, post_context);
+        let result = simulate_optimal_pegging_distribution(state, &mut memo, evaluator);
         for (key, weight) in result.outcomes.entries {
             add_weight_pair_i32(
                 &mut outcomes.outcomes,
@@ -1613,7 +2969,7 @@ fn optimal_pegging_outcome_distribution_for_candidate(
 fn simulate_optimal_pegging_distribution(
     state: OptimalPegSimulationState,
     memo: &mut HashMap<OptimalPegSimulationKey, PeggingOutcomeDistribution>,
-    post_context: &mut PostPeggingWinContext,
+    evaluator: &mut PeggingWinEvaluator,
 ) -> PeggingOutcomeDistribution {
     let key = optimal_peg_simulation_key(&state);
     if let Some(cached) = memo.get(&key) {
@@ -1641,29 +2997,38 @@ fn simulate_optimal_pegging_distribution(
                 if state.count != 31 {
                     scores[player_index(last_player)] += 1;
                     if scores[player_index(last_player)] >= 121 {
-                        let result = outcome_from_scores(state.root_scores, scores, state.perspective);
+                        let result =
+                            outcome_from_scores(state.root_scores, scores, state.perspective);
                         memo.insert(key, result.clone());
                         return result;
                     }
                 }
             }
-            let result = simulate_optimal_pegging_distribution(OptimalPegSimulationState {
-                scores,
-                plays: Vec::new(),
-                count: 0,
-                current: other_player(state.current),
-                go_player: None,
-                last_player: None,
-                ..state.clone()
-            }, memo, post_context);
+            let result = simulate_optimal_pegging_distribution(
+                OptimalPegSimulationState {
+                    scores,
+                    plays: Vec::new(),
+                    count: 0,
+                    current: other_player(state.current),
+                    go_player: None,
+                    last_player: None,
+                    ..state.clone()
+                },
+                memo,
+                evaluator,
+            );
             memo.insert(key, result.clone());
             return result;
         }
-        let result = simulate_optimal_pegging_distribution(OptimalPegSimulationState {
-            current: other_player(state.current),
-            go_player: Some(state.current),
-            ..state.clone()
-        }, memo, post_context);
+        let result = simulate_optimal_pegging_distribution(
+            OptimalPegSimulationState {
+                current: other_player(state.current),
+                go_player: Some(state.current),
+                ..state.clone()
+            },
+            memo,
+            evaluator,
+        );
         memo.insert(key, result.clone());
         return result;
     }
@@ -1676,12 +3041,12 @@ fn simulate_optimal_pegging_distribution(
     };
     let mut best_point_ev = f64::NEG_INFINITY;
     for rank in legal {
-        let candidate = optimal_pegging_branch(&state, rank, memo, post_context);
+        let candidate = optimal_pegging_branch(&state, rank, memo, evaluator);
         let score = expected_win_probability_for_distribution(
             state.root_scores,
             state.perspective,
             &candidate,
-            post_context,
+            evaluator,
         );
         let point_ev = pegging_distribution_point_ev(&candidate);
         let is_better = if state.current == state.perspective {
@@ -1709,14 +3074,17 @@ fn optimal_pegging_branch(
     state: &OptimalPegSimulationState,
     rank: u8,
     memo: &mut HashMap<OptimalPegSimulationKey, PeggingOutcomeDistribution>,
-    post_context: &mut PostPeggingWinContext,
+    evaluator: &mut PeggingWinEvaluator,
 ) -> PeggingOutcomeDistribution {
     let current_index = player_index(state.current);
     let mut hands = state.hands;
     hands[current_index][rank as usize] -= 1;
     let mut plays = state.plays.clone();
     plays.push(rank);
-    let play_cards = plays.iter().map(|played_rank| peg_card_for_rank(*played_rank)).collect::<Vec<_>>();
+    let play_cards = plays
+        .iter()
+        .map(|played_rank| peg_card_for_rank(*played_rank))
+        .collect::<Vec<_>>();
     let points = score_count(&play_cards) as i32;
     let next_count = state.count + peg_card_for_rank(rank).value;
     let mut scores = state.scores;
@@ -1751,26 +3119,26 @@ fn optimal_pegging_branch(
             perspective_role: state.perspective_role,
         }
     };
-    simulate_optimal_pegging_distribution(next_state, memo, post_context)
+    simulate_optimal_pegging_distribution(next_state, memo, evaluator)
 }
 
 fn expected_win_probability_after_pegging(
     input: &DecisionInput,
     distribution: &PeggingOutcomeDistribution,
-    post_context: &mut PostPeggingWinContext,
+    evaluator: &mut PeggingWinEvaluator,
 ) -> f64 {
     if distribution.total_weight == 0.0 {
         return 0.0;
     }
     let root_scores = scores_from_input(input);
-    expected_win_probability_for_distribution(root_scores, PlayerKey::Ai, distribution, post_context)
+    expected_win_probability_for_distribution(root_scores, PlayerKey::Ai, distribution, evaluator)
 }
 
 fn expected_win_probability_for_distribution(
     root_scores: [i32; 2],
     perspective: PlayerKey,
     distribution: &PeggingOutcomeDistribution,
-    post_context: &mut PostPeggingWinContext,
+    evaluator: &mut PeggingWinEvaluator,
 ) -> f64 {
     if distribution.total_weight == 0.0 {
         return 0.0;
@@ -1780,12 +3148,34 @@ fn expected_win_probability_for_distribution(
     for ((my_pegging, opponent_pegging), weight) in &distribution.outcomes.entries {
         let my_score = root_scores[player_index(perspective)] + *my_pegging;
         let opponent_score = root_scores[player_index(opponent)] + *opponent_pegging;
-        total += *weight * post_pegging_win_probability(post_context, my_score as f64, opponent_score as f64);
+        total += *weight * evaluator.win_probability(my_score as f64, opponent_score as f64);
     }
     total / distribution.total_weight
 }
 
-fn post_pegging_win_context(input: &DecisionInput, hold: &Model13HoldTable) -> PostPeggingWinContext {
+fn historic_phase_pegging_win_evaluator(input: &DecisionInput) -> PeggingWinEvaluator {
+    PeggingWinEvaluator {
+        perspective_role: input.role,
+        board: BoardModel::new(),
+        mode: PeggingWinMode::HistoricPhase,
+    }
+}
+
+fn known_card_pegging_win_evaluator(
+    input: &DecisionInput,
+    hold: &Model13HoldTable,
+) -> PeggingWinEvaluator {
+    PeggingWinEvaluator {
+        perspective_role: input.role,
+        board: board_model_for_input(input),
+        mode: PeggingWinMode::KnownCards(post_pegging_win_context(input, hold)),
+    }
+}
+
+fn post_pegging_win_context(
+    input: &DecisionInput,
+    hold: &Model13HoldTable,
+) -> PostPeggingWinContext {
     let perspective_role = input.role;
     let pone_is_perspective = input.role == Role::Pone;
     let dealer_is_perspective = input.role == Role::Dealer;
@@ -1798,6 +3188,22 @@ fn post_pegging_win_context(input: &DecisionInput, hold: &Model13HoldTable) -> P
         crib: upcoming_crib_score_distribution(input),
         memo: HashMap::new(),
         board: board_model_for_input(input),
+    }
+}
+
+impl PeggingWinEvaluator {
+    fn win_probability(&mut self, my_score: f64, opponent_score: f64) -> f64 {
+        match &mut self.mode {
+            PeggingWinMode::HistoricPhase => self.board.future_win_probability(
+                my_score,
+                opponent_score,
+                self.perspective_role,
+                ScorePhase::HandPone,
+            ),
+            PeggingWinMode::KnownCards(context) => {
+                post_pegging_win_probability(context, my_score, opponent_score)
+            }
+        }
     }
 }
 
@@ -1833,6 +3239,7 @@ fn upcoming_hand_score_distribution(
         &input.human_table,
         scorer_role,
         hold,
+        true,
     );
     let mut outcomes: BTreeMap<i32, f64> = BTreeMap::new();
     let mut total_weight = 0.0;
@@ -1851,11 +3258,15 @@ fn upcoming_hand_score_distribution(
         }
     }
     if total_weight == 0.0 {
-        return vec![(score_phase_average(if scorer_role == Role::Dealer {
-            ScorePhase::HandDealer
-        } else {
-            ScorePhase::HandPone
-        }).round() as i32, 1.0)];
+        return vec![(
+            score_phase_average(if scorer_role == Role::Dealer {
+                ScorePhase::HandDealer
+            } else {
+                ScorePhase::HandPone
+            })
+            .round() as i32,
+            1.0,
+        )];
     }
     normalized_score_outcomes(&outcomes, total_weight)
 }
@@ -1885,9 +3296,18 @@ fn post_pegging_win_probability(
     let mut total = 0.0;
     let mut total_weight = 0.0;
     for (pone_score, pone_weight) in &context.pone_hand {
-        let after_pone_my = my_score + if context.pone_is_perspective { *pone_score as f64 } else { 0.0 };
-        let after_pone_opponent =
-            opponent_score + if context.pone_is_perspective { 0.0 } else { *pone_score as f64 };
+        let after_pone_my = my_score
+            + if context.pone_is_perspective {
+                *pone_score as f64
+            } else {
+                0.0
+            };
+        let after_pone_opponent = opponent_score
+            + if context.pone_is_perspective {
+                0.0
+            } else {
+                *pone_score as f64
+            };
         if after_pone_my >= 121.0 {
             total += *pone_weight;
             total_weight += *pone_weight;
@@ -1898,10 +3318,18 @@ fn post_pegging_win_probability(
             continue;
         }
         for (dealer_score, dealer_weight) in &context.dealer_hand {
-            let after_dealer_my =
-                after_pone_my + if context.dealer_is_perspective { *dealer_score as f64 } else { 0.0 };
-            let after_dealer_opponent =
-                after_pone_opponent + if context.dealer_is_perspective { 0.0 } else { *dealer_score as f64 };
+            let after_dealer_my = after_pone_my
+                + if context.dealer_is_perspective {
+                    *dealer_score as f64
+                } else {
+                    0.0
+                };
+            let after_dealer_opponent = after_pone_opponent
+                + if context.dealer_is_perspective {
+                    0.0
+                } else {
+                    *dealer_score as f64
+                };
             if after_dealer_my >= 121.0 {
                 total += *pone_weight * *dealer_weight;
                 total_weight += *pone_weight * *dealer_weight;
@@ -1912,20 +3340,29 @@ fn post_pegging_win_probability(
                 continue;
             }
             for (crib_score, crib_weight) in &context.crib {
-                let after_crib_my =
-                    after_dealer_my + if context.dealer_is_perspective { *crib_score as f64 } else { 0.0 };
-                let after_crib_opponent =
-                    after_dealer_opponent + if context.dealer_is_perspective { 0.0 } else { *crib_score as f64 };
+                let after_crib_my = after_dealer_my
+                    + if context.dealer_is_perspective {
+                        *crib_score as f64
+                    } else {
+                        0.0
+                    };
+                let after_crib_opponent = after_dealer_opponent
+                    + if context.dealer_is_perspective {
+                        0.0
+                    } else {
+                        *crib_score as f64
+                    };
                 let weight = *pone_weight * *dealer_weight * *crib_weight;
                 if after_crib_my >= 121.0 {
                     total += weight;
                 } else if after_crib_opponent < 121.0 {
-                    total += weight * context.board.future_win_probability(
-                        after_crib_my,
-                        after_crib_opponent,
-                        next_perspective_role(context.perspective_role, ScorePhase::Crib),
-                        next_score_phase(ScorePhase::Crib),
-                    );
+                    total += weight
+                        * context.board.future_win_probability(
+                            after_crib_my,
+                            after_crib_opponent,
+                            next_perspective_role(context.perspective_role, ScorePhase::Crib),
+                            next_score_phase(ScorePhase::Crib),
+                        );
                 }
                 total_weight += weight;
             }
@@ -1934,7 +3371,12 @@ fn post_pegging_win_probability(
     let probability = if total_weight > 0.0 {
         total / total_weight
     } else {
-        context.board.future_win_probability(my_score, opponent_score, context.perspective_role, ScorePhase::HandPone)
+        context.board.future_win_probability(
+            my_score,
+            opponent_score,
+            context.perspective_role,
+            ScorePhase::HandPone,
+        )
     };
     context.memo.insert(key, probability);
     probability
@@ -2017,7 +3459,11 @@ fn other_player(player: PlayerKey) -> PlayerKey {
 }
 
 fn perspective_score(perspective: PlayerKey, scorer: PlayerKey, points: i32) -> i32 {
-    if perspective == scorer { points } else { -points }
+    if perspective == scorer {
+        points
+    } else {
+        -points
+    }
 }
 
 fn role_index(role: Role) -> u8 {
@@ -2083,6 +3529,12 @@ fn load_runtime_tables(root: &str) -> Result<RuntimeTables, String> {
         .join("models")
         .join("schell_table-peg_table-12.0")
         .join("pegging-outcome-pairwise.bin");
+    let pairwise14_path = Path::new(root)
+        .join("web")
+        .join("src")
+        .join("models")
+        .join("schell_table-peg_table-14.0")
+        .join("pegging-outcome-tripolicy-aligned.bin");
     let empirical_path = Path::new(root)
         .join("web")
         .join("src")
@@ -2095,10 +3547,31 @@ fn load_runtime_tables(root: &str) -> Result<RuntimeTables, String> {
         .join("models")
         .join("schell_table-peg_table-13.0")
         .join("pegging-remaining-hand-distribution.bin");
+    let crib_rank_score_path = Path::new(root)
+        .join("web")
+        .join("src")
+        .join("models")
+        .join("rank-crib-discard")
+        .join("crib-rank-score-by-discard-cut.json");
+    let crib_histogram_path = Path::new(root)
+        .join("web")
+        .join("src")
+        .join("models")
+        .join("rank-crib-discard")
+        .join("crib-score-histogram-by-discard-cut.json");
+    let crib_tripolicy14_path = Path::new(root)
+        .join("web")
+        .join("src")
+        .join("models")
+        .join("schell_table-peg_table-14.0")
+        .join("crib-score-histogram-tripolicy-by-discard-cut.bin");
     Ok(RuntimeTables {
         empirical: EmpiricalDiscardKeepTable::load_edk1(empirical_path)?,
         pairwise: PairwiseTable::load_p12p(pairwise_path)?,
+        pairwise14: PairwiseTable::load_p12p(pairwise14_path)?,
         hold: Model13HoldTable::load_p13h(hold_path)?,
+        crib_rank: CribRankDiscardTables::load(crib_rank_score_path, crib_histogram_path)?,
+        crib_tripolicy14: CribTripolicyTable::load_c14b(crib_tripolicy14_path)?,
     })
 }
 
@@ -2172,15 +3645,21 @@ fn parse_cards(value: &str) -> Result<Vec<Card>, String> {
 }
 
 fn parse_i32(value: &str) -> Result<i32, String> {
-    value.parse::<i32>().map_err(|error| format!("invalid i32 {}: {}", value, error))
+    value
+        .parse::<i32>()
+        .map_err(|error| format!("invalid i32 {}: {}", value, error))
 }
 
 fn parse_usize(value: &str) -> Result<usize, String> {
-    value.parse::<usize>().map_err(|error| format!("invalid usize {}: {}", value, error))
+    value
+        .parse::<usize>()
+        .map_err(|error| format!("invalid usize {}: {}", value, error))
 }
 
 fn parse_u8(value: &str) -> Result<u8, String> {
-    value.parse::<u8>().map_err(|error| format!("invalid u8 {}: {}", value, error))
+    value
+        .parse::<u8>()
+        .map_err(|error| format!("invalid u8 {}: {}", value, error))
 }
 
 fn parse_optional_u8(value: &str) -> Result<Option<u8>, String> {
@@ -2193,7 +3672,10 @@ fn parse_optional_u8(value: &str) -> Result<Option<u8>, String> {
 fn ids_key(cards: &[Card]) -> String {
     let mut ids: Vec<u8> = cards.iter().map(|card| card.id).collect();
     ids.sort_unstable();
-    ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",")
+    ids.iter()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn card_set_key(cards: &[Card]) -> String {
