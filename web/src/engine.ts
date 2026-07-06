@@ -60,6 +60,7 @@ export type Opponent =
   | "schell_table-peg_table-14.8.1"
   | "schell_table-peg_table-15.0"
   | "schell_table-peg_table-15.1"
+  | "schell_table-peg_table-15.2"
   | "schell_table-2.0";
 type LegacyOpponent =
   | "ras-table-1.0"
@@ -137,6 +138,7 @@ const ENGINE_LABELS: Record<Opponent, string> = {
   "schell_table-peg_table-14.8.1": "Schell Table + Peg Table 14.8.1",
   "schell_table-peg_table-15.0": "Schell Table + Peg Table 15.0",
   "schell_table-peg_table-15.1": "Schell Table + Peg Table 15.1",
+  "schell_table-peg_table-15.2": "Schell Table + Peg Table 15.2",
 };
 const CRIB_FLUSH_BONUS_BY_SUIT_COUNT = cribFlushBonusBySuitCount as number[];
 const HAND_RANK_SCORE_BY_KEEP_CUT = (handRankScoreByKeepCut as {
@@ -315,6 +317,7 @@ DISCARD_TABLES["schell_table-peg_table-14.8"] = DISCARD_TABLES["schell_table-2.0
 DISCARD_TABLES["schell_table-peg_table-14.8.1"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-15.0"] = DISCARD_TABLES["schell_table-2.0"];
 DISCARD_TABLES["schell_table-peg_table-15.1"] = DISCARD_TABLES["schell_table-2.0"];
+DISCARD_TABLES["schell_table-peg_table-15.2"] = DISCARD_TABLES["schell_table-2.0"];
 
 export class WinGame extends Error {}
 
@@ -2663,6 +2666,8 @@ const PEGGING_HOLD_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Pegging
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
   "schell_table-peg_table-15.1": () =>
     loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
+  "schell_table-peg_table-15.2": () =>
+    loadModel13HoldTable(model13HoldUrl, model13HoldManifest as Model13HoldManifest),
 };
 const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<PeggingPairwiseTable>>> = {
   "schell_table-peg_table-12.0": () =>
@@ -2695,6 +2700,8 @@ const PEGGING_PAIRWISE_TABLE_LOADERS: Partial<Record<Opponent, () => Promise<Peg
     loadPairwisePeggingTable(peggingPairwise12Url, peggingPairwise12Manifest as PeggingPairwiseManifest),
   "schell_table-peg_table-15.1": () =>
     loadPairwisePeggingTable(peggingPairwise12Url, peggingPairwise12Manifest as PeggingPairwiseManifest),
+  "schell_table-peg_table-15.2": () =>
+    loadPairwisePeggingTable(peggingPairwise12Url, peggingPairwise12Manifest as PeggingPairwiseManifest),
 };
 const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLeadFrequencyTable>>> = {
   "schell_table-peg_table-13.0": () =>
@@ -2724,6 +2731,8 @@ const PONE_LEAD_FREQUENCY_LOADERS: Partial<Record<Opponent, () => Promise<PoneLe
   "schell_table-peg_table-15.0": () =>
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
   "schell_table-peg_table-15.1": () =>
+    loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
+  "schell_table-peg_table-15.2": () =>
     loadModel13LeadTable(model13LeadUrl, model13LeadManifest as Model13LeadManifest),
 };
 const CRIB_TRIPOLICY_LOADERS: Partial<Record<Opponent, () => Promise<CribTripolicyTable>>> = {
@@ -2862,7 +2871,8 @@ function isModel14OrLater(engine: Opponent): boolean {
     engine === "schell_table-peg_table-14.8" ||
     engine === "schell_table-peg_table-14.8.1" ||
     engine === "schell_table-peg_table-15.0" ||
-    engine === "schell_table-peg_table-15.1";
+    engine === "schell_table-peg_table-15.1" ||
+    engine === "schell_table-peg_table-15.2";
 }
 
 function usesSixCardDiscardModel(engine: Opponent): boolean {
@@ -2873,13 +2883,15 @@ function usesEmpiricalDiscardKeepModel(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-14.8" ||
     engine === "schell_table-peg_table-14.8.1" ||
     engine === "schell_table-peg_table-15.0" ||
-    engine === "schell_table-peg_table-15.1";
+    engine === "schell_table-peg_table-15.1" ||
+    engine === "schell_table-peg_table-15.2";
 }
 
 function usesEmpiricalDiscardCandidateGrouping(engine: Opponent): boolean {
   return engine === "schell_table-peg_table-14.8.1" ||
     engine === "schell_table-peg_table-15.0" ||
-    engine === "schell_table-peg_table-15.1";
+    engine === "schell_table-peg_table-15.1" ||
+    engine === "schell_table-peg_table-15.2";
 }
 
 function usesWinProbabilityPegging(engine: Opponent): boolean {
@@ -2940,7 +2952,8 @@ function usesCorrectedDiscardWinProbability(engine: Opponent): boolean {
     engine === "schell_table-peg_table-14.8" ||
     engine === "schell_table-peg_table-14.8.1" ||
     engine === "schell_table-peg_table-15.0" ||
-    engine === "schell_table-peg_table-15.1";
+    engine === "schell_table-peg_table-15.1" ||
+    engine === "schell_table-peg_table-15.2";
 }
 
 function usesRankOnlyDiscardWinProbabilityApproximation(engine: Opponent): boolean {
@@ -2953,7 +2966,8 @@ function usesRankOnlyDiscardWinProbabilityApproximation(engine: Opponent): boole
     engine === "schell_table-peg_table-14.8" ||
     engine === "schell_table-peg_table-14.8.1" ||
     engine === "schell_table-peg_table-15.0" ||
-    engine === "schell_table-peg_table-15.1";
+    engine === "schell_table-peg_table-15.1" ||
+    engine === "schell_table-peg_table-15.2";
 }
 
 function usesKnownCardPostPeggingWinProbability(engine: Opponent): boolean {
@@ -5202,7 +5216,7 @@ function approximateFutureWinProbabilityForEngine(
   perspectiveRole: "dealer" | "pone",
   phase: ScorePhase,
 ): number {
-  if (engine === "schell_table-peg_table-15.1") {
+  if (engine === "schell_table-peg_table-15.1" || engine === "schell_table-peg_table-15.2") {
     return approximateFutureWinProbability15_1(myScore, opponentScore, perspectiveRole, phase);
   }
   return approximateFutureWinProbability(myScore, opponentScore, perspectiveRole, phase);
@@ -7513,6 +7527,7 @@ function normalizeOpponent(opponent: StoredOpponent): Opponent {
     opponent === "expert_schell-table-peg_table-1.2" ||
     opponent === "expert_schell_table-peg_table-4.0"
   ) return "schell_table-peg_table-4.0";
+  if (opponent === "schell_table-peg_table-15.2") return "schell_table-peg_table-15.2";
   if (opponent === "schell_table-peg_table-15.1") return "schell_table-peg_table-15.1";
   if (opponent === "schell_table-peg_table-15.0") return "schell_table-peg_table-15.0";
   if (opponent === "schell_table-peg_table-14.8.1") return "schell_table-peg_table-14.8.1";

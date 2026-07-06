@@ -5,7 +5,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { Worker } from "node:worker_threads";
 import { CribbageGame, WinGame, type GameSnapshot } from "../web/src/engine";
-import { MODEL, MODEL_13, MODEL_14_3, MODEL_15, MODEL_15_0 } from "./ai-constants";
+import { MODEL, MODEL_13, MODEL_14_3, MODEL_15, MODEL_15_0, MODEL_15_2 } from "./ai-constants";
 import {
   persistRustShadowRecord,
   requestModelForPayload,
@@ -25,11 +25,11 @@ const DATA_DIR = resolve(process.env.CRIBBAGE_DATA_DIR || join(ROOT, "data"));
 const DB_PATH = resolve(process.env.CRIBBAGE_DB_PATH || join(DATA_DIR, "cribbage-server.sqlite"));
 const MARKETING_HOSTS = new Set(["strongcribbage.com"]);
 const AI_QUEUE_MAX_WAITING = Number(process.env.AI_QUEUE_MAX_WAITING || 4);
-const LEADERBOARD_MODELS = [MODEL_13, MODEL_14_3, MODEL_15_0, MODEL_15] as const;
+const LEADERBOARD_MODELS = [MODEL_13, MODEL_14_3, MODEL_15_0, MODEL_15, MODEL_15_2] as const;
 const PUBLIC_GAME_MODELS = [MODEL_15] as const;
 const RUST_PRIMARY_ENABLED = process.env.CRIBBAGE_RUST_PRIMARY === "1";
 const RUST_PRIMARY_MODELS = new Set(
-  (process.env.CRIBBAGE_RUST_PRIMARY_MODELS || `${MODEL_13},${MODEL_14_3},${MODEL_15_0},${MODEL_15}`)
+  (process.env.CRIBBAGE_RUST_PRIMARY_MODELS || `${MODEL_13},${MODEL_14_3},${MODEL_15_0},${MODEL_15},${MODEL_15_2}`)
     .split(",")
     .map((model) => model.trim())
     .filter(Boolean),
@@ -796,7 +796,7 @@ function buildLeaderboardSummary(rows: JsonRecord[]): JsonRecord {
   return {
     generatedAt: new Date().toISOString(),
     source: "server-game-uploads",
-    model: "13.0/14.3/15.0/15.1 public",
+    model: "13.0/14.3/15.0/15.1/15.2 tracked",
     models: LEADERBOARD_MODELS,
     games: playerStats.reduce((sum, player) => sum + player.games, 0),
     playerStats,
@@ -812,7 +812,7 @@ async function leaderboardSummary(): Promise<JsonRecord> {
     return {
       generatedAt: new Date().toISOString(),
       source: "server-game-uploads",
-      model: "13.0/14.3/15.0/15.1 public",
+      model: "13.0/14.3/15.0/15.1/15.2 tracked",
       models: LEADERBOARD_MODELS,
       games: 0,
       playerStats: [],

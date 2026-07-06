@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Role {
@@ -31,49 +32,186 @@ struct CycleFastPathCutoffs {
 
 const CYCLE_FAST_PATH_QUANTILE: f64 = 0.999;
 const ZERO_DISTRIBUTION: [(u8, f64); 1] = [(0, 1.0)];
+const SCORE_STATES: usize = 122;
+const ROLE_STATES: usize = 2;
+const PHASE_STATES: usize = 5;
+const BOARD_MEMO_SIZE: usize = SCORE_STATES * SCORE_STATES * ROLE_STATES * PHASE_STATES;
+
+struct BoardDistributions {
+    pegging_pone: Vec<(u8, f64)>,
+    pegging_dealer: Vec<(u8, f64)>,
+    hand_pone: Vec<(u8, f64)>,
+    hand_dealer: Vec<(u8, f64)>,
+    crib: Vec<(u8, f64)>,
+    cycle_delta_pone: Vec<((u8, u8), f64)>,
+    cycle_delta_dealer: Vec<((u8, u8), f64)>,
+    cycle_fast_path_cutoffs: CycleFastPathCutoffs,
+    max_pegging_pone: u8,
+    max_pegging_dealer: u8,
+}
+
+impl BoardDistributions {
+    fn standard() -> &'static BoardDistributions {
+        static STANDARD: OnceLock<BoardDistributions> = OnceLock::new();
+        STANDARD.get_or_init(|| {
+            let mut distributions = HashMap::new();
+            for phase in [
+                ScorePhase::PeggingPone,
+                ScorePhase::PeggingDealer,
+                ScorePhase::HandPone,
+                ScorePhase::HandDealer,
+                ScorePhase::Crib,
+            ] {
+                distributions.insert(phase, score_phase_distribution(phase_stats(phase)));
+            }
+            BoardDistributions::from_phase_map(distributions)
+        })
+    }
+
+    fn from_phase_map(distributions: HashMap<ScorePhase, Vec<(u8, f64)>>) -> BoardDistributions {
+        let cycle_fast_path_cutoffs =
+            cycle_fast_path_cutoffs(&distributions, CYCLE_FAST_PATH_QUANTILE);
+        let cycle_delta_pone = build_cycle_delta_distribution(&distributions, Role::Pone);
+        let cycle_delta_dealer = build_cycle_delta_distribution(&distributions, Role::Dealer);
+        let pegging_pone = distributions
+            .get(&ScorePhase::PeggingPone)
+            .cloned()
+            .unwrap_or_else(|| ZERO_DISTRIBUTION.to_vec());
+        let pegging_dealer = distributions
+            .get(&ScorePhase::PeggingDealer)
+            .cloned()
+            .unwrap_or_else(|| ZERO_DISTRIBUTION.to_vec());
+        let hand_pone = distributions
+            .get(&ScorePhase::HandPone)
+            .cloned()
+            .unwrap_or_else(|| ZERO_DISTRIBUTION.to_vec());
+        let hand_dealer = distributions
+            .get(&ScorePhase::HandDealer)
+            .cloned()
+            .unwrap_or_else(|| ZERO_DISTRIBUTION.to_vec());
+        let crib = distributions
+            .get(&ScorePhase::Crib)
+            .cloned()
+            .unwrap_or_else(|| ZERO_DISTRIBUTION.to_vec());
+        let max_pegging_pone = max_distribution_points(&pegging_pone);
+        let max_pegging_dealer = max_distribution_points(&pegging_dealer);
+        BoardDistributions {
+            pegging_pone,
+            pegging_dealer,
+            hand_pone,
+            hand_dealer,
+            crib,
+            cycle_delta_pone,
+            cycle_delta_dealer,
+            cycle_fast_path_cutoffs,
+            max_pegging_pone,
+            max_pegging_dealer,
+        }
+    }
+
+    fn distribution(&'static self, phase: ScorePhase) -> &'static [(u8, f64)] {
+        match phase {
+            ScorePhase::PeggingPone => &self.pegging_pone,
+            ScorePhase::PeggingDealer => &self.pegging_dealer,
+            ScorePhase::HandPone => &self.hand_pone,
+            ScorePhase::HandDealer => &self.hand_dealer,
+            ScorePhase::Crib => &self.crib,
+        }
+    }
+
+    fn cycle_delta_distribution(&'static self, role: Role) -> &'static [((u8, u8), f64)] {
+        match role {
+            Role::Pone => &self.cycle_delta_pone,
+            Role::Dealer => &self.cycle_delta_dealer,
+        }
+    }
+}
 
 pub struct BoardModel {
-    distributions: HashMap<ScorePhase, Vec<(u8, f64)>>,
-    cycle_delta_cache: HashMap<Role, Vec<((u8, u8), f64)>>,
-    cycle_fast_path_cutoffs: CycleFastPathCutoffs,
-    memo: HashMap<(u8, u8, Role, ScorePhase), f64>,
+    distributions: &'static BoardDistributions,
+    memo: BoardMemo,
     use_heuristic_before_90: bool,
     joint_future_pegging: bool,
+    joint_only_when_terminal_ambiguity_possible: bool,
+}
+
+struct BoardMemo {
+    values: Vec<f64>,
+}
+
+impl BoardMemo {
+    fn new() -> BoardMemo {
+        BoardMemo {
+            values: vec![f64::NAN; BOARD_MEMO_SIZE],
+        }
+    }
+
+    fn get(&self, my: u8, opponent: u8, role: Role, phase: ScorePhase) -> Option<f64> {
+        let value = self.values[board_memo_index(my, opponent, role, phase)];
+        if value.is_nan() {
+            None
+        } else {
+            Some(value)
+        }
+    }
+
+    fn set(&mut self, my: u8, opponent: u8, role: Role, phase: ScorePhase, value: f64) {
+        let index = board_memo_index(my, opponent, role, phase);
+        self.values[index] = value;
+    }
+}
+
+fn board_memo_index(my: u8, opponent: u8, role: Role, phase: ScorePhase) -> usize {
+    ((((my as usize) * SCORE_STATES + opponent as usize) * ROLE_STATES + role_index(role))
+        * PHASE_STATES)
+        + score_phase_index(phase)
+}
+
+fn role_index(role: Role) -> usize {
+    match role {
+        Role::Pone => 0,
+        Role::Dealer => 1,
+    }
+}
+
+fn score_phase_index(phase: ScorePhase) -> usize {
+    match phase {
+        ScorePhase::PeggingPone => 0,
+        ScorePhase::PeggingDealer => 1,
+        ScorePhase::HandPone => 2,
+        ScorePhase::HandDealer => 3,
+        ScorePhase::Crib => 4,
+    }
 }
 
 impl BoardModel {
     pub fn new() -> BoardModel {
-        BoardModel::with_options(true, false)
+        BoardModel::with_options(true, false, false)
     }
 
     pub fn without_early_heuristic() -> BoardModel {
-        BoardModel::with_options(false, false)
+        BoardModel::with_options(false, false, false)
     }
 
     pub fn joint_pegging_without_early_heuristic() -> BoardModel {
-        BoardModel::with_options(false, true)
+        BoardModel::with_options(false, true, false)
     }
 
-    fn with_options(use_heuristic_before_90: bool, joint_future_pegging: bool) -> BoardModel {
-        let mut distributions = HashMap::new();
-        for phase in [
-            ScorePhase::PeggingPone,
-            ScorePhase::PeggingDealer,
-            ScorePhase::HandPone,
-            ScorePhase::HandDealer,
-            ScorePhase::Crib,
-        ] {
-            distributions.insert(phase, score_phase_distribution(phase_stats(phase)));
-        }
-        let cycle_fast_path_cutoffs =
-            cycle_fast_path_cutoffs(&distributions, CYCLE_FAST_PATH_QUANTILE);
+    pub fn exact_joint_pegging_without_early_heuristic() -> BoardModel {
+        BoardModel::with_options(false, true, true)
+    }
+
+    fn with_options(
+        use_heuristic_before_90: bool,
+        joint_future_pegging: bool,
+        joint_only_when_terminal_ambiguity_possible: bool,
+    ) -> BoardModel {
         BoardModel {
-            distributions,
-            cycle_delta_cache: HashMap::new(),
-            cycle_fast_path_cutoffs,
-            memo: HashMap::new(),
+            distributions: BoardDistributions::standard(),
+            memo: BoardMemo::new(),
             use_heuristic_before_90,
             joint_future_pegging,
+            joint_only_when_terminal_ambiguity_possible,
         }
     }
 
@@ -118,19 +256,25 @@ impl BoardModel {
         if self.use_heuristic_before_90 && my < 90 && opponent < 90 {
             return heuristic_win_probability(my as f64, opponent as f64, perspective_role);
         }
-        let key = (my, opponent, perspective_role, phase);
-        if let Some(value) = self.memo.get(&key) {
-            return *value;
+        if let Some(value) = self.memo.get(my, opponent, perspective_role, phase) {
+            return value;
         }
-        self.memo.insert(key, 0.5);
+        self.memo.set(my, opponent, perspective_role, phase, 0.5);
 
-        if self.joint_future_pegging && phase == ScorePhase::PeggingPone {
-            let probability = if self.cycle_fast_path_allowed(my, opponent, perspective_role) {
+        if self.joint_future_pegging
+            && phase == ScorePhase::PeggingPone
+            && (!self.joint_only_when_terminal_ambiguity_possible
+                || self.joint_pegging_terminal_ambiguity_possible(my, opponent, perspective_role))
+        {
+            let probability = if self.joint_only_when_terminal_ambiguity_possible {
+                self.future_joint_pegging_win_probability(my, opponent, perspective_role)
+            } else if self.cycle_fast_path_allowed(my, opponent, perspective_role) {
                 self.future_cycle_win_probability(my, opponent, perspective_role)
             } else {
                 self.future_joint_pegging_win_probability(my, opponent, perspective_role)
             };
-            self.memo.insert(key, probability);
+            self.memo
+                .set(my, opponent, perspective_role, phase, probability);
             return probability;
         }
 
@@ -139,16 +283,12 @@ impl BoardModel {
             ScorePhase::PeggingDealer | ScorePhase::HandDealer | ScorePhase::Crib => Role::Dealer,
         };
         let perspective_scores = perspective_role == scorer_role;
-        let distribution = self
-            .distributions
-            .get(&phase)
-            .cloned()
-            .unwrap_or_else(|| vec![(0, 1.0)]);
+        let distribution = self.distributions.distribution(phase);
         let mut probability = 0.0;
         for (points, weight) in distribution {
             if perspective_scores {
-                let next_my = my.saturating_add(points);
-                probability += weight
+                let next_my = my.saturating_add(*points);
+                probability += *weight
                     * if next_my >= 121 {
                         1.0
                     } else {
@@ -160,8 +300,8 @@ impl BoardModel {
                         )
                     };
             } else {
-                let next_opponent = opponent.saturating_add(points);
-                probability += weight
+                let next_opponent = opponent.saturating_add(*points);
+                probability += *weight
                     * if next_opponent >= 121 {
                         0.0
                     } else {
@@ -174,7 +314,8 @@ impl BoardModel {
                     };
             }
         }
-        self.memo.insert(key, probability);
+        self.memo
+            .set(my, opponent, perspective_role, phase, probability);
         probability
     }
 
@@ -185,14 +326,16 @@ impl BoardModel {
         perspective_role: Role,
     ) -> f64 {
         let next_role = next_perspective_role(perspective_role, ScorePhase::Crib);
-        let deltas = self.cycle_delta_distribution(perspective_role);
+        let deltas = self
+            .distributions
+            .cycle_delta_distribution(perspective_role);
         if !self.cycle_fast_path_allowed(my, opponent, next_role) {
             let mut probability = 0.0;
             for ((my_delta, opponent_delta), weight) in deltas {
-                probability += weight
+                probability += *weight
                     * self.future_win_probability_u8(
-                        my + my_delta,
-                        opponent + opponent_delta,
+                        my + *my_delta,
+                        opponent + *opponent_delta,
                         next_role,
                         ScorePhase::PeggingPone,
                     );
@@ -200,21 +343,26 @@ impl BoardModel {
             return probability;
         }
 
-        let paired_deltas = self.cycle_delta_distribution(next_role);
+        let paired_deltas = self.distributions.cycle_delta_distribution(next_role);
         let (base, zero_cycle_weight) =
-            self.cycle_delta_continuation_value(&deltas, my, opponent, next_role);
+            self.cycle_delta_continuation_value(deltas, my, opponent, next_role);
         let (paired_base, paired_zero_cycle_weight) =
-            self.cycle_delta_continuation_value(&paired_deltas, my, opponent, perspective_role);
+            self.cycle_delta_continuation_value(paired_deltas, my, opponent, perspective_role);
         let denominator = 1.0 - (zero_cycle_weight * paired_zero_cycle_weight);
         if denominator.abs() < 1e-12 {
-            let paired_key = (my, opponent, next_role, ScorePhase::PeggingPone);
-            self.memo.insert(paired_key, 0.5);
+            self.memo
+                .set(my, opponent, next_role, ScorePhase::PeggingPone, 0.5);
             return 0.5;
         }
         let probability = (base + zero_cycle_weight * paired_base) / denominator;
         let paired_probability = (paired_base + paired_zero_cycle_weight * base) / denominator;
-        let paired_key = (my, opponent, next_role, ScorePhase::PeggingPone);
-        self.memo.insert(paired_key, paired_probability);
+        self.memo.set(
+            my,
+            opponent,
+            next_role,
+            ScorePhase::PeggingPone,
+            paired_probability,
+        );
         probability
     }
 
@@ -249,29 +397,21 @@ impl BoardModel {
         opponent: u8,
         perspective_role: Role,
     ) -> f64 {
-        let pone_distribution = self
-            .distributions
-            .get(&ScorePhase::PeggingPone)
-            .cloned()
-            .unwrap_or_else(|| vec![(0, 1.0)]);
-        let dealer_distribution = self
-            .distributions
-            .get(&ScorePhase::PeggingDealer)
-            .cloned()
-            .unwrap_or_else(|| vec![(0, 1.0)]);
+        let pone_distribution = self.distributions.distribution(ScorePhase::PeggingPone);
+        let dealer_distribution = self.distributions.distribution(ScorePhase::PeggingDealer);
         let mut probability = 0.0;
         for (pone_points, pone_weight) in pone_distribution {
-            for (dealer_points, dealer_weight) in &dealer_distribution {
-                let weight = pone_weight * *dealer_weight;
+            for (dealer_points, dealer_weight) in dealer_distribution {
+                let weight = *pone_weight * *dealer_weight;
                 let (next_my, next_opponent) = if perspective_role == Role::Pone {
                     (
-                        my.saturating_add(pone_points),
+                        my.saturating_add(*pone_points),
                         opponent.saturating_add(*dealer_points),
                     )
                 } else {
                     (
                         my.saturating_add(*dealer_points),
-                        opponent.saturating_add(pone_points),
+                        opponent.saturating_add(*pone_points),
                     )
                 };
                 let my_out = next_my >= 121;
@@ -296,57 +436,71 @@ impl BoardModel {
     fn cycle_fast_path_allowed(&self, my: u8, opponent: u8, perspective_role: Role) -> bool {
         let (my_cutoff, opponent_cutoff) = if perspective_role == Role::Pone {
             (
-                self.cycle_fast_path_cutoffs.pone,
-                self.cycle_fast_path_cutoffs.dealer,
+                self.distributions.cycle_fast_path_cutoffs.pone,
+                self.distributions.cycle_fast_path_cutoffs.dealer,
             )
         } else {
             (
-                self.cycle_fast_path_cutoffs.dealer,
-                self.cycle_fast_path_cutoffs.pone,
+                self.distributions.cycle_fast_path_cutoffs.dealer,
+                self.distributions.cycle_fast_path_cutoffs.pone,
             )
         };
         (my as u16) + (my_cutoff as u16) < 121 && (opponent as u16) + (opponent_cutoff as u16) < 121
     }
 
-    fn cycle_delta_distribution(&mut self, perspective_role: Role) -> Vec<((u8, u8), f64)> {
-        if let Some(cached) = self.cycle_delta_cache.get(&perspective_role) {
-            return cached.clone();
-        }
-        let mut states = HashMap::new();
-        add_cycle_state(&mut states, (0, 0), 1.0);
-        states = apply_cycle_joint_pegging_delta(
-            states,
-            &self.distribution_for(ScorePhase::PeggingPone),
-            &self.distribution_for(ScorePhase::PeggingDealer),
-            perspective_role,
-        );
-        states = apply_cycle_delta_phase(
-            states,
-            &self.distribution_for(ScorePhase::HandPone),
-            perspective_role == Role::Pone,
-        );
-        states = apply_cycle_delta_phase(
-            states,
-            &self.distribution_for(ScorePhase::HandDealer),
-            perspective_role == Role::Dealer,
-        );
-        states = apply_cycle_delta_phase(
-            states,
-            &self.distribution_for(ScorePhase::Crib),
-            perspective_role == Role::Dealer,
-        );
-        let distribution = states.into_iter().collect::<Vec<_>>();
-        self.cycle_delta_cache
-            .insert(perspective_role, distribution.clone());
-        distribution
+    fn joint_pegging_terminal_ambiguity_possible(
+        &self,
+        my: u8,
+        opponent: u8,
+        perspective_role: Role,
+    ) -> bool {
+        let pone_max = self.distributions.max_pegging_pone;
+        let dealer_max = self.distributions.max_pegging_dealer;
+        let (my_max, opponent_max) = if perspective_role == Role::Pone {
+            (pone_max, dealer_max)
+        } else {
+            (dealer_max, pone_max)
+        };
+        (my as u16) + (my_max as u16) >= 121 && (opponent as u16) + (opponent_max as u16) >= 121
     }
+}
 
-    fn distribution_for(&self, phase: ScorePhase) -> Vec<(u8, f64)> {
-        self.distributions
-            .get(&phase)
-            .cloned()
-            .unwrap_or_else(|| vec![(0, 1.0)])
-    }
+fn build_cycle_delta_distribution(
+    distributions: &HashMap<ScorePhase, Vec<(u8, f64)>>,
+    perspective_role: Role,
+) -> Vec<((u8, u8), f64)> {
+    let mut states = HashMap::new();
+    add_cycle_state(&mut states, (0, 0), 1.0);
+    states = apply_cycle_joint_pegging_delta(
+        states,
+        distribution_or_zero(distributions, ScorePhase::PeggingPone),
+        distribution_or_zero(distributions, ScorePhase::PeggingDealer),
+        perspective_role,
+    );
+    states = apply_cycle_delta_phase(
+        states,
+        distribution_or_zero(distributions, ScorePhase::HandPone),
+        perspective_role == Role::Pone,
+    );
+    states = apply_cycle_delta_phase(
+        states,
+        distribution_or_zero(distributions, ScorePhase::HandDealer),
+        perspective_role == Role::Dealer,
+    );
+    states = apply_cycle_delta_phase(
+        states,
+        distribution_or_zero(distributions, ScorePhase::Crib),
+        perspective_role == Role::Dealer,
+    );
+    states.into_iter().collect()
+}
+
+fn max_distribution_points(distribution: &[(u8, f64)]) -> u8 {
+    distribution
+        .iter()
+        .map(|(points, _)| *points)
+        .max()
+        .unwrap_or(0)
 }
 
 fn apply_cycle_joint_pegging_delta(
@@ -551,7 +705,11 @@ mod tests {
     use super::*;
 
     fn test_board_with_joint_pegging(pone_points: u8, dealer_points: u8) -> BoardModel {
-        test_board_with_cycle(pone_points, dealer_points, 0, 0, 0)
+        test_board_with_cycle(pone_points, dealer_points, 0, 0, 0, false)
+    }
+
+    fn test_board_with_exact_joint_pegging(pone_points: u8, dealer_points: u8) -> BoardModel {
+        test_board_with_cycle(pone_points, dealer_points, 0, 0, 0, true)
     }
 
     fn test_board_with_cycle(
@@ -560,6 +718,7 @@ mod tests {
         pone_hand: u8,
         dealer_hand: u8,
         crib: u8,
+        joint_only_when_terminal_ambiguity_possible: bool,
     ) -> BoardModel {
         let mut distributions = HashMap::new();
         distributions.insert(ScorePhase::PeggingPone, vec![(pone_pegging, 1.0)]);
@@ -567,23 +726,20 @@ mod tests {
         distributions.insert(ScorePhase::HandPone, vec![(pone_hand, 1.0)]);
         distributions.insert(ScorePhase::HandDealer, vec![(dealer_hand, 1.0)]);
         distributions.insert(ScorePhase::Crib, vec![(crib, 1.0)]);
-        let cycle_fast_path_cutoffs =
-            cycle_fast_path_cutoffs(&distributions, CYCLE_FAST_PATH_QUANTILE);
         BoardModel {
-            distributions,
-            cycle_delta_cache: HashMap::new(),
-            cycle_fast_path_cutoffs,
-            memo: HashMap::new(),
+            distributions: Box::leak(Box::new(BoardDistributions::from_phase_map(distributions))),
+            memo: BoardMemo::new(),
             use_heuristic_before_90: false,
             joint_future_pegging: true,
+            joint_only_when_terminal_ambiguity_possible,
         }
     }
 
     #[test]
     fn cycle_fast_path_uses_999th_percentile_cutoffs() {
         let board = BoardModel::joint_pegging_without_early_heuristic();
-        assert_eq!(board.cycle_fast_path_cutoffs.pone, 24);
-        assert_eq!(board.cycle_fast_path_cutoffs.dealer, 34);
+        assert_eq!(board.distributions.cycle_fast_path_cutoffs.pone, 24);
+        assert_eq!(board.distributions.cycle_fast_path_cutoffs.dealer, 34);
         assert!(board.cycle_fast_path_allowed(96, 86, Role::Pone));
         assert!(!board.cycle_fast_path_allowed(97, 86, Role::Pone));
         assert!(!board.cycle_fast_path_allowed(96, 87, Role::Pone));
@@ -593,8 +749,35 @@ mod tests {
     }
 
     #[test]
+    fn board_memo_index_stays_inside_fixed_state_space() {
+        assert_eq!(
+            board_memo_index(0, 0, Role::Pone, ScorePhase::PeggingPone),
+            0
+        );
+        let max_index = board_memo_index(121, 121, Role::Dealer, ScorePhase::Crib);
+        assert_eq!(max_index, BOARD_MEMO_SIZE - 1);
+        assert_ne!(
+            board_memo_index(12, 34, Role::Pone, ScorePhase::HandPone),
+            board_memo_index(12, 34, Role::Dealer, ScorePhase::HandPone)
+        );
+        assert_ne!(
+            board_memo_index(12, 34, Role::Dealer, ScorePhase::HandPone),
+            board_memo_index(12, 34, Role::Dealer, ScorePhase::HandDealer)
+        );
+    }
+
+    #[test]
     fn joint_future_pegging_treats_double_out_as_indeterminate() {
         let mut board = test_board_with_joint_pegging(2, 2);
+        assert_eq!(
+            board.future_win_probability_from_scores(119, 119, Role::Pone, ScorePhase::PeggingPone),
+            0.5
+        );
+    }
+
+    #[test]
+    fn exact_joint_future_pegging_treats_double_out_as_indeterminate() {
+        let mut board = test_board_with_exact_joint_pegging(2, 2);
         assert_eq!(
             board.future_win_probability_from_scores(119, 119, Role::Pone, ScorePhase::PeggingPone),
             0.5
@@ -628,7 +811,7 @@ mod tests {
 
     #[test]
     fn cycle_terminal_order_scores_pone_hand_before_dealer_hand() {
-        let mut pone_board = test_board_with_cycle(0, 0, 2, 2, 0);
+        let mut pone_board = test_board_with_cycle(0, 0, 2, 2, 0, false);
         assert_eq!(
             pone_board.future_win_probability_from_scores(
                 119,
@@ -639,7 +822,7 @@ mod tests {
             1.0
         );
 
-        let mut dealer_board = test_board_with_cycle(0, 0, 2, 2, 0);
+        let mut dealer_board = test_board_with_cycle(0, 0, 2, 2, 0, false);
         assert_eq!(
             dealer_board.future_win_probability_from_scores(
                 119,
@@ -653,7 +836,7 @@ mod tests {
 
     #[test]
     fn cycle_terminal_order_scores_dealer_hand_before_crib() {
-        let mut dealer_board = test_board_with_cycle(0, 0, 0, 2, 2);
+        let mut dealer_board = test_board_with_cycle(0, 0, 0, 2, 2, false);
         assert_eq!(
             dealer_board.future_win_probability_from_scores(
                 119,
@@ -664,7 +847,7 @@ mod tests {
             1.0
         );
 
-        let mut pone_board = test_board_with_cycle(0, 0, 0, 2, 2);
+        let mut pone_board = test_board_with_cycle(0, 0, 0, 2, 2, false);
         assert_eq!(
             pone_board.future_win_probability_from_scores(
                 119,
@@ -678,10 +861,35 @@ mod tests {
 
     #[test]
     fn cycle_without_progress_remains_indeterminate() {
-        let mut board = test_board_with_cycle(0, 0, 0, 0, 0);
+        let mut board = test_board_with_cycle(0, 0, 0, 0, 0, false);
         assert_eq!(
             board.future_win_probability_from_scores(50, 50, Role::Pone, ScorePhase::PeggingPone),
             0.5
+        );
+    }
+
+    #[test]
+    fn exact_joint_gate_awards_single_side_pegging_terminal_without_joint_ambiguity() {
+        let mut pone_board = test_board_with_exact_joint_pegging(2, 0);
+        assert_eq!(
+            pone_board.future_win_probability_from_scores(
+                119,
+                119,
+                Role::Pone,
+                ScorePhase::PeggingPone
+            ),
+            1.0
+        );
+
+        let mut dealer_board = test_board_with_exact_joint_pegging(0, 2);
+        assert_eq!(
+            dealer_board.future_win_probability_from_scores(
+                119,
+                119,
+                Role::Pone,
+                ScorePhase::PeggingPone
+            ),
+            0.0
         );
     }
 }

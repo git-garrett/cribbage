@@ -3,7 +3,15 @@ import { existsSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { MODEL_13, MODEL_14_3, MODEL_14_8, MODEL_14_8_1, MODEL_15, MODEL_15_0 } from "./ai-constants";
+import {
+  MODEL_13,
+  MODEL_14_3,
+  MODEL_14_8,
+  MODEL_14_8_1,
+  MODEL_15,
+  MODEL_15_0,
+  MODEL_15_2,
+} from "./ai-constants";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -46,7 +54,7 @@ const RUST_SHADOW_MAX_IN_FLIGHT = Math.max(
   Number.parseInt(process.env.CRIBBAGE_RUST_SHADOW_MAX_IN_FLIGHT || "2", 10) || 2,
 );
 const RUST_SHADOW_MODELS = new Set(
-  (process.env.CRIBBAGE_RUST_SHADOW_MODELS || `${MODEL_13},${MODEL_14_3},${MODEL_14_8},${MODEL_14_8_1},${MODEL_15_0},${MODEL_15}`)
+  (process.env.CRIBBAGE_RUST_SHADOW_MODELS || `${MODEL_13},${MODEL_14_3},${MODEL_14_8},${MODEL_14_8_1},${MODEL_15_0},${MODEL_15},${MODEL_15_2}`)
     .split(",")
     .map((model) => model.trim())
     .filter(Boolean),
