@@ -177,10 +177,10 @@ const state: {
     | "revealed"
     | null;
   turnCutResolve: (() => void) | null;
-  cutForDealPreparation: { key: string; promise: Promise<ServerCutForDealPreparationResponse> } | null;
+  cutForDealPreparation: CutForDealPreparation | null;
   aiDiscardPreparation: { key: string; promise: Promise<AiDiscardPreparationResult> } | null;
   finishingDiscardKey: string | null;
-  nextHandPreparation: { key: string; promise: Promise<ServerAiDiscardPreparationResponse> } | null;
+  nextHandPreparation: NextHandPreparation | null;
 } = {
   game: null,
   selected: new Set(),
@@ -230,10 +230,12 @@ const state: {
 type TurnCutProgress = "ai-turn" | "revealed" | "confirmed" | null;
 
 let interactionEpoch = 0;
+let gameStateGeneration = 0;
 const failedNextHandPreparationKeys = new Set<string>();
 
 function resetTransientGameUi(): void {
   interactionEpoch += 1;
+  gameStateGeneration += 1;
   state.selected.clear();
   state.resultOverride = null;
   state.serverBusy = null;
@@ -557,6 +559,21 @@ function saveGame(): void {
 }
 
 let currentSnapshot: GameSnapshot | null = null;
+function currentSnapshotGeneration(): number {
+  return gameStateGeneration;
+}
+
+function canApplySnapshotResponse(requestSnapshot: GameSnapshot | null, requestGeneration: number): boolean {
+  return currentSnapshot === requestSnapshot && gameStateGeneration === requestGeneration;
+}
+
+function applyAuthoritativeGameState(snapshot: GameSnapshot, game: GameState): void {
+  currentSnapshot = snapshot;
+  state.game = game;
+  gameStateGeneration += 1;
+  saveGame();
+}
+
 function simpleNetworkSessionValue(): string {
   return SIMPLE_NETWORK_LOCAL_AI_MODE ? "local-13.0-14.3-14.7-14.8-14.8.1" : "server-assigned-13.0-14.3";
 }
@@ -591,6 +608,7 @@ const savedGame = loadSavedGame();
 if (savedGame) {
   currentSnapshot = savedGame.snapshot;
   state.game = savedGame.state;
+  gameStateGeneration = 1;
 }
 const simpleLoadedState = state.game;
 state.splashOpen = SIMPLE_NETWORK_MODE && !playerFirstName;
@@ -608,6 +626,7 @@ if (
 ) {
   currentSnapshot = null;
   state.game = null;
+  gameStateGeneration += 1;
   safeLocalStorageRemove(SAVE_KEY);
 }
 state.hasResumableGame = SIMPLE_NETWORK_MODE &&
@@ -1707,16 +1726,38 @@ interface ServerCutForDealPreparationResponse extends ServerGameActionResponse {
   } | null;
 }
 
+interface CutForDealPreparation {
+  key: string;
+  generation: number;
+  snapshot: GameSnapshot;
+  promise: Promise<ServerCutForDealPreparationResponse>;
+}
+
+interface NextHandPreparation {
+  key: string;
+  generation: number;
+  snapshot: GameSnapshot;
+  promise: Promise<ServerAiDiscardPreparationResponse>;
+}
+
 async function serverGameAction(action: string, payload: Record<string, unknown> | null = null): Promise<GameState> {
+  const requestSnapshot = currentSnapshot;
+  const requestGeneration = currentSnapshotGeneration();
   const response = await serverJson<ServerGameActionResponse>("/api/game/action", {
     action,
     payload: payload ?? {},
-    snapshot: currentSnapshot,
+    snapshot: requestSnapshot,
     tag: currentSessionTag() || null,
   });
-  currentSnapshot = response.snapshot;
-  state.game = response.state;
-  saveGame();
+  if (!canApplySnapshotResponse(requestSnapshot, requestGeneration)) {
+    console.warn("Ignored stale game action response.", {
+      action,
+      requestPhase: requestSnapshot?.phase ?? null,
+      currentPhase: currentSnapshot?.phase ?? null,
+    });
+    return state.game ?? response.state;
+  }
+  applyAuthoritativeGameState(response.snapshot, response.state);
   startCutForDealPreparation(response.state);
   startAiDiscardPreparation(response.state);
   startNextHandPreparation(response.state);
@@ -1760,6 +1801,7 @@ function remoteGameSessionPayload(tag: string, snapshot: GameSnapshot, game: Gam
     gameId: snapshot.gameId ?? null,
     tag,
     model: snapshot.opponent,
+    clientRevision: gameStateGeneration,
     snapshot,
     state: game,
   };
@@ -1784,10 +1826,8 @@ async function loadRemoteActiveGameSession(): Promise<GameState | null> {
   const session = response.session;
   if (!session || session.state.phase === "game_over") return null;
   if (SIMPLE_NETWORK_MODE && !isAllowedSimpleNetworkOpponent(session.snapshot.opponent)) return null;
-  currentSnapshot = session.snapshot;
-  state.game = session.state;
+  applyAuthoritativeGameState(session.snapshot, session.state);
   state.hasResumableGame = true;
-  safeLocalStorageSet(SAVE_KEY, JSON.stringify({ version: 1, snapshot: currentSnapshot, state: state.game }));
   return session.state;
 }
 
@@ -1824,20 +1864,26 @@ function startCutForDealPreparation(game: GameState): void {
   void promise.catch(() => {
     if (state.cutForDealPreparation?.key === key) state.cutForDealPreparation = null;
   });
-  state.cutForDealPreparation = { key, promise };
+  state.cutForDealPreparation = { key, generation: currentSnapshotGeneration(), snapshot, promise };
 }
 
-function preparedCutForDealFor(game: GameState | null): Promise<ServerCutForDealPreparationResponse> | null {
+function preparedCutForDealFor(game: GameState | null): CutForDealPreparation | null {
   if (!game) return null;
   const key = cutForDealPreparationKey(game);
-  return key && state.cutForDealPreparation?.key === key ? state.cutForDealPreparation.promise : null;
+  return key && state.cutForDealPreparation?.key === key ? state.cutForDealPreparation : null;
 }
 
-function applyPreparedCutForDeal(response: ServerCutForDealPreparationResponse): GameState {
-  currentSnapshot = response.snapshot;
-  state.game = response.state;
-  saveGame();
-  state.cutForDealPreparation = null;
+function applyPreparedCutForDeal(
+  response: ServerCutForDealPreparationResponse,
+  preparation: CutForDealPreparation | null = state.cutForDealPreparation,
+): GameState {
+  if (preparation && !canApplySnapshotResponse(preparation.snapshot, preparation.generation)) {
+    console.warn("Ignored stale prepared cut-for-deal response.");
+    if (state.cutForDealPreparation === preparation) state.cutForDealPreparation = null;
+    return state.game ?? response.state;
+  }
+  applyAuthoritativeGameState(response.snapshot, response.state);
+  if (!preparation || state.cutForDealPreparation === preparation) state.cutForDealPreparation = null;
   storePreparedAiDiscard(response.state, response.recommendation ?? null);
   if (response.state.phase === "cut_for_deal") startCutForDealPreparation(response.state);
   return response.state;
@@ -1907,21 +1953,27 @@ function startNextHandPreparation(game: GameState): void {
     failedNextHandPreparationKeys.add(key);
     if (state.nextHandPreparation?.key === key) state.nextHandPreparation = null;
   });
-  state.nextHandPreparation = { key, promise };
+  state.nextHandPreparation = { key, generation: currentSnapshotGeneration(), snapshot, promise };
 }
 
-function preparedNextHandFor(game: GameState | null): Promise<ServerAiDiscardPreparationResponse> | null {
+function preparedNextHandFor(game: GameState | null): NextHandPreparation | null {
   if (!game || game.phase !== "score_crib" || game.scoring?.stage !== "crib") return null;
   const key = nextHandPreparationKey(game);
-  return key && state.nextHandPreparation?.key === key ? state.nextHandPreparation.promise : null;
+  return key && state.nextHandPreparation?.key === key ? state.nextHandPreparation : null;
 }
 
-function applyPreparedNextHand(response: ServerAiDiscardPreparationResponse): GameState {
-  currentSnapshot = response.snapshot;
-  state.game = response.state;
-  saveGame();
+function applyPreparedNextHand(
+  response: ServerAiDiscardPreparationResponse,
+  preparation: NextHandPreparation | null = state.nextHandPreparation,
+): GameState {
+  if (preparation && !canApplySnapshotResponse(preparation.snapshot, preparation.generation)) {
+    console.warn("Ignored stale prepared next-hand response.");
+    if (state.nextHandPreparation === preparation) state.nextHandPreparation = null;
+    return state.game ?? response.state;
+  }
+  applyAuthoritativeGameState(response.snapshot, response.state);
   storePreparedAiDiscard(response.state, response.recommendation);
-  state.nextHandPreparation = null;
+  if (!preparation || state.nextHandPreparation === preparation) state.nextHandPreparation = null;
   failedNextHandPreparationKeys.delete(nextHandPreparationKey(response.state) ?? "");
   return response.state;
 }
@@ -1983,12 +2035,18 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       });
     }
     if (path === "/api/prepare-next-hand-ai-discard") {
+      const requestSnapshot = currentSnapshot;
+      const requestGeneration = currentSnapshotGeneration();
       const response = await serverJson<ServerAiDiscardPreparationResponse>("/api/game/action", {
         action: "prepare-next-hand-ai-discard",
         payload: {},
-        snapshot: currentSnapshot,
+        snapshot: requestSnapshot,
         tag: currentSessionTag() || null,
       });
+      if (!canApplySnapshotResponse(requestSnapshot, requestGeneration)) {
+        console.warn("Ignored stale explicit next-hand preparation response.");
+        return state.game ?? response.state;
+      }
       return applyPreparedNextHand(response);
     }
     if (path === "/api/continue-scoring") {
@@ -4811,7 +4869,7 @@ async function cutForDeal(): Promise<void> {
     let next: GameState;
     if (preparedCut) {
       try {
-        next = applyPreparedCutForDeal(await preparedCut);
+        next = applyPreparedCutForDeal(await preparedCut.promise, preparedCut);
       } catch {
         state.cutForDealPreparation = null;
         next = await api("/api/cut-for-deal", {});
@@ -4993,7 +5051,7 @@ els.continueScoring.addEventListener("click", async () => {
     let next: GameState;
     if (preparedNext) {
       try {
-        next = applyPreparedNextHand(await preparedNext);
+        next = applyPreparedNextHand(await preparedNext.promise, preparedNext);
       } catch {
         state.nextHandPreparation = null;
         next = await api("/api/continue-scoring", {});

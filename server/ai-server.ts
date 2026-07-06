@@ -497,6 +497,93 @@ function gameSessionKey(tag: string, model: string): string {
   return `${model.toLowerCase()}::${tag.toLowerCase()}`;
 }
 
+function numericRecordValue(record: JsonRecord | undefined, key: string): number | null {
+  const value = record?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function phaseProgress(phase: unknown): number {
+  switch (phase) {
+    case "cut_for_deal":
+      return 0;
+    case "discard":
+      return 10;
+    case "ai_discarding":
+      return 20;
+    case "pegging":
+      return 30;
+    case "pegging_complete":
+      return 40;
+    case "score_pone":
+      return 50;
+    case "score_dealer":
+      return 60;
+    case "score_crib":
+      return 70;
+    case "game_over":
+      return 80;
+    default:
+      return -1;
+  }
+}
+
+function snapshotProgressTuple(snapshot: JsonRecord, state: JsonRecord | undefined): number[] {
+  const scores = state?.scores as JsonRecord | undefined;
+  const humanScore = numericRecordValue(scores, "human") ?? 0;
+  const aiScore = numericRecordValue(scores, "ai") ?? 0;
+  return [
+    numericRecordValue(snapshot, "handNumber") ?? 0,
+    numericRecordValue(snapshot, "analyticsCounter") ?? 0,
+    phaseProgress(snapshot.phase),
+    humanScore + aiScore,
+  ];
+}
+
+function compareProgressTuple(left: number[], right: number[]): number {
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+function shouldIgnoreStaleGameSessionSave(
+  existing: JsonRecord | undefined,
+  incomingRequest: JsonRecord,
+  incomingSnapshot: JsonRecord,
+  incomingState: JsonRecord,
+  incomingGameId: string,
+): boolean {
+  if (!existing) return false;
+  let existingRequest: JsonRecord | null = null;
+  let existingSnapshot: JsonRecord | null = null;
+  let existingState: JsonRecord | null = null;
+  try {
+    existingRequest = JSON.parse(String(existing.request_json || "{}")) as JsonRecord;
+    existingSnapshot = JSON.parse(String(existing.snapshot_json || "{}")) as JsonRecord;
+    existingState = JSON.parse(String(existing.state_json || "{}")) as JsonRecord;
+  } catch {
+    return false;
+  }
+
+  const incomingRevision = numericRecordValue(incomingRequest, "clientRevision");
+  const existingRevision = numericRecordValue(existingRequest, "clientRevision");
+  if (incomingRevision !== null && existingRevision !== null && incomingRevision < existingRevision) {
+    return true;
+  }
+
+  const existingGameId = String(existing.game_id || existingSnapshot.gameId || "");
+  if (incomingGameId && existingGameId && incomingGameId !== existingGameId) {
+    return incomingRevision !== null && existingRevision !== null && incomingRevision < existingRevision;
+  }
+
+  return compareProgressTuple(
+    snapshotProgressTuple(incomingSnapshot, incomingState),
+    snapshotProgressTuple(existingSnapshot, existingState),
+  ) < 0;
+}
+
 async function persistGameSession(requestBody: JsonRecord): Promise<void> {
   const tag = sessionTagFromRequest(requestBody);
   if (!tag) return;
@@ -516,6 +603,13 @@ async function persistGameSession(requestBody: JsonRecord): Promise<void> {
   const model = sessionModelFromRequest(requestBody);
   const now = new Date().toISOString();
   const gameId = String(requestBody.gameId || snapshot.gameId || "");
+  const sessionKey = gameSessionKey(tag, model);
+  const existing = db.prepare(`
+    SELECT game_id, snapshot_json, state_json, request_json
+    FROM game_sessions
+    WHERE session_key = ? AND status = 'active'
+  `).get(sessionKey) as JsonRecord | undefined;
+  if (shouldIgnoreStaleGameSessionSave(existing, requestBody, snapshot, state, gameId)) return;
   db.prepare(`
     INSERT INTO game_sessions
       (session_key, tag, model, game_id, created_at, updated_at, status, snapshot_json, state_json, request_json)
@@ -530,7 +624,7 @@ async function persistGameSession(requestBody: JsonRecord): Promise<void> {
       state_json = excluded.state_json,
       request_json = excluded.request_json
   `).run(
-    gameSessionKey(tag, model),
+    sessionKey,
     tag,
     model,
     gameId || null,
