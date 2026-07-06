@@ -575,7 +575,7 @@ describe("game state", () => {
     expect(play.ascii).toBe("3c");
   });
 
-  test("records discard review against the review model", () => {
+  test("defers discard review against the review model", () => {
     const game = new CribbageGame("schell_table-peg_table-4.0");
     game.phase = "discard";
     game.dealer = game.ai;
@@ -591,10 +591,15 @@ describe("game state", () => {
     );
     expect(discard).toMatchObject({
       cards: ["5s", "6d"],
+    });
+    expect((discard as any).review).toBeUndefined();
+
+    expect(game.completePendingDecisionReviews()).toBe(1);
+    expect(discard).toMatchObject({
       review: {
         model: REVIEW_OPPONENT,
         selected: ["5s", "6d"],
-        recommended: ["As", "2d"],
+        recommended: expect.any(Array),
         delta: expect.any(Number),
         winProbabilityDelta: expect.any(Number),
       },

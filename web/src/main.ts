@@ -99,6 +99,7 @@ type ServerBusyRetry = () => void | Promise<void>;
 type AppFontSize = "normal" | "large" | "x-large";
 
 const FONT_SIZE_STORAGE_KEY = "strong-cribbage.fontSize";
+const DISMISSED_GAME_OVER_STORAGE_KEY = "strong-cribbage.dismissedGameOverId";
 
 function normalizeAppFontSize(value: string | null): AppFontSize {
   return value === "large" || value === "x-large" ? value : "normal";
@@ -201,7 +202,7 @@ const state: {
   selectedModelInfo: DEFAULT_OPPONENT,
   selectedLogGameId: null,
   snapshotEventId: null,
-  dismissedGameOverId: null,
+  dismissedGameOverId: safeLocalStorageGet(DISMISSED_GAME_OVER_STORAGE_KEY),
   aiThinking: false,
   modelLoading: false,
   completingReviews: false,
@@ -237,6 +238,7 @@ function resetTransientGameUi(): void {
   state.resultOverride = null;
   state.serverBusy = null;
   state.dismissedGameOverId = null;
+  safeLocalStorageRemove(DISMISSED_GAME_OVER_STORAGE_KEY);
   state.aiThinking = false;
   state.modelLoading = false;
   state.completingReviews = false;
@@ -2466,7 +2468,7 @@ function renderSingleGameReport(game: GameState, end: GameEndEvent): void {
   newGame.className = "report-new-game";
   newGame.textContent = "New game";
   newGame.addEventListener("click", () => {
-    void startNewGameFromUi();
+    void startNewGameFromUi({ forceNew: true });
   });
   els.singleGameReport.append(newGame);
   renderGameReportInto(els.singleGameReport, game.analyticsEvents, end, "Game report", game.scores);
@@ -2519,8 +2521,8 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
     pendingBody.className = "decision-review-pending-body";
     const pendingText = document.createElement("span");
     pendingText.textContent = canAnalyze
-      ? `${pending.length} user peg play${pending.length === 1 ? "" : "s"} waiting for analysis.`
-      : `${pending.length} user peg play${pending.length === 1 ? "" : "s"} not analyzed.`;
+      ? `${pending.length} user decision${pending.length === 1 ? "" : "s"} waiting for analysis.`
+      : `${pending.length} user decision${pending.length === 1 ? "" : "s"} not analyzed.`;
     pendingBody.append(pendingText);
     if (state.completingReviews && state.reviewProgress) {
       const total = Math.max(1, state.reviewProgress.total);
@@ -2597,21 +2599,22 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   return section;
 }
 
-function pendingDecisionReviews(events: AnalyticsEvent[], gameId: string): PeggingEvent[] {
-  return events.filter((event): event is PeggingEvent =>
+function pendingDecisionReviews(events: AnalyticsEvent[], gameId: string): Array<DiscardEvent | PeggingEvent> {
+  return events.filter((event): event is DiscardEvent | PeggingEvent =>
     event.gameId === gameId &&
-    event.type === "pegging" &&
-    event.action === "play" &&
-    event.player === "human" &&
+    ((event.type === "discard" && event.player === "human") ||
+      (event.type === "pegging" && event.action === "play" && event.player === "human")) &&
     !event.review,
   );
 }
 
 function canAnalyzeCurrentGameDecisionReviews(gameId: string): boolean {
+  const pendingDiscardCount = currentSnapshot?.pendingDiscardReviews?.length ?? 0;
+  const pendingPeggingCount = currentSnapshot?.pendingPeggingReviews?.length ?? 0;
   return Boolean(
     state.game?.phase === "game_over" &&
       currentSnapshot?.gameId === gameId &&
-      (currentSnapshot.pendingPeggingReviews?.length ?? 0) > 0,
+      pendingDiscardCount + pendingPeggingCount > 0,
   );
 }
 
@@ -4590,17 +4593,19 @@ async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
 
 async function analyzeCurrentGameDecisionReviews(): Promise<void> {
   if (!state.game || state.game.phase !== "game_over" || state.pending || state.completingReviews) return;
-  const total = currentSnapshot?.pendingPeggingReviews?.length ?? 0;
+  const total = (currentSnapshot?.pendingDiscardReviews?.length ?? 0) + (currentSnapshot?.pendingPeggingReviews?.length ?? 0);
   if (!total) return;
   state.completingReviews = true;
   state.reviewProgress = { total, remaining: total };
   render(state.game);
   try {
     for (;;) {
-      const beforeRemaining = currentSnapshot?.pendingPeggingReviews?.length ?? 0;
+      const beforeRemaining = (currentSnapshot?.pendingDiscardReviews?.length ?? 0) +
+        (currentSnapshot?.pendingPeggingReviews?.length ?? 0);
       if (!beforeRemaining) break;
       const next = await api("/api/complete-decision-reviews", { limit: 1 });
-      const remaining = currentSnapshot?.pendingPeggingReviews?.length ?? 0;
+      const remaining = (currentSnapshot?.pendingDiscardReviews?.length ?? 0) +
+        (currentSnapshot?.pendingPeggingReviews?.length ?? 0);
       state.reviewProgress = { total, remaining };
       render(next);
       if (!remaining || remaining >= beforeRemaining) break;
@@ -4785,6 +4790,11 @@ els.opponent.addEventListener("change", async () => {
 els.gameOverClose.addEventListener("click", () => {
   const end = state.game ? latestGameEnd(state.game) : null;
   state.dismissedGameOverId = end?.gameId ?? null;
+  if (state.dismissedGameOverId) {
+    safeLocalStorageSet(DISMISSED_GAME_OVER_STORAGE_KEY, state.dismissedGameOverId);
+  } else {
+    safeLocalStorageRemove(DISMISSED_GAME_OVER_STORAGE_KEY);
+  }
   render(state.game);
 });
 
@@ -5112,6 +5122,7 @@ els.troubleGame.addEventListener("click", async () => {
   try {
     state.resultOverride = null;
     state.dismissedGameOverId = null;
+    safeLocalStorageRemove(DISMISSED_GAME_OVER_STORAGE_KEY);
     els.opponent.value = SIMPLE_NETWORK_OPPONENT;
     const next = await api("/api/trouble-game", {});
     els.settingsPanel.hidden = true;

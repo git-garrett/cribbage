@@ -589,7 +589,15 @@ export interface GameSnapshot {
   result: string[];
   pegPositions: Record<PlayerKey, [number | string, number | string]>;
   pegTableLeads?: Record<PlayerKey, number | null>;
+  pendingDiscardReviews?: PendingDiscardReview[];
   pendingPeggingReviews?: PendingPeggingReview[];
+}
+
+interface PendingDiscardReview {
+  eventId: string;
+  player: PlayerKey;
+  cardIds: number[];
+  snapshot: GameSnapshot;
 }
 
 interface PendingPeggingReview {
@@ -803,6 +811,7 @@ export class CribbageGame {
     human: null,
     ai: null,
   };
+  pendingDiscardReviews: PendingDiscardReview[] = [];
   pendingPeggingReviews: PendingPeggingReview[] = [];
 
   constructor(
@@ -899,6 +908,7 @@ export class CribbageGame {
       human: snapshot.pegTableLeads?.human ?? null,
       ai: snapshot.pegTableLeads?.ai ?? null,
     };
+    game.pendingDiscardReviews = [...snapshot.pendingDiscardReviews ?? []];
     game.pendingPeggingReviews = [...snapshot.pendingPeggingReviews ?? []];
     return game;
   }
@@ -952,6 +962,7 @@ export class CribbageGame {
         ai: [...this.pegPositions.ai],
       },
       pegTableLeads: { ...this.pegTableLeads },
+      pendingDiscardReviews: [...this.pendingDiscardReviews],
       pendingPeggingReviews: [...this.pendingPeggingReviews],
     };
   }
@@ -960,6 +971,7 @@ export class CribbageGame {
     return {
       ...this.snapshot(),
       analyticsEvents: [],
+      pendingDiscardReviews: [],
       pendingPeggingReviews: [],
     };
   }
@@ -1161,9 +1173,10 @@ export class CribbageGame {
     if (this.phase !== "discard") throw new Error("It is not discard time.");
     const discards = this.selectedCards(sortedCards(this.human.hand), ids, 2);
     const handBeforeDiscard = [...this.human.hand];
+    const pendingReviewSnapshot = this.reviewSnapshot();
     removeCards(this.human.hand, discards);
     this.crib.push(...discards);
-    this.recordDiscard(this.human, discards, handBeforeDiscard);
+    this.recordDiscard(this.human, discards, handBeforeDiscard, true, undefined, pendingReviewSnapshot);
     this.logEvent("User discarded two cards to the crib.");
     if (this.ai.hand.length === 6) {
       this.phase = "ai_discarding";
@@ -1400,6 +1413,27 @@ export class CribbageGame {
     const maxReviews = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : Number.POSITIVE_INFINITY;
     let completed = 0;
     let attempted = 0;
+    const remainingDiscards: PendingDiscardReview[] = [];
+    for (const pending of this.pendingDiscardReviews) {
+      if (attempted >= maxReviews) {
+        remainingDiscards.push(pending);
+        continue;
+      }
+      attempted += 1;
+      const event = this.analyticsEvents.find((candidate) => candidate.id === pending.eventId);
+      if (!event || event.type !== "discard") continue;
+      try {
+        const reviewGame = CribbageGame.restore(pending.snapshot);
+        const player = reviewGame.playerByKey(pending.player);
+        const cards = pending.cardIds.map((id) => new Card(id));
+        event.review = reviewGame.reviewDiscard(player, cards, [...player.hand]);
+        completed += 1;
+      } catch {
+        remainingDiscards.push(pending);
+      }
+    }
+    this.pendingDiscardReviews = remainingDiscards;
+
     const remaining: PendingPeggingReview[] = [];
     for (const pending of this.pendingPeggingReviews) {
       if (attempted >= maxReviews) {
@@ -2066,30 +2100,34 @@ export class CribbageGame {
     handBeforeDiscard: Card[] = player.hand,
     reviewDecision = player === this.human,
     discardAnalysis?: DiscardChoiceAnalysis,
+    pendingReviewSnapshot?: GameSnapshot,
   ): void {
     const engine = this.playerEngines[player.key];
-    const analysis = discardAnalysis ??
-      analyzeDiscardChoice(handBeforeDiscard, cards, player === this.dealer, engine, { game: this, player });
-    this.pegTableLeads[player.key] = analysis.selectedPegTableLead;
-    const selectedWinProbability = analysis.selectedWinProbability ?? discardChoiceWinProbability(
-      this,
-      player,
-      analysis.selectedComponents,
-      engine,
-    );
-    const recommendedWinProbability = analysis.recommendedWinProbability ?? discardChoiceWinProbability(
-      this,
-      player,
-      analysis.recommendedComponents,
-      engine,
-    );
-    const selectedEvComponents = shouldLogScoreComponents()
+    const shouldDeferHumanReview = reviewDecision && player === this.human && pendingReviewSnapshot;
+    const analysis = discardAnalysis ?? (shouldDeferHumanReview
+      ? undefined
+      : analyzeDiscardChoice(handBeforeDiscard, cards, player === this.dealer, engine, { game: this, player }));
+    if (analysis) this.pegTableLeads[player.key] = analysis.selectedPegTableLead;
+    const selectedWinProbability = analysis
+      ? analysis.selectedWinProbability ?? discardChoiceWinProbability(
+        this,
+        player,
+        analysis.selectedComponents,
+        engine,
+      )
+      : undefined;
+    const recommendedWinProbability = analysis
+      ? analysis.recommendedWinProbability ?? discardChoiceWinProbability(
+        this,
+        player,
+        analysis.recommendedComponents,
+        engine,
+      )
+      : undefined;
+    const selectedEvComponents = analysis && shouldLogScoreComponents()
       ? selectedDiscardEvComponents(handBeforeDiscard, cards, player === this.dealer, engine)
       : undefined;
-    const review = reviewDecision && player === this.human
-      ? this.reviewDiscard(player, cards, handBeforeDiscard)
-      : undefined;
-    this.recordAnalytics({
+    const event = this.recordAnalytics({
       type: "discard",
       handNumber: this.handNumber,
       player: player.key,
@@ -2102,13 +2140,22 @@ export class CribbageGame {
       scores: { human: this.human.score, ai: this.ai.score },
       dealer: this.dealer.key,
       model: engine,
-      selectedEv: roundEv(analysis.selectedEv),
-      selectedWinProbability: roundProbability(selectedWinProbability),
-      recommendedWinProbability: roundProbability(recommendedWinProbability),
-      winProbabilityDelta: roundProbability(recommendedWinProbability - selectedWinProbability),
+      selectedEv: analysis ? roundEv(analysis.selectedEv) : undefined,
+      selectedWinProbability: selectedWinProbability === undefined ? undefined : roundProbability(selectedWinProbability),
+      recommendedWinProbability: recommendedWinProbability === undefined ? undefined : roundProbability(recommendedWinProbability),
+      winProbabilityDelta: selectedWinProbability === undefined || recommendedWinProbability === undefined
+        ? undefined
+        : roundProbability(recommendedWinProbability - selectedWinProbability),
       selectedEvComponents,
-      review,
     });
+    if (shouldDeferHumanReview) {
+      this.pendingDiscardReviews.push({
+        eventId: event.id,
+        player: player.key,
+        cardIds: cards.map((card) => card.id),
+        snapshot: pendingReviewSnapshot,
+      });
+    }
   }
 
   private reviewDiscard(
