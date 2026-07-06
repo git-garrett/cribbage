@@ -416,6 +416,87 @@ function hasColumn(db, tableName, columnName) {
   return db.prepare(`PRAGMA table_info(${tableName})`).all().some((column) => column.name === columnName);
 }
 
+function percentile(values, q) {
+  if (!values.length) return 0;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1));
+  return sorted[index];
+}
+
+function decisionTiming(db, runIds) {
+  const hasDiscardTiming = hasColumn(db, "compact_discards", "decision_elapsed_us");
+  const hasPeggingTiming = hasColumn(db, "compact_peg_plays", "decision_elapsed_us");
+  if (!hasDiscardTiming && !hasPeggingTiming) {
+    return {
+      note: "Compact decision rows do not have decision_elapsed_us yet.",
+      rows: [],
+    };
+  }
+  const runPlaceholders = placeholders(runIds);
+  const rows = [];
+  if (hasDiscardTiming) {
+    rows.push(...db.prepare(`
+      SELECT
+        'discard' AS kind,
+        d.role,
+        d.model,
+        d.decision_elapsed_us
+      FROM compact_discards d
+      JOIN compact_games g ON g.game_id = d.game_id
+      WHERE g.run_id IN (${runPlaceholders})
+        AND d.decision_elapsed_us IS NOT NULL
+    `).all(...runIds));
+  }
+  if (hasPeggingTiming) {
+    rows.push(...db.prepare(`
+      SELECT
+        'pegging' AS kind,
+        p.role,
+        p.model,
+        p.decision_elapsed_us
+      FROM compact_peg_plays p
+      JOIN compact_games g ON g.game_id = p.game_id
+      WHERE g.run_id IN (${runPlaceholders})
+        AND p.decision_elapsed_us IS NOT NULL
+        AND p.model IS NOT NULL
+        AND p.role IS NOT NULL
+    `).all(...runIds));
+  }
+
+  const buckets = new Map();
+  for (const row of rows) {
+    const role = row.role === 1 ? "dealer" : "pone";
+    const key = `${row.kind}:${role}:${row.model}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        kind: row.kind,
+        role,
+        model: row.model,
+        values: [],
+      });
+    }
+    const value = Number(row.decision_elapsed_us);
+    if (Number.isFinite(value)) buckets.get(key).values.push(value);
+  }
+
+  return {
+    note: "Decision timing measures Rust model decision calls only; forced no-model rows are stored as NULL and excluded.",
+    rows: [...buckets.values()]
+      .map((bucket) => ({
+        kind: bucket.kind,
+        role: bucket.role,
+        model: bucket.model,
+        rows: bucket.values.length,
+        avgMs: mean(bucket.values) / 1000,
+        p50Ms: percentile(bucket.values, 0.5) / 1000,
+        p90Ms: percentile(bucket.values, 0.9) / 1000,
+        maxMs: bucket.values.reduce((maximum, value) => Math.max(maximum, value), 0) / 1000,
+        totalSeconds: bucket.values.reduce((sum, value) => sum + value, 0) / 1_000_000,
+      }))
+      .sort((a, b) => a.kind.localeCompare(b.kind) || a.role.localeCompare(b.role) || a.model.localeCompare(b.model)),
+  };
+}
+
 function summarizeWinProbabilityBucket(bucket) {
   const avgPredicted = mean(bucket.predicted);
   const actualWinRate = mean(bucket.actual);
@@ -566,6 +647,7 @@ function main() {
   const completedHands = completedDecisionHands(games, hands);
   const ev = evCalibration(db, runIds, completedHands);
   const winProbability = winProbabilityCalibration(db, runIds);
+  const timing = decisionTiming(db, runIds);
   db.close();
 
   const rightWins = games.filter((game) => game.winner === 1).length;
@@ -622,6 +704,7 @@ function main() {
       excluded: ev.skipped,
       rows: evRows,
     },
+    timing,
     winProbability,
   };
 
@@ -650,6 +733,24 @@ function main() {
   const winLeader = rightWins >= leftWins ? rightModel : leftModel;
   lines.push(`Win confidence leader: ${winLeader} at ${pct(winConfidence.confidence)} (normal approximation to binomial).`);
   lines.push("");
+  if (timing.rows.length) {
+    lines.push("Decision timing note: Rust model decision calls only; forced no-model rows are excluded.");
+    lines.push(table(
+      ["Kind", "Role", "Model", "Rows", "Avg ms", "P50 ms", "P90 ms", "Max ms", "Total sec"],
+      timing.rows.map((row) => [
+        row.kind,
+        row.role,
+        row.model,
+        row.rows,
+        fmt(row.avgMs, 3),
+        fmt(row.p50Ms, 3),
+        fmt(row.p90Ms, 3),
+        fmt(row.maxMs, 3),
+        fmt(row.totalSeconds, 3),
+      ]),
+    ));
+    lines.push("");
+  }
   lines.push(table(
     ["Metric", `${leftModel} avg`, "N", `${rightModel} avg`, "N", `${rightModel} - ${leftModel}`, "Leader", "Leader confidence"],
     scoring.map((row) => [

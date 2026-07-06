@@ -408,7 +408,7 @@ fn initialize_db(db_path: &Path, config: &Config, started_at: &str) -> Result<()
         )
     );
     run_sqlite(db_path, &sql)?;
-    ensure_compact_hand_available_event_columns(db_path)
+    ensure_compact_schema_columns(db_path)
 }
 
 fn mark_run_complete(db_path: &Path, run_id: &str, status: &str) -> Result<(), String> {
@@ -512,8 +512,8 @@ fn append_discard_rows(sql: &mut String, game_id: &str, record: &CompactPlayoutR
         sql.push_str(&format!(
             concat!(
                 "INSERT OR REPLACE INTO compact_discards (game_id, hand_number, player, role, model, selected_ev, selected_win_probability, ",
-                "recommended_win_probability, win_probability_delta, cards, hand_before, remaining_hand, crib_after_discard, left_score, right_score) ",
-                "VALUES ({}, {}, {}, {}, {}, {}, {}, {}, 0, {}, {}, {}, {}, {}, {});\n"
+                "recommended_win_probability, win_probability_delta, decision_elapsed_us, cards, hand_before, remaining_hand, crib_after_discard, left_score, right_score) ",
+                "VALUES ({}, {}, {}, {}, {}, {}, {}, {}, 0, {}, {}, {}, {}, {}, {}, {});\n"
             ),
             sql_text(game_id),
             discard.hand_number,
@@ -523,6 +523,7 @@ fn append_discard_rows(sql: &mut String, game_id: &str, record: &CompactPlayoutR
             sql_opt_f64(discard.selected_ev),
             sql_opt_f64(discard.selected_win_probability),
             sql_opt_f64(discard.selected_win_probability),
+            sql_opt_u64(discard.decision_elapsed_us),
             sql_card_blob(&discard.cards),
             sql_card_blob(&discard.hand_before),
             sql_card_blob(&discard.remaining_hand),
@@ -538,8 +539,8 @@ fn append_peg_rows(sql: &mut String, game_id: &str, record: &CompactPlayoutRecor
         sql.push_str(&format!(
             concat!(
                 "INSERT OR REPLACE INTO compact_peg_plays (game_id, hand_number, sequence, player, role, model, selected_ev, ",
-                "selected_win_probability, legal_count, action, card, count_before, count_after, points, left_score, right_score) ",
-                "VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n"
+                "selected_win_probability, decision_elapsed_us, legal_count, action, card, count_before, count_after, points, left_score, right_score) ",
+                "VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n"
             ),
             sql_text(game_id),
             play.hand_number,
@@ -549,6 +550,7 @@ fn append_peg_rows(sql: &mut String, game_id: &str, record: &CompactPlayoutRecor
             play.model.map(|model| sql_text(model.as_str())).unwrap_or_else(|| "NULL".to_string()),
             sql_opt_f64(play.selected_ev),
             sql_opt_f64(play.selected_win_probability),
+            sql_opt_u64(play.decision_elapsed_us),
             play.legal_count.map(|count| count.to_string()).unwrap_or_else(|| "NULL".to_string()),
             play.action,
             play.card.map(compact_card_id).map(|id| id.to_string()).unwrap_or_else(|| "NULL".to_string()),
@@ -645,6 +647,7 @@ CREATE TABLE IF NOT EXISTS compact_peg_plays (
   model TEXT,
   selected_ev REAL,
   selected_win_probability REAL,
+  decision_elapsed_us INTEGER,
   legal_count INTEGER,
   action INTEGER NOT NULL,
   card INTEGER,
@@ -665,6 +668,7 @@ CREATE TABLE IF NOT EXISTS compact_discards (
   selected_win_probability REAL,
   recommended_win_probability REAL,
   win_probability_delta REAL,
+  decision_elapsed_us INTEGER,
   cards BLOB,
   hand_before BLOB,
   remaining_hand BLOB,
@@ -677,9 +681,9 @@ CREATE INDEX IF NOT EXISTS idx_compact_discards_model ON compact_discards(model,
 "#
 }
 
-fn ensure_compact_hand_available_event_columns(db_path: &Path) -> Result<(), String> {
-    let columns = sqlite_table_columns(db_path, "compact_hands")?;
-    let migrations = [
+fn ensure_compact_schema_columns(db_path: &Path) -> Result<(), String> {
+    let hand_columns = sqlite_table_columns(db_path, "compact_hands")?;
+    let hand_migrations = [
         (
             "left_available_pegging_points",
             "INTEGER NOT NULL DEFAULT 0",
@@ -693,13 +697,27 @@ fn ensure_compact_hand_available_event_columns(db_path: &Path) -> Result<(), Str
         ("available_crib_points", "INTEGER NOT NULL DEFAULT 0"),
     ];
     let mut sql = String::new();
-    for (column, definition) in migrations {
-        if !columns.iter().any(|existing| existing == column) {
+    for (column, definition) in hand_migrations {
+        if !hand_columns.iter().any(|existing| existing == column) {
             sql.push_str(&format!(
                 "ALTER TABLE compact_hands ADD COLUMN {} {};\n",
                 column, definition
             ));
         }
+    }
+    let discard_columns = sqlite_table_columns(db_path, "compact_discards")?;
+    if !discard_columns
+        .iter()
+        .any(|existing| existing == "decision_elapsed_us")
+    {
+        sql.push_str("ALTER TABLE compact_discards ADD COLUMN decision_elapsed_us INTEGER;\n");
+    }
+    let peg_columns = sqlite_table_columns(db_path, "compact_peg_plays")?;
+    if !peg_columns
+        .iter()
+        .any(|existing| existing == "decision_elapsed_us")
+    {
+        sql.push_str("ALTER TABLE compact_peg_plays ADD COLUMN decision_elapsed_us INTEGER;\n");
     }
     if sql.is_empty() {
         Ok(())
@@ -794,6 +812,12 @@ fn sql_opt_f64(value: Option<f64>) -> String {
     value
         .filter(|item| item.is_finite())
         .map(|item| format!("{:.12}", item))
+        .unwrap_or_else(|| "NULL".to_string())
+}
+
+fn sql_opt_u64(value: Option<u64>) -> String {
+    value
+        .map(|item| item.to_string())
         .unwrap_or_else(|| "NULL".to_string())
 }
 

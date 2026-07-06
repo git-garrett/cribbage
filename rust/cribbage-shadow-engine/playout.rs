@@ -3,6 +3,7 @@ use crate::cards::{score_count, score_hand, Card};
 use crate::game::{CribbageGame, Phase, Side};
 use crate::model::{evaluate_decision, Decision, DecisionInput, DecisionKind, PlayerKey};
 use crate::model_id::ModelId;
+use std::time::Instant;
 
 #[derive(Clone, Debug)]
 pub struct PlayoutResult {
@@ -56,6 +57,7 @@ pub struct CompactDiscardRecord {
     pub model: ModelId,
     pub selected_ev: Option<f64>,
     pub selected_win_probability: Option<f64>,
+    pub decision_elapsed_us: Option<u64>,
     pub cards: Vec<Card>,
     pub hand_before: Vec<Card>,
     pub remaining_hand: Vec<Card>,
@@ -73,6 +75,7 @@ pub struct CompactPegPlayRecord {
     pub model: Option<ModelId>,
     pub selected_ev: Option<f64>,
     pub selected_win_probability: Option<f64>,
+    pub decision_elapsed_us: Option<u64>,
     pub legal_count: Option<usize>,
     pub action: u8,
     pub card: Option<Card>,
@@ -163,7 +166,9 @@ impl ModelPlayout {
         for side in [Side::Left, Side::Right] {
             if self.game.phase == Phase::Discard && self.game.player(side).hand.len() == 6 {
                 let input = self.decision_input(side, DecisionKind::Discard);
+                let decision_started = Instant::now();
                 let decision = evaluate_decision(&input, root)?;
+                let decision_elapsed_us = elapsed_micros(decision_started);
                 let Decision::Discard {
                     card_ids,
                     best_lead,
@@ -198,6 +203,7 @@ impl ModelPlayout {
                     model: self.model(side),
                     selected_ev: ev,
                     selected_win_probability: win_probability,
+                    decision_elapsed_us: Some(decision_elapsed_us),
                     cards,
                     hand_before,
                     remaining_hand: self.game.player(side).hand.clone(),
@@ -227,6 +233,7 @@ impl ModelPlayout {
                 model: None,
                 selected_ev: None,
                 selected_win_probability: None,
+                decision_elapsed_us: None,
                 legal_count: None,
                 action: 2,
                 card: None,
@@ -256,6 +263,7 @@ impl ModelPlayout {
                 model: Some(self.model(side)),
                 selected_ev: None,
                 selected_win_probability: None,
+                decision_elapsed_us: None,
                 legal_count: Some(0),
                 action: 1,
                 card: None,
@@ -293,6 +301,7 @@ impl ModelPlayout {
                 model: Some(self.model(side)),
                 selected_ev: Some(ev),
                 selected_win_probability: None,
+                decision_elapsed_us: None,
                 legal_count: Some(1),
                 action: 0,
                 card: Some(card),
@@ -307,7 +316,9 @@ impl ModelPlayout {
             return Ok(());
         }
         let input = self.decision_input(side, DecisionKind::Peg);
+        let decision_started = Instant::now();
         let decision = evaluate_decision(&input, root)?;
+        let decision_elapsed_us = elapsed_micros(decision_started);
         match decision {
             Decision::Peg { action, .. } if action == "go" => {
                 self.game.say_go(side)?;
@@ -321,6 +332,7 @@ impl ModelPlayout {
                     model: Some(self.model(side)),
                     selected_ev: None,
                     selected_win_probability: None,
+                    decision_elapsed_us: Some(decision_elapsed_us),
                     legal_count: Some(legal.len()),
                     action: 1,
                     card: None,
@@ -364,6 +376,7 @@ impl ModelPlayout {
                     model: Some(self.model(side)),
                     selected_ev: ev,
                     selected_win_probability: win_probability,
+                    decision_elapsed_us: Some(decision_elapsed_us),
                     legal_count: Some(legal.len()),
                     action: 0,
                     card: Some(card),
@@ -625,6 +638,10 @@ fn points_until_win(score: i32, points: i32) -> i32 {
     } else {
         points.min(121 - score)
     }
+}
+
+fn elapsed_micros(started: Instant) -> u64 {
+    started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64
 }
 
 #[cfg(test)]
