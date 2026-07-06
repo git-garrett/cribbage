@@ -5,7 +5,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { Worker } from "node:worker_threads";
 import { CribbageGame, WinGame, type GameSnapshot } from "../web/src/engine";
-import { MODEL, MODEL_13, MODEL_14_3 } from "./ai-constants";
+import { MODEL, MODEL_13, MODEL_14_3, MODEL_15 } from "./ai-constants";
 import {
   persistRustShadowRecord,
   requestModelForPayload,
@@ -25,11 +25,11 @@ const DATA_DIR = resolve(process.env.CRIBBAGE_DATA_DIR || join(ROOT, "data"));
 const DB_PATH = resolve(process.env.CRIBBAGE_DB_PATH || join(DATA_DIR, "cribbage-server.sqlite"));
 const MARKETING_HOSTS = new Set(["strongcribbage.com"]);
 const AI_QUEUE_MAX_WAITING = Number(process.env.AI_QUEUE_MAX_WAITING || 4);
-const LEADERBOARD_MODELS = [MODEL_13, MODEL_14_3] as const;
-const PUBLIC_GAME_MODELS = [MODEL_13, MODEL_14_3] as const;
+const LEADERBOARD_MODELS = [MODEL_13, MODEL_14_3, MODEL_15] as const;
+const PUBLIC_GAME_MODELS = [MODEL_15] as const;
 const RUST_PRIMARY_ENABLED = process.env.CRIBBAGE_RUST_PRIMARY === "1";
 const RUST_PRIMARY_MODELS = new Set(
-  (process.env.CRIBBAGE_RUST_PRIMARY_MODELS || `${MODEL_13},${MODEL_14_3}`)
+  (process.env.CRIBBAGE_RUST_PRIMARY_MODELS || `${MODEL_13},${MODEL_14_3},${MODEL_15}`)
     .split(",")
     .map((model) => model.trim())
     .filter(Boolean),
@@ -796,7 +796,7 @@ function buildLeaderboardSummary(rows: JsonRecord[]): JsonRecord {
   return {
     generatedAt: new Date().toISOString(),
     source: "server-game-uploads",
-    model: "13.0/14.3 alternating",
+    model: "13.0/14.3/15.0 public",
     models: LEADERBOARD_MODELS,
     games: playerStats.reduce((sum, player) => sum + player.games, 0),
     playerStats,
@@ -812,7 +812,7 @@ async function leaderboardSummary(): Promise<JsonRecord> {
     return {
       generatedAt: new Date().toISOString(),
       source: "server-game-uploads",
-      model: "13.0/14.3 alternating",
+      model: "13.0/14.3/15.0 public",
       models: LEADERBOARD_MODELS,
       games: 0,
       playerStats: [],
@@ -1240,36 +1240,33 @@ function mostRecentPublicModel(db: DatabaseSyncLike): string | null {
 }
 
 function randomPublicModel(): string {
-  return Math.random() < 0.5 ? MODEL_13 : MODEL_14_3;
+  return MODEL_15;
 }
 
 function balancedPublicModelFromCounts(counts: Record<string, number>): string | null {
-  const count13 = counts[MODEL_13] ?? 0;
-  const count14_3 = counts[MODEL_14_3] ?? 0;
-  if (count13 < count14_3) return MODEL_13;
-  if (count14_3 < count13) return MODEL_14_3;
+  for (const model of PUBLIC_GAME_MODELS) {
+    if (typeof counts[model] === "number") return model;
+  }
   return null;
 }
 
 async function publicModelForGameStart(tag: string | null = null): Promise<string> {
   const db = await ensureDatabase();
-  if (!db) return MODEL_13;
+  if (!db) return MODEL_15;
   if (tag) {
     const uploadCounts = gameUploadCountsByPublicModelForTag(db, tag);
     const sessionCounts = activeGameSessionCountsByPublicModelForTag(db, tag);
-    const personalChoice = balancedPublicModelFromCounts({
-      [MODEL_13]: uploadCounts[MODEL_13] + sessionCounts[MODEL_13],
-      [MODEL_14_3]: uploadCounts[MODEL_14_3] + sessionCounts[MODEL_14_3],
-    });
+    const personalChoice = balancedPublicModelFromCounts(
+      Object.fromEntries(PUBLIC_GAME_MODELS.map((model) => [model, uploadCounts[model] + sessionCounts[model]])),
+    );
     return personalChoice ?? randomPublicModel();
   }
   const uploadCounts = gameUploadCountsByPublicModel(db);
   const sessionCounts = activeGameSessionCountsByPublicModel(db);
-  const globalChoice = balancedPublicModelFromCounts({
-    [MODEL_13]: uploadCounts[MODEL_13] + sessionCounts[MODEL_13],
-    [MODEL_14_3]: uploadCounts[MODEL_14_3] + sessionCounts[MODEL_14_3],
-  });
-  return globalChoice ?? (mostRecentPublicModel(db) === MODEL_13 ? MODEL_14_3 : MODEL_13);
+  const globalChoice = balancedPublicModelFromCounts(
+    Object.fromEntries(PUBLIC_GAME_MODELS.map((model) => [model, uploadCounts[model] + sessionCounts[model]])),
+  );
+  return globalChoice ?? randomPublicModel();
 }
 
 async function publicGameActionRequest(request: IncomingMessage, requestBody: JsonRecord): Promise<JsonRecord> {
