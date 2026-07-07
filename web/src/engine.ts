@@ -87,8 +87,8 @@ type LegacyOpponent =
   | "expert-peg-2.2"
   | "expert-peg_table-2.3";
 type StoredOpponent = Opponent | LegacyOpponent;
-export const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-15.1";
-export const REVIEW_OPPONENT: Opponent = "schell_table-peg_table-15.1";
+export const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-15.2";
+export const REVIEW_OPPONENT: Opponent = "schell_table-peg_table-15.2";
 export type Phase =
   | "cut_for_deal"
   | "discard"

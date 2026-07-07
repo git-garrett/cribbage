@@ -11,7 +11,7 @@ import type {
 } from "./engine";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 
-const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-15.1";
+const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-15.2";
 
 type BaselineScoreTotals = Pick<
   AnalyticsTotals,
@@ -87,7 +87,7 @@ interface LeaderboardSummarySource {
 const EMPTY_LEADERBOARD_SUMMARY: LeaderboardSummarySource = {
   generatedAt: "",
   source: "server-game-uploads",
-  model: "15.1 public",
+  model: "15.2 public",
   games: 0,
   playerStats: [],
   winRate14_3: [],
@@ -431,14 +431,14 @@ const ANALYTICS_KEY = "strong-cribbage.analytics.v1";
 const PHONE_GAME_DB_NAME = "cribbage-game-log";
 const PHONE_GAME_DB_VERSION = 1;
 const NOTICE_MIN_MS = 600;
-const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-15.1";
+const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-15.2";
 const SIMPLE_NETWORK_PUBLIC_OPPONENTS = new Set<string>([
-  "schell_table-peg_table-15.1",
-  "schell_table-peg_table-15.0",
+  "schell_table-peg_table-15.2",
 ]);
 const SIMPLE_NETWORK_LOCAL_OPPONENTS = new Set<string>([
   ...SIMPLE_NETWORK_PUBLIC_OPPONENTS,
-  "schell_table-peg_table-15.2",
+  "schell_table-peg_table-15.1",
+  "schell_table-peg_table-15.0",
   "schell_table-peg_table-13.0",
   "schell_table-peg_table-14.3",
   "schell_table-peg_table-14.7",
@@ -578,7 +578,7 @@ function applyAuthoritativeGameState(snapshot: GameSnapshot, game: GameState): v
 }
 
 function simpleNetworkSessionValue(): string {
-  return SIMPLE_NETWORK_LOCAL_AI_MODE ? "local-13.0-14.3-14.7-14.8-14.8.1-15.0-15.1-15.2" : "server-assigned-15.1";
+  return SIMPLE_NETWORK_LOCAL_AI_MODE ? "local-13.0-14.3-14.7-14.8-14.8.1-15.0-15.1-15.2" : "server-assigned-15.2";
 }
 function isValidSimpleNetworkSessionValue(value: string | null): boolean {
   return value === simpleNetworkSessionValue() ||

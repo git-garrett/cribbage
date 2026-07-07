@@ -26,7 +26,7 @@ const DB_PATH = resolve(process.env.CRIBBAGE_DB_PATH || join(DATA_DIR, "cribbage
 const MARKETING_HOSTS = new Set(["strongcribbage.com"]);
 const AI_QUEUE_MAX_WAITING = Number(process.env.AI_QUEUE_MAX_WAITING || 4);
 const LEADERBOARD_MODELS = [MODEL_13, MODEL_14_3, MODEL_15_0, MODEL_15, MODEL_15_2] as const;
-const PUBLIC_GAME_MODELS = [MODEL_15] as const;
+const PUBLIC_GAME_MODELS = [MODEL] as const;
 const RUST_PRIMARY_ENABLED = process.env.CRIBBAGE_RUST_PRIMARY === "1";
 const RUST_PRIMARY_MODELS = new Set(
   (process.env.CRIBBAGE_RUST_PRIMARY_MODELS || `${MODEL_13},${MODEL_14_3},${MODEL_15_0},${MODEL_15},${MODEL_15_2}`)
@@ -1240,7 +1240,7 @@ function mostRecentPublicModel(db: DatabaseSyncLike): string | null {
 }
 
 function randomPublicModel(): string {
-  return MODEL_15;
+  return MODEL;
 }
 
 function balancedPublicModelFromCounts(counts: Record<string, number>): string | null {
@@ -1252,7 +1252,7 @@ function balancedPublicModelFromCounts(counts: Record<string, number>): string |
 
 async function publicModelForGameStart(tag: string | null = null): Promise<string> {
   const db = await ensureDatabase();
-  if (!db) return MODEL_15;
+  if (!db) return MODEL;
   if (tag) {
     const uploadCounts = gameUploadCountsByPublicModelForTag(db, tag);
     const sessionCounts = activeGameSessionCountsByPublicModelForTag(db, tag);
