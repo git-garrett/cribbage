@@ -36,10 +36,9 @@ Capacitor wrappers needed for future iOS and Android releases.
   checks.
 - [x] Deploy the Rust API to production and verify the public browser/API
   surface.
-- [ ] Archive or delete the remaining unused browser-model tree only after
-  explicit confirmation. It contains 13.0+ lookup assets and model documents,
-  including a few historical prototype timing notes; a safety guard rejected
-  deleting the entire tree.
+- [x] Archive the remaining unused browser-model tree to Elements, verify its
+  checksum and manifest, then remove the local tree. Explicit user approval
+  was received on 2026-07-16.
 - [x] Transfer the verified pre-13 benchmark archive to Elements and remove
   its local source directory.
 
@@ -59,4 +58,6 @@ Capacitor wrappers needed for future iOS and Android releases.
 | 2026-07-16 | Verification | `cargo test --workspace` passed (23 library tests plus workspace targets). Local HTTP smoke tests covered health, model metadata, game creation, cut/discard recommendation, and a persisted two-point skunk leaderboard result. |
 | 2026-07-16 | Frontend verification | `npm run typecheck`, `npm run build`, and the protected-client-asset check passed. The production archive was rebuilt and verified to contain the static client, native Rust binary, and Rust-owned runtime assets. |
 | 2026-07-16 | Browser-model review | `web/src/models/` is 192 MB of unused browser-era lookup assets plus model documentation. It is not required by the Rust API. It does contain 13.0+ assets and a few prototype timing notes, so it remains in place pending a specific archive/delete confirmation. |
+| 2026-07-16 | Browser-model archive authorized | User explicitly authorized archiving the entire unused `web/src/models/` tree to Elements. The archive will retain the 13.0+ lookup material and historical model notes rather than deleting them. |
+| 2026-07-16 | Browser-model archive moved | Created and checksum-verified `/Volumes/Elements/cribbage-archive/2026-07-16/cribbage-web-models-20260716.tar.gz`: 44 entries, 80 MB compressed from 192 MB, SHA-256 `46fe10dbf84de141c1960a1ab678c836b13e40aa32a6e7ec7ed0ffd2aa7c9b9f`. The local `web/src/models/` tree and temporary archive were then removed. |
 | 2026-07-16 | Pre-13 benchmark archive moved | `benchmarks/large-mixed/` (464 KB) contained only RAS/Schell versus Expert 1.1 results. It was compressed to `/Volumes/Elements/cribbage-archive/2026-07-16/cribbage-pre13-benchmarks-large-mixed-20260716.tar.gz` (28 KB, SHA-256 `3c728fee7abd96b8e80823d54fd3a836e5e39553642be4818302cd31dca8154d`), checksum-verified, then removed locally. All other `benchmarks/` material contains model 13+ or Rust 15.x data and remains local. |
