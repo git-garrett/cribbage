@@ -62,37 +62,13 @@
           <label>
             AI
             <select id="opponent">
+              <option value="schell_table-peg_table-15.2" selected>AI 15.2</option>
               <option value="schell_table-peg_table-15.1">AI 15.1</option>
               <option value="schell_table-peg_table-15.0">AI 15.0</option>
               <option value="schell_table-peg_table-14.8.1">AI 14.8.1</option>
               <option value="schell_table-peg_table-14.8">AI 14.8</option>
-              <option value="schell_table-peg_table-14.7">AI 14.7</option>
-              <option value="schell_table-peg_table-14.6">AI 14.6</option>
-              <option value="schell_table-peg_table-14.5">AI 14.5</option>
-              <option value="schell_table-peg_table-14.4.1">AI 14.4.1</option>
-              <option value="schell_table-peg_table-14.4">AI 14.4</option>
               <option value="schell_table-peg_table-14.3">AI 14.3</option>
-              <option value="schell_table-peg_table-14.2">AI 14.2</option>
-              <option value="schell_table-peg_table-14.1">AI 14.1</option>
-              <option value="schell_table-peg_table-14.0">AI 14.0</option>
               <option value="schell_table-peg_table-13.0">AI 13.0</option>
-              <option value="schell_table-peg_table-12.0" selected>AI 12.0</option>
-              <option value="schell_table-peg_table-11.1">AI 11.1</option>
-              <option value="schell_table-peg_table-11.0">AI 11.0</option>
-              <option value="schell_table-peg_table-10.0">AI 10.0</option>
-              <option value="schell_table-peg_table-9.0">AI 9.0</option>
-              <option value="schell_table-peg_table-8.0">AI 8.0</option>
-              <option value="schell_table-peg_table-7.0">AI 7.0</option>
-              <option value="schell_table-peg_table-6.0">AI 6.0</option>
-              <option value="schell_table-peg_table-5.0">AI 5.0</option>
-              <option value="schell_table-peg_table-4.0">AI 4.0</option>
-              <option value="ras_table-peg_table-4.0">AI 4.0 alternate</option>
-              <option value="schell_table-peg-3.0">AI 3.0</option>
-              <option value="ras_table-peg-3.0">AI 3.0 alternate</option>
-              <option value="schell_table-2.0">AI 2.0</option>
-              <option value="ras_table-2.0">AI 2.0 alternate</option>
-              <option value="original_exhaustive_peg-1.2">AI 1.2</option>
-              <option value="original-1.1">AI 1.1</option>
             </select>
           </label>
           <div id="model-loading" class="menu-loading" role="status" aria-live="polite" hidden>
@@ -266,6 +242,10 @@
             <p id="leaderboard-summary">No leaderboard data yet.</p>
           </div>
           <button id="leaderboard-close" type="button">Done</button>
+        </div>
+        <div class="leaderboard-rule-notice" role="note">
+          <strong>Leaderboard scoring changed:</strong>
+          skunking the AI now awards 2 leaderboard points. Regular wins award 1 point; losses award 0. Rankings are by leaderboard points divided by games played.
         </div>
         <div id="leaderboard-highlights" class="analytics-totals"></div>
         <div id="leaderboard-list" class="analytics-list"></div>

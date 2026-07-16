@@ -4,7 +4,7 @@ const { execFileSync } = require("node:child_process");
 
 const packagePath = "package.json";
 const lockPath = "package-lock.json";
-const enginePath = "web/src/engine.ts";
+const modelIdPath = "rust/cribbage-shadow-engine/model_id.rs";
 
 function readJson(path) {
   return JSON.parse(fs.readFileSync(path, "utf8"));
@@ -15,9 +15,9 @@ function writeJson(path, value) {
 }
 
 function versionFromHighestModel() {
-  const engine = fs.readFileSync(enginePath, "utf8");
-  const matches = [...engine.matchAll(/schell_table-peg_table-(\d+(?:\.\d+)+)/g)];
-  if (!matches.length) throw new Error(`Could not determine app model version from ${enginePath}`);
+  const modelIds = fs.readFileSync(modelIdPath, "utf8");
+  const matches = [...modelIds.matchAll(/schell_table-peg_table-(\d+(?:\.\d+)+)/g)];
+  if (!matches.length) throw new Error(`Could not determine app model version from ${modelIdPath}`);
   const highest = matches
     .map((match) => match[1].split(".").map(Number))
     .sort((a, b) => {

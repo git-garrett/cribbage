@@ -8,20 +8,21 @@ const root = join(__dirname, "..");
 const { version } = require("../package.json");
 const archive = join(root, `cribbage-server-${version}.tgz`);
 const required = [
-  "web/src/models/schell_table-peg_table-12.0/pegging-outcome-pairwise.bin",
-  "web/src/models/schell_table-peg_table-13.0/pegging-remaining-hand-distribution.bin",
-  "web/src/models/schell_table-peg_table-13.0/pone-lead-frequency.bin",
-  "web/src/models/schell_table-peg_table-14.0/pegging-outcome-tripolicy-aligned.bin",
-  "web/src/models/schell_table-peg_table-14.0/crib-score-histogram-tripolicy-by-discard-cut.bin",
-  "web/src/models/schell_table-peg_table-14.4/pegging-outcome-bounded-overrides.bin",
-  "web/src/models/schell_table-peg_table-14.4/crib-score-histogram-bounded-tripolicy-by-discard-cut.bin",
-  "web/src/models/schell_table-peg_table-14.5/pegging-outcome-frontier-overrides.bin",
-  "web/src/models/schell_table-peg_table-14.5/crib-score-histogram-frontier-by-discard-cut.bin",
-  "web/src/models/schell_table-peg_table-14.6/crib-score-histogram-full-frontier-by-discard-cut.bin",
-  "web/src/models/rank-crib-discard/six-card-discard-policy.bin",
-  "web/src/models/rank-crib-discard/empirical-discard-keep-14.8.bin",
-  "rust/cribbage-shadow-engine/main.rs",
-  "rust/cribbage-shadow-engine/build.sh",
+  "rust/Cargo.toml",
+  "rust/Cargo.lock",
+  "rust/cribbage-api/Cargo.toml",
+  "rust/cribbage-api/main.rs",
+  "rust/cribbage-runner/Cargo.toml",
+  "rust/cribbage-runner/src/main.rs",
+  "rust/cribbage-shadow-engine/Cargo.toml",
+  "rust/cribbage-shadow-engine/lib.rs",
+  "rust/cribbage-shadow-engine/assets/model13-pairwise.bin",
+  "rust/cribbage-shadow-engine/assets/model13-hold.bin",
+  "rust/cribbage-shadow-engine/assets/model143-pairwise.bin",
+  "rust/cribbage-shadow-engine/assets/model143-crib.bin",
+  "rust/cribbage-shadow-engine/assets/empirical-discard-keep-14.8.bin",
+  "rust/cribbage-shadow-engine/assets/crib-rank-score-by-discard-cut.json",
+  "rust/cribbage-shadow-engine/assets/crib-score-histogram-by-discard-cut.json",
 ];
 
 if (!existsSync(archive)) {
@@ -36,9 +37,9 @@ const entries = new Set(
 );
 const missing = required.filter((entry) => !entries.has(entry));
 if (missing.length) {
-  console.error("Server package is missing protected model assets:");
+  console.error("Rust server package is missing required runtime assets:");
   for (const entry of missing) console.error(`- ${entry}`);
   process.exit(1);
 }
 
-console.log("Server package check passed: protected model assets included.");
+console.log("Rust server package check passed: API source and runtime assets included.");

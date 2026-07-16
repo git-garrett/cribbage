@@ -435,7 +435,7 @@ function decisionTiming(db, runIds) {
   const runPlaceholders = placeholders(runIds);
   const rows = [];
   if (hasDiscardTiming) {
-    rows.push(...db.prepare(`
+    for (const row of db.prepare(`
       SELECT
         'discard' AS kind,
         d.role,
@@ -445,10 +445,12 @@ function decisionTiming(db, runIds) {
       JOIN compact_games g ON g.game_id = d.game_id
       WHERE g.run_id IN (${runPlaceholders})
         AND d.decision_elapsed_us IS NOT NULL
-    `).all(...runIds));
+    `).all(...runIds)) {
+      rows.push(row);
+    }
   }
   if (hasPeggingTiming) {
-    rows.push(...db.prepare(`
+    for (const row of db.prepare(`
       SELECT
         'pegging' AS kind,
         p.role,
@@ -460,7 +462,9 @@ function decisionTiming(db, runIds) {
         AND p.decision_elapsed_us IS NOT NULL
         AND p.model IS NOT NULL
         AND p.role IS NOT NULL
-    `).all(...runIds));
+    `).all(...runIds)) {
+      rows.push(row);
+    }
   }
 
   const buckets = new Map();

@@ -3610,68 +3610,49 @@ impl RuntimeTables {
 
     fn empirical(&self) -> Result<&EmpiricalDiscardKeepTable, String> {
         load_cached(&self.empirical, "empirical", || {
-            EmpiricalDiscardKeepTable::load_edk1(
-                self.model_path(&["rank-crib-discard", "empirical-discard-keep-14.8.bin"]),
-            )
+            EmpiricalDiscardKeepTable::load_edk1(self.asset_path("empirical-discard-keep-14.8.bin"))
         })
     }
 
     fn pairwise(&self) -> Result<&PairwiseTable, String> {
         load_cached(&self.pairwise, "pairwise", || {
-            PairwiseTable::load_p12p(self.model_path(&[
-                "schell_table-peg_table-12.0",
-                "pegging-outcome-pairwise.bin",
-            ]))
+            PairwiseTable::load_p12p(self.asset_path("model13-pairwise.bin"))
         })
     }
 
     fn pairwise14(&self) -> Result<&PairwiseTable, String> {
         load_cached(&self.pairwise14, "pairwise14", || {
-            PairwiseTable::load_p12p(self.model_path(&[
-                "schell_table-peg_table-14.0",
-                "pegging-outcome-tripolicy-aligned.bin",
-            ]))
+            PairwiseTable::load_p12p(self.asset_path("model143-pairwise.bin"))
         })
     }
 
     fn hold(&self) -> Result<&Model13HoldTable, String> {
         load_cached(&self.hold, "hold", || {
-            Model13HoldTable::load_p13h(self.model_path(&[
-                "schell_table-peg_table-13.0",
-                "pegging-remaining-hand-distribution.bin",
-            ]))
+            Model13HoldTable::load_p13h(self.asset_path("model13-hold.bin"))
         })
     }
 
     fn crib_rank(&self) -> Result<&CribRankDiscardTables, String> {
         load_cached(&self.crib_rank, "crib_rank", || {
             CribRankDiscardTables::load(
-                self.model_path(&["rank-crib-discard", "crib-rank-score-by-discard-cut.json"]),
-                self.model_path(&[
-                    "rank-crib-discard",
-                    "crib-score-histogram-by-discard-cut.json",
-                ]),
+                self.asset_path("crib-rank-score-by-discard-cut.json"),
+                self.asset_path("crib-score-histogram-by-discard-cut.json"),
             )
         })
     }
 
     fn crib_tripolicy14(&self) -> Result<&CribTripolicyTable, String> {
         load_cached(&self.crib_tripolicy14, "crib_tripolicy14", || {
-            CribTripolicyTable::load_c14b(self.model_path(&[
-                "schell_table-peg_table-14.0",
-                "crib-score-histogram-tripolicy-by-discard-cut.bin",
-            ]))
+            CribTripolicyTable::load_c14b(self.asset_path("model143-crib.bin"))
         })
     }
 
-    fn model_path(&self, parts: &[&str]) -> PathBuf {
+    fn asset_path(&self, filename: &str) -> PathBuf {
         let mut path = PathBuf::from(&self.root);
-        path.push("web");
-        path.push("src");
-        path.push("models");
-        for part in parts {
-            path.push(part);
-        }
+        path.push("rust");
+        path.push("cribbage-shadow-engine");
+        path.push("assets");
+        path.push(filename);
         path
     }
 }

@@ -1,6 +1,6 @@
 # Cribbage Server Setup on Rocky Linux
 
-This deploys the static client and the Model 13 API on one small Rocky Linux Nanode. The Node process serves `dist/` and handles `/api/*`; Caddy sits in front for HTTPS.
+This deploys the static browser client and native Rust API on one small Rocky Linux Nanode. Caddy serves `dist/` and proxies `/api/*` and `/health` to the Rust process.
 
 ## 1. Base Packages
 
@@ -13,15 +13,16 @@ sudo firewall-cmd --permanent --add-service=https
 sudo firewall-cmd --reload
 ```
 
-## 2. Install Node 22
+## 2. Install Rust for the native production build
 
-Node 22 is recommended because the server can use the built-in SQLite module.
+The deployment archive contains the Rust API source and checked-in runtime
+assets. It is compiled on the x86_64 Nanode so the release binary matches the
+production architecture. Node is not required on the server.
 
 ```bash
-curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
-sudo dnf install -y nodejs
-node --version
-npm --version
+sudo dnf install -y rust cargo gcc
+rustc --version
+cargo --version
 ```
 
 ## 3. Install Caddy
@@ -33,9 +34,12 @@ sudo dnf install -y caddy
 sudo systemctl enable --now caddy
 ```
 
-## 4. Build the App Off-Box
+## 4. Build the Browser Client Off-Box
 
-Do not build this app on a 1 GB Nanode. The Vite/Rollup build loads large model artifacts and can be killed by the Linux OOM killer. Build on a laptop, workstation, or CI runner, then upload the generated artifacts.
+Do not build the browser client on a 1 GB Nanode. Build the Vite client on a
+laptop, workstation, or CI runner, then upload the generated artifact. The
+small native Rust API is compiled on the Nanode from the package's locked
+source tree to produce the correct Linux binary.
 
 The easiest path is the deploy helper:
 
@@ -43,7 +47,7 @@ The easiest path is the deploy helper:
 scripts/deploy-nanode.sh deploy
 ```
 
-By default it targets `root@45.79.111.69` using `../2019.private`, builds locally, uploads the artifact, installs the systemd unit, writes the Caddy reverse proxy for `cribbage.strongcribbage.com` and `strongcribbage.com`, restarts services, and checks health.
+By default it targets `root@172.239.170.10` using `../../keys/strongcribbage_admin_ed25519`, builds locally, uploads the artifact, installs the systemd unit, writes the Caddy reverse proxy for `cribbage.strongcribbage.com` and `strongcribbage.com`, restarts services, and checks health.
 
 On the build machine:
 
@@ -55,17 +59,18 @@ npm run build:deploy
 npm run package:server
 ```
 
-This creates `cribbage-server-13.0.0.tgz` containing:
+This creates `cribbage-server-15.2.0.tgz` containing:
 
 - `dist/` static client
-- `server-dist/` Node server bundle
-- `package.json`
+- Rust workspace source and lockfile, compiled on the Nanode with `cargo
+  build --locked --release`
+- Rust-owned runtime lookup tables under `rust/cribbage-shadow-engine/assets/`
 - this setup document
 
 Upload it:
 
 ```bash
-scp cribbage-server-13.0.0.tgz YOUR_USER@your-domain.example.com:/tmp/
+scp cribbage-server-15.2.0.tgz YOUR_USER@your-domain.example.com:/tmp/
 ```
 
 ## 5. Deploy the App
@@ -73,10 +78,11 @@ scp cribbage-server-13.0.0.tgz YOUR_USER@your-domain.example.com:/tmp/
 ```bash
 sudo mkdir -p /opt/cribbage /var/lib/cribbage
 sudo chown -R "$USER":"$USER" /opt/cribbage /var/lib/cribbage
-tar -xzf /tmp/cribbage-server-13.0.0.tgz -C /opt/cribbage
+tar -xzf /tmp/cribbage-server-15.2.0.tgz -C /opt/cribbage
 ```
 
-No `npm ci` or `npm run build:*` step is required on the Nanode for this artifact deploy. The server bundle uses Node built-ins and the bundled generated files.
+No `npm ci` or Node runtime is required on the Nanode. The deploy helper runs
+the locked Rust release build there after unpacking the artifact.
 
 ## 6. Configure systemd
 
@@ -84,7 +90,7 @@ Create `/etc/systemd/system/cribbage.service`:
 
 ```ini
 [Unit]
-Description=Cribbage Model 13 API and static client
+Description=Cribbage Rust API and static client
 After=network.target
 
 [Service]
@@ -92,14 +98,36 @@ Type=simple
 WorkingDirectory=/opt/cribbage
 Environment=HOST=127.0.0.1
 Environment=PORT=8787
-Environment=CRIBBAGE_STATIC_DIR=/opt/cribbage/dist
-Environment=CRIBBAGE_DB_PATH=/var/lib/cribbage/cribbage-server.sqlite
-Environment=NODE_OPTIONS=--max-old-space-size=512
-ExecStart=/usr/bin/node --experimental-sqlite /opt/cribbage/server-dist/server.mjs
+Environment=CRIBBAGE_MODEL_ROOT=/opt/cribbage
+Environment=CRIBBAGE_DATA_DIR=/var/lib/cribbage
+ExecStart=/opt/cribbage/rust/target/release/cribbage-api
 Restart=always
 RestartSec=3
-User=YOUR_USER
-Group=YOUR_USER
+User=cribbage
+Group=cribbage
+UMask=0077
+CapabilityBoundingSet=
+RemoveIPC=true
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectHome=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+ProtectSystem=strict
+ReadWritePaths=/var/lib/cribbage
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target
@@ -120,7 +148,16 @@ Set `/etc/caddy/Caddyfile`:
 
 ```caddyfile
 cribbage.strongcribbage.com, strongcribbage.com {
-	reverse_proxy 127.0.0.1:8787
+	encode zstd gzip
+	@api path /api/* /health
+	handle @api {
+		reverse_proxy 127.0.0.1:8787
+	}
+	handle {
+		root * /opt/cribbage/dist
+		try_files {path} /index.html
+		file_server
+	}
 }
 ```
 
@@ -132,16 +169,14 @@ sudo systemctl reload caddy
 curl https://cribbage.strongcribbage.com/health
 ```
 
-The Node server serves the game app on `cribbage.strongcribbage.com` and a lightweight coming-soon page on `strongcribbage.com`.
+Caddy serves the browser client and the Rust API handles only game routes.
 
 ## 8. Operating Notes
 
-- The public app defaults to simple mode. Use `?full=1` or `?mode=full` to expose the full local app UI.
+- The public app defaults to the Rust-backed browser client.
 - Use `?tag=anything` to attach an arbitrary tag to uploaded game logs.
-- Use `?local=1` to bypass the server AI API and run AI locally in the browser.
-- Game uploads are stored in `/var/lib/cribbage/cribbage-server.sqlite`.
-- Server AI request logs are stored in the same SQLite database under `ai_requests`.
-- Back up `/var/lib/cribbage/cribbage-server.sqlite` and its WAL files.
+- The browser no longer contains a local AI engine; all gameplay decisions use the Rust API.
+- Completed-game leaderboard records persist in `/var/lib/cribbage/leaderboard-games.tsv`.
 
 ## 9. Updating
 
@@ -165,15 +200,16 @@ git pull
 npm ci
 npm run build:deploy
 npm run package:server
-scp cribbage-server-13.0.0.tgz YOUR_USER@your-domain.example.com:/tmp/
+scp cribbage-server-15.2.0.tgz YOUR_USER@your-domain.example.com:/tmp/
 ```
 
 On the Nanode:
 
 ```bash
 sudo systemctl stop cribbage
-sudo rm -rf /opt/cribbage/dist /opt/cribbage/server-dist /opt/cribbage/package.json
-tar -xzf /tmp/cribbage-server-13.0.0.tgz -C /opt/cribbage
+sudo rm -rf /opt/cribbage/dist /opt/cribbage/server-dist /opt/cribbage/package.json /opt/cribbage/rust
+tar -xzf /tmp/cribbage-server-15.2.0.tgz -C /opt/cribbage
+cd /opt/cribbage/rust && cargo build --locked --release --manifest-path cribbage-api/Cargo.toml
 sudo systemctl start cribbage
 curl http://127.0.0.1:8787/health
 ```

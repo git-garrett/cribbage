@@ -3,10 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 VERSION="$(node -p "require('${ROOT_DIR}/package.json').version")"
-REMOTE_HOST="${REMOTE_HOST:-45.79.111.69}"
+REMOTE_HOST="${REMOTE_HOST:-172.239.170.10}"
 REMOTE_USER="${REMOTE_USER:-root}"
 REMOTE_PORT="${REMOTE_PORT:-22}"
-SSH_KEY="${SSH_KEY:-${ROOT_DIR}/../2019.private}"
+SSH_KEY="${SSH_KEY:-${ROOT_DIR}/../../keys/strongcribbage_admin_ed25519}"
 REMOTE_APP_DIR="${REMOTE_APP_DIR:-/opt/cribbage}"
 REMOTE_DATA_DIR="${REMOTE_DATA_DIR:-/var/lib/cribbage}"
 REMOTE_PORT_APP="${REMOTE_PORT_APP:-8787}"
@@ -61,14 +61,20 @@ deploy() {
   "${SCP_BASE[@]}" "$ARCHIVE" "$REMOTE:/tmp/$(basename "$ARCHIVE")"
 
   echo "Installing app files on $REMOTE..."
-  remote_exec "mkdir -p '$REMOTE_APP_DIR' '$REMOTE_DATA_DIR' && \
+  remote_exec "id cribbage >/dev/null 2>&1 || useradd --system --home-dir '$REMOTE_DATA_DIR' --shell /usr/sbin/nologin cribbage && \
+    mkdir -p '$REMOTE_APP_DIR' '$REMOTE_DATA_DIR' && \
     rm -rf '$REMOTE_APP_DIR/dist' '$REMOTE_APP_DIR/server-dist' '$REMOTE_APP_DIR/package.json' '$REMOTE_APP_DIR/docs' '$REMOTE_APP_DIR/rust' && \
-    tar -xzf '/tmp/$(basename "$ARCHIVE")' -C '$REMOTE_APP_DIR'"
+    tar -xzf '/tmp/$(basename "$ARCHIVE")' -C '$REMOTE_APP_DIR' && \
+    cd '$REMOTE_APP_DIR/rust' && cargo build --locked --release --manifest-path cribbage-api/Cargo.toml && \
+    chown -R root:root '$REMOTE_APP_DIR' && \
+    chown -R cribbage:cribbage '$REMOTE_DATA_DIR' && \
+    chmod 755 '$REMOTE_APP_DIR' && \
+    chmod 750 '$REMOTE_DATA_DIR'"
 
   echo "Writing systemd unit..."
   "${SSH_BASE[@]}" "$REMOTE" "cat > /etc/systemd/system/cribbage.service" <<SERVICE
 [Unit]
-Description=Cribbage Model 13 API and static client
+Description=Cribbage Rust API and static client
 After=network.target
 
 [Service]
@@ -76,37 +82,54 @@ Type=simple
 WorkingDirectory=${REMOTE_APP_DIR}
 Environment=HOST=${REMOTE_BIND_HOST}
 Environment=PORT=${REMOTE_PORT_APP}
-Environment=CRIBBAGE_STATIC_DIR=${REMOTE_APP_DIR}/dist
-Environment=CRIBBAGE_DB_PATH=${REMOTE_DATA_DIR}/cribbage-server.sqlite
-Environment=CRIBBAGE_RUST_PRIMARY=${CRIBBAGE_RUST_PRIMARY:-1}
-Environment=CRIBBAGE_RUST_PRIMARY_MODELS=${CRIBBAGE_RUST_PRIMARY_MODELS:-schell_table-peg_table-13.0,schell_table-peg_table-14.3,schell_table-peg_table-15.0,schell_table-peg_table-15.1,schell_table-peg_table-15.2}
-Environment=CRIBBAGE_RUST_SHADOW=${CRIBBAGE_RUST_SHADOW:-0}
-Environment=CRIBBAGE_RUST_SHADOW_BIN=${REMOTE_APP_DIR}/rust/cribbage-shadow-engine/cribbage-shadow-engine
-Environment=CRIBBAGE_RUST_SHADOW_MODELS=${CRIBBAGE_RUST_SHADOW_MODELS:-schell_table-peg_table-13.0,schell_table-peg_table-14.3,schell_table-peg_table-14.8,schell_table-peg_table-14.8.1,schell_table-peg_table-15.0,schell_table-peg_table-15.1,schell_table-peg_table-15.2}
-Environment=CRIBBAGE_RUST_SHADOW_TIMEOUT_MS=${CRIBBAGE_RUST_SHADOW_TIMEOUT_MS:-5000}
-Environment=CRIBBAGE_RUST_SHADOW_PERSISTENT=${CRIBBAGE_RUST_SHADOW_PERSISTENT:-1}
-Environment=CRIBBAGE_RUST_SHADOW_SAMPLE_RATE=${CRIBBAGE_RUST_SHADOW_SAMPLE_RATE:-1}
-Environment=CRIBBAGE_RUST_SHADOW_MAX_IN_FLIGHT=${CRIBBAGE_RUST_SHADOW_MAX_IN_FLIGHT:-2}
-Environment=NODE_OPTIONS=--max-old-space-size=512
-ExecStart=/usr/bin/node --experimental-sqlite ${REMOTE_APP_DIR}/server-dist/server.mjs
+Environment=CRIBBAGE_MODEL_ROOT=${REMOTE_APP_DIR}
+Environment=CRIBBAGE_DATA_DIR=${REMOTE_DATA_DIR}
+ExecStart=${REMOTE_APP_DIR}/rust/target/release/cribbage-api
 Restart=always
 RestartSec=3
-User=root
-Group=root
+User=cribbage
+Group=cribbage
+UMask=0077
+CapabilityBoundingSet=
+RemoveIPC=true
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectHome=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+ProtectSystem=strict
+ReadWritePaths=${REMOTE_DATA_DIR}
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target
 SERVICE
 
-  echo "Building Rust shadow engine when rustc is available..."
-  remote_exec "if command -v rustc >/dev/null 2>&1; then \
-    cd '$REMOTE_APP_DIR/rust/cribbage-shadow-engine' && ./build.sh; \
-    else echo 'rustc not installed; Rust shadow engine will remain unavailable until compiled.'; fi"
-
   echo "Writing Caddy reverse proxy..."
   "${SSH_BASE[@]}" "$REMOTE" "cat > /etc/caddy/Caddyfile" <<CADDY
 ${DOMAIN} {
-	reverse_proxy ${REMOTE_BIND_HOST}:${REMOTE_PORT_APP}
+	encode zstd gzip
+	@api path /api/* /health
+	handle @api {
+		reverse_proxy ${REMOTE_BIND_HOST}:${REMOTE_PORT_APP}
+	}
+	handle {
+		root * ${REMOTE_APP_DIR}/dist
+		try_files {path} /index.html
+		file_server
+	}
 }
 CADDY
 
@@ -138,8 +161,16 @@ pull() {
 
 health() {
   echo "Checking remote health..."
-  remote_exec "curl -sS http://${REMOTE_BIND_HOST}:${REMOTE_PORT_APP}/health && echo"
-  echo "Public URL: http://${REMOTE_HOST}/"
+  local attempt
+  for attempt in {1..20}; do
+    if remote_exec "curl -fsS http://${REMOTE_BIND_HOST}:${REMOTE_PORT_APP}/health && echo"; then
+      echo "Public URL: http://${REMOTE_HOST}/"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "Remote health check failed after waiting for the app to start." >&2
+  return 1
 }
 
 case "${1:-}" in

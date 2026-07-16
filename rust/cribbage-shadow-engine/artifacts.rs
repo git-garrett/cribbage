@@ -477,11 +477,10 @@ impl CribTripolicyTable {
 
 pub fn pairwise_self_test(root: &str) -> Result<(), String> {
     let path = Path::new(root)
-        .join("web")
-        .join("src")
-        .join("models")
-        .join("schell_table-peg_table-12.0")
-        .join("pegging-outcome-pairwise.bin");
+        .join("rust")
+        .join("cribbage-shadow-engine")
+        .join("assets")
+        .join("model13-pairwise.bin");
     let table = PairwiseTable::load_p12p(path)?;
     if table.keep_ranks.len() != 1820 {
         return Err(format!("unexpected keep count: {}", table.keep_ranks.len()));
@@ -613,10 +612,9 @@ impl EmpiricalDiscardKeepTable {
 
 pub fn empirical_self_test(root: &str) -> Result<(), String> {
     let path = Path::new(root)
-        .join("web")
-        .join("src")
-        .join("models")
-        .join("rank-crib-discard")
+        .join("rust")
+        .join("cribbage-shadow-engine")
+        .join("assets")
         .join("empirical-discard-keep-14.8.bin");
     let table = EmpiricalDiscardKeepTable::load_edk1(path)?;
     if table.dealer.discards.len() != 91 || table.pone.discards.len() != 91 {
@@ -1151,11 +1149,10 @@ fn crib_role_index(role: &str) -> Result<u8, String> {
 
 pub fn model13_hold_self_test(root: &str) -> Result<(), String> {
     let path = Path::new(root)
-        .join("web")
-        .join("src")
-        .join("models")
-        .join("schell_table-peg_table-13.0")
-        .join("pegging-remaining-hand-distribution.bin");
+        .join("rust")
+        .join("cribbage-shadow-engine")
+        .join("assets")
+        .join("model13-hold.bin");
     let table = Model13HoldTable::load_p13h(path)?;
     if table.hand_ranks.len() != 2372 {
         return Err(format!(

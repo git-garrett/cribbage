@@ -8,7 +8,7 @@ import type {
   Opponent,
   PlayerKey,
   ScorePhase,
-} from "./engine";
+} from "./api-types";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 
 const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-15.2";
@@ -58,6 +58,8 @@ interface LeaderboardPlayer {
   losses: number;
   skunks: number;
   skunked: number;
+  leaderboardPoints?: number;
+  leaderboardPointsPerGame?: number;
   winRate: number;
   avgMargin: number;
 }
@@ -441,7 +443,6 @@ const SIMPLE_NETWORK_LOCAL_OPPONENTS = new Set<string>([
   "schell_table-peg_table-15.0",
   "schell_table-peg_table-13.0",
   "schell_table-peg_table-14.3",
-  "schell_table-peg_table-14.7",
   "schell_table-peg_table-14.8",
   "schell_table-peg_table-14.8.1",
 ]);
@@ -578,15 +579,10 @@ function applyAuthoritativeGameState(snapshot: GameSnapshot, game: GameState): v
 }
 
 function simpleNetworkSessionValue(): string {
-  return SIMPLE_NETWORK_LOCAL_AI_MODE ? "local-13.0-14.3-14.7-14.8-14.8.1-15.0-15.1-15.2" : "server-assigned-15.2";
+  return SIMPLE_NETWORK_LOCAL_AI_MODE ? "rust-13.0-14.3-14.8-14.8.1-15.0-15.1-15.2" : "rust-15.2";
 }
 function isValidSimpleNetworkSessionValue(value: string | null): boolean {
-  return value === simpleNetworkSessionValue() ||
-    (SIMPLE_NETWORK_LOCAL_AI_MODE && value === "local-13.0-14.3-14.7-14.8") ||
-    (SIMPLE_NETWORK_LOCAL_AI_MODE && value === "local-13.0-14.3-14.7") ||
-    value === "server-assigned-13.0-14.3" ||
-    (SIMPLE_NETWORK_LOCAL_AI_MODE && value === "server-assigned-13.0-14.3-14.7") ||
-    value === SIMPLE_NETWORK_OPPONENT;
+  return value === simpleNetworkSessionValue() || value === SIMPLE_NETWORK_OPPONENT;
 }
 function simpleNetworkAllowedOpponents(): Set<string> {
   return SIMPLE_NETWORK_LOCAL_AI_MODE ? SIMPLE_NETWORK_LOCAL_OPPONENTS : SIMPLE_NETWORK_PUBLIC_OPPONENTS;
@@ -645,23 +641,7 @@ els.appVersion.textContent = displayAppVersion(__APP_VERSION__);
 buildBoard();
 
 function applyFullModeOpponentAvailability(): void {
-  if (LOCAL_NETWORK_MODE) return;
-  for (const option of [...els.opponent.options]) {
-    if (
-      option.value !== "schell_table-peg_table-14.7" &&
-      option.value !== "schell_table-peg_table-14.8" &&
-      option.value !== "schell_table-peg_table-14.8.1"
-    ) continue;
-    option.hidden = true;
-    option.disabled = true;
-  }
-  if (
-    els.opponent.value === "schell_table-peg_table-14.7" ||
-    els.opponent.value === "schell_table-peg_table-14.8" ||
-    els.opponent.value === "schell_table-peg_table-14.8.1"
-  ) {
-    els.opponent.value = DEFAULT_OPPONENT;
-  }
+  if (!LOCAL_NETWORK_MODE) els.opponent.value = DEFAULT_OPPONENT;
 }
 
 function applySimpleNetworkMode(): void {
@@ -3503,6 +3483,27 @@ function percentage(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
+function playerLeaderboardPoints(player: LeaderboardPlayer): number {
+  return typeof player.leaderboardPoints === "number" && Number.isFinite(player.leaderboardPoints)
+    ? player.leaderboardPoints
+    : player.wins + player.skunks;
+}
+
+function playerLeaderboardRate(player: LeaderboardPlayer): number {
+  if (typeof player.leaderboardPointsPerGame === "number" && Number.isFinite(player.leaderboardPointsPerGame)) {
+    return player.leaderboardPointsPerGame;
+  }
+  return player.games ? playerLeaderboardPoints(player) / player.games : 0;
+}
+
+function formatLeaderboardScore(player: LeaderboardPlayer): string {
+  return percentage(playerLeaderboardRate(player));
+}
+
+function formatLeaderboardPointsDetail(player: LeaderboardPlayer): string {
+  return `${playerLeaderboardPoints(player)} pts in ${player.games} game${player.games === 1 ? "" : "s"}`;
+}
+
 async function refreshLeaderboard(): Promise<void> {
   if (!usesRemoteAi()) return;
   state.leaderboardLoading = true;
@@ -3520,19 +3521,19 @@ async function refreshLeaderboard(): Promise<void> {
 
 function renderLeaderboard(): void {
   const summary = state.leaderboardSummary;
-  const winRate14_3 = summary.winRate14_3 ?? [];
+  const rankedPlayers = summary.playerStats?.length ? summary.playerStats : summary.winRate14_3 ?? [];
   const bestWins = summary.bestWins ?? [];
   els.leaderboardSummary.textContent = state.leaderboardLoading
     ? "Refreshing leaderboard..."
     : `${summary.games} completed ${summary.model ? engineName(summary.model) : "production"} game${summary.games === 1 ? "" : "s"} recorded.`;
   els.leaderboardHighlights.innerHTML = "";
-  const top14_3 = winRate14_3[0] ?? null;
+  const topPlayer = rankedPlayers[0] ?? null;
   const skunks = summary.mostSkunks?.length ? summary.mostSkunks : [];
   els.leaderboardHighlights.append(
     leaderboardCard(
-      "Best vs AI",
-      top14_3
-        ? `${top14_3.player} ${percentage(top14_3.winRate)} (${top14_3.wins}-${top14_3.losses})`
+      "Top leaderboard score",
+      topPlayer
+        ? `${topPlayer.player} ${formatLeaderboardScore(topPlayer)} (${formatLeaderboardPointsDetail(topPlayer)})`
         : "No games yet",
     ),
     leaderboardCard(
@@ -3543,17 +3544,17 @@ function renderLeaderboard(): void {
     ),
   );
   els.leaderboardList.innerHTML = "";
-  appendLeaderboardSection("Win percentage vs AI", winRate14_3, (player) => [
+  appendLeaderboardSection("Leaderboard score vs AI", rankedPlayers, (player) => [
     leaderboardCell(player.player),
-    leaderboardCell(`${player.wins}-${player.losses} (${percentage(player.winRate)})`),
-    leaderboardCell(`Skunks ${player.skunks}; margin ${formatSigned(player.avgMargin)}`),
+    leaderboardCell(`${formatLeaderboardScore(player)} (${formatLeaderboardPointsDetail(player)})`),
+    leaderboardCell(`${player.wins}-${player.losses}; skunks ${player.skunks}`),
   ]);
   appendLeaderboardSection("Biggest human wins", bestWins, (win) => [
     leaderboardCell(win.player),
     leaderboardCell(`Margin ${formatSigned(win.margin)}`),
     leaderboardCell(`${engineName(win.opponent)} · ${shortDate(win.endedAt)}${win.result !== "regular" ? ` · ${win.result}` : ""}`),
   ]);
-  if (!winRate14_3.length && !bestWins.length) {
+  if (!rankedPlayers.length && !bestWins.length) {
     const empty = document.createElement("p");
     empty.className = "analytics-empty";
     empty.textContent = "No leaderboard data yet.";
@@ -3874,33 +3875,8 @@ function analyticsEngineSortKey(engine: Opponent): number {
     "schell_table-peg_table-15.0",
     "schell_table-peg_table-14.8.1",
     "schell_table-peg_table-14.8",
-    "schell_table-peg_table-14.7",
-    "schell_table-peg_table-14.6",
-    "schell_table-peg_table-14.5",
-    "schell_table-peg_table-14.4.1",
-    "schell_table-peg_table-14.4",
     "schell_table-peg_table-14.3",
-    "schell_table-peg_table-14.2",
-    "schell_table-peg_table-14.1",
-    "schell_table-peg_table-14.0",
     "schell_table-peg_table-13.0",
-    "schell_table-peg_table-12.0",
-    "schell_table-peg_table-11.1",
-    "schell_table-peg_table-11.0",
-    "schell_table-peg_table-10.0",
-    "schell_table-peg_table-9.0",
-    "schell_table-peg_table-8.0",
-    "schell_table-peg_table-7.0",
-    "schell_table-peg_table-6.0",
-    "schell_table-peg_table-5.0",
-    "schell_table-peg_table-4.0",
-    "ras_table-peg_table-4.0",
-    "schell_table-peg-3.0",
-    "ras_table-peg-3.0",
-    "schell_table-2.0",
-    "ras_table-2.0",
-    "original_exhaustive_peg-1.2",
-    "original-1.1",
   ].indexOf(engine);
 }
 
@@ -4165,74 +4141,7 @@ function engineName(engine: string | undefined): string {
 }
 
 function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
-  if (engine === "ras-table-1.0") return "ras_table-2.0";
-  if (engine === "ras-table-peg-1.1") return "ras_table-peg-3.0";
-  if (engine === "ras-table-peg_table-1.2") return "ras_table-peg_table-4.0";
-  if (engine === "schell-table-1.0") return "schell_table-2.0";
-  if (engine === "schell-table-peg-1.1") return "schell_table-peg-3.0";
-  if (engine === "schell-table-peg_table-1.2") return "schell_table-peg_table-4.0";
-  if (engine === "expert" || engine === "expert-1.1") return "original-1.1";
-  if (engine === "expert-peg-1.2") return "original_exhaustive_peg-1.2";
-  if (
-    engine === "expert-2.0-ras-tables" ||
-    engine === "expert_ras-table-1.0" ||
-    engine === "expert_ras_table-2.0"
-  ) return "ras_table-2.0";
-  if (
-    engine === "expert-peg-2.1" ||
-    engine === "expert_ras-table-peg-1.1" ||
-    engine === "expert_ras_table-peg-3.0"
-  ) return "ras_table-peg-3.0";
-  if (engine === "expert-peg_table-2.2") return "ras_table-peg_table-4.0";
-  if (
-    engine === "expert-peg-2.2" ||
-    engine === "expert_schell-table-peg-1.1" ||
-    engine === "expert_schell_table-peg-3.0"
-  ) return "schell_table-peg-3.0";
-  if (
-    engine === "expert-peg_table-1.3" ||
-    engine === "expert-peg_table-2.3" ||
-    engine === "expert_schell-table-peg_table-1.2" ||
-    engine === "expert_schell_table-peg_table-4.0"
-  ) {
-    return "schell_table-peg_table-4.0";
-  }
-  if (
-    engine === "original-1.1" ||
-    engine === "original_exhaustive_peg-1.2" ||
-    engine === "ras_table-2.0" ||
-    engine === "ras_table-peg-3.0" ||
-    engine === "ras_table-peg_table-4.0" ||
-    engine === "schell_table-peg-3.0" ||
-    engine === "schell_table-peg_table-4.0" ||
-    engine === "schell_table-peg_table-5.0" ||
-    engine === "schell_table-peg_table-6.0" ||
-    engine === "schell_table-peg_table-7.0" ||
-    engine === "schell_table-peg_table-8.0" ||
-    engine === "schell_table-peg_table-9.0" ||
-    engine === "schell_table-peg_table-10.0" ||
-    engine === "schell_table-peg_table-11.0" ||
-    engine === "schell_table-peg_table-11.1" ||
-    engine === "schell_table-peg_table-12.0" ||
-    engine === "schell_table-peg_table-13.0" ||
-    engine === "schell_table-peg_table-14.0" ||
-    engine === "schell_table-peg_table-14.1" ||
-    engine === "schell_table-peg_table-14.2" ||
-    engine === "schell_table-peg_table-14.3" ||
-    engine === "schell_table-peg_table-14.4" ||
-    engine === "schell_table-peg_table-14.4.1" ||
-    engine === "schell_table-peg_table-14.5" ||
-    engine === "schell_table-peg_table-14.6" ||
-    engine === "schell_table-peg_table-14.7" ||
-    engine === "schell_table-peg_table-14.8" ||
-    engine === "schell_table-peg_table-14.8.1" ||
-    engine === "schell_table-peg_table-15.0" ||
-    engine === "schell_table-peg_table-15.1" ||
-    engine === "schell_table-peg_table-15.2" ||
-    engine === "schell_table-2.0"
-  ) {
-    return engine;
-  }
+  if (engine && SIMPLE_NETWORK_LOCAL_OPPONENTS.has(engine)) return engine as Opponent;
   return DEFAULT_OPPONENT;
 }
 

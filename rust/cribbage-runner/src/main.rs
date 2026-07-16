@@ -17,6 +17,8 @@ struct Config {
     left: ModelId,
     right: ModelId,
     games: u32,
+    start_index: u32,
+    total_games: u32,
     seed: u32,
     model_root: String,
     max_steps: u32,
@@ -120,7 +122,8 @@ fn run(config: Config) -> Result<Summary, String> {
         thread::spawn(move || {
             let mut index = worker_index;
             while index < worker_config.games {
-                let result = run_game_index(&worker_config, index);
+                let game_index = worker_config.start_index + index;
+                let result = run_game_index(&worker_config, game_index);
                 if sender.send((index, result)).is_err() {
                     return;
                 }
@@ -135,7 +138,7 @@ fn run(config: Config) -> Result<Summary, String> {
             insert_game(
                 db_path,
                 &config,
-                index,
+                config.start_index + index,
                 seed,
                 &result,
                 &started_at,
@@ -190,6 +193,8 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
     let mut left = ModelId::Schell150;
     let mut right = ModelId::Schell1481;
     let mut games = 1u32;
+    let mut start_index = 0u32;
+    let mut total_games: Option<u32> = None;
     let mut seed = 0x9e3779b9u32;
     let mut model_root = ".".to_string();
     let mut max_steps = 10_000u32;
@@ -212,6 +217,8 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
             "--left" => left = ModelId::from_str(value)?,
             "--right" => right = ModelId::from_str(value)?,
             "--games" => games = parse_u32("--games", value)?,
+            "--start-index" => start_index = parse_u32("--start-index", value)?,
+            "--total-games" => total_games = Some(parse_u32("--total-games", value)?),
             "--seed" => seed = parse_seed(value)?,
             "--model-root" => model_root = value.clone(),
             "--max-steps" => max_steps = parse_u32("--max-steps", value)?,
@@ -230,6 +237,10 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
     }
     if workers == 0 {
         return Err("--workers must be greater than zero".to_string());
+    }
+    let resolved_total_games = total_games.unwrap_or(start_index.saturating_add(games));
+    if resolved_total_games < start_index.saturating_add(games) {
+        return Err("--total-games must be at least --start-index + --games".to_string());
     }
     let resolved_run_id = run_id.unwrap_or_else(|| {
         out_dir
@@ -252,6 +263,8 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
         left,
         right,
         games,
+        start_index,
+        total_games: resolved_total_games,
         seed,
         model_root,
         max_steps,
@@ -289,6 +302,7 @@ fn print_usage() {
     eprintln!(concat!(
         "Usage: cribbage-runner ",
         "--left <model> --right <model> --games <n> ",
+        "[--start-index <n>] [--total-games <n>] ",
         "[--seed <u32|0xhex>] [--model-root <path>] [--max-steps <n>] ",
         "[--workers <n>] [--out-dir <path>] [--db <path>] [--run-id <id>]"
     ));
@@ -319,7 +333,8 @@ fn write_status(
     } else {
         0.0
     };
-    let remaining = config.games.saturating_sub(summary.games);
+    let completed = config.start_index.saturating_add(summary.games);
+    let remaining = config.total_games.saturating_sub(completed);
     let estimated_remaining_seconds = if games_per_second > 0.0 {
         Some(f64::from(remaining) / games_per_second)
     } else {
@@ -350,11 +365,11 @@ fn write_status(
         json_escape(config.left.as_str()),
         json_escape(config.right.as_str()),
         config.workers,
-        summary.games,
-        summary.games,
-        config.games,
-        if config.games > 0 {
-            f64::from(summary.games) * 100.0 / f64::from(config.games)
+        completed,
+        completed,
+        config.total_games,
+        if config.total_games > 0 {
+            f64::from(completed) * 100.0 / f64::from(config.total_games)
         } else {
             100.0
         },
