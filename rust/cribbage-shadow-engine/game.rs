@@ -45,6 +45,13 @@ pub enum Phase {
     GameOver,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PegHistoryEvent {
+    Play { side: Side, rank: u8 },
+    Go { side: Side },
+    Reset,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PlayerState {
     pub hand: Vec<Card>,
@@ -70,6 +77,9 @@ pub struct CribbageGame {
     pub play_owners: Vec<Side>,
     pub completed_plays: Vec<Vec<Card>>,
     pub completed_play_owners: Vec<Vec<Side>>,
+    /// Perfect-recall public pegging history for the current hand. Unlike
+    /// `plays`, this survives count resets and records go declarations.
+    pub pegging_history: Vec<PegHistoryEvent>,
     pub hand_number: u32,
     pub count: u8,
     pub turn: PegTurn,
@@ -94,6 +104,7 @@ impl CribbageGame {
             play_owners: Vec::new(),
             completed_plays: Vec::new(),
             completed_play_owners: Vec::new(),
+            pegging_history: Vec::new(),
             hand_number: 1,
             count: 0,
             turn: PegTurn::Pone,
@@ -141,6 +152,7 @@ impl CribbageGame {
         self.play_owners.clear();
         self.completed_plays.clear();
         self.completed_play_owners.clear();
+        self.pegging_history.clear();
         self.count = 0;
         self.turn = PegTurn::Pone;
         self.go_player = None;
@@ -211,6 +223,10 @@ impl CribbageGame {
         }
         let card = self.remove_cards(side, &[card_id])?[0];
         self.player_mut(side).table.push(card);
+        self.pegging_history.push(PegHistoryEvent::Play {
+            side,
+            rank: card.rank,
+        });
         self.plays.push(card);
         self.play_owners.push(side);
         self.count += card.value;
@@ -241,6 +257,7 @@ impl CribbageGame {
         if !self.legal_cards(side).is_empty() {
             return Err("player has a legal card to play".to_string());
         }
+        self.pegging_history.push(PegHistoryEvent::Go { side });
         if self.go_player.is_some() {
             if let Some(last_player) = self.last_player {
                 if self.count != 31 {
@@ -260,6 +277,7 @@ impl CribbageGame {
             return;
         }
         self.pegging_reset_pending = false;
+        self.pegging_history.push(PegHistoryEvent::Reset);
         self.clear_current_pegging_series();
         self.turn = self.turn.other();
         self.complete_pegging_if_no_cards();

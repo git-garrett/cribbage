@@ -1,0 +1,537 @@
+use crate::board::Role;
+use crate::cards::{peg_card_for_rank, rank_counts, score_count, Card};
+use crate::game::{CribbageGame, PegHistoryEvent, Side};
+
+const RANKS: usize = 13;
+const MAX_PUBLIC_HISTORY: usize = 32;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum InfoActor {
+    SelfPlayer,
+    Opponent,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum PublicPegEvent {
+    SelfPlay(u8),
+    OpponentPlay(u8),
+    SelfGo,
+    OpponentGo,
+    Reset,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct PegInformationSetKey {
+    pub role: Role,
+    pub my_score: u8,
+    pub opponent_score: u8,
+    pub own_hand_ranks: u64,
+    pub own_discard_ranks: u64,
+    pub turn_rank: u8,
+    pub count: u8,
+    pub current: InfoActor,
+    pub go_player: Option<InfoActor>,
+    pub last_player: Option<InfoActor>,
+    history: [u8; MAX_PUBLIC_HISTORY],
+    history_len: u8,
+}
+
+pub struct PegObservation<'a> {
+    pub role: Role,
+    pub my_score: i32,
+    pub opponent_score: i32,
+    pub own_hand: &'a [Card],
+    pub own_discards: &'a [Card],
+    pub turn_card: Card,
+    pub count: u8,
+    pub current: InfoActor,
+    pub go_player: Option<InfoActor>,
+    pub last_player: Option<InfoActor>,
+    pub history: &'a [PublicPegEvent],
+}
+
+impl PegInformationSetKey {
+    pub fn from_observation(observation: PegObservation<'_>) -> Result<Self, String> {
+        if observation.history.len() > MAX_PUBLIC_HISTORY {
+            return Err(format!(
+                "public pegging history has {} events; maximum is {}",
+                observation.history.len(),
+                MAX_PUBLIC_HISTORY
+            ));
+        }
+        let mut history = [0_u8; MAX_PUBLIC_HISTORY];
+        for (index, event) in observation.history.iter().enumerate() {
+            history[index] = encode_public_event(*event)?;
+        }
+        Ok(PegInformationSetKey {
+            role: observation.role,
+            my_score: observation.my_score.clamp(0, 121) as u8,
+            opponent_score: observation.opponent_score.clamp(0, 121) as u8,
+            own_hand_ranks: pack_rank_counts(&rank_counts(observation.own_hand)),
+            own_discard_ranks: pack_rank_counts(&rank_counts(observation.own_discards)),
+            turn_rank: observation.turn_card.rank,
+            count: observation.count,
+            current: observation.current,
+            go_player: observation.go_player,
+            last_player: observation.last_player,
+            history,
+            history_len: observation.history.len() as u8,
+        })
+    }
+
+    pub fn history(&self) -> Result<Vec<PublicPegEvent>, String> {
+        self.history[..self.history_len as usize]
+            .iter()
+            .copied()
+            .map(decode_public_event)
+            .collect()
+    }
+}
+
+pub fn perspective_history(game: &CribbageGame, perspective: Side) -> Vec<PublicPegEvent> {
+    game.pegging_history
+        .iter()
+        .map(|event| match *event {
+            PegHistoryEvent::Play { side, rank } if side == perspective => {
+                PublicPegEvent::SelfPlay(rank)
+            }
+            PegHistoryEvent::Play { rank, .. } => PublicPegEvent::OpponentPlay(rank),
+            PegHistoryEvent::Go { side } if side == perspective => PublicPegEvent::SelfGo,
+            PegHistoryEvent::Go { .. } => PublicPegEvent::OpponentGo,
+            PegHistoryEvent::Reset => PublicPegEvent::Reset,
+        })
+        .collect()
+}
+
+pub fn information_set_from_game(
+    game: &CribbageGame,
+    perspective: Side,
+) -> Result<PegInformationSetKey, String> {
+    let opponent = perspective.other();
+    let history = perspective_history(game, perspective);
+    PegInformationSetKey::from_observation(PegObservation {
+        role: if perspective == game.dealer {
+            Role::Dealer
+        } else {
+            Role::Pone
+        },
+        my_score: game.player(perspective).score,
+        opponent_score: game.player(opponent).score,
+        own_hand: &game.player(perspective).hand,
+        own_discards: &game.player(perspective).discarded_to_crib,
+        turn_card: game.turn_card,
+        count: game.count,
+        current: actor(game.current_player(), perspective),
+        go_player: game.go_player.map(|side| actor(side, perspective)),
+        last_player: game.last_player.map(|side| actor(side, perspective)),
+        history: &history,
+    })
+}
+
+fn actor(side: Side, perspective: Side) -> InfoActor {
+    if side == perspective {
+        InfoActor::SelfPlayer
+    } else {
+        InfoActor::Opponent
+    }
+}
+
+fn pack_rank_counts(counts: &[u8; RANKS]) -> u64 {
+    counts
+        .iter()
+        .enumerate()
+        .fold(0_u64, |packed, (rank, count)| {
+            packed | (u64::from(*count) << (rank * 3))
+        })
+}
+
+fn encode_public_event(event: PublicPegEvent) -> Result<u8, String> {
+    match event {
+        PublicPegEvent::SelfPlay(rank) if rank < RANKS as u8 => Ok(1 + rank),
+        PublicPegEvent::OpponentPlay(rank) if rank < RANKS as u8 => Ok(14 + rank),
+        PublicPegEvent::SelfGo => Ok(27),
+        PublicPegEvent::OpponentGo => Ok(28),
+        PublicPegEvent::Reset => Ok(29),
+        PublicPegEvent::SelfPlay(rank) | PublicPegEvent::OpponentPlay(rank) => {
+            Err(format!("invalid pegging rank {}", rank))
+        }
+    }
+}
+
+fn decode_public_event(value: u8) -> Result<PublicPegEvent, String> {
+    match value {
+        1..=13 => Ok(PublicPegEvent::SelfPlay(value - 1)),
+        14..=26 => Ok(PublicPegEvent::OpponentPlay(value - 14)),
+        27 => Ok(PublicPegEvent::SelfGo),
+        28 => Ok(PublicPegEvent::OpponentGo),
+        29 => Ok(PublicPegEvent::Reset),
+        other => Err(format!("invalid packed public pegging event {}", other)),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum PegSeat {
+    Zero,
+    One,
+}
+
+impl PegSeat {
+    fn index(self) -> usize {
+        match self {
+            PegSeat::Zero => 0,
+            PegSeat::One => 1,
+        }
+    }
+
+    fn other(self) -> PegSeat {
+        match self {
+            PegSeat::Zero => PegSeat::One,
+            PegSeat::One => PegSeat::Zero,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RankPegAction {
+    Play(u8),
+    Go,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RankPegEvent {
+    Play { seat: PegSeat, rank: u8 },
+    Go { seat: PegSeat },
+    Reset,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RankPegState {
+    pub hands: [[u8; RANKS]; 2],
+    pub own_discards: [[u8; RANKS]; 2],
+    pub turn_rank: u8,
+    pub scores: [i32; 2],
+    pub dealer: PegSeat,
+    pub current: PegSeat,
+    pub plays: Vec<u8>,
+    pub count: u8,
+    pub go_player: Option<PegSeat>,
+    pub last_player: Option<PegSeat>,
+    pub history: Vec<RankPegEvent>,
+    pub winner: Option<PegSeat>,
+    pub complete: bool,
+}
+
+impl RankPegState {
+    pub fn legal_actions(&self) -> Vec<RankPegAction> {
+        if self.complete || self.winner.is_some() {
+            return Vec::new();
+        }
+        let legal = legal_ranks(&self.hands[self.current.index()], self.count);
+        if legal.is_empty() {
+            vec![RankPegAction::Go]
+        } else {
+            legal.into_iter().map(RankPegAction::Play).collect()
+        }
+    }
+
+    pub fn apply(&mut self, action: RankPegAction) -> Result<i32, String> {
+        if self.complete || self.winner.is_some() {
+            return Err("pegging state is already terminal".to_string());
+        }
+        match action {
+            RankPegAction::Play(rank) => self.apply_play(rank),
+            RankPegAction::Go => self.apply_go(),
+        }
+    }
+
+    pub fn information_set(&self, perspective: PegSeat) -> Result<PegInformationSetKey, String> {
+        let history = self
+            .history
+            .iter()
+            .map(|event| perspective_event(*event, perspective))
+            .collect::<Vec<_>>();
+        let own_hand = cards_for_rank_counts(&self.hands[perspective.index()]);
+        let own_discards = cards_for_rank_counts(&self.own_discards[perspective.index()]);
+        PegInformationSetKey::from_observation(PegObservation {
+            role: if perspective == self.dealer {
+                Role::Dealer
+            } else {
+                Role::Pone
+            },
+            my_score: self.scores[perspective.index()],
+            opponent_score: self.scores[perspective.other().index()],
+            own_hand: &own_hand,
+            own_discards: &own_discards,
+            turn_card: peg_card_for_rank(self.turn_rank),
+            count: self.count,
+            current: seat_actor(self.current, perspective),
+            go_player: self.go_player.map(|seat| seat_actor(seat, perspective)),
+            last_player: self.last_player.map(|seat| seat_actor(seat, perspective)),
+            history: &history,
+        })
+    }
+
+    fn apply_play(&mut self, rank: u8) -> Result<i32, String> {
+        if rank >= RANKS as u8 {
+            return Err(format!("invalid pegging rank {}", rank));
+        }
+        let current_index = self.current.index();
+        if self.hands[current_index][rank as usize] == 0 {
+            return Err(format!("rank {} is not in the current hand", rank));
+        }
+        let card = peg_card_for_rank(rank);
+        if self.count + card.value > 31 {
+            return Err(format!("rank {} would take the count over 31", rank));
+        }
+        self.hands[current_index][rank as usize] -= 1;
+        self.history.push(RankPegEvent::Play {
+            seat: self.current,
+            rank,
+        });
+        self.plays.push(rank);
+        self.count += card.value;
+        self.last_player = Some(self.current);
+        let played_cards = self
+            .plays
+            .iter()
+            .copied()
+            .map(peg_card_for_rank)
+            .collect::<Vec<_>>();
+        let points = i32::from(score_count(&played_cards));
+        self.add_score(self.current, points);
+        if self.winner.is_some() {
+            return Ok(points);
+        }
+        if self.count == 31 {
+            self.reset_series(self.current.other());
+        } else if self.go_player.is_none() {
+            self.current = self.current.other();
+        }
+        self.complete_if_empty();
+        Ok(points)
+    }
+
+    fn apply_go(&mut self) -> Result<i32, String> {
+        if !legal_ranks(&self.hands[self.current.index()], self.count).is_empty() {
+            return Err("current player still has a legal rank".to_string());
+        }
+        self.history.push(RankPegEvent::Go { seat: self.current });
+        if self.go_player.is_some() {
+            let scorer = self.last_player;
+            let points = i32::from(scorer.is_some() && self.count != 31);
+            if let Some(last_player) = scorer {
+                if points != 0 {
+                    self.add_score(last_player, points);
+                }
+            }
+            if self.winner.is_none() {
+                self.reset_series(self.current.other());
+                self.complete_if_empty_without_last();
+            }
+            Ok(points)
+        } else {
+            self.go_player = Some(self.current);
+            self.current = self.current.other();
+            Ok(0)
+        }
+    }
+
+    fn reset_series(&mut self, next: PegSeat) {
+        self.history.push(RankPegEvent::Reset);
+        self.plays.clear();
+        self.count = 0;
+        self.go_player = None;
+        self.last_player = None;
+        self.current = next;
+    }
+
+    fn complete_if_empty(&mut self) {
+        if self.hands.iter().flatten().any(|count| *count != 0) {
+            return;
+        }
+        if self.count != 0 {
+            if let Some(last_player) = self.last_player {
+                self.add_score(last_player, 1);
+            }
+        }
+        self.complete = self.winner.is_none();
+    }
+
+    fn complete_if_empty_without_last(&mut self) {
+        if self.hands.iter().flatten().all(|count| *count == 0) {
+            self.complete = self.winner.is_none();
+        }
+    }
+
+    fn add_score(&mut self, seat: PegSeat, points: i32) {
+        if points <= 0 || self.winner.is_some() {
+            return;
+        }
+        let score = &mut self.scores[seat.index()];
+        *score = (*score + points).min(121);
+        if *score >= 121 {
+            self.winner = Some(seat);
+            self.complete = true;
+        }
+    }
+}
+
+fn legal_ranks(hand: &[u8; RANKS], count: u8) -> Vec<u8> {
+    hand.iter()
+        .enumerate()
+        .filter_map(|(rank, copies)| {
+            (*copies > 0 && count + peg_card_for_rank(rank as u8).value <= 31).then_some(rank as u8)
+        })
+        .collect()
+}
+
+fn cards_for_rank_counts(counts: &[u8; RANKS]) -> Vec<Card> {
+    let mut cards = Vec::new();
+    for (rank, copies) in counts.iter().enumerate() {
+        for _ in 0..*copies {
+            cards.push(peg_card_for_rank(rank as u8));
+        }
+    }
+    cards
+}
+
+fn seat_actor(seat: PegSeat, perspective: PegSeat) -> InfoActor {
+    if seat == perspective {
+        InfoActor::SelfPlayer
+    } else {
+        InfoActor::Opponent
+    }
+}
+
+fn perspective_event(event: RankPegEvent, perspective: PegSeat) -> PublicPegEvent {
+    match event {
+        RankPegEvent::Play { seat, rank } if seat == perspective => PublicPegEvent::SelfPlay(rank),
+        RankPegEvent::Play { rank, .. } => PublicPegEvent::OpponentPlay(rank),
+        RankPegEvent::Go { seat } if seat == perspective => PublicPegEvent::SelfGo,
+        RankPegEvent::Go { .. } => PublicPegEvent::OpponentGo,
+        RankPegEvent::Reset => PublicPegEvent::Reset,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hand(entries: &[(u8, u8)]) -> [u8; RANKS] {
+        let mut hand = [0_u8; RANKS];
+        for (rank, count) in entries {
+            hand[*rank as usize] = *count;
+        }
+        hand
+    }
+
+    fn state(hands: [[u8; RANKS]; 2]) -> RankPegState {
+        RankPegState {
+            hands,
+            own_discards: [hand(&[(0, 1), (1, 1)]), hand(&[(2, 1), (3, 1)])],
+            turn_rank: 4,
+            scores: [0, 0],
+            dealer: PegSeat::One,
+            current: PegSeat::Zero,
+            plays: Vec::new(),
+            count: 0,
+            go_player: None,
+            last_player: None,
+            history: Vec::new(),
+            winner: None,
+            complete: false,
+        }
+    }
+
+    #[test]
+    fn information_set_excludes_hidden_opponent_hand() {
+        let first = state([hand(&[(4, 1), (5, 1)]), hand(&[(6, 1), (7, 1)])]);
+        let second = state([hand(&[(4, 1), (5, 1)]), hand(&[(8, 1), (9, 1)])]);
+
+        assert_eq!(
+            first.information_set(PegSeat::Zero).unwrap(),
+            second.information_set(PegSeat::Zero).unwrap()
+        );
+        assert_eq!(first.legal_actions(), second.legal_actions());
+    }
+
+    #[test]
+    fn information_set_preserves_ordered_public_history() {
+        let mut first = state([hand(&[(4, 1)]), hand(&[(5, 1)])]);
+        first.history = vec![
+            RankPegEvent::Play {
+                seat: PegSeat::Zero,
+                rank: 4,
+            },
+            RankPegEvent::Play {
+                seat: PegSeat::One,
+                rank: 5,
+            },
+        ];
+        let mut second = first.clone();
+        second.history.reverse();
+
+        assert_ne!(
+            first.information_set(PegSeat::Zero).unwrap(),
+            second.information_set(PegSeat::Zero).unwrap()
+        );
+    }
+
+    #[test]
+    fn simulator_scores_thirty_one_and_resets_deterministically() {
+        let mut first = state([hand(&[(9, 2)]), hand(&[(9, 1), (0, 1)])]);
+        let mut second = first.clone();
+        let actions = [
+            RankPegAction::Play(9),
+            RankPegAction::Play(9),
+            RankPegAction::Play(9),
+            RankPegAction::Play(0),
+        ];
+        let mut final_points = 0;
+        for action in actions {
+            final_points = first.apply(action).unwrap();
+            assert_eq!(second.apply(action).unwrap(), final_points);
+        }
+
+        assert_eq!(first, second);
+        assert_eq!(final_points, 2);
+        assert_eq!(first.count, 0);
+        assert_eq!(first.current, PegSeat::Zero);
+        assert_eq!(first.scores[PegSeat::One.index()], 4);
+        assert_eq!(first.history.last(), Some(&RankPegEvent::Reset));
+    }
+
+    #[test]
+    fn simulator_records_go_and_awards_last_card() {
+        let mut game = state([hand(&[(9, 1)]), hand(&[(9, 1)])]);
+        game.count = 25;
+        game.plays = vec![9, 9, 4];
+        game.last_player = Some(PegSeat::One);
+
+        assert_eq!(game.legal_actions(), vec![RankPegAction::Go]);
+        game.apply(RankPegAction::Go).unwrap();
+        assert_eq!(game.current, PegSeat::One);
+        game.apply(RankPegAction::Go).unwrap();
+
+        assert_eq!(game.scores[PegSeat::One.index()], 1);
+        assert!(game.history.contains(&RankPegEvent::Go {
+            seat: PegSeat::Zero
+        }));
+        assert!(game.history.contains(&RankPegEvent::Reset));
+    }
+
+    #[test]
+    fn simulator_stops_immediately_on_terminal_score() {
+        let mut game = state([hand(&[(6, 1)]), hand(&[(7, 1)])]);
+        game.scores[0] = 119;
+        game.plays = vec![6];
+        game.count = 7;
+        game.last_player = Some(PegSeat::One);
+
+        game.apply(RankPegAction::Play(6)).unwrap();
+
+        assert_eq!(game.winner, Some(PegSeat::Zero));
+        assert!(game.complete);
+        assert!(game.legal_actions().is_empty());
+    }
+}

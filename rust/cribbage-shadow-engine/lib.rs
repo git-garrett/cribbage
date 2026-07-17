@@ -3,6 +3,7 @@ pub mod board;
 pub mod cards;
 pub mod decision;
 pub mod game;
+pub mod information_set;
 pub mod model;
 pub mod model_id;
 pub mod playout;
