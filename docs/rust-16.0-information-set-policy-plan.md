@@ -73,12 +73,12 @@ QA:
 
 ### 1. Legal Information-Set Identity and Pegging Simulator
 
-- [ ] Define a packed information-set key containing only legally observable
+- [x] Define a packed information-set key containing only legally observable
   public state plus the acting player's private cards and own crib discards.
-- [ ] Preserve ordered pegging play/reset/go history needed for perfect recall.
-- [ ] Add a deterministic rank-level pegging simulator shared by training and
+- [x] Preserve ordered pegging play/reset/go history needed for perfect recall.
+- [x] Add a deterministic rank-level pegging simulator shared by training and
   runtime policy validation.
-- [ ] Prove by tests that two hidden opponent hands with the same information
+- [x] Prove by tests that two hidden opponent hands with the same information
   set produce the same key and available policy actions.
 
 QA:
@@ -160,3 +160,10 @@ QA:
   replan threshold below ten equivalents. QA confirmed that only this plan
   was staged; `pasted-text.txt` remains untracked. Implementation commit:
   `1814b24`.
+- 2026-07-17, Step 1: Added a packed legal information-set key, current-hand
+  public play/go/reset history, and a deterministic rank-level pegging
+  simulator. Tests cover hidden-hand key/action invariance, ordered-history
+  identity, deterministic replay, 31/reset scoring, go/last-card scoring, and
+  immediate terminal wins. `cargo fmt --all -- --check` and the full Rust
+  workspace suite passed (60 unit tests plus doc tests). Implementation
+  commit: `6e9b6a0`.
