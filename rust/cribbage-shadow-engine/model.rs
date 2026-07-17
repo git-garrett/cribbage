@@ -18,6 +18,7 @@ use crate::cards::{
 };
 use crate::model_id::{
     MODEL_13_0, MODEL_14_3, MODEL_14_8, MODEL_14_8_1, MODEL_15_0, MODEL_15_1, MODEL_15_2,
+    MODEL_16_0,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -119,10 +120,25 @@ struct PeggingOption {
     opponent_pegging: i32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct CurrentHandOutcome {
+    own_pegging: i32,
+    opponent_pegging: i32,
+    own_hand: i32,
+    opponent_hand: i32,
+}
+
+#[derive(Default, Clone)]
+struct WeightedCurrentHandOutcomes {
+    entries: Vec<(CurrentHandOutcome, f64)>,
+    indexes: HashMap<CurrentHandOutcome, usize>,
+}
+
 #[derive(Default, Clone)]
 struct LeadCutAccumulator {
     total_weight: f64,
     base_outcomes: WeightedPairI32,
+    current_hand_outcomes: WeightedCurrentHandOutcomes,
     own_hand_total: f64,
     opponent_hand_total: f64,
     own_pegging_total: f64,
@@ -133,6 +149,7 @@ struct LeadCutAccumulator {
 struct LeadEvaluation {
     total_weight: f64,
     win_probability_outcomes: WeightedPairU8,
+    ordered_win_probability_total: f64,
     own_hand_total: f64,
     opponent_hand_total: f64,
     crib_total: f64,
@@ -340,10 +357,14 @@ fn is_supported_rust_model(model: &str) -> bool {
         || model == MODEL_15_0
         || model == MODEL_15_1
         || model == MODEL_15_2
+        || model == MODEL_16_0
 }
 
 fn is_strength_model(input: &DecisionInput) -> bool {
-    input.model == MODEL_15_0 || input.model == MODEL_15_1 || input.model == MODEL_15_2
+    input.model == MODEL_15_0
+        || input.model == MODEL_15_1
+        || input.model == MODEL_15_2
+        || input.model == MODEL_16_0
 }
 
 fn uses_joint_future_pegging(input: &DecisionInput) -> bool {
@@ -351,7 +372,11 @@ fn uses_joint_future_pegging(input: &DecisionInput) -> bool {
 }
 
 fn uses_exact_joint_future_pegging(input: &DecisionInput) -> bool {
-    input.model == MODEL_15_2
+    input.model == MODEL_15_2 || input.model == MODEL_16_0
+}
+
+fn uses_ordered_current_hand_scoring(input: &DecisionInput) -> bool {
+    input.model == MODEL_16_0
 }
 
 fn groups_equivalent_discard_candidates(input: &DecisionInput) -> bool {
@@ -447,6 +472,7 @@ fn recommend_discard(input: &DecisionInput, root: &str) -> Result<Decision, Stri
     let cut_options = cut_rank_options(&deck);
     let mut memo = DiscardMemo::default();
     let mut board = board_model_for_input(input);
+    let ordered_current_hand_scoring = uses_ordered_current_hand_scoring(input);
     let mut recommended: Option<(Vec<Card>, CandidateEvaluation)> = None;
     let candidate_groups = empirical_discard_candidate_groups(
         &input.ai_hand,
@@ -472,6 +498,7 @@ fn recommend_discard(input: &DecisionInput, root: &str) -> Result<Decision, Stri
             &deck,
             input.ai_score,
             input.human_score,
+            ordered_current_hand_scoring,
             &mut memo,
             &mut board,
         ) else {
@@ -1950,6 +1977,7 @@ fn evaluate_discard_candidate(
     deck: &[Card],
     player_score: i32,
     opponent_score: i32,
+    ordered_current_hand_scoring: bool,
     memo: &mut DiscardMemo,
     board: &mut BoardModel,
 ) -> Option<CandidateEvaluation> {
@@ -1992,6 +2020,7 @@ fn evaluate_discard_candidate(
             pairwise,
             empirical,
             memo,
+            ordered_current_hand_scoring,
         );
         for (lead_rank, lead_cut) in lead_cut_outcomes {
             if lead_cut.total_weight == 0.0 {
@@ -2004,22 +2033,40 @@ fn evaluate_discard_candidate(
             accumulator.crib_total += crib.average * lead_cut.total_weight * cut.weight;
             accumulator.own_pegging_total += lead_cut.own_pegging_total * cut.weight;
             accumulator.opponent_pegging_total += lead_cut.opponent_pegging_total * cut.weight;
-            for ((own_base, opponent_base), base_weight) in lead_cut.base_outcomes.entries {
-                for (crib_score, crib_weight) in &crib.outcomes {
-                    let own_round_score =
-                        own_base + if role == Role::Dealer { *crib_score } else { 0 };
-                    let opponent_round_score =
-                        opponent_base + if role == Role::Dealer { 0 } else { *crib_score };
-                    let scenario_weight = base_weight * *crib_weight * cut.weight;
-                    let key = score_pair_i32(
-                        player_score + own_round_score,
-                        opponent_score + opponent_round_score,
-                    );
-                    add_weight_pair_u8(
-                        &mut accumulator.win_probability_outcomes,
-                        key,
-                        scenario_weight,
-                    );
+            if ordered_current_hand_scoring {
+                for (outcome, outcome_weight) in lead_cut.current_hand_outcomes.entries {
+                    for (crib_score, crib_weight) in &crib.outcomes {
+                        let scenario_weight = outcome_weight * *crib_weight * cut.weight;
+                        accumulator.ordered_win_probability_total += scenario_weight
+                            * ordered_current_hand_win_probability(
+                                board,
+                                player_score,
+                                opponent_score,
+                                role,
+                                next_role,
+                                outcome,
+                                *crib_score,
+                            );
+                    }
+                }
+            } else {
+                for ((own_base, opponent_base), base_weight) in lead_cut.base_outcomes.entries {
+                    for (crib_score, crib_weight) in &crib.outcomes {
+                        let own_round_score =
+                            own_base + if role == Role::Dealer { *crib_score } else { 0 };
+                        let opponent_round_score =
+                            opponent_base + if role == Role::Dealer { 0 } else { *crib_score };
+                        let scenario_weight = base_weight * *crib_weight * cut.weight;
+                        let key = score_pair_i32(
+                            player_score + own_round_score,
+                            opponent_score + opponent_round_score,
+                        );
+                        add_weight_pair_u8(
+                            &mut accumulator.win_probability_outcomes,
+                            key,
+                            scenario_weight,
+                        );
+                    }
                 }
             }
         }
@@ -2039,18 +2086,24 @@ fn evaluate_discard_candidate(
         } else {
             hand_score - crib_score
         }) + net_pegging;
-        let mut win_probability_total = 0.0;
-        for ((my_score, future_opponent_score), weight) in
-            &accumulator.win_probability_outcomes.entries
-        {
-            win_probability_total += *weight
-                * board.future_win_probability_from_scores(
-                    i32::from(*my_score),
-                    i32::from(*future_opponent_score),
-                    next_role,
-                    ScorePhase::PeggingPone,
-                );
-        }
+        let win_probability_total = if ordered_current_hand_scoring {
+            accumulator.ordered_win_probability_total
+        } else {
+            accumulator
+                .win_probability_outcomes
+                .entries
+                .iter()
+                .map(|((my_score, future_opponent_score), weight)| {
+                    *weight
+                        * board.future_win_probability_from_scores(
+                            i32::from(*my_score),
+                            i32::from(*future_opponent_score),
+                            next_role,
+                            ScorePhase::PeggingPone,
+                        )
+                })
+                .sum()
+        };
         let win_probability = win_probability_total / accumulator.total_weight;
         let candidate = CandidateEvaluation {
             win_probability,
@@ -2076,6 +2129,82 @@ fn evaluate_discard_candidate(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn ordered_current_hand_win_probability(
+    board: &mut BoardModel,
+    player_score: i32,
+    opponent_score: i32,
+    role: Role,
+    next_role: Role,
+    outcome: CurrentHandOutcome,
+    crib_score: i32,
+) -> f64 {
+    if player_score >= 121 {
+        return 1.0;
+    }
+    if opponent_score >= 121 {
+        return 0.0;
+    }
+
+    // The pairwise table retains only aggregate pegging totals, not the
+    // card-by-card scoring chronology. A one-sided count-out is exact; when
+    // both aggregates cross 121, retain 15.2's neutral joint ambiguity rule.
+    let mut my_score = player_score + outcome.own_pegging;
+    let mut their_score = opponent_score + outcome.opponent_pegging;
+    match (my_score >= 121, their_score >= 121) {
+        (true, false) => return 1.0,
+        (false, true) => return 0.0,
+        (true, true) => return 0.5,
+        (false, false) => {}
+    }
+
+    // Pone counts first, regardless of which side is the model perspective.
+    if role == Role::Pone {
+        my_score += outcome.own_hand;
+        if my_score >= 121 {
+            return 1.0;
+        }
+    } else {
+        their_score += outcome.opponent_hand;
+        if their_score >= 121 {
+            return 0.0;
+        }
+    }
+
+    // Dealer counts only if pone did not go out.
+    if role == Role::Dealer {
+        my_score += outcome.own_hand;
+        if my_score >= 121 {
+            return 1.0;
+        }
+    } else {
+        their_score += outcome.opponent_hand;
+        if their_score >= 121 {
+            return 0.0;
+        }
+    }
+
+    // The dealer's crib is the final scoring event in the current hand.
+    if role == Role::Dealer {
+        my_score += crib_score;
+        if my_score >= 121 {
+            return 1.0;
+        }
+    } else {
+        their_score += crib_score;
+        if their_score >= 121 {
+            return 0.0;
+        }
+    }
+
+    board.future_win_probability_from_scores(
+        my_score,
+        their_score,
+        next_role,
+        ScorePhase::PeggingPone,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 fn empirical_keep_lead_outcomes_for_cut_rank(
     keep_ranks: &[u8; 13],
     keep_key: &str,
@@ -2088,6 +2217,7 @@ fn empirical_keep_lead_outcomes_for_cut_rank(
     pairwise: &PairwiseTable,
     table: &EmpiricalDiscardKeepTable,
     memo: &mut DiscardMemo,
+    ordered_current_hand_scoring: bool,
 ) -> BTreeMap<i8, LeadCutAccumulator> {
     let role_table = empirical_role(table, opponent_role);
     let cache_key = format!(
@@ -2128,13 +2258,27 @@ fn empirical_keep_lead_outcomes_for_cut_rank(
             for (opponent_hand_score, opponent_hand_weight) in &opponent_hand_outcomes {
                 for (own_hand_score, own_hand_weight) in own_hand_outcomes {
                     let weight = entry.weight * *opponent_hand_weight * *own_hand_weight;
-                    let own_base = *own_hand_score + pegging.own_pegging;
-                    let opponent_base = *opponent_hand_score + pegging.opponent_pegging;
-                    add_weight_pair_i32(
-                        &mut accumulator.base_outcomes,
-                        (own_base, opponent_base),
-                        weight,
-                    );
+                    if ordered_current_hand_scoring {
+                        add_weight_current_hand_outcome(
+                            &mut accumulator.current_hand_outcomes,
+                            CurrentHandOutcome {
+                                own_pegging: pegging.own_pegging,
+                                opponent_pegging: pegging.opponent_pegging,
+                                own_hand: *own_hand_score,
+                                opponent_hand: *opponent_hand_score,
+                            },
+                            weight,
+                        );
+                    } else {
+                        add_weight_pair_i32(
+                            &mut accumulator.base_outcomes,
+                            (
+                                *own_hand_score + pegging.own_pegging,
+                                *opponent_hand_score + pegging.opponent_pegging,
+                            ),
+                            weight,
+                        );
+                    }
                     accumulator.total_weight += weight;
                     accumulator.own_hand_total += *own_hand_score as f64 * weight;
                     accumulator.opponent_hand_total += *opponent_hand_score as f64 * weight;
@@ -2829,6 +2973,19 @@ fn score_pair_i32(my_score: i32, opponent_score: i32) -> (u8, u8) {
 }
 
 fn add_weight_pair_i32(outcomes: &mut WeightedPairI32, key: (i32, i32), weight: f64) {
+    if let Some(index) = outcomes.indexes.get(&key).copied() {
+        outcomes.entries[index].1 += weight;
+        return;
+    }
+    outcomes.indexes.insert(key, outcomes.entries.len());
+    outcomes.entries.push((key, weight));
+}
+
+fn add_weight_current_hand_outcome(
+    outcomes: &mut WeightedCurrentHandOutcomes,
+    key: CurrentHandOutcome,
+    weight: f64,
+) {
     if let Some(index) = outcomes.indexes.get(&key).copied() {
         outcomes.entries[index].1 += weight;
         return;
@@ -3947,6 +4104,150 @@ fn round_ev(value: f64) -> f64 {
 mod tests {
     use super::*;
 
+    fn current_hand_outcome(
+        own_pegging: i32,
+        opponent_pegging: i32,
+        own_hand: i32,
+        opponent_hand: i32,
+    ) -> CurrentHandOutcome {
+        CurrentHandOutcome {
+            own_pegging,
+            opponent_pegging,
+            own_hand,
+            opponent_hand,
+        }
+    }
+
+    #[test]
+    fn current_hand_outcomes_preserve_scoring_components() {
+        let mut outcomes = WeightedCurrentHandOutcomes::default();
+        add_weight_current_hand_outcome(&mut outcomes, current_hand_outcome(0, 0, 6, 6), 1.0);
+        add_weight_current_hand_outcome(&mut outcomes, current_hand_outcome(6, 6, 0, 0), 1.0);
+
+        assert_eq!(outcomes.entries.len(), 2);
+    }
+
+    #[test]
+    fn ordered_current_hand_awards_pone_hand_first() {
+        let outcome = current_hand_outcome(0, 0, 6, 6);
+        let mut collapsed_board = BoardModel::exact_joint_pegging_without_early_heuristic();
+        let mut dealer_board = BoardModel::exact_joint_pegging_without_early_heuristic();
+        let mut pone_board = BoardModel::exact_joint_pegging_without_early_heuristic();
+
+        // This is the 15.2 failure mode: collapsing both hands before the
+        // board call produces 121-121, and the perspective-first terminal
+        // check incorrectly awards the dealer the game.
+        assert_eq!(
+            collapsed_board.future_win_probability_from_scores(
+                121,
+                121,
+                Role::Pone,
+                ScorePhase::PeggingPone,
+            ),
+            1.0
+        );
+        assert_eq!(
+            ordered_current_hand_win_probability(
+                &mut dealer_board,
+                115,
+                115,
+                Role::Dealer,
+                Role::Pone,
+                outcome,
+                12,
+            ),
+            0.0
+        );
+        assert_eq!(
+            ordered_current_hand_win_probability(
+                &mut pone_board,
+                115,
+                115,
+                Role::Pone,
+                Role::Dealer,
+                outcome,
+                12,
+            ),
+            1.0
+        );
+    }
+
+    #[test]
+    fn ordered_current_hand_resolves_pegging_before_hands() {
+        let outcome = current_hand_outcome(1, 0, 0, 1);
+        let mut board = BoardModel::exact_joint_pegging_without_early_heuristic();
+
+        assert_eq!(
+            ordered_current_hand_win_probability(
+                &mut board,
+                120,
+                120,
+                Role::Dealer,
+                Role::Pone,
+                outcome,
+                0,
+            ),
+            1.0
+        );
+    }
+
+    #[test]
+    fn ordered_current_hand_resolves_dealer_hand_before_crib() {
+        let outcome = current_hand_outcome(0, 0, 1, 0);
+        let mut board = BoardModel::exact_joint_pegging_without_early_heuristic();
+
+        assert_eq!(
+            ordered_current_hand_win_probability(
+                &mut board,
+                120,
+                100,
+                Role::Dealer,
+                Role::Pone,
+                outcome,
+                0,
+            ),
+            1.0
+        );
+    }
+
+    #[test]
+    fn ordered_current_hand_delays_dealer_crib_until_after_pone_hand() {
+        let outcome = current_hand_outcome(0, 0, 0, 1);
+        let mut board = BoardModel::exact_joint_pegging_without_early_heuristic();
+
+        assert_eq!(
+            ordered_current_hand_win_probability(
+                &mut board,
+                120,
+                120,
+                Role::Dealer,
+                Role::Pone,
+                outcome,
+                1,
+            ),
+            0.0
+        );
+    }
+
+    #[test]
+    fn ordered_current_hand_keeps_joint_pegging_double_out_indeterminate() {
+        let outcome = current_hand_outcome(1, 1, 0, 0);
+        let mut board = BoardModel::exact_joint_pegging_without_early_heuristic();
+
+        assert_eq!(
+            ordered_current_hand_win_probability(
+                &mut board,
+                120,
+                120,
+                Role::Dealer,
+                Role::Pone,
+                outcome,
+                0,
+            ),
+            0.5
+        );
+    }
+
     #[test]
     fn packed_rank_counts_preserve_distinct_counts() {
         let mut ranks_a = [0_u8; 13];
@@ -4016,5 +4317,10 @@ mod tests {
             upcoming_crib_score_distribution(&input),
             vec![(score_phase_average(ScorePhase::Crib).round() as i32, 1.0)]
         );
+
+        let mut model16 = input.clone();
+        model16.model = MODEL_16_0.to_string();
+        assert!(!uses_ordered_current_hand_scoring(&input));
+        assert!(uses_ordered_current_hand_scoring(&model16));
     }
 }

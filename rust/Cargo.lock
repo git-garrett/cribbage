@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "cribbage-api"
-version = "15.2.0"
+version = "16.0.0"
 dependencies = [
  "cribbage-shadow-engine",
 ]

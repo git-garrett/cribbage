@@ -59,7 +59,7 @@ npm run build:deploy
 npm run package:server
 ```
 
-This creates `cribbage-server-15.2.0.tgz` containing:
+This creates `cribbage-server-16.0.0.tgz` containing:
 
 - `dist/` static client
 - Rust workspace source and lockfile, compiled on the Nanode with `cargo
@@ -70,7 +70,7 @@ This creates `cribbage-server-15.2.0.tgz` containing:
 Upload it:
 
 ```bash
-scp cribbage-server-15.2.0.tgz YOUR_USER@your-domain.example.com:/tmp/
+scp cribbage-server-16.0.0.tgz YOUR_USER@your-domain.example.com:/tmp/
 ```
 
 ## 5. Deploy the App
@@ -78,7 +78,7 @@ scp cribbage-server-15.2.0.tgz YOUR_USER@your-domain.example.com:/tmp/
 ```bash
 sudo mkdir -p /opt/cribbage /var/lib/cribbage
 sudo chown -R "$USER":"$USER" /opt/cribbage /var/lib/cribbage
-tar -xzf /tmp/cribbage-server-15.2.0.tgz -C /opt/cribbage
+tar -xzf /tmp/cribbage-server-16.0.0.tgz -C /opt/cribbage
 ```
 
 No `npm ci` or Node runtime is required on the Nanode. The deploy helper runs
@@ -200,7 +200,7 @@ git pull
 npm ci
 npm run build:deploy
 npm run package:server
-scp cribbage-server-15.2.0.tgz YOUR_USER@your-domain.example.com:/tmp/
+scp cribbage-server-16.0.0.tgz YOUR_USER@your-domain.example.com:/tmp/
 ```
 
 On the Nanode:
@@ -208,7 +208,7 @@ On the Nanode:
 ```bash
 sudo systemctl stop cribbage
 sudo rm -rf /opt/cribbage/dist /opt/cribbage/server-dist /opt/cribbage/package.json /opt/cribbage/rust
-tar -xzf /tmp/cribbage-server-15.2.0.tgz -C /opt/cribbage
+tar -xzf /tmp/cribbage-server-16.0.0.tgz -C /opt/cribbage
 cd /opt/cribbage/rust && cargo build --locked --release --manifest-path cribbage-api/Cargo.toml
 sudo systemctl start cribbage
 curl http://127.0.0.1:8787/health

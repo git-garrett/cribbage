@@ -1,5 +1,5 @@
 {
-  "version": "15.2.0",
+  "version": "16.0.0",
   "scripts": {
     "build": "node --max-old-space-size=8192 node_modules/vite/bin/vite.js build && node scripts/check-client-artifacts.cjs",
     "build:deploy": "npm run build && cargo build --manifest-path rust/cribbage-api/Cargo.toml --release",

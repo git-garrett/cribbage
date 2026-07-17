@@ -669,4 +669,15 @@ mod tests {
         );
         assert!(playout.is_ok());
     }
+
+    #[test]
+    fn playout_accepts_model16() {
+        let playout = ModelPlayout::new(
+            0x9e3779b9,
+            Side::Left,
+            ModelId::Schell160,
+            ModelId::Schell152,
+        );
+        assert!(playout.is_ok());
+    }
 }

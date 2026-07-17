@@ -272,7 +272,7 @@ fn health_json() -> String {
 
 fn model_json() -> String {
     format!(
-        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"schell_table-peg_table-13.0\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\"]}}",
+        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"schell_table-peg_table-13.0\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\"]}}",
         APP_VERSION, MODEL_13_0
     )
 }
@@ -1426,6 +1426,11 @@ fn isoish_now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_metadata_includes_model16() {
+        assert!(model_json().contains("schell_table-peg_table-16.0"));
+    }
 
     #[test]
     fn snapshot_redacts_ai_hand_and_complete_crib() {
