@@ -42,6 +42,27 @@ Capacitor wrappers needed for future iOS and Android releases.
 - [x] Transfer the verified pre-13 benchmark archive to Elements and remove
   its local source directory.
 
+## Post-migration model validation
+
+- [ ] Complete the 10,000-game native Rust matchup: 13.0 (left) versus 15.2
+  (right). The runner alternates first deal and uses deterministic sequential
+  seeds so the result is reproducible.
+- [x] Start the matchup as a one-shot background launchd job with persistent
+  status and SQLite records.
+- [ ] Analyze final wins, score margin, discard/pegging timings, and confidence
+  before assigning a strength ranking.
+
+### Live run details
+
+- Launchd label: `cribbage-runner-13v152-10k` (one-shot; it exits at completion).
+- Status/ETA: `.background/rust-13.0-vs-15.2-10k-20260716/status.json`.
+  Read `gamesPerSecond` and `estimatedRemainingSeconds`; the runner rewrites
+  this file after every persisted game.
+- Results database:
+  `benchmarks/ai-db/rust-13.0-vs-15.2-10k-20260716.sqlite`.
+- Initial checkpoint (2026-07-17T00:27:28Z): 8 / 10,000 games, 8 workers,
+  0.271605 games/sec, 36,788.702 seconds remaining (about 10 h 13 m).
+
 ## Decisions and Results
 
 | Date | Item | Result |
@@ -61,3 +82,4 @@ Capacitor wrappers needed for future iOS and Android releases.
 | 2026-07-16 | Browser-model archive authorized | User explicitly authorized archiving the entire unused `web/src/models/` tree to Elements. The archive will retain the 13.0+ lookup material and historical model notes rather than deleting them. |
 | 2026-07-16 | Browser-model archive moved | Created and checksum-verified `/Volumes/Elements/cribbage-archive/2026-07-16/cribbage-web-models-20260716.tar.gz`: 44 entries, 80 MB compressed from 192 MB, SHA-256 `46fe10dbf84de141c1960a1ab678c836b13e40aa32a6e7ec7ed0ffd2aa7c9b9f`. The local `web/src/models/` tree and temporary archive were then removed. |
 | 2026-07-16 | Pre-13 benchmark archive moved | `benchmarks/large-mixed/` (464 KB) contained only RAS/Schell versus Expert 1.1 results. It was compressed to `/Volumes/Elements/cribbage-archive/2026-07-16/cribbage-pre13-benchmarks-large-mixed-20260716.tar.gz` (28 KB, SHA-256 `3c728fee7abd96b8e80823d54fd3a836e5e39553642be4818302cd31dca8154d`), checksum-verified, then removed locally. All other `benchmarks/` material contains model 13+ or Rust 15.x data and remains local. |
+| 2026-07-16 | 13.0 vs 15.2 validation started | Started one-shot launchd job `cribbage-runner-13v152-10k`: 10,000 native Rust AI-vs-AI games, 13.0 left versus 15.2 right, 8 workers, seed `0x13201520`, alternating first deal. Live status is `.background/rust-13.0-vs-15.2-10k-20260716/status.json`; per-game data is in `benchmarks/ai-db/rust-13.0-vs-15.2-10k-20260716.sqlite`. Initial ETA was about 10 h 13 m. |
