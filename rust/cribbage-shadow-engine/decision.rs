@@ -182,7 +182,7 @@ fn decision_input(
         ai_table: game.player(side).table.clone(),
         human_table: game.player(opponent).table.clone(),
         human_hand_count: game.player(opponent).hand.len(),
-        crib: game.crib.clone(),
+        own_discards: game.player(side).discarded_to_crib.clone(),
         turn_card: game.turn_card,
         count: game.count,
         turn: PlayerKey::Ai,
@@ -252,5 +252,44 @@ mod tests {
         assert_eq!(result.recommended.card_ids.len(), 2);
         assert!(result.selected.ev.is_some());
         assert!(result.recommended.win_probability.is_some());
+    }
+
+    #[test]
+    fn decision_input_exposes_only_the_actors_own_discards() {
+        let mut game = CribbageGame::new_with_seed(0x9e3779b9, Side::Left);
+        game.discard(Side::Left, [29, 11]).unwrap();
+        game.discard(Side::Right, [51, 15]).unwrap();
+
+        let left = decision_input(
+            &game,
+            Side::Left,
+            ModelId::Schell13,
+            DecisionKind::Peg,
+            None,
+        );
+        let right = decision_input(
+            &game,
+            Side::Right,
+            ModelId::Schell13,
+            DecisionKind::Peg,
+            None,
+        );
+
+        assert_eq!(
+            left.own_discards
+                .iter()
+                .map(|card| card.id)
+                .collect::<Vec<_>>(),
+            vec![29, 11]
+        );
+        assert_eq!(
+            right
+                .own_discards
+                .iter()
+                .map(|card| card.id)
+                .collect::<Vec<_>>(),
+            vec![51, 15]
+        );
+        assert_eq!(game.crib.len(), 4);
     }
 }

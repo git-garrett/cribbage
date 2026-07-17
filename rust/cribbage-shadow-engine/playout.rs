@@ -408,7 +408,7 @@ impl ModelPlayout {
             ai_table: self.game.player(side).table.clone(),
             human_table: self.game.player(opponent).table.clone(),
             human_hand_count: self.game.player(opponent).hand.len(),
-            crib: self.game.crib.clone(),
+            own_discards: self.game.player(side).discarded_to_crib.clone(),
             turn_card: self.game.turn_card,
             count: self.game.count,
             turn: PlayerKey::Ai,

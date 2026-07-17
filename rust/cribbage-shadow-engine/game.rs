@@ -49,6 +49,10 @@ pub enum Phase {
 pub struct PlayerState {
     pub hand: Vec<Card>,
     pub table: Vec<Card>,
+    /// The two cards this player contributed to the current crib. These are
+    /// private to the player until crib scoring; `CribbageGame::crib` remains
+    /// the server-authoritative complete crib.
+    pub discarded_to_crib: Vec<Card>,
     pub crib: Vec<Card>,
     pub score: i32,
 }
@@ -128,6 +132,7 @@ impl CribbageGame {
         self.player_mut(self.pone).hand = deck.drain(0..6).collect();
         for player in &mut self.players {
             player.table.clear();
+            player.discarded_to_crib.clear();
             player.crib.clear();
         }
         self.turn_card = deck.remove(0);
@@ -173,6 +178,7 @@ impl CribbageGame {
             return Err("it is not discard time".to_string());
         }
         let discards = self.remove_cards(side, &card_ids)?;
+        self.player_mut(side).discarded_to_crib = discards.clone();
         self.crib.extend(discards);
         if self.player(self.dealer).hand.len() == 4 && self.player(self.pone).hand.len() == 4 {
             self.begin_pegging();
@@ -384,6 +390,14 @@ mod tests {
         game.discard(Side::Right, [51, 15]).unwrap();
         assert_eq!(game.phase, Phase::Pegging);
         assert_eq!(ids(&game.crib), vec![29, 11, 51, 15]);
+        assert_eq!(
+            ids(&game.player(Side::Left).discarded_to_crib),
+            vec![29, 11]
+        );
+        assert_eq!(
+            ids(&game.player(Side::Right).discarded_to_crib),
+            vec![51, 15]
+        );
         assert_eq!(ids(&game.player(Side::Left).crib), vec![29, 11, 51, 15]);
     }
 

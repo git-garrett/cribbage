@@ -44,7 +44,9 @@ pub struct DecisionInput {
     pub ai_table: Vec<Card>,
     pub human_table: Vec<Card>,
     pub human_hand_count: usize,
-    pub crib: Vec<Card>,
+    /// The acting player's own two discards. Opponent crib cards are hidden
+    /// during pegging and must never enter a decision input.
+    pub own_discards: Vec<Card>,
     pub turn_card: Card,
     pub count: u8,
     pub turn: PlayerKey,
@@ -290,7 +292,7 @@ pub fn parse_decision_input(input_text: &str) -> Result<DecisionInput, String> {
         ai_table: parse_cards(fields.get("aiTable").copied().unwrap_or(""))?,
         human_table: parse_cards(fields.get("humanTable").copied().unwrap_or(""))?,
         human_hand_count: parse_usize(fields.get("humanHandCount").copied().unwrap_or("0"))?,
-        crib: parse_cards(fields.get("crib").copied().unwrap_or(""))?,
+        own_discards: parse_cards(fields.get("ownDiscards").copied().unwrap_or(""))?,
         turn_card: Card::new(parse_u8(fields.get("turnCard").copied().unwrap_or("0"))?)?,
         count: parse_u8(fields.get("count").copied().unwrap_or("0"))?,
         turn: parse_player(fields.get("turn").copied().unwrap_or("ai"))?,
@@ -2849,7 +2851,7 @@ fn known_cards_for_pegging(input: &DecisionInput) -> Vec<Card> {
     known.extend(input.ai_hand.iter().copied());
     known.extend(input.ai_table.iter().copied());
     known.extend(input.human_table.iter().copied());
-    known.extend(input.crib.iter().copied());
+    known.extend(input.own_discards.iter().copied());
     known.push(input.turn_card);
     known
 }
@@ -3422,7 +3424,7 @@ fn upcoming_hand_score_distribution(
     known_cards.extend(input.ai_hand.iter().copied());
     known_cards.extend(input.ai_table.iter().copied());
     known_cards.extend(input.human_table.iter().copied());
-    known_cards.extend(input.crib.iter().copied());
+    known_cards.extend(input.own_discards.iter().copied());
     known_cards.push(input.turn_card);
     let mut known_ids = [false; 52];
     for card in &known_cards {
@@ -3471,10 +3473,11 @@ fn upcoming_hand_score_distribution(
     normalized_score_outcomes(&outcomes, total_weight)
 }
 
-fn upcoming_crib_score_distribution(input: &DecisionInput) -> Vec<(i32, f64)> {
-    if input.crib.len() == 4 {
-        return vec![(score_hand(&input.crib, input.turn_card, true) as i32, 1.0)];
-    }
+fn upcoming_crib_score_distribution(_input: &DecisionInput) -> Vec<(i32, f64)> {
+    // The acting player knows only their own two discards. The other two crib
+    // cards remain hidden until scoring, so treating the complete crib as an
+    // exact future score would leak opponent information. Keep the existing
+    // legal global prior until a conditional own-discard crib asset exists.
     vec![(score_phase_average(ScorePhase::Crib).round() as i32, 1.0)]
 }
 
@@ -3986,5 +3989,32 @@ mod tests {
 
         assert_ne!(peg_simulation_key(&base), peg_simulation_key(&reordered));
         assert_ne!(peg_simulation_key(&base), peg_simulation_key(&changed_hand));
+    }
+
+    #[test]
+    fn decision_parser_ignores_legacy_full_crib_and_uses_own_discards() {
+        let input = parse_decision_input(
+            "kind=peg;model=15.2;role=dealer;aiHand=0,1;aiTable=;humanTable=;humanHandCount=4;crib=4,5,6,7;ownDiscards=2,3;turnCard=8;count=0;turn=ai;go=-;last=-;plays=;pegLead=-",
+        )
+        .unwrap();
+
+        assert_eq!(
+            input
+                .own_discards
+                .iter()
+                .map(|card| card.id)
+                .collect::<Vec<_>>(),
+            vec![2, 3]
+        );
+        let mut known = known_cards_for_pegging(&input)
+            .iter()
+            .map(|card| card.id)
+            .collect::<Vec<_>>();
+        known.sort_unstable();
+        assert_eq!(known, vec![0, 1, 2, 3, 8]);
+        assert_eq!(
+            upcoming_crib_score_distribution(&input),
+            vec![(score_phase_average(ScorePhase::Crib).round() as i32, 1.0)]
+        );
     }
 }

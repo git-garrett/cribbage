@@ -656,7 +656,7 @@ fn snapshot_json(session: &Session) -> String {
         player_snapshot_json(game, HUMAN),
         player_snapshot_json(game, AI),
         game.turn_card.id,
-        number_array_json(&game.crib.iter().map(|card| card.id).collect::<Vec<_>>()),
+        "[]",
         number_array_json(&game.plays.iter().map(|card| card.id).collect::<Vec<_>>()),
         side_array_json(&game.play_owners),
         nested_number_arrays_json(&game.completed_plays),
@@ -679,11 +679,19 @@ fn snapshot_json(session: &Session) -> String {
 
 fn player_snapshot_json(game: &CribbageGame, side: Side) -> String {
     let player = game.player(side);
+    // Snapshots are stored by the browser. Only the human's private hand is
+    // needed for recovery; the AI hand and both players' crib views must stay
+    // server-private until scoring.
+    let hand = if side == HUMAN {
+        number_array_json(&player.hand.iter().map(|card| card.id).collect::<Vec<_>>())
+    } else {
+        "[]".to_string()
+    };
     format!(
         "{{\"hand\":{},\"table\":{},\"crib\":{},\"score\":{}}}",
-        number_array_json(&player.hand.iter().map(|card| card.id).collect::<Vec<_>>()),
+        hand,
         number_array_json(&player.table.iter().map(|card| card.id).collect::<Vec<_>>()),
-        number_array_json(&player.crib.iter().map(|card| card.id).collect::<Vec<_>>()),
+        "[]",
         player.score,
     )
 }
@@ -1413,4 +1421,42 @@ fn unix_millis() -> u128 {
 
 fn isoish_now() -> String {
     format!("{}Z", unix_millis())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_redacts_ai_hand_and_complete_crib() {
+        let mut session = new_session(ModelId::Schell13, None);
+        session.waiting_for_deal_cut = false;
+        let dealer = session.game.dealer;
+        let pone = session.game.pone;
+        let dealer_discards = [
+            session.game.player(dealer).hand[0].id,
+            session.game.player(dealer).hand[1].id,
+        ];
+        let pone_discards = [
+            session.game.player(pone).hand[0].id,
+            session.game.player(pone).hand[1].id,
+        ];
+        session.game.discard(dealer, dealer_discards).unwrap();
+        session.game.discard(pone, pone_discards).unwrap();
+
+        let snapshot = snapshot_json(&session);
+        let ai_hand = number_array_json(
+            &session
+                .game
+                .player(AI)
+                .hand
+                .iter()
+                .map(|card| card.id)
+                .collect::<Vec<_>>(),
+        );
+
+        assert!(snapshot.contains("\"ai\":{\"hand\":[]"));
+        assert!(!snapshot.contains(&format!("\"hand\":{}", ai_hand)));
+        assert_eq!(snapshot.matches("\"crib\":[]").count(), 3);
+    }
 }
