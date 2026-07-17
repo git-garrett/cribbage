@@ -60,9 +60,9 @@ untracked.
 
 ### 0. Freeze Architecture and Cost Guardrails
 
-- [ ] Record the reference compute and latency measurements.
-- [ ] Select external-sampling MCCFR rather than exhaustive CFR.
-- [ ] Define stop conditions and the per-step commit protocol.
+- [x] Record the reference compute and latency measurements.
+- [x] Select external-sampling MCCFR rather than exhaustive CFR.
+- [x] Define stop conditions and the per-step commit protocol.
 
 QA:
 
@@ -153,4 +153,10 @@ QA:
 
 ## Completion Log
 
-- No steps completed yet.
+- 2026-07-17, Step 0: Queried the retained 10k database directly and froze
+  the 15.05-hour reference workload, aggregate decision CPU time, and pegging
+  latency percentiles above. Selected external-sampling MCCFR, capped the
+  prototype at five reference equivalents, and established a mandatory
+  replan threshold below ten equivalents. QA confirmed that only this plan
+  was staged; `pasted-text.txt` remains untracked. Implementation commit:
+  `1814b24`.
