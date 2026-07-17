@@ -1,0 +1,8 @@
+[package]
+name = "cribbage-policy-trainer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cribbage-shadow-engine = { path = "../cribbage-shadow-engine" }
+

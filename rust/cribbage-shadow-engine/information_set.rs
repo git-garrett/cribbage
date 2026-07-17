@@ -176,14 +176,14 @@ pub enum PegSeat {
 }
 
 impl PegSeat {
-    fn index(self) -> usize {
+    pub fn index(self) -> usize {
         match self {
             PegSeat::Zero => 0,
             PegSeat::One => 1,
         }
     }
 
-    fn other(self) -> PegSeat {
+    pub fn other(self) -> PegSeat {
         match self {
             PegSeat::Zero => PegSeat::One,
             PegSeat::One => PegSeat::Zero,

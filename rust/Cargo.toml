@@ -1,5 +1,10 @@
 [workspace]
-members = ["cribbage-shadow-engine", "cribbage-runner", "cribbage-api"]
+members = [
+  "cribbage-shadow-engine",
+  "cribbage-runner",
+  "cribbage-api",
+  "cribbage-policy-trainer",
+]
 resolver = "2"
 
 [profile.release]
