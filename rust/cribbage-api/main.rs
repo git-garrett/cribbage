@@ -11,7 +11,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cribbage_shadow_engine::cards::{Card, RANKS, SUIT_NAMES, VALUES};
 use cribbage_shadow_engine::decision::{
-    recommend_discard_for_side, recommend_peg_for_side, PegDecision,
+    recommend_discard_for_side, recommend_peg_for_side, review_discard_for_side,
+    review_peg_for_side, DecisionReview as EngineDecisionReview, PegDecision,
 };
 use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
 use cribbage_shadow_engine::model_id::{ModelId, MODEL_13_0};
@@ -33,6 +34,34 @@ struct Session {
     waiting_for_ai_discard: bool,
     deal_cuts: [Card; 2],
     created_at: String,
+    decision_reviews: Vec<SavedDecisionReview>,
+    next_review_id: u32,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ReviewKind {
+    Discard,
+    Peg,
+}
+
+#[derive(Clone)]
+struct SavedDecisionReview {
+    id: String,
+    at: String,
+    kind: ReviewKind,
+    game: CribbageGame,
+    selected_card_ids: Vec<u8>,
+    completed: Option<CompletedDecisionReview>,
+}
+
+#[derive(Clone)]
+struct CompletedDecisionReview {
+    selected_card_ids: Vec<u8>,
+    recommended_card_ids: Vec<u8>,
+    selected_ev: f64,
+    recommended_ev: f64,
+    selected_win_probability: Option<f64>,
+    recommended_win_probability: Option<f64>,
 }
 
 #[derive(Clone)]
@@ -312,6 +341,8 @@ fn new_session(model: ModelId, tag: Option<String>) -> Session {
         waiting_for_ai_discard: false,
         deal_cuts: [first, second],
         created_at: isoish_now(),
+        decision_reviews: Vec::new(),
+        next_review_id: 1,
     }
 }
 
@@ -347,7 +378,14 @@ fn apply_action(
             if ids.len() != 2 {
                 return Err("Select exactly two cards to discard.".to_string());
             }
+            let review_game = session.game.clone();
             session.game.discard(HUMAN, [ids[0] as u8, ids[1] as u8])?;
+            queue_decision_review(
+                session,
+                ReviewKind::Discard,
+                review_game,
+                vec![ids[0] as u8, ids[1] as u8],
+            );
             session.waiting_for_ai_discard = true;
             Ok(())
         }
@@ -373,7 +411,9 @@ fn apply_action(
         "play" | "play-human" => {
             require_phase(session, Phase::Pegging)?;
             let id = json_number(body, "id").ok_or_else(|| "Missing card id.".to_string())? as u8;
+            let review_game = session.game.clone();
             session.game.play_card(HUMAN, id)?;
+            queue_decision_review(session, ReviewKind::Peg, review_game, vec![id]);
             Ok(())
         }
         "go" | "go-human" => {
@@ -400,8 +440,88 @@ fn apply_action(
             require_phase(session, Phase::PeggingComplete)?;
             session.game.score_after_pegging()
         }
-        "complete-decision-reviews" => Ok(()),
+        "complete-decision-reviews" => complete_decision_reviews(
+            session,
+            json_number(body, "limit")
+                .map(|value| (value as usize).max(1))
+                .unwrap_or(usize::MAX),
+            model_root,
+        ),
         other => Err(format!("Unknown game action: {}", other)),
+    }
+}
+
+fn queue_decision_review(
+    session: &mut Session,
+    kind: ReviewKind,
+    game: CribbageGame,
+    selected_card_ids: Vec<u8>,
+) {
+    let id = format!("{}-review-{}", session.id, session.next_review_id);
+    session.next_review_id += 1;
+    session.decision_reviews.push(SavedDecisionReview {
+        id,
+        at: isoish_now(),
+        kind,
+        game,
+        selected_card_ids,
+        completed: None,
+    });
+}
+
+fn complete_decision_reviews(
+    session: &mut Session,
+    limit: usize,
+    model_root: &str,
+) -> Result<(), String> {
+    if session.game.phase != Phase::GameOver {
+        return Err("Decision review is available after the game ends.".to_string());
+    }
+    let mut completed = 0;
+    for pending in &mut session.decision_reviews {
+        if completed >= limit || pending.completed.is_some() {
+            continue;
+        }
+        let review = match pending.kind {
+            ReviewKind::Discard => {
+                if pending.selected_card_ids.len() != 2 {
+                    return Err("saved discard review is malformed".to_string());
+                }
+                review_discard_for_side(
+                    &pending.game,
+                    HUMAN,
+                    ModelId::Schell13,
+                    [pending.selected_card_ids[0], pending.selected_card_ids[1]],
+                    model_root,
+                )?
+            }
+            ReviewKind::Peg => {
+                let Some(selected) = pending.selected_card_ids.first().copied() else {
+                    return Err("saved pegging review is malformed".to_string());
+                };
+                review_peg_for_side(
+                    &pending.game,
+                    HUMAN,
+                    ModelId::Schell13,
+                    selected,
+                    model_root,
+                )?
+            }
+        };
+        pending.completed = Some(completed_review(review));
+        completed += 1;
+    }
+    Ok(())
+}
+
+fn completed_review(review: EngineDecisionReview) -> CompletedDecisionReview {
+    CompletedDecisionReview {
+        selected_card_ids: review.selected.card_ids,
+        recommended_card_ids: review.recommended.card_ids,
+        selected_ev: review.selected.ev.unwrap_or(0.0),
+        recommended_ev: review.recommended.ev.unwrap_or(0.0),
+        selected_win_probability: review.selected.win_probability,
+        recommended_win_probability: review.recommended.win_probability,
     }
 }
 
@@ -525,7 +645,7 @@ fn game_state_json(session: &Session) -> String {
 fn snapshot_json(session: &Session) -> String {
     let game = &session.game;
     format!(
-        "{{\"version\":1,\"gameId\":\"{}\",\"rngState\":{},\"analyticsCounter\":0,\"analyticsEvents\":{},\"opponent\":\"{}\",\"deal\":{},\"firstDeal\":{},\"handNumber\":{},\"human\":{},\"ai\":{},\"turnCard\":{},\"crib\":{},\"plays\":{},\"playOwners\":{},\"completedPlays\":{},\"completedPlayOwners\":[],\"peggingResetPending\":{},\"count\":{},\"turn\":{},\"goPlayer\":{},\"lastPlayer\":{},\"scoringReview\":null,\"phase\":\"{}\",\"message\":\"{}\",\"log\":[],\"result\":{},\"pegPositions\":{{\"human\":[{},{}],\"ai\":[{},{}]}},\"pendingDiscardReviews\":[],\"pendingPeggingReviews\":[]}}",
+        "{{\"version\":1,\"gameId\":\"{}\",\"rngState\":{},\"analyticsCounter\":0,\"analyticsEvents\":{},\"opponent\":\"{}\",\"deal\":{},\"firstDeal\":{},\"handNumber\":{},\"human\":{},\"ai\":{},\"turnCard\":{},\"crib\":{},\"plays\":{},\"playOwners\":{},\"completedPlays\":{},\"completedPlayOwners\":[],\"peggingResetPending\":{},\"count\":{},\"turn\":{},\"goPlayer\":{},\"lastPlayer\":{},\"scoringReview\":null,\"phase\":\"{}\",\"message\":\"{}\",\"log\":[],\"result\":{},\"pegPositions\":{{\"human\":[{},{}],\"ai\":[{},{}]}},\"pendingDiscardReviews\":{},\"pendingPeggingReviews\":{}}}",
         json_escape(&session.id),
         game.rng_state,
         analytics_events_json(session),
@@ -552,6 +672,8 @@ fn snapshot_json(session: &Session) -> String {
         game.player(HUMAN).score,
         game.player(AI).score,
         game.player(AI).score,
+        pending_reviews_json(session, ReviewKind::Discard),
+        pending_reviews_json(session, ReviewKind::Peg),
     )
 }
 
@@ -617,34 +739,200 @@ fn analytics_events_json(session: &Session) -> String {
         json_escape(&session.id),
         session.model.as_str(),
     );
-    if game.phase != Phase::GameOver {
-        return format!("[{}]", start);
-    }
-    let human_score = game.player(HUMAN).score;
-    let ai_score = game.player(AI).score;
-    let winner = if human_score >= 121 { "human" } else { "ai" };
-    let loser = if winner == "human" { "ai" } else { "human" };
-    let lower = human_score.min(ai_score);
-    let result = if lower < 61 {
-        "double-skunk"
-    } else if lower < 91 {
-        "skunk"
-    } else {
-        "regular"
-    };
-    let end = format!(
-        "{{\"id\":\"{}-end\",\"at\":\"{}\",\"type\":\"game\",\"action\":\"end\",\"gameId\":\"{}\",\"opponent\":\"{}\",\"winner\":\"{}\",\"loser\":\"{}\",\"result\":\"{}\",\"finalScores\":{{\"human\":{},\"ai\":{}}}}}",
-        json_escape(&session.id),
-        isoish_now(),
-        json_escape(&session.id),
-        session.model.as_str(),
-        winner,
-        loser,
-        result,
-        human_score,
-        ai_score,
+    let mut events = vec![start];
+    events.extend(
+        session
+            .decision_reviews
+            .iter()
+            .map(|review| decision_review_event_json(session, review)),
     );
-    format!("[{},{}]", start, end)
+    if game.phase == Phase::GameOver {
+        let human_score = game.player(HUMAN).score;
+        let ai_score = game.player(AI).score;
+        let winner = if human_score >= 121 { "human" } else { "ai" };
+        let loser = if winner == "human" { "ai" } else { "human" };
+        let lower = human_score.min(ai_score);
+        let result = if lower < 61 {
+            "double-skunk"
+        } else if lower < 91 {
+            "skunk"
+        } else {
+            "regular"
+        };
+        events.push(format!(
+            "{{\"id\":\"{}-end\",\"at\":\"{}\",\"type\":\"game\",\"action\":\"end\",\"gameId\":\"{}\",\"opponent\":\"{}\",\"winner\":\"{}\",\"loser\":\"{}\",\"result\":\"{}\",\"finalScores\":{{\"human\":{},\"ai\":{}}}}}",
+            json_escape(&session.id),
+            isoish_now(),
+            json_escape(&session.id),
+            session.model.as_str(),
+            winner,
+            loser,
+            result,
+            human_score,
+            ai_score,
+        ));
+    }
+    format!("[{}]", events.join(","))
+}
+
+fn pending_reviews_json(session: &Session, kind: ReviewKind) -> String {
+    let pending = session
+        .decision_reviews
+        .iter()
+        .filter(|review| review.kind == kind && review.completed.is_none())
+        .map(|review| format!("{{\"id\":\"{}\"}}", json_escape(&review.id)))
+        .collect::<Vec<_>>();
+    format!("[{}]", pending.join(","))
+}
+
+fn decision_review_event_json(session: &Session, review: &SavedDecisionReview) -> String {
+    let game = &review.game;
+    let role = if game.dealer == HUMAN {
+        "dealer"
+    } else {
+        "pone"
+    };
+    let review_json = review
+        .completed
+        .as_ref()
+        .map(|completed| format!(",\"review\":{}", completed_review_json(completed)))
+        .unwrap_or_default();
+    match review.kind {
+        ReviewKind::Discard => {
+            let selected = card_labels_for_ids(&review.selected_card_ids);
+            let remaining = game
+                .player(HUMAN)
+                .hand
+                .iter()
+                .filter(|card| !review.selected_card_ids.contains(&card.id))
+                .map(|card| card.label())
+                .collect::<Vec<_>>();
+            format!(
+                "{{\"id\":\"{}\",\"at\":\"{}\",\"type\":\"discard\",\"gameId\":\"{}\",\"handNumber\":{},\"player\":\"human\",\"role\":\"{}\",\"cards\":{},\"cribOwner\":\"{}\",\"cribAfterDiscard\":{},\"remainingHand\":{},\"handBeforeDiscard\":{},\"scores\":{{\"human\":{},\"ai\":{}}},\"dealer\":\"{}\",\"model\":\"{}\"{}}}",
+                json_escape(&review.id),
+                json_escape(&review.at),
+                json_escape(&session.id),
+                game.hand_number,
+                role,
+                string_array_json(&selected),
+                if game.dealer == HUMAN { "human" } else { "ai" },
+                string_array_json(&selected),
+                string_array_json(&remaining),
+                card_labels_json(&game.player(HUMAN).hand),
+                game.player(HUMAN).score,
+                game.player(AI).score,
+                if game.dealer == HUMAN { "human" } else { "ai" },
+                MODEL_13_0,
+                review_json,
+            )
+        }
+        ReviewKind::Peg => {
+            let selected = card_labels_for_ids(&review.selected_card_ids);
+            let selected_value = review
+                .selected_card_ids
+                .first()
+                .and_then(|id| Card::new(*id).ok())
+                .map(|card| card.value)
+                .unwrap_or(0);
+            format!(
+                "{{\"id\":\"{}\",\"at\":\"{}\",\"type\":\"pegging\",\"action\":\"play\",\"gameId\":\"{}\",\"handNumber\":{},\"player\":\"human\",\"role\":\"{}\",\"card\":\"{}\",\"hand\":{},\"playedCards\":{},\"completedPlayGroups\":{},\"cutCard\":\"{}\",\"countBefore\":{},\"scoresBefore\":{{\"human\":{},\"ai\":{}}},\"count\":{},\"scores\":{{\"human\":{},\"ai\":{}}},\"message\":\"User played {}\",\"model\":\"{}\"{}}}",
+                json_escape(&review.id),
+                json_escape(&review.at),
+                json_escape(&session.id),
+                game.hand_number,
+                role,
+                json_escape(selected.first().map(String::as_str).unwrap_or("card")),
+                card_labels_json(&game.player(HUMAN).hand),
+                card_labels_json(&game.plays),
+                nested_card_labels_json(&game.completed_plays),
+                json_escape(&game.turn_card.label()),
+                game.count,
+                game.player(HUMAN).score,
+                game.player(AI).score,
+                game.count + selected_value,
+                game.player(HUMAN).score,
+                game.player(AI).score,
+                json_escape(selected.first().map(String::as_str).unwrap_or("card")),
+                MODEL_13_0,
+                review_json,
+            )
+        }
+    }
+}
+
+fn completed_review_json(review: &CompletedDecisionReview) -> String {
+    let mut fields = vec![
+        format!("\"model\":\"{}\"", MODEL_13_0),
+        format!(
+            "\"selected\":{}",
+            string_array_json(&card_labels_for_ids(&review.selected_card_ids))
+        ),
+        format!(
+            "\"recommended\":{}",
+            string_array_json(&card_labels_for_ids(&review.recommended_card_ids))
+        ),
+        format!("\"selectedEv\":{}", json_f64(review.selected_ev)),
+        format!("\"recommendedEv\":{}", json_f64(review.recommended_ev)),
+        format!(
+            "\"delta\":{}",
+            json_f64(review.recommended_ev - review.selected_ev)
+        ),
+    ];
+    if let (Some(selected), Some(recommended)) = (
+        review.selected_win_probability,
+        review.recommended_win_probability,
+    ) {
+        fields.push(format!("\"selectedWinProbability\":{}", json_f64(selected)));
+        fields.push(format!(
+            "\"recommendedWinProbability\":{}",
+            json_f64(recommended)
+        ));
+        fields.push(format!(
+            "\"winProbabilityDelta\":{}",
+            json_f64(recommended - selected)
+        ));
+    }
+    format!("{{{}}}", fields.join(","))
+}
+
+fn card_labels_for_ids(ids: &[u8]) -> Vec<String> {
+    ids.iter()
+        .filter_map(|id| Card::new(*id).ok().map(|card| card.label()))
+        .collect()
+}
+
+fn card_labels_json(cards: &[Card]) -> String {
+    string_array_json(&cards.iter().map(|card| card.label()).collect::<Vec<_>>())
+}
+
+fn nested_card_labels_json(groups: &[Vec<Card>]) -> String {
+    format!(
+        "[{}]",
+        groups
+            .iter()
+            .map(|cards| card_labels_json(cards))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+fn string_array_json(values: &[String]) -> String {
+    format!(
+        "[{}]",
+        values
+            .iter()
+            .map(|value| json_string_value(value))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+fn json_f64(value: f64) -> String {
+    if value.is_finite() {
+        format!("{:.6}", value)
+    } else {
+        "0".to_string()
+    }
 }
 
 fn card_json(card: Card, owner: Option<&str>) -> String {

@@ -70,6 +70,14 @@ pub enum Decision {
     },
 }
 
+/// The selected action and the model's recommendation for the same decision
+/// point. This is used by post-game review rather than live play.
+#[derive(Clone, Debug)]
+pub struct DecisionReview {
+    pub selected: Decision,
+    pub recommended: Decision,
+}
+
 #[derive(Clone)]
 struct WeightedEntry {
     key: String,
@@ -298,6 +306,28 @@ pub fn evaluate_decision(input: &DecisionInput, root: &str) -> Result<Decision, 
         DecisionKind::Discard => recommend_discard(input, root),
         DecisionKind::Peg => recommend_peg(input, root),
     }
+}
+
+/// Evaluate a user's already-selected action against the native 13.0 model.
+/// Model 13.0 remains the explicit review model even if a developer-only game
+/// was played against another model.
+pub fn review_decision(
+    input: &DecisionInput,
+    selected_card_ids: &[u8],
+    root: &str,
+) -> Result<DecisionReview, String> {
+    if input.model != MODEL_13_0 {
+        return Err("post-game review currently supports model 13.0 only".to_string());
+    }
+    let selected = match input.kind {
+        DecisionKind::Discard => review_discard_model13(input, selected_card_ids, root)?,
+        DecisionKind::Peg => review_peg_model13(input, selected_card_ids, root)?,
+    };
+    let recommended = evaluate_decision(input, root)?;
+    Ok(DecisionReview {
+        selected,
+        recommended,
+    })
 }
 
 fn is_supported_rust_model(model: &str) -> bool {
@@ -694,6 +724,76 @@ fn recommend_discard_model13(input: &DecisionInput, root: &str) -> Result<Decisi
     })
 }
 
+fn review_discard_model13(
+    input: &DecisionInput,
+    selected_card_ids: &[u8],
+    root: &str,
+) -> Result<Decision, String> {
+    if input.ai_hand.len() != 6 {
+        return Err(format!(
+            "discard review requires six cards, got {}",
+            input.ai_hand.len()
+        ));
+    }
+    if selected_card_ids.len() != 2 || selected_card_ids[0] == selected_card_ids[1] {
+        return Err("discard review requires two distinct selected cards".to_string());
+    }
+    let selected = selected_card_ids
+        .iter()
+        .map(|id| {
+            input
+                .ai_hand
+                .iter()
+                .copied()
+                .find(|card| card.id == *id)
+                .ok_or_else(|| "selected discard is not in the original hand".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let keep = input
+        .ai_hand
+        .iter()
+        .copied()
+        .filter(|card| !selected_card_ids.contains(&card.id))
+        .collect::<Vec<_>>();
+    let tables = runtime_tables(root)?;
+    let crib_rank = tables.crib_rank()?;
+    let pairwise = tables.pairwise()?;
+    let mut seen_cards = [false; 52];
+    for card in &input.ai_hand {
+        seen_cards[card.id as usize] = true;
+    }
+    let deck = full_deck()
+        .into_iter()
+        .filter(|card| !seen_cards[card.id as usize])
+        .collect::<Vec<_>>();
+    let crib_flush_bonus_by_suit = crib_flush_bonuses_by_suit(&input.ai_hand);
+    let mut board = BoardModel::new();
+    let evaluation = evaluate_discard_candidate_model13(
+        &input.ai_hand,
+        &keep,
+        &selected,
+        &deck,
+        input.role,
+        input.ai_score,
+        input.human_score,
+        &crib_flush_bonus_by_suit,
+        crib_rank,
+        pairwise,
+        &mut board,
+    )
+    .ok_or_else(|| "selected discard could not be evaluated".to_string())?;
+    Ok(Decision::Discard {
+        card_ids: selected_card_ids.to_vec(),
+        best_lead: if evaluation.best_lead >= 0 {
+            Some(evaluation.best_lead as u8)
+        } else {
+            None
+        },
+        ev: Some(evaluation.total_ev),
+        win_probability: Some(evaluation.win_probability),
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn evaluate_discard_candidate_model13(
     full_hand: &[Card],
@@ -851,6 +951,67 @@ fn recommend_peg_model13(
     Ok(Decision::Peg {
         action: "play".to_string(),
         card_id: Some(best_card.id),
+        ev: Some(ev),
+        win_probability: Some(win_probability),
+    })
+}
+
+fn review_peg_model13(
+    input: &DecisionInput,
+    selected_card_ids: &[u8],
+    root: &str,
+) -> Result<Decision, String> {
+    if selected_card_ids.len() != 1 {
+        return Err("pegging review requires one selected card".to_string());
+    }
+    let selected_id = selected_card_ids[0];
+    let legal = input
+        .ai_hand
+        .iter()
+        .copied()
+        .filter(|card| input.count + card.value <= 31)
+        .collect::<Vec<_>>();
+    let selected = legal
+        .iter()
+        .copied()
+        .find(|card| card.id == selected_id)
+        .ok_or_else(|| "selected peg is not legal in the saved position".to_string())?;
+    if legal.len() == 1 {
+        let mut plays = input.plays.clone();
+        plays.push(selected);
+        return Ok(Decision::Peg {
+            action: "play".to_string(),
+            card_id: Some(selected.id),
+            ev: Some(score_count(&plays) as f64),
+            win_probability: None,
+        });
+    }
+    let tables = runtime_tables(root)?;
+    let hold = tables.hold()?;
+    let opponent_role = other_role(input.role);
+    let known_cards = known_cards_for_pegging(input);
+    let available_ranks = remaining_rank_counts(&known_cards);
+    let opponent_hands = opponent_rank_hands_for_engine(
+        &available_ranks,
+        input.human_hand_count as u8,
+        &input.human_table,
+        opponent_role,
+        hold,
+        false,
+    );
+    let mut evaluator = historic_phase_pegging_win_evaluator(input);
+    let distribution = optimal_pegging_outcome_distribution_for_candidate(
+        input,
+        selected,
+        &opponent_hands,
+        &mut evaluator,
+    );
+    let win_probability =
+        expected_win_probability_after_pegging(input, &distribution, &mut evaluator);
+    let ev = pegging_distribution_point_ev(&distribution);
+    Ok(Decision::Peg {
+        action: "play".to_string(),
+        card_id: Some(selected.id),
         ev: Some(ev),
         win_probability: Some(win_probability),
     })

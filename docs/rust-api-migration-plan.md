@@ -41,6 +41,9 @@ Capacitor wrappers needed for future iOS and Android releases.
   was received on 2026-07-16.
 - [x] Transfer the verified pre-13 benchmark archive to Elements and remove
   its local source directory.
+- [x] Restore post-game human decision review in the Rust API with a fixed
+  13.0 evaluator, saved decision-state snapshots, and explicit UI wording for
+  win probability and point EV.
 
 ## Post-migration model validation
 
@@ -83,4 +86,5 @@ Capacitor wrappers needed for future iOS and Android releases.
 | 2026-07-16 | Browser-model archive moved | Created and checksum-verified `/Volumes/Elements/cribbage-archive/2026-07-16/cribbage-web-models-20260716.tar.gz`: 44 entries, 80 MB compressed from 192 MB, SHA-256 `46fe10dbf84de141c1960a1ab678c836b13e40aa32a6e7ec7ed0ffd2aa7c9b9f`. The local `web/src/models/` tree and temporary archive were then removed. |
 | 2026-07-16 | Pre-13 benchmark archive moved | `benchmarks/large-mixed/` (464 KB) contained only RAS/Schell versus Expert 1.1 results. It was compressed to `/Volumes/Elements/cribbage-archive/2026-07-16/cribbage-pre13-benchmarks-large-mixed-20260716.tar.gz` (28 KB, SHA-256 `3c728fee7abd96b8e80823d54fd3a836e5e39553642be4818302cd31dca8154d`), checksum-verified, then removed locally. All other `benchmarks/` material contains model 13+ or Rust 15.x data and remains local. |
 | 2026-07-16 | 13.0 vs 15.2 validation started | Started one-shot launchd job `cribbage-runner-13v152-10k`: 10,000 native Rust AI-vs-AI games, 13.0 left versus 15.2 right, 8 workers, seed `0x13201520`, alternating first deal. Live status is `.background/rust-13.0-vs-15.2-10k-20260716/status.json`; per-game data is in `benchmarks/ai-db/rust-13.0-vs-15.2-10k-20260716.sqlite`. Initial ETA was about 10 h 13 m. |
-| 2026-07-16 | Public model reverted and deployed | At the user's direction, new public games and API fallback metadata use 13.0 for its substantial decision-speed advantage while the 13.0-vs-15.2 validation run continues. Deployed to production and verified `/health`, `/api/model`, and a fresh game all report `schell_table-peg_table-13.0`. Existing sessions retain their selected model. The Rust API's post-game decision-review action is presently a no-op, so it has no separate analysis model to retarget. |
+| 2026-07-16 | Public model reverted and deployed | At the user's direction, new public games and API fallback metadata use 13.0 for its substantial decision-speed advantage while the 13.0-vs-15.2 validation run continues. Deployed to production and verified `/health`, `/api/model`, and a fresh game all report `schell_table-peg_table-13.0`. Existing sessions retain their selected model. |
+| 2026-07-17 | Post-game decision review restored and deployed | The native Rust API now saves every human discard and peg-play position, then evaluates it after the game with fixed 13.0. A local end-to-end game queued 8 discard and 32 pegging reviews; the endpoint completed all 40, returned 13.0 recommendations with point EV and win-probability values, and emptied both pending-review queues. Production QA then queued 40 reviews and confirmed the first completed review reported model 13.0 with both EV and win probability. The UI now identifies 13.0 explicitly and states that win probability is primary while point EV is supporting context. |

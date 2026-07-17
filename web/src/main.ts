@@ -579,7 +579,7 @@ function applyAuthoritativeGameState(snapshot: GameSnapshot, game: GameState): v
 }
 
 function simpleNetworkSessionValue(): string {
-  return SIMPLE_NETWORK_LOCAL_AI_MODE ? "rust-13.0-14.3-14.8-14.8.1-15.0-15.1-15.2" : "rust-15.2";
+  return SIMPLE_NETWORK_LOCAL_AI_MODE ? "rust-13.0-14.3-14.8-14.8.1-15.0-15.1-15.2" : "rust-13.0";
 }
 function isValidSimpleNetworkSessionValue(value: string | null): boolean {
   return value === simpleNetworkSessionValue() || value === SIMPLE_NETWORK_OPPONENT;
@@ -2559,7 +2559,7 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
     pendingBody.className = "decision-review-pending-body";
     const pendingText = document.createElement("span");
     pendingText.textContent = canAnalyze
-      ? "Analyze your errors and learn how to improve:"
+      ? "Analyze your errors with AI 13.0 and learn how to improve:"
       : `${pending.length} user decision${pending.length === 1 ? "" : "s"} not analyzed.`;
     pendingBody.append(pendingText);
     if (state.completingReviews && state.reviewProgress) {
@@ -2581,7 +2581,7 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
       const analyze = document.createElement("button");
       analyze.type = "button";
       analyze.className = "decision-review-analyze";
-      analyze.textContent = state.completingReviews ? "Analyzing" : "Analyze";
+      analyze.textContent = state.completingReviews ? "Analyzing" : "Analyze with AI 13.0";
       analyze.disabled = state.completingReviews || state.pending;
       analyze.addEventListener("click", () => {
         void analyzeCurrentGameDecisionReviews();
@@ -2593,14 +2593,14 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   }
 
   const model = document.createElement("p");
-  model.textContent = "Compared to AI analysis.";
+  model.textContent = "Compared with AI 13.0 decision analysis. Win probability is primary; point EV is supporting context.";
   const totals = decisionEvTotals(mistakes);
   section.append(model, decisionEvSummary(totals), decisionWinProbabilityImpact(totals));
 
   if (!mistakes.length) {
     const empty = document.createElement("div");
     empty.className = "decision-review-empty";
-    empty.textContent = "No user discards or peg plays were flagged by AI analysis.";
+    empty.textContent = "No user discards or peg plays were flagged by AI 13.0 analysis.";
     section.append(empty);
     return section;
   }
@@ -2769,6 +2769,13 @@ function decisionErrorAverages(events: AnalyticsEvent[], games: GameLogRecord[])
       handIds.add(`${event.gameId}:${event.handNumber}`);
     }
     if (
+      gameIds.has(event.gameId) &&
+      ((event.type === "discard" && event.player === "human") ||
+        (event.type === "pegging" && event.action === "play" && event.player === "human"))
+    ) {
+      handIds.add(`${event.gameId}:${event.handNumber}`);
+    }
+    if (
       !gameIds.has(event.gameId) ||
       !((event.type === "discard" && event.player === "human") ||
         (event.type === "pegging" && event.action === "play" && event.player === "human")) ||
@@ -2792,8 +2799,10 @@ function decisionErrorAveragesCard(all: DecisionErrorAverages, recent: DecisionE
   const card = document.createElement("div");
   card.className = "analytics-total analytics-total-wide error-average-card";
   const title = document.createElement("strong");
-  title.textContent = "User Error EV";
-  card.append(title);
+  title.textContent = "User decision loss";
+  const note = document.createElement("em");
+  note.textContent = "Point EV, with errors identified by AI 13.0 win-probability impact.";
+  card.append(title, note);
   for (const key of ERROR_SCORE_KEYS) {
     const row = document.createElement("span");
     row.className = "error-average-row";
@@ -3870,13 +3879,13 @@ function sortedAnalyticsEngines(
 
 function analyticsEngineSortKey(engine: Opponent): number {
   return [
+    "schell_table-peg_table-13.0",
     "schell_table-peg_table-15.2",
     "schell_table-peg_table-15.1",
     "schell_table-peg_table-15.0",
     "schell_table-peg_table-14.8.1",
     "schell_table-peg_table-14.8",
     "schell_table-peg_table-14.3",
-    "schell_table-peg_table-13.0",
   ].indexOf(engine);
 }
 
