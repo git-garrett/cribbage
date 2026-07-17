@@ -89,13 +89,13 @@ QA:
 
 ### 2. External-Sampling MCCFR Trainer
 
-- [ ] Implement alternating-player external-sampling regret updates.
-- [ ] Keep the acting player's actions unified at each information set.
-- [ ] Sample legal hidden deals and cut cards without exposing them in keys.
-- [ ] Use ordered terminal scoring and board-aware utility near 121.
-- [ ] Add deterministic seed, worker count, checkpoint, resume, status, ETA,
+- [x] Implement alternating-player external-sampling regret updates.
+- [x] Keep the acting player's actions unified at each information set.
+- [x] Sample legal hidden deals and cut cards without exposing them in keys.
+- [x] Use ordered terminal scoring and board-aware utility near 121.
+- [x] Add deterministic seed, worker count, checkpoint, resume, status, ETA,
   and explicit wall-budget arguments.
-- [ ] Run 10k/100k-iteration probes and project the capped build cost.
+- [x] Run 10k/100k-iteration probes and project the capped build cost.
 
 QA:
 
@@ -167,3 +167,26 @@ QA:
   immediate terminal wins. `cargo fmt --all -- --check` and the full Rust
   workspace suite passed (60 unit tests plus doc tests). Implementation
   commit: `6e9b6a0`.
+- 2026-07-17, Step 2: Added the alternating-player external-sampling MCCFR
+  trainer as a Rust workspace crate. It samples legal deals using a
+  non-clairvoyant discard heuristic, expands every traverser action, samples
+  opponent actions, and evaluates terminal play in pone-hand, dealer-hand,
+  crib order with board-aware continuation utility. The learned key groups
+  exact legal views by observable retained/revealed ranks, current-series
+  order, go/last state, role, and board pressure; it intentionally omits cut
+  and own-discard ranks to make repeat learning feasible without introducing
+  hidden-hand information. One-use states retain only deterministic 64-bit
+  fingerprints and become full regret nodes when revisited.
+
+  The CLI supports deterministic seeds, parallel workers, atomic status with
+  ETA, deterministic checkpoint/resume, per-run wall limits, projected
+  reference-work limits, and an information-set memory guard. The final 10k
+  release probe trained at 10,048 iterations/second, completed in 1.0 second,
+  retained 101,053 trained plus 517,382 singleton states, and wrote an 11 MB
+  checkpoint. The non-persisting 100k probe completed in 12.5 seconds at
+  8,007 iterations/second with 1,277,862 trained plus 3,658,245 singleton
+  states, projecting to 0.00023 of the 15.05-hour reference workload. CLI
+  resume from 10k to 11k and a forced information-set-limit stop both passed.
+  Formatting, all 70 workspace unit tests plus doc tests, and warning-as-error
+  Clippy for the trainer passed; only pre-existing shadow-engine dead-code
+  warnings remain. Implementation commit: `ebed86c`.
