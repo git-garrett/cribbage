@@ -14,7 +14,7 @@ use cribbage_shadow_engine::decision::{
     recommend_discard_for_side, recommend_peg_for_side, PegDecision,
 };
 use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
-use cribbage_shadow_engine::model_id::{ModelId, MODEL_15_2};
+use cribbage_shadow_engine::model_id::{ModelId, MODEL_13_0};
 
 const HUMAN: Side = Side::Left;
 const AI: Side = Side::Right;
@@ -237,14 +237,14 @@ fn write_response(stream: &mut TcpStream, response: Response) -> Result<(), Stri
 fn health_json() -> String {
     format!(
         "{{\"ok\":true,\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\"}}",
-        APP_VERSION, MODEL_15_2
+        APP_VERSION, MODEL_13_0
     )
 }
 
 fn model_json() -> String {
     format!(
         "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"schell_table-peg_table-13.0\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\"]}}",
-        APP_VERSION, MODEL_15_2
+        APP_VERSION, MODEL_13_0
     )
 }
 
@@ -261,7 +261,7 @@ fn game_action(server: &Server, body: &str) -> Response {
         if action == "new" || action == "state" && json_string(body, "gameId").is_none() {
             let model = json_string(body, "opponent")
                 .and_then(|value| ModelId::from_str(&value).ok())
-                .unwrap_or(ModelId::Schell152);
+                .unwrap_or(ModelId::Schell13);
             let session = new_session(model, tag);
             let id = session.id.clone();
             app.sessions.insert(id.clone(), session);
@@ -809,7 +809,7 @@ fn upload_game(server: &Server, body: &str) -> Response {
         let player = json_string(body, "tag").unwrap_or_else(|| "Anonymous".to_string());
         let winner = json_string(body, "winner");
         let result = json_string(body, "result").unwrap_or_else(|| "regular".to_string());
-        let model = json_string(body, "model").unwrap_or_else(|| MODEL_15_2.to_string());
+        let model = json_string(body, "model").unwrap_or_else(|| MODEL_13_0.to_string());
         let human_score = json_number_after(body, "human").unwrap_or(0) as i32;
         let ai_score = json_number_after(body, "ai").unwrap_or(0) as i32;
         let upload = UploadedGame {
@@ -1016,7 +1016,7 @@ fn leaderboard_json(server: &Server) -> Result<String, String> {
         )
     }).collect::<Vec<_>>().join(",");
     Ok(format!(
-        "{{\"generatedAt\":\"{}\",\"source\":\"rust-api-tsv\",\"model\":\"15.2 public\",\"games\":{},\"playerStats\":[{}],\"bestWinRate\":[],\"winRate14_3\":[],\"bestWins\":[],\"mostSkunks\":[]}}",
+        "{{\"generatedAt\":\"{}\",\"source\":\"rust-api-tsv\",\"model\":\"13.0 public\",\"games\":{},\"playerStats\":[{}],\"bestWinRate\":[],\"winRate14_3\":[],\"bestWins\":[],\"mostSkunks\":[]}}",
         isoish_now(), app.uploads.len(), player_stats
     ))
 }

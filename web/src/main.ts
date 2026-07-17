@@ -11,7 +11,7 @@ import type {
 } from "./api-types";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 
-const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-15.2";
+const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-13.0";
 
 type BaselineScoreTotals = Pick<
   AnalyticsTotals,
@@ -89,7 +89,7 @@ interface LeaderboardSummarySource {
 const EMPTY_LEADERBOARD_SUMMARY: LeaderboardSummarySource = {
   generatedAt: "",
   source: "server-game-uploads",
-  model: "15.2 public",
+  model: "13.0 public",
   games: 0,
   playerStats: [],
   winRate14_3: [],
@@ -433,9 +433,9 @@ const ANALYTICS_KEY = "strong-cribbage.analytics.v1";
 const PHONE_GAME_DB_NAME = "cribbage-game-log";
 const PHONE_GAME_DB_VERSION = 1;
 const NOTICE_MIN_MS = 600;
-const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-15.2";
+const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-13.0";
 const SIMPLE_NETWORK_PUBLIC_OPPONENTS = new Set<string>([
-  "schell_table-peg_table-15.2",
+  "schell_table-peg_table-13.0",
 ]);
 const SIMPLE_NETWORK_LOCAL_OPPONENTS = new Set<string>([
   ...SIMPLE_NETWORK_PUBLIC_OPPONENTS,

@@ -2,6 +2,6 @@
   "version": 2,
   "source": "rust-native-model-surface",
   "games": 0,
-  "opponent": "schell_table-peg_table-15.2",
+  "opponent": "schell_table-peg_table-13.0",
   "models": {}
 }
