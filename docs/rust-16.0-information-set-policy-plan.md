@@ -106,11 +106,11 @@ QA:
 
 ### 3. Compact Policy Artifact
 
-- [ ] Convert cumulative strategy into an average-policy artifact.
-- [ ] Pack keys and rank-action probabilities with deterministic ordering.
-- [ ] Include schema, training provenance, checksum, coverage, and backoff
+- [x] Convert cumulative strategy into an average-policy artifact.
+- [x] Pack keys and rank-action probabilities with deterministic ordering.
+- [x] Include schema, training provenance, checksum, coverage, and backoff
   metadata.
-- [ ] Add a loader and byte-for-byte deterministic pack test.
+- [x] Add a loader and byte-for-byte deterministic pack test.
 
 QA:
 
@@ -190,3 +190,24 @@ QA:
   Formatting, all 70 workspace unit tests plus doc tests, and warning-as-error
   Clippy for the trainer passed; only pre-existing shadow-engine dead-code
   warnings remain. Implementation commit: `ebed86c`.
+- 2026-07-17, Step 3: Moved the learned policy key into the runtime engine and
+  added a versioned compact artifact with deterministic key ordering, FNV
+  checksum, atomic save/load, training provenance, source-checkpoint checksum,
+  source/included coverage counts, minimum-evidence threshold, and the named
+  legal-information heuristic backoff. Legal rank/go probabilities use sparse
+  largest-remainder weights totaling 65,535; decoded values are within one
+  quantum (`1 / 65,535`) of the normalized cumulative average strategy, with
+  regret-matched current strategy used only when a node has no average sample.
+
+  A new `pack_policy` CLI converts any retained checkpoint into
+  `rust/cribbage-shadow-engine/assets/model16-pegging-policy.bin`; the existing
+  server packager already includes that entire asset directory. A real
+  single-worker 1,000-iteration release probe retained 8,035 trained plus
+  57,571 singleton information sets. With minimum evidence 2, it emitted 2,267
+  entries in 98,732 bytes; two independent packs were byte-identical with
+  artifact checksum `02ffc7f680ec7f9a` and SHA-256
+  `14c2d417f11da9729260344d188b33ac150e5879ac5f2f903aeb17b6417af16f`.
+  Formatting, all 78 workspace unit tests plus doc tests, warning-as-error
+  Clippy for the trainer, corruption/truncation rejection, and server-package
+  path/syntax checks passed. The probe files were removed after QA; no
+  provisional policy asset was committed. Implementation commit: `07360f1`.
