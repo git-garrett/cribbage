@@ -151,6 +151,25 @@ QA:
 - analyzer timing/calibration checks;
 - clean worktree and pushed completion record.
 
+Active local run (not yet a completion record):
+
+- durable root: `/Volumes/Elements/cribbage/model16-policy/2026-07-17`;
+- 100k calibration checkpoint/status: `model16-100k.cfr` and
+  `model16-100k.status.json` (checksum `131c5ab696f06fdf`);
+- calibration artifacts: `model16-100k-min2.bin` (22,797,232 bytes,
+  518,869 entries) and `model16-100k-min5.bin` (5,613,293 bytes, 126,678
+  entries);
+- planned deterministic final checkpoint/status: `model16-250k.cfr` and
+  `model16-250k.status.json`, seed `0x16c0ffee`, one worker;
+- repository release asset after threshold selection:
+  `rust/cribbage-shadow-engine/assets/model16-pegging-policy.bin`;
+- paired held-out evaluation root:
+  `/Volumes/Elements/cribbage/model16-policy/2026-07-17/release-eval`;
+- resumable evaluator: `scripts/run-model16-release-eval.sh`; each matchup
+  writes `status.json`, `games.db`, and append-only `sessions.jsonl` below the
+  evaluation root. Matchups are 16-vs-13, 13-vs-16, 16-vs-15.2, and
+  15.2-vs-16 with the same seeds used for each side swap.
+
 ## Completion Log
 
 - 2026-07-17, Step 0: Queried the retained 10k database directly and froze
