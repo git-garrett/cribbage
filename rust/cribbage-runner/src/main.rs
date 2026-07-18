@@ -1,4 +1,5 @@
 use cribbage_shadow_engine::game::Side;
+use cribbage_shadow_engine::model::{model16_policy_stats, reset_model16_policy_stats};
 use cribbage_shadow_engine::model_id::ModelId;
 use cribbage_shadow_engine::playout::{CompactPlayoutRecord, ModelPlayout, PlayoutResult};
 use std::env;
@@ -52,6 +53,7 @@ fn main() {
 
     match run(config) {
         Ok(summary) => {
+            let policy = model16_policy_stats();
             println!(
                 concat!(
                     "{{",
@@ -61,7 +63,10 @@ fn main() {
                     "\"leftAvgScore\":{:.3},",
                     "\"rightAvgScore\":{:.3},",
                     "\"avgHands\":{:.3},",
-                    "\"avgSteps\":{:.3}",
+                    "\"avgSteps\":{:.3},",
+                    "\"model16PolicyLookups\":{},",
+                    "\"model16PolicyHits\":{},",
+                    "\"model16PolicyMisses\":{}",
                     "}}"
                 ),
                 summary.games,
@@ -70,7 +75,10 @@ fn main() {
                 average(summary.left_score, summary.games),
                 average(summary.right_score, summary.games),
                 average(summary.hands as i64, summary.games),
-                average(summary.steps as i64, summary.games)
+                average(summary.steps as i64, summary.games),
+                policy.lookups,
+                policy.hits,
+                policy.misses()
             );
         }
         Err(error) => {
@@ -94,6 +102,7 @@ fn run(config: Config) -> Result<Summary, String> {
         ));
     }
 
+    reset_model16_policy_stats();
     let mut summary = Summary::default();
     let started_at = iso_now();
     let started = Instant::now();
@@ -340,6 +349,7 @@ fn write_status(
     } else {
         None
     };
+    let policy = model16_policy_stats();
     let json = format!(
         concat!(
             "{{\n",
@@ -355,6 +365,9 @@ fn write_status(
             "  \"progressPercent\": {:.6},\n",
             "  \"gamesPerSecond\": {:.6},\n",
             "  \"estimatedRemainingSeconds\": {},\n",
+            "  \"model16PolicyLookups\": {},\n",
+            "  \"model16PolicyHits\": {},\n",
+            "  \"model16PolicyMisses\": {},\n",
             "  \"gameDbPath\": {},\n",
             "  \"outDir\": {}\n",
             "}}\n"
@@ -377,6 +390,9 @@ fn write_status(
         estimated_remaining_seconds
             .map(|value| format!("{:.3}", value))
             .unwrap_or_else(|| "null".to_string()),
+        policy.lookups,
+        policy.hits,
+        policy.misses(),
         config
             .db_path
             .as_ref()

@@ -29,6 +29,7 @@ fn main() {
 
 fn run(config: &Config) -> Result<(), String> {
     let checkpoint = Checkpoint::load(&config.checkpoint)?;
+    let statistics = checkpoint.statistics();
     let artifact = build_policy_artifact(
         &checkpoint,
         config.minimum_visits,
@@ -41,7 +42,9 @@ fn run(config: &Config) -> Result<(), String> {
     println!(
         concat!(
             "entries={} sourceNodes={} sourceSingletons={} minimumVisits={} ",
-            "checkpointChecksum={:016x} artifactChecksum={:016x} bytes={} output={}"
+            "checkpointChecksum={:016x} artifactChecksum={:016x} bytes={} ",
+            "regretUpdates={} averageStrategySamples={} positiveRegretPerUpdate={:.9} ",
+            "maxPositiveRegretPerUpdate={:.9} meanNormalizedPolicyEntropy={:.9} output={}"
         ),
         artifact.metadata.included_entries,
         artifact.metadata.source_nodes,
@@ -50,6 +53,11 @@ fn run(config: &Config) -> Result<(), String> {
         artifact.metadata.checkpoint_checksum,
         artifact.checksum()?,
         bytes,
+        statistics.regret_updates,
+        statistics.average_strategy_samples,
+        statistics.positive_regret_per_update,
+        statistics.max_positive_regret_per_update,
+        statistics.mean_normalized_policy_entropy,
         config.output.display()
     );
     Ok(())

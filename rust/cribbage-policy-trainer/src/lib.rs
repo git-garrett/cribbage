@@ -70,6 +70,15 @@ pub struct Checkpoint {
     pub pending_fingerprints: Vec<u64>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CheckpointStatistics {
+    pub regret_updates: u64,
+    pub average_strategy_samples: u64,
+    pub positive_regret_per_update: f64,
+    pub max_positive_regret_per_update: f64,
+    pub mean_normalized_policy_entropy: f64,
+}
+
 impl Checkpoint {
     pub fn checksum(&self) -> u64 {
         fnv1a64(&self.to_bytes())
@@ -77,6 +86,57 @@ impl Checkpoint {
 
     pub fn checksum_hex(&self) -> String {
         format!("{:016x}", self.checksum())
+    }
+
+    /// Lightweight convergence diagnostics. These are sampled-CFR regret
+    /// proxies, not an exact exploitability bound for the full cribbage game.
+    pub fn statistics(&self) -> CheckpointStatistics {
+        let mut regret_updates = 0_u64;
+        let mut average_strategy_samples = 0_u64;
+        let mut positive_regret = 0.0;
+        let mut max_positive_regret = 0.0;
+        let mut normalized_entropy = 0.0;
+        let mut entropy_nodes = 0_u64;
+        for (_, node) in &self.nodes {
+            regret_updates = regret_updates.saturating_add(node.visits);
+            average_strategy_samples =
+                average_strategy_samples.saturating_add(node.strategy_visits);
+            let mut node_max: f64 = 0.0;
+            let mut legal_actions = 0_u32;
+            for (action, regret) in node.regrets.iter().enumerate() {
+                if node.legal_mask & (1 << action) == 0 {
+                    continue;
+                }
+                legal_actions += 1;
+                let positive = regret.max(0.0);
+                positive_regret += positive;
+                node_max = node_max.max(positive);
+            }
+            max_positive_regret += node_max;
+            if legal_actions > 1 {
+                let strategy = export_strategy(node);
+                let entropy = strategy
+                    .iter()
+                    .filter(|probability| **probability > 0.0)
+                    .map(|probability| -*probability * probability.ln())
+                    .sum::<f64>()
+                    / f64::from(legal_actions).ln();
+                normalized_entropy += entropy;
+                entropy_nodes += 1;
+            }
+        }
+        let update_denominator = regret_updates.max(1) as f64;
+        CheckpointStatistics {
+            regret_updates,
+            average_strategy_samples,
+            positive_regret_per_update: positive_regret / update_denominator,
+            max_positive_regret_per_update: max_positive_regret / update_denominator,
+            mean_normalized_policy_entropy: if entropy_nodes == 0 {
+                0.0
+            } else {
+                normalized_entropy / entropy_nodes as f64
+            },
+        }
     }
 
     pub fn save(&self, path: &Path) -> Result<(), String> {
@@ -1262,6 +1322,30 @@ mod tests {
                     <= 1.0 / f64::from(POLICY_WEIGHT_TOTAL)
             );
         }
+    }
+
+    #[test]
+    fn checkpoint_statistics_report_sampled_regret_proxies() {
+        let state = policy_state([rank_hand(&[(4, 1), (9, 1)]), rank_hand(&[(6, 2)])]);
+        let key = PolicyInformationSetKey::from_state(&state, PegSeat::Zero).unwrap();
+        let mut node = PolicyNode::new(key.expected_legal_mask());
+        node.regrets[4] = 4.0;
+        node.regrets[9] = -1.0;
+        node.visits = 2;
+        node.strategy_visits = 3;
+        let statistics = Checkpoint {
+            seed: 1,
+            iterations: 2,
+            nodes: vec![(key, node)],
+            pending_fingerprints: Vec::new(),
+        }
+        .statistics();
+
+        assert_eq!(statistics.regret_updates, 2);
+        assert_eq!(statistics.average_strategy_samples, 3);
+        assert_eq!(statistics.positive_regret_per_update, 2.0);
+        assert_eq!(statistics.max_positive_regret_per_update, 2.0);
+        assert_eq!(statistics.mean_normalized_policy_entropy, 0.0);
     }
 
     #[test]

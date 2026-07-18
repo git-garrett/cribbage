@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 use crate::artifacts::{
@@ -182,6 +183,32 @@ struct RuntimeTables {
 }
 
 static RUNTIME_TABLES: OnceLock<RuntimeTables> = OnceLock::new();
+static MODEL16_POLICY_LOOKUPS: AtomicU64 = AtomicU64::new(0);
+static MODEL16_POLICY_HITS: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Model16PolicyStats {
+    pub lookups: u64,
+    pub hits: u64,
+}
+
+impl Model16PolicyStats {
+    pub fn misses(self) -> u64 {
+        self.lookups.saturating_sub(self.hits)
+    }
+}
+
+pub fn model16_policy_stats() -> Model16PolicyStats {
+    Model16PolicyStats {
+        lookups: MODEL16_POLICY_LOOKUPS.load(Ordering::Relaxed),
+        hits: MODEL16_POLICY_HITS.load(Ordering::Relaxed),
+    }
+}
+
+pub fn reset_model16_policy_stats() {
+    MODEL16_POLICY_LOOKUPS.store(0, Ordering::Relaxed);
+    MODEL16_POLICY_HITS.store(0, Ordering::Relaxed);
+}
 
 #[derive(Clone)]
 struct WeightedRankHand {
@@ -687,9 +714,12 @@ fn recommend_peg_model16(
         ));
     }
 
-    let weights = policy
-        .and_then(|artifact| artifact.lookup(&key))
-        .map(|entry| &entry.weights);
+    MODEL16_POLICY_LOOKUPS.fetch_add(1, Ordering::Relaxed);
+    let policy_entry = policy.and_then(|artifact| artifact.lookup(&key));
+    if policy_entry.is_some() {
+        MODEL16_POLICY_HITS.fetch_add(1, Ordering::Relaxed);
+    }
+    let weights = policy_entry.map(|entry| &entry.weights);
     let available_ranks = remaining_rank_counts(&known_cards_for_pegging(input));
     let selected = legal
         .iter()
