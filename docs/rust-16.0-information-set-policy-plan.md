@@ -206,10 +206,10 @@ QA:
 
 ### 9. Weekend Training and Promotion Gate
 
-- [ ] Launch the best validated trainer/configuration in a detached,
+- [x] Launch the best validated trainer/configuration in a detached,
   resumable local session with status, ETA, checkpointing, and a hard stop
   inside the existing five-reference-equivalent budget.
-- [ ] Store checkpoints, status, logs, and artifacts below a documented
+- [x] Store checkpoints, status, logs, and artifacts below a documented
   `/Volumes/Elements/cribbage/model16-policy/` run directory.
 - [ ] On completion, pack candidates by evidence threshold and run paired,
   side-swapped held-out validation.
@@ -290,13 +290,18 @@ Active correction work:
   continuing to refine admitted frequent states; QA froze at exactly 100
   states and completed all 1,000 requested iterations.
 - weekend supervisor commit: `691d4ca`; detached screen
-  `cribbage-model16-weekend` targets 2,000,000,000
+  `cribbage-model16-weekend` (screen id `73719`) targets 2,000,000,000
   single-worker iterations, an exact 8,000,000-set support limit, 10M-iteration
   checkpoints, a 60-hour wall budget, and the existing five-reference-work
   cap. Durable output is
   `/Volumes/Elements/cribbage/model16-policy/2026-07-17/realistic-2b`. The
   fixed table sustained approximately 14,450 iterations/second during launch,
-  projecting to about 38.5 hours/2.55 reference workloads.
+  projecting to about 38.5 hours/2.55 reference workloads without competing
+  evaluation load. With the four-worker ablation active, the first frozen-table
+  status measured 10,484 iterations/second and a conservative 53.0-hour ETA,
+  still inside the 60-hour/5-reference hard gates. Live progress is
+  `realistic-2b/status.json` and supervisor state is
+  `realistic-2b/supervisor-status.json`.
 
 ## Completion Log
 
