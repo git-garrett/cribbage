@@ -24,6 +24,7 @@ struct Config {
     probe_without_checkpoint: bool,
     corpus: Option<PathBuf>,
     freeze_at_information_set_limit: bool,
+    start_frozen_support: bool,
 }
 
 struct TrainingSource {
@@ -97,6 +98,9 @@ fn run(config: &Config) -> Result<(), String> {
     };
     if config.freeze_at_information_set_limit {
         trainer.set_information_set_limit(config.max_information_sets)?;
+        if config.start_frozen_support {
+            trainer.freeze_new_information_sets();
+        }
         if trainer.information_sets_frozen() {
             trainer.compact_frozen_support()?;
         }
@@ -427,6 +431,7 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
     let mut probe_without_checkpoint = false;
     let mut corpus = None;
     let mut freeze_at_information_set_limit = false;
+    let mut start_frozen_support = false;
 
     let mut index = 0;
     while index < args.len() {
@@ -443,6 +448,11 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
         }
         if key == "--freeze-at-information-set-limit" {
             freeze_at_information_set_limit = true;
+            index += 1;
+            continue;
+        }
+        if key == "--start-frozen-support" {
+            start_frozen_support = true;
             index += 1;
             continue;
         }
@@ -475,6 +485,12 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
     if resume && probe_without_checkpoint {
         return Err("--resume cannot be combined with --probe-without-checkpoint".to_string());
     }
+    if start_frozen_support && (!resume || !freeze_at_information_set_limit) {
+        return Err(
+            "--start-frozen-support requires --resume and --freeze-at-information-set-limit"
+                .to_string(),
+        );
+    }
     if iterations == 0
         || workers == 0
         || checkpoint_every == 0
@@ -500,6 +516,7 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
         probe_without_checkpoint,
         corpus,
         freeze_at_information_set_limit,
+        start_frozen_support,
     })
 }
 
@@ -559,6 +576,7 @@ fn print_usage() {
         "  --max-reference-equivalents N\n",
         "  --max-information-sets N\n",
         "  --freeze-at-information-set-limit\n",
+        "  --start-frozen-support\n",
         "  --probe-without-checkpoint\n",
         "  --resume"
     ));
@@ -610,6 +628,36 @@ mod tests {
         ])
         .unwrap();
         assert!(config.freeze_at_information_set_limit);
+    }
+
+    #[test]
+    fn parses_frozen_support_resume_mode() {
+        let config = parse_args(vec![
+            "--iterations".into(),
+            "100".into(),
+            "--checkpoint".into(),
+            "run.cfr".into(),
+            "--resume".into(),
+            "--freeze-at-information-set-limit".into(),
+            "--start-frozen-support".into(),
+        ])
+        .unwrap();
+        assert!(config.resume);
+        assert!(config.freeze_at_information_set_limit);
+        assert!(config.start_frozen_support);
+    }
+
+    #[test]
+    fn rejects_frozen_support_without_resume() {
+        assert!(parse_args(vec![
+            "--iterations".into(),
+            "100".into(),
+            "--checkpoint".into(),
+            "run.cfr".into(),
+            "--freeze-at-information-set-limit".into(),
+            "--start-frozen-support".into(),
+        ])
+        .is_err());
     }
 
     #[test]

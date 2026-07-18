@@ -69,7 +69,7 @@ args=(
   --corpus "$CORPUS"
 )
 if [[ -f "$CHECKPOINT" ]]; then
-  args+=(--resume)
+  args+=(--resume --start-frozen-support)
 fi
 
 "$TRAINER" "${args[@]}"
