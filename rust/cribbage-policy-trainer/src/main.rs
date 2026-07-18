@@ -66,7 +66,7 @@ fn run(config: &Config) -> Result<(), String> {
             .transpose()?,
     };
     verify_corpus_context(config, &source)?;
-    let (trainer, starting_iteration) = if config.resume {
+    let (trainer, starting_iteration, resume_checksum) = if config.resume {
         let checkpoint = Checkpoint::load(&config.checkpoint)?;
         if checkpoint.seed != config.seed {
             return Err(format!(
@@ -80,9 +80,11 @@ fn run(config: &Config) -> Result<(), String> {
                 checkpoint.iterations, config.iterations
             ));
         }
+        let checksum = checkpoint.checksum_hex();
         (
             SharedTrainer::from_checkpoint(&checkpoint)?,
             checkpoint.iterations,
+            Some(checksum),
         )
     } else {
         if config.checkpoint.exists() {
@@ -91,7 +93,7 @@ fn run(config: &Config) -> Result<(), String> {
                 config.checkpoint.display()
             ));
         }
-        (SharedTrainer::new(), 0)
+        (SharedTrainer::new(), 0, None)
     };
     if config.freeze_at_information_set_limit {
         trainer.set_information_set_limit(config.max_information_sets)?;
@@ -106,15 +108,7 @@ fn run(config: &Config) -> Result<(), String> {
     let mut projection_start_elapsed = Duration::ZERO;
     let mut support_compacted = trainer.information_sets_frozen();
     let mut last_checkpoint_iteration = starting_iteration;
-    let mut last_checksum = if config.resume {
-        Some(
-            trainer
-                .checkpoint(config.seed, starting_iteration)?
-                .checksum_hex(),
-        )
-    } else {
-        None
-    };
+    let mut last_checksum = resume_checksum;
     write_status(
         config,
         &source,
