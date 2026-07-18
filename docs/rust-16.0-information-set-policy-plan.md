@@ -174,6 +174,11 @@ Active local run (not yet a completion record):
   writes `status.json`, `games.db`, and append-only `sessions.jsonl` below the
   evaluation root. Matchups are 16-vs-13, 13-vs-16, 16-vs-15.2, and
   15.2-vs-16 with the same seeds used for each side swap.
+- active evaluator: detached screen session `cribbage-model16-eval` (screen id
+  `73687`), started 2026-07-17 at approximately 17:34 PDT with four workers,
+  500 games per side ordering/2,000 total. Supervisor output is
+  `release-eval/runner.log`; the currently active matchup's live ETA is in its
+  `status.json`. No launchd job was created.
 
 The final trainer completed 250,000 iterations in 117.7 seconds at 2,134
 iterations/second, retaining 3,213,626 trained plus 7,139,584 singleton states.
