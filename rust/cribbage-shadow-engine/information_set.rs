@@ -52,6 +52,19 @@ pub struct PegObservation<'a> {
     pub history: &'a [PublicPegEvent],
 }
 
+pub struct PolicyRankObservation<'a> {
+    pub role: Role,
+    pub my_score: i32,
+    pub opponent_score: i32,
+    pub own_hand: &'a [u8; RANKS],
+    pub own_played: &'a [u8; RANKS],
+    pub opponent_played: &'a [u8; RANKS],
+    pub current_series: &'a [u8],
+    pub count: u8,
+    pub go_player: Option<InfoActor>,
+    pub last_player: Option<InfoActor>,
+}
+
 impl PegInformationSetKey {
     pub fn from_observation(observation: PegObservation<'_>) -> Result<Self, String> {
         if observation.history.len() > MAX_PUBLIC_HISTORY {
@@ -179,22 +192,22 @@ impl PolicyInformationSetKey {
                 )?;
             }
         }
-        Self::new(
-            if perspective == state.dealer {
+        Self::from_rank_observation(PolicyRankObservation {
+            role: if perspective == state.dealer {
                 Role::Dealer
             } else {
                 Role::Pone
             },
-            state.scores[perspective.index()],
-            state.scores[perspective.other().index()],
-            &state.hands[perspective.index()],
-            &own_played,
-            &opponent_played,
-            &state.plays,
-            state.count,
-            encode_relative_seat(state.go_player, perspective),
-            encode_relative_seat(state.last_player, perspective),
-        )
+            my_score: state.scores[perspective.index()],
+            opponent_score: state.scores[perspective.other().index()],
+            own_hand: &state.hands[perspective.index()],
+            own_played: &own_played,
+            opponent_played: &opponent_played,
+            current_series: &state.plays,
+            count: state.count,
+            go_player: relative_seat(state.go_player, perspective),
+            last_player: relative_seat(state.last_player, perspective),
+        })
     }
 
     pub fn from_game(game: &CribbageGame, perspective: Side) -> Result<Self, String> {
@@ -213,47 +226,38 @@ impl PolicyInformationSetKey {
             }
         }
         let current_series = game.plays.iter().map(|card| card.rank).collect::<Vec<_>>();
-        Self::new(
-            if perspective == game.dealer {
+        Self::from_rank_observation(PolicyRankObservation {
+            role: if perspective == game.dealer {
                 Role::Dealer
             } else {
                 Role::Pone
             },
-            game.player(perspective).score,
-            game.player(perspective.other()).score,
-            &rank_counts(&game.player(perspective).hand),
-            &own_played,
-            &opponent_played,
-            &current_series,
-            game.count,
-            encode_relative_side(game.go_player, perspective),
-            encode_relative_side(game.last_player, perspective),
-        )
+            my_score: game.player(perspective).score,
+            opponent_score: game.player(perspective.other()).score,
+            own_hand: &rank_counts(&game.player(perspective).hand),
+            own_played: &own_played,
+            opponent_played: &opponent_played,
+            current_series: &current_series,
+            count: game.count,
+            go_player: relative_side(game.go_player, perspective),
+            last_player: relative_side(game.last_player, perspective),
+        })
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        role: Role,
-        my_score: i32,
-        opponent_score: i32,
-        own_hand: &[u8; RANKS],
-        own_played: &[u8; RANKS],
-        opponent_played: &[u8; RANKS],
-        plays: &[u8],
-        count: u8,
-        go_player: u8,
-        last_player: u8,
-    ) -> Result<Self, String> {
+    pub fn from_rank_observation(observation: PolicyRankObservation<'_>) -> Result<Self, String> {
         Ok(PolicyInformationSetKey {
-            role,
-            board_pressure_class: board_pressure_class(my_score, opponent_score),
-            own_hand_ranks: pack_rank_counts(own_hand),
-            own_played_ranks: pack_rank_counts(own_played),
-            opponent_played_ranks: pack_rank_counts(opponent_played),
-            current_series: pack_current_series(plays)?,
-            count,
-            go_player,
-            last_player,
+            role: observation.role,
+            board_pressure_class: board_pressure_class(
+                observation.my_score,
+                observation.opponent_score,
+            ),
+            own_hand_ranks: pack_rank_counts(observation.own_hand),
+            own_played_ranks: pack_rank_counts(observation.own_played),
+            opponent_played_ranks: pack_rank_counts(observation.opponent_played),
+            current_series: pack_current_series(observation.current_series)?,
+            count: observation.count,
+            go_player: encode_policy_actor(observation.go_player),
+            last_player: encode_policy_actor(observation.last_player),
         })
     }
 
@@ -385,19 +389,27 @@ fn pack_current_series(plays: &[u8]) -> Result<u64, String> {
     Ok(packed)
 }
 
-fn encode_relative_seat(seat: Option<PegSeat>, perspective: PegSeat) -> u8 {
+fn relative_seat(seat: Option<PegSeat>, perspective: PegSeat) -> Option<InfoActor> {
     match seat {
-        None => 0,
-        Some(seat) if seat == perspective => 1,
-        Some(_) => 2,
+        None => None,
+        Some(seat) if seat == perspective => Some(InfoActor::SelfPlayer),
+        Some(_) => Some(InfoActor::Opponent),
     }
 }
 
-fn encode_relative_side(side: Option<Side>, perspective: Side) -> u8 {
+fn relative_side(side: Option<Side>, perspective: Side) -> Option<InfoActor> {
     match side {
+        None => None,
+        Some(side) if side == perspective => Some(InfoActor::SelfPlayer),
+        Some(_) => Some(InfoActor::Opponent),
+    }
+}
+
+fn encode_policy_actor(actor: Option<InfoActor>) -> u8 {
+    match actor {
         None => 0,
-        Some(side) if side == perspective => 1,
-        Some(_) => 2,
+        Some(InfoActor::SelfPlayer) => 1,
+        Some(InfoActor::Opponent) => 2,
     }
 }
 
@@ -759,6 +771,47 @@ mod tests {
         assert_ne!(
             first.information_set(PegSeat::Zero).unwrap(),
             second.information_set(PegSeat::Zero).unwrap()
+        );
+    }
+
+    #[test]
+    fn runtime_rank_observation_matches_simulator_policy_key() {
+        let mut simulator = state([hand(&[(4, 1), (9, 1)]), hand(&[(6, 2)])]);
+        simulator.scores = [97, 112];
+        simulator.plays = vec![7];
+        simulator.count = 8;
+        simulator.go_player = None;
+        simulator.last_player = Some(PegSeat::One);
+        simulator.history = vec![
+            RankPegEvent::Play {
+                seat: PegSeat::Zero,
+                rank: 5,
+            },
+            RankPegEvent::Reset,
+            RankPegEvent::Play {
+                seat: PegSeat::One,
+                rank: 7,
+            },
+        ];
+        let own_played = hand(&[(5, 1)]);
+        let opponent_played = hand(&[(7, 1)]);
+        let runtime = PolicyInformationSetKey::from_rank_observation(PolicyRankObservation {
+            role: Role::Pone,
+            my_score: 97,
+            opponent_score: 112,
+            own_hand: &simulator.hands[0],
+            own_played: &own_played,
+            opponent_played: &opponent_played,
+            current_series: &[7],
+            count: 8,
+            go_player: None,
+            last_player: Some(InfoActor::Opponent),
+        })
+        .unwrap();
+
+        assert_eq!(
+            runtime,
+            PolicyInformationSetKey::from_state(&simulator, PegSeat::Zero).unwrap()
         );
     }
 

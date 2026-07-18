@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::fs;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -16,10 +17,12 @@ use crate::cards::{
     rank_counts, remaining_rank_counts, score_count, score_flush_and_right_jack, score_hand,
     score_hand_rank_only, Card,
 };
+use crate::information_set::{InfoActor, PolicyInformationSetKey, PolicyRankObservation};
 use crate::model_id::{
     MODEL_13_0, MODEL_14_3, MODEL_14_8, MODEL_14_8_1, MODEL_15_0, MODEL_15_1, MODEL_15_2,
     MODEL_16_0,
 };
+use crate::policy::PolicyArtifact;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DecisionKind {
@@ -175,6 +178,7 @@ struct RuntimeTables {
     hold: OnceLock<Model13HoldTable>,
     crib_rank: OnceLock<CribRankDiscardTables>,
     crib_tripolicy14: OnceLock<CribTripolicyTable>,
+    policy16: OnceLock<Option<PolicyArtifact>>,
 }
 
 static RUNTIME_TABLES: OnceLock<RuntimeTables> = OnceLock::new();
@@ -572,6 +576,9 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
     }
 
     let tables = runtime_tables(root)?;
+    if input.model == MODEL_16_0 {
+        return recommend_peg_model16(input, &legal, tables.policy16()?);
+    }
     if input.model == MODEL_13_0 {
         return recommend_peg_model13(input, tables);
     }
@@ -661,6 +668,151 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
         ev: Some(ev),
         win_probability: Some(win_probability),
     })
+}
+
+fn recommend_peg_model16(
+    input: &DecisionInput,
+    legal: &[Card],
+    policy: Option<&PolicyArtifact>,
+) -> Result<Decision, String> {
+    let key = model16_policy_key(input)?;
+    let expected_mask = key.expected_legal_mask();
+    let actual_mask = legal
+        .iter()
+        .fold(0_u16, |mask, card| mask | (1 << card.rank));
+    if actual_mask != expected_mask {
+        return Err(format!(
+            "model16 policy key legal mask {:#x} does not match cards {:#x}",
+            expected_mask, actual_mask
+        ));
+    }
+
+    let weights = policy
+        .and_then(|artifact| artifact.lookup(&key))
+        .map(|entry| &entry.weights);
+    let available_ranks = remaining_rank_counts(&known_cards_for_pegging(input));
+    let selected = legal
+        .iter()
+        .copied()
+        .max_by(|left, right| {
+            let left_weight = weights.map_or(0, |values| values[left.rank as usize]);
+            let right_weight = weights.map_or(0, |values| values[right.rank as usize]);
+            left_weight
+                .cmp(&right_weight)
+                .then_with(|| {
+                    compare_model16_heuristic(
+                        model16_heuristic_key(input, *left, &available_ranks),
+                        model16_heuristic_key(input, *right, &available_ranks),
+                    )
+                })
+                // Cards of the same rank are strategically identical. Pick
+                // the lowest id so suit/order cannot make play nondeterministic.
+                .then_with(|| right.id.cmp(&left.id))
+        })
+        .ok_or_else(|| "model16 received no legal pegging cards".to_string())?;
+
+    Ok(Decision::Peg {
+        action: "play".to_string(),
+        card_id: Some(selected.id),
+        // Policy probability and the tactical backoff score are not EV or WP.
+        ev: None,
+        win_probability: None,
+    })
+}
+
+fn model16_policy_key(input: &DecisionInput) -> Result<PolicyInformationSetKey, String> {
+    let own_hand = rank_counts(&input.ai_hand);
+    let own_played = rank_counts(&input.ai_table);
+    let opponent_played = rank_counts(&input.human_table);
+    let current_series = input.plays.iter().map(|card| card.rank).collect::<Vec<_>>();
+    PolicyInformationSetKey::from_rank_observation(PolicyRankObservation {
+        role: input.role,
+        my_score: input.ai_score,
+        opponent_score: input.human_score,
+        own_hand: &own_hand,
+        own_played: &own_played,
+        opponent_played: &opponent_played,
+        current_series: &current_series,
+        count: input.count,
+        go_player: model16_policy_actor(input.go_player),
+        last_player: model16_policy_actor(input.last_player),
+    })
+}
+
+fn model16_policy_actor(player: Option<PlayerKey>) -> Option<InfoActor> {
+    player.map(|player| match player {
+        PlayerKey::Ai => InfoActor::SelfPlayer,
+        PlayerKey::Human => InfoActor::Opponent,
+    })
+}
+
+fn model16_heuristic_key(
+    input: &DecisionInput,
+    card: Card,
+    available_ranks: &[u8; 13],
+) -> [f64; 7] {
+    let mut plays = input.plays.clone();
+    plays.push(card);
+    let immediate = f64::from(score_count(&plays));
+    let count_after = input.count + card.value;
+    let wins_now = f64::from(input.ai_score + immediate as i32 >= 121);
+    let mut reply_weight = 0.0;
+    let mut reply_point_total = 0.0;
+    let mut max_reply: f64 = 0.0;
+    let mut winning_reply_weight = 0.0;
+    if count_after < 31 {
+        for (rank, copies) in available_ranks.iter().copied().enumerate() {
+            if copies == 0 {
+                continue;
+            }
+            let reply = peg_card_for_rank(rank as u8);
+            if count_after + reply.value > 31 {
+                continue;
+            }
+            plays.push(reply);
+            let reply_points = f64::from(score_count(&plays));
+            plays.pop();
+            let weight = f64::from(copies);
+            reply_weight += weight;
+            reply_point_total += weight * reply_points;
+            max_reply = max_reply.max(reply_points);
+            if input.human_score + reply_points as i32 >= 121 {
+                winning_reply_weight += weight;
+            }
+        }
+    }
+    let expected_reply = if reply_weight > 0.0 {
+        reply_point_total / reply_weight
+    } else {
+        0.0
+    };
+    let winning_reply_rate = if reply_weight > 0.0 {
+        winning_reply_weight / reply_weight
+    } else {
+        0.0
+    };
+    let immediate_weight = if input.ai_score >= 117 { 12.0 } else { 6.0 };
+    let reply_penalty = if input.human_score >= 117 { 12.0 } else { 4.0 };
+    let tactical = immediate * immediate_weight - max_reply * reply_penalty - expected_reply;
+    [
+        wins_now,
+        -winning_reply_rate,
+        tactical,
+        immediate,
+        -max_reply,
+        -expected_reply,
+        f64::from(card.rank + 1),
+    ]
+}
+
+fn compare_model16_heuristic(left: [f64; 7], right: [f64; 7]) -> std::cmp::Ordering {
+    for (left_value, right_value) in left.into_iter().zip(right) {
+        let ordering = left_value.total_cmp(&right_value);
+        if ordering != std::cmp::Ordering::Equal {
+            return ordering;
+        }
+    }
+    std::cmp::Ordering::Equal
 }
 
 #[derive(Clone)]
@@ -3926,6 +4078,7 @@ impl RuntimeTables {
             hold: OnceLock::new(),
             crib_rank: OnceLock::new(),
             crib_tripolicy14: OnceLock::new(),
+            policy16: OnceLock::new(),
         }
     }
 
@@ -3966,6 +4119,23 @@ impl RuntimeTables {
         load_cached(&self.crib_tripolicy14, "crib_tripolicy14", || {
             CribTripolicyTable::load_c14b(self.asset_path("model143-crib.bin"))
         })
+    }
+
+    fn policy16(&self) -> Result<Option<&PolicyArtifact>, String> {
+        if let Some(policy) = self.policy16.get() {
+            return Ok(policy.as_ref());
+        }
+        let path = self.asset_path("model16-pegging-policy.bin");
+        let policy = match fs::metadata(&path) {
+            Ok(_) => Some(PolicyArtifact::load(&path)?),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(format!("stat {} failed: {}", path.display(), error)),
+        };
+        let _ = self.policy16.set(policy);
+        self.policy16
+            .get()
+            .map(Option::as_ref)
+            .ok_or_else(|| "RuntimeTables policy16 cache was not initialized".to_string())
     }
 
     fn asset_path(&self, filename: &str) -> PathBuf {
@@ -4103,6 +4273,56 @@ fn round_ev(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::policy::{PolicyArtifactMetadata, QuantizedPolicyEntry, POLICY_WEIGHT_TOTAL};
+
+    fn model16_peg_input() -> DecisionInput {
+        DecisionInput {
+            kind: DecisionKind::Peg,
+            model: MODEL_16_0.to_string(),
+            player: PlayerKey::Ai,
+            role: Role::Pone,
+            ai_score: 120,
+            human_score: 116,
+            ai_hand: cards_from_ids(&[4, 5]).unwrap(),
+            ai_table: Vec::new(),
+            human_table: cards_from_ids(&[9]).unwrap(),
+            human_hand_count: 3,
+            own_discards: cards_from_ids(&[0, 1]).unwrap(),
+            turn_card: Card::new(2).unwrap(),
+            count: 10,
+            turn: PlayerKey::Ai,
+            go_player: None,
+            last_player: Some(PlayerKey::Human),
+            plays: cards_from_ids(&[9]).unwrap(),
+            peg_lead: None,
+        }
+    }
+
+    fn model16_artifact(input: &DecisionInput, selected_rank: u8) -> PolicyArtifact {
+        let key = model16_policy_key(input).unwrap();
+        let mut weights = [0_u16; 14];
+        weights[selected_rank as usize] = POLICY_WEIGHT_TOTAL as u16;
+        PolicyArtifact::new(
+            PolicyArtifactMetadata {
+                training_seed: 16,
+                training_iterations: 100,
+                checkpoint_checksum: 7,
+                source_nodes: 1,
+                source_singletons: 0,
+                included_entries: 0,
+                minimum_visits: 1,
+                provenance: "model16-runtime-test".to_string(),
+                backoff: "legal-information heuristic".to_string(),
+            },
+            vec![QuantizedPolicyEntry {
+                key,
+                legal_mask: key.expected_legal_mask(),
+                confidence: 10,
+                weights,
+            }],
+        )
+        .unwrap()
+    }
 
     fn current_hand_outcome(
         own_pegging: i32,
@@ -4290,6 +4510,74 @@ mod tests {
 
         assert_ne!(peg_simulation_key(&base), peg_simulation_key(&reordered));
         assert_ne!(peg_simulation_key(&base), peg_simulation_key(&changed_hand));
+    }
+
+    #[test]
+    fn model16_policy_overrides_backoff_without_hidden_hand_search() {
+        let input = model16_peg_input();
+        let fallback = recommend_peg_model16(&input, &input.ai_hand, None).unwrap();
+        let artifact = model16_artifact(&input, 5);
+        let learned = recommend_peg_model16(&input, &input.ai_hand, Some(&artifact)).unwrap();
+
+        assert!(matches!(
+            fallback,
+            Decision::Peg {
+                card_id: Some(4),
+                ..
+            }
+        ));
+        assert!(matches!(
+            learned,
+            Decision::Peg {
+                card_id: Some(5),
+                ev: None,
+                win_probability: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn model16_shared_policy_key_has_one_deterministic_action() {
+        let input = model16_peg_input();
+        let artifact = model16_artifact(&input, 5);
+        let mut alternate_world = input.clone();
+        // These legal/public cards affected the legacy opponent-world
+        // enumerator but are intentionally outside the learned abstraction.
+        // An actual hidden opponent hand is not present in DecisionInput at all.
+        alternate_world.own_discards = cards_from_ids(&[13, 14]).unwrap();
+        alternate_world.turn_card = Card::new(15).unwrap();
+        alternate_world.peg_lead = Some(4);
+        assert_eq!(
+            model16_policy_key(&input).unwrap(),
+            model16_policy_key(&alternate_world).unwrap()
+        );
+
+        let first = recommend_peg_model16(&input, &input.ai_hand, Some(&artifact)).unwrap();
+        let second =
+            recommend_peg_model16(&alternate_world, &alternate_world.ai_hand, Some(&artifact))
+                .unwrap();
+        assert_eq!(decision_json(&first), decision_json(&second));
+    }
+
+    #[test]
+    fn model16_policy_file_is_loaded_once_and_reused() {
+        let input = model16_peg_input();
+        let artifact = model16_artifact(&input, 5);
+        let root =
+            std::env::temp_dir().join(format!("cribbage-model16-runtime-{}", std::process::id()));
+        let path = root
+            .join("rust")
+            .join("cribbage-shadow-engine")
+            .join("assets")
+            .join("model16-pegging-policy.bin");
+        artifact.save(&path).unwrap();
+        let tables = RuntimeTables::new(root.to_str().unwrap());
+        let first = tables.policy16().unwrap().unwrap();
+        let second = tables.policy16().unwrap().unwrap();
+        assert!(std::ptr::eq(first, second));
+        assert_eq!(first, &artifact);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
