@@ -12,7 +12,13 @@ use cribbage_shadow_engine::board::{BoardModel, Role, ScorePhase};
 use cribbage_shadow_engine::cards::{
     combinations_indices, full_deck, rank_counts, score_hand, Card,
 };
-use cribbage_shadow_engine::information_set::{PegSeat, RankPegAction, RankPegEvent, RankPegState};
+use cribbage_shadow_engine::information_set::{
+    PegSeat, PolicyInformationSetKey, RankPegAction, RankPegState, PACKED_POLICY_KEY_BYTES,
+    POLICY_ACTION_COUNT,
+};
+use cribbage_shadow_engine::policy::{
+    PolicyArtifact, PolicyArtifactMetadata, QuantizedPolicyEntry, POLICY_WEIGHT_TOTAL,
+};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
@@ -21,209 +27,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
 
-pub const ACTION_COUNT: usize = 14;
+pub const ACTION_COUNT: usize = POLICY_ACTION_COUNT;
 const GO_ACTION: usize = 13;
-pub const PACKED_POLICY_KEY_BYTES: usize = 37;
 const CHECKPOINT_MAGIC: &[u8; 8] = b"C16CFR02";
-const CHECKPOINT_VERSION: u32 = 6;
+const CHECKPOINT_VERSION: u32 = 7;
 const TABLE_SHARDS: usize = 64;
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct PolicyInformationSetKey {
-    pub role: Role,
-    pub board_pressure_class: u8,
-    pub own_hand_ranks: u64,
-    pub own_played_ranks: u64,
-    pub opponent_played_ranks: u64,
-    pub current_series: u64,
-    pub count: u8,
-    pub go_player: u8,
-    pub last_player: u8,
-}
-
-impl PolicyInformationSetKey {
-    pub fn from_state(state: &RankPegState, perspective: PegSeat) -> Result<Self, String> {
-        let mut own_played = [0_u8; 13];
-        let mut opponent_played = [0_u8; 13];
-        for event in &state.history {
-            if let RankPegEvent::Play { seat, rank } = *event {
-                if rank >= 13 {
-                    return Err(format!("invalid history rank {}", rank));
-                }
-                let counts = if seat == perspective {
-                    &mut own_played
-                } else {
-                    &mut opponent_played
-                };
-                counts[rank as usize] += 1;
-                if counts[rank as usize] > 4 {
-                    return Err(format!(
-                        "history contains more than four rank {} cards",
-                        rank
-                    ));
-                }
-            }
-        }
-        let mut current_series = 0_u64;
-        if state.plays.len() > 8 {
-            return Err(format!(
-                "current pegging series has {} plays; maximum is 8",
-                state.plays.len()
-            ));
-        }
-        for (index, rank) in state.plays.iter().copied().enumerate() {
-            if rank >= 13 {
-                return Err(format!("invalid current-series rank {}", rank));
-            }
-            current_series |= u64::from(rank + 1) << (index * 4);
-        }
-        Ok(PolicyInformationSetKey {
-            role: if perspective == state.dealer {
-                Role::Dealer
-            } else {
-                Role::Pone
-            },
-            board_pressure_class: board_pressure_class(
-                state.scores[perspective.index()],
-                state.scores[perspective.other().index()],
-            ),
-            own_hand_ranks: pack_rank_counts(&state.hands[perspective.index()]),
-            own_played_ranks: pack_rank_counts(&own_played),
-            opponent_played_ranks: pack_rank_counts(&opponent_played),
-            current_series,
-            count: state.count,
-            go_player: encode_relative_seat(state.go_player, perspective),
-            last_player: encode_relative_seat(state.last_player, perspective),
-        })
-    }
-
-    pub fn to_packed_bytes(&self) -> [u8; PACKED_POLICY_KEY_BYTES] {
-        let mut bytes = [0_u8; PACKED_POLICY_KEY_BYTES];
-        bytes[0] = match self.role {
-            Role::Pone => 0,
-            Role::Dealer => 1,
-        };
-        bytes[1] = self.board_pressure_class;
-        bytes[2..10].copy_from_slice(&self.own_hand_ranks.to_le_bytes());
-        bytes[10..18].copy_from_slice(&self.own_played_ranks.to_le_bytes());
-        bytes[18..26].copy_from_slice(&self.opponent_played_ranks.to_le_bytes());
-        bytes[26..34].copy_from_slice(&self.current_series.to_le_bytes());
-        bytes[34] = self.count;
-        bytes[35] = self.go_player;
-        bytes[36] = self.last_player;
-        bytes
-    }
-
-    pub fn from_packed_bytes(bytes: &[u8]) -> Result<Self, String> {
-        if bytes.len() != PACKED_POLICY_KEY_BYTES {
-            return Err(format!(
-                "packed policy key has {} bytes; expected {}",
-                bytes.len(),
-                PACKED_POLICY_KEY_BYTES
-            ));
-        }
-        let role = match bytes[0] {
-            0 => Role::Pone,
-            1 => Role::Dealer,
-            value => return Err(format!("invalid policy role {}", value)),
-        };
-        if bytes[1] > 16 {
-            return Err("invalid policy board-pressure class".to_string());
-        }
-        let own_hand_ranks = u64::from_le_bytes(bytes[2..10].try_into().unwrap());
-        let own_played_ranks = u64::from_le_bytes(bytes[10..18].try_into().unwrap());
-        let opponent_played_ranks = u64::from_le_bytes(bytes[18..26].try_into().unwrap());
-        validate_packed_rank_counts(own_hand_ranks)?;
-        validate_packed_rank_counts(own_played_ranks)?;
-        validate_packed_rank_counts(opponent_played_ranks)?;
-        let current_series = u64::from_le_bytes(bytes[26..34].try_into().unwrap());
-        validate_current_series(current_series)?;
-        if bytes[34] > 31 {
-            return Err(format!("invalid policy count {}", bytes[34]));
-        }
-        if bytes[35] > 2 || bytes[36] > 2 {
-            return Err("invalid relative policy actor".to_string());
-        }
-        Ok(PolicyInformationSetKey {
-            role,
-            board_pressure_class: bytes[1],
-            own_hand_ranks,
-            own_played_ranks,
-            opponent_played_ranks,
-            current_series,
-            count: bytes[34],
-            go_player: bytes[35],
-            last_player: bytes[36],
-        })
-    }
-}
-
-fn board_pressure_class(my_score: i32, opponent_score: i32) -> u8 {
-    if my_score >= 117 {
-        let my_out = (121 - my_score).clamp(1, 4) as u8;
-        return if opponent_score >= 117 {
-            4 + my_out
-        } else {
-            my_out
-        };
-    }
-    if opponent_score >= 117 {
-        return 8 + (121 - opponent_score).clamp(1, 4) as u8;
-    }
-    match (my_score >= 105, opponent_score >= 105) {
-        (false, false) => 0,
-        (true, false) => 13,
-        (false, true) => 14,
-        (true, true) if my_score >= opponent_score => 15,
-        (true, true) => 16,
-    }
-}
-
-fn encode_relative_seat(seat: Option<PegSeat>, perspective: PegSeat) -> u8 {
-    match seat {
-        None => 0,
-        Some(seat) if seat == perspective => 1,
-        Some(_) => 2,
-    }
-}
-
-fn pack_rank_counts(counts: &[u8; 13]) -> u64 {
-    counts
-        .iter()
-        .enumerate()
-        .fold(0_u64, |packed, (rank, count)| {
-            packed | (u64::from(*count) << (rank * 3))
-        })
-}
-
-fn validate_packed_rank_counts(packed: u64) -> Result<(), String> {
-    if packed >> 39 != 0 {
-        return Err("packed policy rank counts use reserved bits".to_string());
-    }
-    for rank in 0..13 {
-        if ((packed >> (rank * 3)) & 0b111) > 4 {
-            return Err(format!("invalid packed policy count at rank {}", rank));
-        }
-    }
-    Ok(())
-}
-
-fn validate_current_series(mut packed: u64) -> Result<(), String> {
-    let mut found_zero = false;
-    for _ in 0..8 {
-        let rank = packed & 0b1111;
-        if rank == 0 {
-            found_zero = true;
-        } else if found_zero || rank > 13 {
-            return Err("invalid packed current pegging series".to_string());
-        }
-        packed >>= 4;
-    }
-    if packed != 0 {
-        return Err("packed current series uses reserved bits".to_string());
-    }
-    Ok(())
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PolicyNode {
@@ -231,6 +39,7 @@ pub struct PolicyNode {
     pub regrets: [f64; ACTION_COUNT],
     pub strategy_sum: [f64; ACTION_COUNT],
     pub visits: u64,
+    pub strategy_visits: u64,
 }
 
 impl PolicyNode {
@@ -240,6 +49,7 @@ impl PolicyNode {
             regrets: [0.0; ACTION_COUNT],
             strategy_sum: [0.0; ACTION_COUNT],
             visits: 0,
+            strategy_visits: 0,
         }
     }
 
@@ -313,6 +123,7 @@ impl Checkpoint {
             bytes.extend_from_slice(&key.to_packed_bytes());
             bytes.extend_from_slice(&node.legal_mask.to_le_bytes());
             bytes.extend_from_slice(&node.visits.to_le_bytes());
+            bytes.extend_from_slice(&node.strategy_visits.to_le_bytes());
             for action in 0..ACTION_COUNT {
                 if node.legal_mask & (1 << action) != 0 {
                     bytes.extend_from_slice(&node.regrets[action].to_le_bytes());
@@ -346,6 +157,7 @@ impl Checkpoint {
             let legal_mask = cursor.u16()?;
             validate_legal_mask(legal_mask)?;
             let visits = cursor.u64()?;
+            let strategy_visits = cursor.u64()?;
             let mut regrets = [0.0; ACTION_COUNT];
             let mut strategy_sum = [0.0; ACTION_COUNT];
             for action in 0..ACTION_COUNT {
@@ -368,6 +180,7 @@ impl Checkpoint {
                     regrets,
                     strategy_sum,
                     visits,
+                    strategy_visits,
                 },
             ));
         }
@@ -396,6 +209,132 @@ impl Checkpoint {
             pending_fingerprints,
         })
     }
+}
+
+/// Convert a training checkpoint into the compact, runtime-readable average
+/// policy. Nodes below `minimum_visits` remain covered by the documented
+/// runtime backoff instead of consuming artifact space on weak evidence.
+pub fn build_policy_artifact(
+    checkpoint: &Checkpoint,
+    minimum_visits: u64,
+    provenance: String,
+) -> Result<PolicyArtifact, String> {
+    if minimum_visits == 0 {
+        return Err("minimum policy visits must be greater than zero".to_string());
+    }
+    if provenance.trim().is_empty() {
+        return Err("policy provenance must not be empty".to_string());
+    }
+
+    let mut entries = Vec::new();
+    for (key, node) in &checkpoint.nodes {
+        let evidence = node.visits.saturating_add(node.strategy_visits);
+        if evidence < minimum_visits {
+            continue;
+        }
+        validate_legal_mask(node.legal_mask)?;
+        if node.legal_mask != key.expected_legal_mask() {
+            return Err(format!(
+                "checkpoint legal mask {:#x} does not match policy key {:#x}",
+                node.legal_mask,
+                key.expected_legal_mask()
+            ));
+        }
+        let strategy = export_strategy(node);
+        entries.push(QuantizedPolicyEntry {
+            key: *key,
+            legal_mask: node.legal_mask,
+            confidence: evidence.min(u64::from(u32::MAX)) as u32,
+            weights: quantize_strategy(&strategy, node.legal_mask)?,
+        });
+    }
+
+    PolicyArtifact::new(
+        PolicyArtifactMetadata {
+            training_seed: checkpoint.seed,
+            training_iterations: checkpoint.iterations,
+            checkpoint_checksum: checkpoint.checksum(),
+            source_nodes: checkpoint.nodes.len() as u64,
+            source_singletons: checkpoint.pending_fingerprints.len() as u64,
+            included_entries: 0,
+            minimum_visits,
+            provenance,
+            backoff: "model16 legal-information heuristic for missing keys".to_string(),
+        },
+        entries,
+    )
+}
+
+fn export_strategy(node: &PolicyNode) -> [f64; ACTION_COUNT] {
+    let average_total = node
+        .strategy_sum
+        .iter()
+        .enumerate()
+        .filter(|(action, _)| node.legal_mask & (1 << action) != 0)
+        .map(|(_, value)| value.max(0.0))
+        .sum::<f64>();
+    if average_total > 0.0 {
+        node.average_strategy()
+    } else {
+        node.current_strategy()
+    }
+}
+
+fn quantize_strategy(
+    strategy: &[f64; ACTION_COUNT],
+    legal_mask: u16,
+) -> Result<[u16; ACTION_COUNT], String> {
+    validate_legal_mask(legal_mask)?;
+    let mut total = 0.0;
+    for (action, probability) in strategy.iter().enumerate() {
+        if !probability.is_finite() || *probability < 0.0 {
+            return Err(format!("invalid policy probability at action {}", action));
+        }
+        if legal_mask & (1 << action) != 0 {
+            total += *probability;
+        } else if *probability != 0.0 {
+            return Err(format!("illegal action {} has policy probability", action));
+        }
+    }
+    if total <= 0.0 {
+        return Err("policy strategy has no legal probability mass".to_string());
+    }
+
+    let mut weights = [0_u16; ACTION_COUNT];
+    let mut used = 0_u32;
+    let mut remainders = Vec::new();
+    for (action, probability) in strategy.iter().enumerate() {
+        if legal_mask & (1 << action) == 0 {
+            continue;
+        }
+        let exact = (*probability / total) * f64::from(POLICY_WEIGHT_TOTAL);
+        let floor = exact.floor() as u32;
+        if floor > u32::from(u16::MAX) {
+            return Err("policy quantization overflow".to_string());
+        }
+        weights[action] = floor as u16;
+        used = used
+            .checked_add(floor)
+            .ok_or_else(|| "policy quantization overflow".to_string())?;
+        remainders.push((action, exact - f64::from(floor)));
+    }
+    if used > POLICY_WEIGHT_TOTAL {
+        return Err("policy quantization exceeded its weight total".to_string());
+    }
+    remainders.sort_by(
+        |(left_action, left_fraction), (right_action, right_fraction)| {
+            right_fraction
+                .total_cmp(left_fraction)
+                .then_with(|| left_action.cmp(right_action))
+        },
+    );
+    for index in 0..(POLICY_WEIGHT_TOTAL - used) as usize {
+        let action = remainders[index % remainders.len()].0;
+        weights[action] = weights[action]
+            .checked_add(1)
+            .ok_or_else(|| "policy quantization overflow".to_string())?;
+    }
+    Ok(weights)
 }
 
 #[derive(Default)]
@@ -624,6 +563,7 @@ impl SharedTrainer {
                 node.strategy_sum[action] += reach * *probability;
             }
         }
+        node.strategy_visits += 1;
         Ok(())
     }
 }
@@ -1120,6 +1060,7 @@ impl<'a> ByteCursor<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cribbage_shadow_engine::information_set::RankPegEvent;
 
     fn rank_hand(entries: &[(u8, u8)]) -> [u8; 13] {
         let mut hand = [0_u8; 13];
@@ -1187,12 +1128,23 @@ mod tests {
 
     #[test]
     fn board_pressure_classes_keep_out_ranges_distinct() {
-        assert_eq!(board_pressure_class(89, 89), 0);
-        assert_eq!(board_pressure_class(110, 80), 13);
-        assert_eq!(board_pressure_class(80, 110), 14);
-        assert_eq!(board_pressure_class(118, 80), 3);
-        assert_eq!(board_pressure_class(119, 118), 6);
-        assert_eq!(board_pressure_class(80, 120), 9);
+        let mut state = policy_state([rank_hand(&[(4, 1)]), rank_hand(&[(6, 1)])]);
+        for (scores, expected) in [
+            ([89, 89], 0),
+            ([110, 80], 13),
+            ([80, 110], 14),
+            ([118, 80], 3),
+            ([119, 118], 6),
+            ([80, 120], 9),
+        ] {
+            state.scores = scores;
+            assert_eq!(
+                PolicyInformationSetKey::from_state(&state, PegSeat::Zero)
+                    .unwrap()
+                    .board_pressure_class,
+                expected
+            );
+        }
     }
 
     #[test]
@@ -1237,6 +1189,79 @@ mod tests {
             checkpoint.pending_fingerprints
         );
         assert!(Checkpoint::from_bytes(&bytes[..bytes.len() - 1]).is_err());
+    }
+
+    #[test]
+    fn policy_artifact_is_deterministic_and_matches_average_strategy() {
+        let state = policy_state([rank_hand(&[(4, 1), (9, 1)]), rank_hand(&[(6, 2)])]);
+        let key = PolicyInformationSetKey::from_state(&state, PegSeat::Zero).unwrap();
+        let mut node = PolicyNode::new(key.expected_legal_mask());
+        node.strategy_sum[4] = 1.0;
+        node.strategy_sum[9] = 3.0;
+        node.visits = 1;
+        node.strategy_visits = 2;
+
+        let mut filtered_state = state.clone();
+        filtered_state.hands[0] = rank_hand(&[(2, 1)]);
+        let filtered_key =
+            PolicyInformationSetKey::from_state(&filtered_state, PegSeat::Zero).unwrap();
+        let mut filtered_node = PolicyNode::new(filtered_key.expected_legal_mask());
+        filtered_node.visits = 1;
+
+        let checkpoint = Checkpoint {
+            seed: 0x1600,
+            iterations: 77,
+            nodes: vec![(filtered_key, filtered_node), (key, node.clone())],
+            pending_fingerprints: vec![3, 1],
+        };
+        let artifact = build_policy_artifact(&checkpoint, 2, "unit-test".to_string()).unwrap();
+        assert_eq!(artifact.entries.len(), 1);
+        assert_eq!(artifact.metadata.source_nodes, 2);
+        assert_eq!(artifact.metadata.source_singletons, 2);
+        assert_eq!(artifact.metadata.checkpoint_checksum, checkpoint.checksum());
+        let entry = artifact.lookup(&key).unwrap();
+        assert_eq!(entry.confidence, 3);
+        for action in [4, 9] {
+            assert!(
+                (entry.probabilities()[action] - node.average_strategy()[action]).abs()
+                    <= 1.0 / f64::from(POLICY_WEIGHT_TOTAL)
+            );
+        }
+
+        let mut reordered = checkpoint.clone();
+        reordered.nodes.reverse();
+        reordered.pending_fingerprints.reverse();
+        let second = build_policy_artifact(&reordered, 2, "unit-test".to_string()).unwrap();
+        assert_eq!(artifact.to_bytes().unwrap(), second.to_bytes().unwrap());
+        assert_eq!(
+            PolicyArtifact::from_bytes(&artifact.to_bytes().unwrap()).unwrap(),
+            artifact
+        );
+    }
+
+    #[test]
+    fn policy_artifact_uses_current_strategy_without_average_samples() {
+        let state = policy_state([rank_hand(&[(4, 1), (9, 1)]), rank_hand(&[(6, 2)])]);
+        let key = PolicyInformationSetKey::from_state(&state, PegSeat::Zero).unwrap();
+        let mut node = PolicyNode::new(key.expected_legal_mask());
+        node.regrets[4] = 4.0;
+        node.regrets[9] = 1.0;
+        node.visits = 2;
+        let expected = node.current_strategy();
+        let checkpoint = Checkpoint {
+            seed: 1,
+            iterations: 2,
+            nodes: vec![(key, node)],
+            pending_fingerprints: Vec::new(),
+        };
+        let artifact = build_policy_artifact(&checkpoint, 1, "fallback-test".to_string()).unwrap();
+        let probabilities = artifact.entries[0].probabilities();
+        for action in [4, 9] {
+            assert!(
+                (probabilities[action] - expected[action]).abs()
+                    <= 1.0 / f64::from(POLICY_WEIGHT_TOTAL)
+            );
+        }
     }
 
     #[test]

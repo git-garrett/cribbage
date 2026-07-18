@@ -2,7 +2,7 @@
 name = "cribbage-policy-trainer"
 version = "0.1.0"
 edition = "2021"
+default-run = "cribbage-policy-trainer"
 
 [dependencies]
 cribbage-shadow-engine = { path = "../cribbage-shadow-engine" }
-

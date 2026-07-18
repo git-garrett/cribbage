@@ -4,6 +4,8 @@ use crate::game::{CribbageGame, PegHistoryEvent, Side};
 
 const RANKS: usize = 13;
 const MAX_PUBLIC_HISTORY: usize = 32;
+pub const POLICY_ACTION_COUNT: usize = 14;
+pub const PACKED_POLICY_KEY_BYTES: usize = 37;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum InfoActor {
@@ -143,6 +145,289 @@ fn pack_rank_counts(counts: &[u8; RANKS]) -> u64 {
         .fold(0_u64, |packed, (rank, count)| {
             packed | (u64::from(*count) << (rank * 3))
         })
+}
+
+/// Runtime/training abstraction over exact legal information sets. Every
+/// field is observable by the acting player; cut and private discard ranks are
+/// intentionally omitted so equivalent pegging situations share experience.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct PolicyInformationSetKey {
+    pub role: Role,
+    pub board_pressure_class: u8,
+    pub own_hand_ranks: u64,
+    pub own_played_ranks: u64,
+    pub opponent_played_ranks: u64,
+    pub current_series: u64,
+    pub count: u8,
+    pub go_player: u8,
+    pub last_player: u8,
+}
+
+impl PolicyInformationSetKey {
+    pub fn from_state(state: &RankPegState, perspective: PegSeat) -> Result<Self, String> {
+        let mut own_played = [0_u8; RANKS];
+        let mut opponent_played = [0_u8; RANKS];
+        for event in &state.history {
+            if let RankPegEvent::Play { seat, rank } = *event {
+                add_policy_played_rank(
+                    if seat == perspective {
+                        &mut own_played
+                    } else {
+                        &mut opponent_played
+                    },
+                    rank,
+                )?;
+            }
+        }
+        Self::new(
+            if perspective == state.dealer {
+                Role::Dealer
+            } else {
+                Role::Pone
+            },
+            state.scores[perspective.index()],
+            state.scores[perspective.other().index()],
+            &state.hands[perspective.index()],
+            &own_played,
+            &opponent_played,
+            &state.plays,
+            state.count,
+            encode_relative_seat(state.go_player, perspective),
+            encode_relative_seat(state.last_player, perspective),
+        )
+    }
+
+    pub fn from_game(game: &CribbageGame, perspective: Side) -> Result<Self, String> {
+        let mut own_played = [0_u8; RANKS];
+        let mut opponent_played = [0_u8; RANKS];
+        for event in &game.pegging_history {
+            if let PegHistoryEvent::Play { side, rank } = *event {
+                add_policy_played_rank(
+                    if side == perspective {
+                        &mut own_played
+                    } else {
+                        &mut opponent_played
+                    },
+                    rank,
+                )?;
+            }
+        }
+        let current_series = game.plays.iter().map(|card| card.rank).collect::<Vec<_>>();
+        Self::new(
+            if perspective == game.dealer {
+                Role::Dealer
+            } else {
+                Role::Pone
+            },
+            game.player(perspective).score,
+            game.player(perspective.other()).score,
+            &rank_counts(&game.player(perspective).hand),
+            &own_played,
+            &opponent_played,
+            &current_series,
+            game.count,
+            encode_relative_side(game.go_player, perspective),
+            encode_relative_side(game.last_player, perspective),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        role: Role,
+        my_score: i32,
+        opponent_score: i32,
+        own_hand: &[u8; RANKS],
+        own_played: &[u8; RANKS],
+        opponent_played: &[u8; RANKS],
+        plays: &[u8],
+        count: u8,
+        go_player: u8,
+        last_player: u8,
+    ) -> Result<Self, String> {
+        Ok(PolicyInformationSetKey {
+            role,
+            board_pressure_class: board_pressure_class(my_score, opponent_score),
+            own_hand_ranks: pack_rank_counts(own_hand),
+            own_played_ranks: pack_rank_counts(own_played),
+            opponent_played_ranks: pack_rank_counts(opponent_played),
+            current_series: pack_current_series(plays)?,
+            count,
+            go_player,
+            last_player,
+        })
+    }
+
+    pub fn expected_legal_mask(&self) -> u16 {
+        let mut mask = 0_u16;
+        for rank in 0..RANKS {
+            let copies = (self.own_hand_ranks >> (rank * 3)) & 0b111;
+            if copies != 0 && self.count + peg_card_for_rank(rank as u8).value <= 31 {
+                mask |= 1 << rank;
+            }
+        }
+        if mask == 0 {
+            1 << (POLICY_ACTION_COUNT - 1)
+        } else {
+            mask
+        }
+    }
+
+    pub fn to_packed_bytes(&self) -> [u8; PACKED_POLICY_KEY_BYTES] {
+        let mut bytes = [0_u8; PACKED_POLICY_KEY_BYTES];
+        bytes[0] = match self.role {
+            Role::Pone => 0,
+            Role::Dealer => 1,
+        };
+        bytes[1] = self.board_pressure_class;
+        bytes[2..10].copy_from_slice(&self.own_hand_ranks.to_le_bytes());
+        bytes[10..18].copy_from_slice(&self.own_played_ranks.to_le_bytes());
+        bytes[18..26].copy_from_slice(&self.opponent_played_ranks.to_le_bytes());
+        bytes[26..34].copy_from_slice(&self.current_series.to_le_bytes());
+        bytes[34] = self.count;
+        bytes[35] = self.go_player;
+        bytes[36] = self.last_player;
+        bytes
+    }
+
+    pub fn from_packed_bytes(bytes: &[u8]) -> Result<Self, String> {
+        if bytes.len() != PACKED_POLICY_KEY_BYTES {
+            return Err(format!(
+                "packed policy key has {} bytes; expected {}",
+                bytes.len(),
+                PACKED_POLICY_KEY_BYTES
+            ));
+        }
+        let role = match bytes[0] {
+            0 => Role::Pone,
+            1 => Role::Dealer,
+            value => return Err(format!("invalid policy role {}", value)),
+        };
+        if bytes[1] > 16 {
+            return Err("invalid policy board-pressure class".to_string());
+        }
+        let own_hand_ranks = u64::from_le_bytes(bytes[2..10].try_into().unwrap());
+        let own_played_ranks = u64::from_le_bytes(bytes[10..18].try_into().unwrap());
+        let opponent_played_ranks = u64::from_le_bytes(bytes[18..26].try_into().unwrap());
+        validate_policy_rank_counts(own_hand_ranks)?;
+        validate_policy_rank_counts(own_played_ranks)?;
+        validate_policy_rank_counts(opponent_played_ranks)?;
+        let current_series = u64::from_le_bytes(bytes[26..34].try_into().unwrap());
+        validate_current_series(current_series)?;
+        if bytes[34] > 31 {
+            return Err(format!("invalid policy count {}", bytes[34]));
+        }
+        if bytes[35] > 2 || bytes[36] > 2 {
+            return Err("invalid relative policy actor".to_string());
+        }
+        Ok(PolicyInformationSetKey {
+            role,
+            board_pressure_class: bytes[1],
+            own_hand_ranks,
+            own_played_ranks,
+            opponent_played_ranks,
+            current_series,
+            count: bytes[34],
+            go_player: bytes[35],
+            last_player: bytes[36],
+        })
+    }
+}
+
+fn board_pressure_class(my_score: i32, opponent_score: i32) -> u8 {
+    if my_score >= 117 {
+        let my_out = (121 - my_score).clamp(1, 4) as u8;
+        return if opponent_score >= 117 {
+            4 + my_out
+        } else {
+            my_out
+        };
+    }
+    if opponent_score >= 117 {
+        return 8 + (121 - opponent_score).clamp(1, 4) as u8;
+    }
+    match (my_score >= 105, opponent_score >= 105) {
+        (false, false) => 0,
+        (true, false) => 13,
+        (false, true) => 14,
+        (true, true) if my_score >= opponent_score => 15,
+        (true, true) => 16,
+    }
+}
+
+fn add_policy_played_rank(counts: &mut [u8; RANKS], rank: u8) -> Result<(), String> {
+    if rank >= RANKS as u8 {
+        return Err(format!("invalid policy history rank {}", rank));
+    }
+    counts[rank as usize] += 1;
+    if counts[rank as usize] > 4 {
+        return Err(format!(
+            "policy history has more than four rank {} cards",
+            rank
+        ));
+    }
+    Ok(())
+}
+
+fn pack_current_series(plays: &[u8]) -> Result<u64, String> {
+    if plays.len() > 8 {
+        return Err(format!(
+            "current pegging series has {} plays; maximum is 8",
+            plays.len()
+        ));
+    }
+    let mut packed = 0_u64;
+    for (index, rank) in plays.iter().copied().enumerate() {
+        if rank >= RANKS as u8 {
+            return Err(format!("invalid current-series rank {}", rank));
+        }
+        packed |= u64::from(rank + 1) << (index * 4);
+    }
+    Ok(packed)
+}
+
+fn encode_relative_seat(seat: Option<PegSeat>, perspective: PegSeat) -> u8 {
+    match seat {
+        None => 0,
+        Some(seat) if seat == perspective => 1,
+        Some(_) => 2,
+    }
+}
+
+fn encode_relative_side(side: Option<Side>, perspective: Side) -> u8 {
+    match side {
+        None => 0,
+        Some(side) if side == perspective => 1,
+        Some(_) => 2,
+    }
+}
+
+fn validate_policy_rank_counts(packed: u64) -> Result<(), String> {
+    if packed >> (RANKS * 3) != 0 {
+        return Err("packed policy rank counts use reserved bits".to_string());
+    }
+    for rank in 0..RANKS {
+        if ((packed >> (rank * 3)) & 0b111) > 4 {
+            return Err(format!("invalid packed policy count at rank {}", rank));
+        }
+    }
+    Ok(())
+}
+
+fn validate_current_series(mut packed: u64) -> Result<(), String> {
+    let mut found_zero = false;
+    for _ in 0..8 {
+        let rank = packed & 0b1111;
+        if rank == 0 {
+            found_zero = true;
+        } else if found_zero || rank > RANKS as u64 {
+            return Err("invalid packed current pegging series".to_string());
+        }
+        packed >>= 4;
+    }
+    if packed != 0 {
+        return Err("packed current series uses reserved bits".to_string());
+    }
+    Ok(())
 }
 
 fn encode_public_event(event: PublicPegEvent) -> Result<u8, String> {
