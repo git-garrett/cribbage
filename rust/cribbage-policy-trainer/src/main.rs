@@ -7,6 +7,7 @@ use std::process;
 use std::time::{Duration, Instant};
 
 const REFERENCE_WALL_SECONDS: f64 = 15.05 * 60.0 * 60.0;
+const MIN_PROJECTION_ITERATIONS: u64 = 100_000;
 
 #[derive(Clone, Debug)]
 struct Config {
@@ -407,7 +408,9 @@ fn stopping_state(
         Some("wall_budget_exhausted")
     } else if information_set_limit_reached && !freeze_at_information_set_limit {
         Some("information_set_limit_exceeded")
-    } else if session_iterations >= 1_000 && projected_equivalents >= max_reference_equivalents {
+    } else if session_iterations >= MIN_PROJECTION_ITERATIONS
+        && projected_equivalents >= max_reference_equivalents
+    {
         Some("projection_limit_exceeded")
     } else {
         None
@@ -691,7 +694,7 @@ mod tests {
                 Duration::from_secs(60),
                 true,
                 true,
-                1_000,
+                MIN_PROJECTION_ITERATIONS,
                 5.1,
                 5.0,
             ),
