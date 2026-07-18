@@ -120,11 +120,11 @@ QA:
 
 ### 4. Model 16.0 Runtime Integration
 
-- [ ] Route 16.0 pegging through the information-set policy.
-- [ ] Never fall back to the per-hidden-hand optimal solver.
-- [ ] Use a cheap legal-information heuristic when a key is missing.
-- [ ] Keep 15.2 and earlier behavior unchanged.
-- [ ] Retain policy state/cache across turns where it reduces work without
+- [x] Route 16.0 pegging through the information-set policy.
+- [x] Never fall back to the per-hidden-hand optimal solver.
+- [x] Use a cheap legal-information heuristic when a key is missing.
+- [x] Keep 15.2 and earlier behavior unchanged.
+- [x] Retain policy state/cache across turns where it reduces work without
   changing decisions.
 
 QA:
@@ -211,3 +211,25 @@ QA:
   Clippy for the trainer, corruption/truncation rejection, and server-package
   path/syntax checks passed. The probe files were removed after QA; no
   provisional policy asset was committed. Implementation commit: `07360f1`.
+- 2026-07-17, Step 4: Routed only Model 16 pegging away from the legacy
+  opponent-hand enumeration/optimal-response solver. Runtime now constructs
+  the same observable rank key as the trainer, performs a deterministic
+  average-policy lookup, and picks the highest-weight legal rank (stable ties
+  and duplicate-rank suits are deterministic). A missing policy file or key
+  uses a bounded one-reply tactical heuristic over public and own-known cards;
+  it cannot inspect or specialize future actions to an opponent's hidden hand.
+  Models 13.0 through 15.2 retain their existing paths.
+
+  The validated policy artifact is loaded at most once per server process and
+  retained with the other runtime tables; a corrupt present asset fails closed
+  rather than silently falling back. Trainer/runtime key-parity, learned-policy
+  override, hidden-world independence, legal choice, deterministic choice, and
+  cache-reuse regressions passed. Six complete 16.0-versus-16.0 release games
+  produced 298 timed multi-card decisions: p50 0.001 ms, p95 0.003 ms, p99
+  0.003 ms, and max 0.028 ms. By legal-card count, maxima were 0.001 ms (2),
+  0.002 ms (3), and 0.028 ms (4), all far below the frozen 15.2 baselines.
+  Full QA passed: Rust formatting, 62 unique workspace unit tests plus doc
+  tests, shadow-engine Clippy with only pre-existing warnings, workspace
+  release build, frontend TypeScript check, and production frontend build with
+  its protected-artifact check. The temporary timing database was removed.
+  Implementation commit: `3f5f908`.
