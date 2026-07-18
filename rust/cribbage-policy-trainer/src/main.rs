@@ -482,9 +482,6 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
     let iterations = iterations.ok_or_else(|| "--iterations is required".to_string())?;
     let checkpoint = checkpoint.ok_or_else(|| "--checkpoint is required".to_string())?;
     let status = status.unwrap_or_else(|| checkpoint.with_extension("status.json"));
-    if resume && probe_without_checkpoint {
-        return Err("--resume cannot be combined with --probe-without-checkpoint".to_string());
-    }
     if start_frozen_support && (!resume || !freeze_at_information_set_limit) {
         return Err(
             "--start-frozen-support requires --resume and --freeze-at-information-set-limit"
@@ -601,6 +598,21 @@ mod tests {
         assert_eq!(config.seed, 16);
         assert!(config.resume);
         assert_eq!(config.status, PathBuf::from("run.status.json"));
+    }
+
+    #[test]
+    fn parses_read_only_resume_probe() {
+        let config = parse_args(vec![
+            "--iterations".into(),
+            "200".into(),
+            "--checkpoint".into(),
+            "run.cfr".into(),
+            "--resume".into(),
+            "--probe-without-checkpoint".into(),
+        ])
+        .unwrap();
+        assert!(config.resume);
+        assert!(config.probe_without_checkpoint);
     }
 
     #[test]
