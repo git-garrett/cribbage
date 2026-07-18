@@ -33,6 +33,52 @@ const CHECKPOINT_MAGIC: &[u8; 8] = b"C16CFR02";
 const CHECKPOINT_VERSION: u32 = 7;
 const TABLE_SHARDS: usize = 64;
 
+#[derive(Clone, Debug)]
+pub struct TrainingCorpus {
+    deals: Vec<TrainingDeal>,
+    checksum: u64,
+}
+
+impl TrainingCorpus {
+    pub fn load_tsv(path: &Path) -> Result<TrainingCorpus, String> {
+        let bytes = fs::read(path).map_err(|error| {
+            format!("read training corpus {} failed: {}", path.display(), error)
+        })?;
+        let text = std::str::from_utf8(&bytes)
+            .map_err(|_| format!("training corpus {} is not UTF-8", path.display()))?;
+        let mut deals = Vec::new();
+        for (index, line) in text.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            deals.push(parse_training_corpus_line(line, index + 1)?);
+        }
+        if deals.is_empty() {
+            return Err(format!("training corpus {} is empty", path.display()));
+        }
+        Ok(TrainingCorpus {
+            deals,
+            checksum: fnv1a64(&bytes),
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.deals.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.deals.is_empty()
+    }
+
+    pub fn checksum(&self) -> u64 {
+        self.checksum
+    }
+
+    fn sample(&self, rng: &mut TrainingRng) -> TrainingDeal {
+        self.deals[rng.range(self.deals.len() as u64) as usize].clone()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PolicyNode {
     pub legal_mask: u16,
@@ -460,6 +506,17 @@ impl SharedTrainer {
         end_iteration: u64,
         workers: usize,
     ) -> Result<(), String> {
+        self.train_range_with_corpus(seed, start_iteration, end_iteration, workers, None)
+    }
+
+    pub fn train_range_with_corpus(
+        &self,
+        seed: u64,
+        start_iteration: u64,
+        end_iteration: u64,
+        workers: usize,
+        corpus: Option<&TrainingCorpus>,
+    ) -> Result<(), String> {
         if end_iteration < start_iteration {
             return Err("training range ends before it starts".to_string());
         }
@@ -481,7 +538,9 @@ impl SharedTrainer {
                             break;
                         }
                         let mut rng = TrainingRng::for_iteration(seed, iteration);
-                        let deal = sample_training_deal(&mut rng);
+                        let deal = corpus
+                            .map(|corpus| corpus.sample(&mut rng))
+                            .unwrap_or_else(|| sample_training_deal(&mut rng));
                         let traverser = if iteration.is_multiple_of(2) {
                             PegSeat::Zero
                         } else {
@@ -746,6 +805,175 @@ impl TrainingDeal {
             complete: winner.is_some(),
         }
     }
+}
+
+fn parse_training_corpus_line(line: &str, line_number: usize) -> Result<TrainingDeal, String> {
+    let fields = line.split('\t').collect::<Vec<_>>();
+    if fields.len() != 9 {
+        return Err(format!(
+            "training corpus line {} has {} fields; expected 9",
+            line_number,
+            fields.len()
+        ));
+    }
+    let dealer = match parse_corpus_u8(fields[0], line_number, "dealer")? {
+        0 => PegSeat::Zero,
+        1 => PegSeat::One,
+        value => {
+            return Err(format!(
+                "training corpus line {} has invalid dealer {}",
+                line_number, value
+            ))
+        }
+    };
+    let left_score = parse_corpus_i32(fields[1], line_number, "left score")?;
+    let right_score = parse_corpus_i32(fields[2], line_number, "right score")?;
+    if !(0..121).contains(&left_score) || !(0..121).contains(&right_score) {
+        return Err(format!(
+            "training corpus line {} scores must be in 0..121",
+            line_number
+        ));
+    }
+    let turn_card = compact_corpus_card(
+        parse_corpus_u8(fields[3], line_number, "cut card")?,
+        line_number,
+    )?;
+    let dealt = [
+        parse_corpus_cards(fields[4], line_number, "left dealt", 6)?,
+        parse_corpus_cards(fields[5], line_number, "right dealt", 6)?,
+    ];
+    let retained = [
+        parse_corpus_cards(fields[6], line_number, "left keep", 4)?,
+        parse_corpus_cards(fields[7], line_number, "right keep", 4)?,
+    ];
+    let crib = parse_corpus_cards(fields[8], line_number, "crib", 4)?;
+    let discards = [
+        corpus_discards(&dealt[0], &retained[0], line_number)?,
+        corpus_discards(&dealt[1], &retained[1], line_number)?,
+    ];
+    let mut expected_crib = discards
+        .iter()
+        .flatten()
+        .map(|card| card.id)
+        .collect::<Vec<_>>();
+    let mut actual_crib = crib.iter().map(|card| card.id).collect::<Vec<_>>();
+    expected_crib.sort_unstable();
+    actual_crib.sort_unstable();
+    if expected_crib != actual_crib {
+        return Err(format!(
+            "training corpus line {} crib does not match the four discards",
+            line_number
+        ));
+    }
+    let unique_cards = dealt
+        .iter()
+        .flatten()
+        .chain(std::iter::once(&turn_card))
+        .map(|card| card.id)
+        .collect::<HashSet<_>>();
+    if unique_cards.len() != 13 {
+        return Err(format!(
+            "training corpus line {} does not contain 13 unique dealt/cut cards",
+            line_number
+        ));
+    }
+    Ok(TrainingDeal {
+        retained,
+        discards,
+        crib,
+        turn_card,
+        starting_scores: [left_score, right_score],
+        dealer,
+    })
+}
+
+fn parse_corpus_u8(value: &str, line_number: usize, field: &str) -> Result<u8, String> {
+    value.parse::<u8>().map_err(|error| {
+        format!(
+            "training corpus line {} invalid {} '{}': {}",
+            line_number, field, value, error
+        )
+    })
+}
+
+fn parse_corpus_i32(value: &str, line_number: usize, field: &str) -> Result<i32, String> {
+    value.parse::<i32>().map_err(|error| {
+        format!(
+            "training corpus line {} invalid {} '{}': {}",
+            line_number, field, value, error
+        )
+    })
+}
+
+fn parse_corpus_cards(
+    value: &str,
+    line_number: usize,
+    field: &str,
+    expected: usize,
+) -> Result<Vec<Card>, String> {
+    if value.len() != expected * 2 || !value.len().is_multiple_of(2) {
+        return Err(format!(
+            "training corpus line {} {} has {} hex characters; expected {}",
+            line_number,
+            field,
+            value.len(),
+            expected * 2
+        ));
+    }
+    (0..expected)
+        .map(|index| {
+            let offset = index * 2;
+            let compact = u8::from_str_radix(&value[offset..offset + 2], 16).map_err(|error| {
+                format!(
+                    "training corpus line {} invalid {} hex: {}",
+                    line_number, field, error
+                )
+            })?;
+            compact_corpus_card(compact, line_number)
+        })
+        .collect()
+}
+
+fn compact_corpus_card(compact: u8, line_number: usize) -> Result<Card, String> {
+    if compact >= 52 {
+        return Err(format!(
+            "training corpus line {} has compact card {} outside 0..52",
+            line_number, compact
+        ));
+    }
+    let rank = compact / 4;
+    let suit = compact % 4;
+    Card::new(suit * 13 + rank)
+}
+
+fn corpus_discards(
+    dealt: &[Card],
+    retained: &[Card],
+    line_number: usize,
+) -> Result<Vec<Card>, String> {
+    let retained_ids = retained.iter().map(|card| card.id).collect::<HashSet<_>>();
+    if retained_ids.len() != retained.len()
+        || retained_ids
+            .iter()
+            .any(|id| !dealt.iter().any(|card| card.id == *id))
+    {
+        return Err(format!(
+            "training corpus line {} keep is not a unique subset of dealt cards",
+            line_number
+        ));
+    }
+    let discards = dealt
+        .iter()
+        .copied()
+        .filter(|card| !retained_ids.contains(&card.id))
+        .collect::<Vec<_>>();
+    if discards.len() != 2 {
+        return Err(format!(
+            "training corpus line {} does not derive exactly two discards",
+            line_number
+        ));
+    }
+    Ok(discards)
 }
 
 fn sample_training_deal(rng: &mut TrainingRng) -> TrainingDeal {
@@ -1379,5 +1607,39 @@ mod tests {
         let state = deal.initial_state();
         assert!(state.information_set(PegSeat::Zero).is_ok());
         assert!(state.information_set(PegSeat::One).is_ok());
+    }
+
+    #[test]
+    fn realistic_training_corpus_parses_compact_game_hands() {
+        let line = "0\t0\t0\t38\t041A161E0702\t1C1D0B321020\t1A161E02\t1C1D3210\t04070B20";
+        let deal = parse_training_corpus_line(line, 1).unwrap();
+        assert_eq!(deal.dealer, PegSeat::Zero);
+        assert_eq!(deal.starting_scores, [0, 0]);
+        assert_eq!(deal.retained[0].len(), 4);
+        assert_eq!(deal.retained[1].len(), 4);
+        assert_eq!(deal.discards[0].len(), 2);
+        assert_eq!(deal.discards[1].len(), 2);
+        assert_eq!(deal.crib.len(), 4);
+    }
+
+    #[test]
+    fn corpus_training_is_deterministic_for_one_worker() {
+        let line = "0\t0\t0\t38\t041A161E0702\t1C1D0B321020\t1A161E02\t1C1D3210\t04070B20";
+        let corpus = TrainingCorpus {
+            deals: vec![parse_training_corpus_line(line, 1).unwrap()],
+            checksum: fnv1a64(line.as_bytes()),
+        };
+        let first = SharedTrainer::new();
+        let second = SharedTrainer::new();
+        first
+            .train_range_with_corpus(0x16c0ffee, 0, 100, 1, Some(&corpus))
+            .unwrap();
+        second
+            .train_range_with_corpus(0x16c0ffee, 0, 100, 1, Some(&corpus))
+            .unwrap();
+        assert_eq!(
+            first.checkpoint(0x16c0ffee, 100).unwrap().checksum(),
+            second.checkpoint(0x16c0ffee, 100).unwrap().checksum()
+        );
     }
 }

@@ -1,4 +1,4 @@
-use cribbage_policy_trainer::{Checkpoint, SharedTrainer};
+use cribbage_policy_trainer::{Checkpoint, SharedTrainer, TrainingCorpus};
 use std::env;
 use std::fs;
 use std::io::Write;
@@ -22,6 +22,11 @@ struct Config {
     max_information_sets: usize,
     resume: bool,
     probe_without_checkpoint: bool,
+    corpus: Option<PathBuf>,
+}
+
+struct TrainingSource {
+    corpus: Option<TrainingCorpus>,
 }
 
 #[derive(Clone, Debug)]
@@ -51,6 +56,14 @@ fn main() {
 }
 
 fn run(config: &Config) -> Result<(), String> {
+    let source = TrainingSource {
+        corpus: config
+            .corpus
+            .as_deref()
+            .map(TrainingCorpus::load_tsv)
+            .transpose()?,
+    };
+    verify_corpus_context(config, &source)?;
     let (trainer, starting_iteration) = if config.resume {
         let checkpoint = Checkpoint::load(&config.checkpoint)?;
         if checkpoint.seed != config.seed {
@@ -93,6 +106,7 @@ fn run(config: &Config) -> Result<(), String> {
     };
     write_status(
         config,
+        &source,
         &Progress {
             state: if completed == config.iterations {
                 "complete"
@@ -112,7 +126,13 @@ fn run(config: &Config) -> Result<(), String> {
     let mut final_state = "complete";
     while completed < config.iterations {
         let batch_end = completed.saturating_add(batch_size).min(config.iterations);
-        trainer.train_range(config.seed, completed, batch_end, config.workers)?;
+        trainer.train_range_with_corpus(
+            config.seed,
+            completed,
+            batch_end,
+            config.workers,
+            source.corpus.as_ref(),
+        )?;
         completed = batch_end;
         let checkpoint_due = completed == config.iterations
             || completed - last_checkpoint_iteration >= config.checkpoint_every;
@@ -151,6 +171,7 @@ fn run(config: &Config) -> Result<(), String> {
             }
             write_status(
                 config,
+                &source,
                 &Progress {
                     state: final_state,
                     completed,
@@ -165,6 +186,7 @@ fn run(config: &Config) -> Result<(), String> {
         }
         write_status(
             config,
+            &source,
             &Progress {
                 state: "running",
                 completed,
@@ -191,7 +213,11 @@ fn run(config: &Config) -> Result<(), String> {
     Ok(())
 }
 
-fn write_status(config: &Config, progress: &Progress) -> Result<(), String> {
+fn write_status(
+    config: &Config,
+    source: &TrainingSource,
+    progress: &Progress,
+) -> Result<(), String> {
     let session_iterations = progress.completed - progress.session_start;
     let iterations_per_second = rate(session_iterations, progress.elapsed);
     let remaining = config.iterations.saturating_sub(progress.completed);
@@ -209,6 +235,21 @@ fn write_status(config: &Config, progress: &Progress) -> Result<(), String> {
         .checksum
         .as_ref()
         .map(|value| format!("\"{}\"", json_escape(value)))
+        .unwrap_or_else(|| "null".to_string());
+    let corpus_path = config
+        .corpus
+        .as_ref()
+        .map(|path| format!("\"{}\"", json_escape(&path.display().to_string())))
+        .unwrap_or_else(|| "null".to_string());
+    let corpus_entries = source
+        .corpus
+        .as_ref()
+        .map(|corpus| corpus.len().to_string())
+        .unwrap_or_else(|| "null".to_string());
+    let corpus_checksum = source
+        .corpus
+        .as_ref()
+        .map(|corpus| format!("\"{:016x}\"", corpus.checksum()))
         .unwrap_or_else(|| "null".to_string());
     let contents = format!(
         concat!(
@@ -230,6 +271,9 @@ fn write_status(config: &Config, progress: &Progress) -> Result<(), String> {
             "  \"wallBudgetSeconds\": {:.3},\n",
             "  \"maxReferenceEquivalents\": {:.3},\n",
             "  \"maxInformationSets\": {},\n",
+            "  \"trainingCorpus\": {},\n",
+            "  \"trainingCorpusEntries\": {},\n",
+            "  \"trainingCorpusChecksum\": {},\n",
             "  \"checkpoint\": \"{}\",\n",
             "  \"checkpointChecksum\": {}\n",
             "}}\n"
@@ -251,10 +295,43 @@ fn write_status(config: &Config, progress: &Progress) -> Result<(), String> {
         config.wall_budget.as_secs_f64(),
         config.max_reference_equivalents,
         config.max_information_sets,
+        corpus_path,
+        corpus_entries,
+        corpus_checksum,
         json_escape(&config.checkpoint.display().to_string()),
         checksum,
     );
     atomic_write(&config.status, contents.as_bytes())
+}
+
+fn verify_corpus_context(config: &Config, source: &TrainingSource) -> Result<(), String> {
+    let Some(corpus) = &source.corpus else {
+        return Ok(());
+    };
+    let path = config.checkpoint.with_extension("corpus-context");
+    let expected = format!(
+        "path={}\nentries={}\nchecksum={:016x}\n",
+        config
+            .corpus
+            .as_ref()
+            .expect("loaded corpus has a path")
+            .display(),
+        corpus.len(),
+        corpus.checksum()
+    );
+    if config.resume {
+        let actual = fs::read_to_string(&path)
+            .map_err(|error| format!("read corpus context {} failed: {}", path.display(), error))?;
+        if actual != expected {
+            return Err(format!(
+                "corpus context {} does not match the requested training corpus",
+                path.display()
+            ));
+        }
+    } else {
+        atomic_write(&path, expected.as_bytes())?;
+    }
+    Ok(())
 }
 
 fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), String> {
@@ -301,6 +378,7 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
     let mut max_information_sets = 12_000_000_usize;
     let mut resume = false;
     let mut probe_without_checkpoint = false;
+    let mut corpus = None;
 
     let mut index = 0;
     while index < args.len() {
@@ -332,6 +410,7 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
             "--wall-budget-seconds" => wall_budget_seconds = parse_f64(key, value)?,
             "--max-reference-equivalents" => max_reference_equivalents = parse_f64(key, value)?,
             "--max-information-sets" => max_information_sets = parse_usize(key, value)?,
+            "--corpus" => corpus = Some(PathBuf::from(value)),
             other => return Err(format!("unknown argument: {}", other)),
         }
         index += 2;
@@ -366,6 +445,7 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
         max_information_sets,
         resume,
         probe_without_checkpoint,
+        corpus,
     })
 }
 
@@ -418,6 +498,7 @@ fn print_usage() {
         "  --seed N|0xHEX\n",
         "  --workers N\n",
         "  --status PATH\n",
+        "  --corpus PATH\n",
         "  --checkpoint-every N\n",
         "  --status-every N\n",
         "  --wall-budget-seconds N\n",
@@ -447,6 +528,20 @@ mod tests {
         assert_eq!(config.seed, 16);
         assert!(config.resume);
         assert_eq!(config.status, PathBuf::from("run.status.json"));
+    }
+
+    #[test]
+    fn parses_realistic_training_corpus_path() {
+        let config = parse_args(vec![
+            "--iterations".into(),
+            "100".into(),
+            "--checkpoint".into(),
+            "run.cfr".into(),
+            "--corpus".into(),
+            "hands.tsv".into(),
+        ])
+        .unwrap();
+        assert_eq!(config.corpus, Some(PathBuf::from("hands.tsv")));
     }
 
     #[test]
