@@ -290,11 +290,13 @@ Active correction work:
   continuing to refine admitted frequent states; QA froze at exactly 100
   states and completed all 1,000 requested iterations.
 - weekend supervisor commit: `691d4ca`; detached screen
-  `cribbage-model16-weekend` (screen id `71832`) targets 300,000,000
+  `cribbage-model16-weekend` targets 2,000,000,000
   single-worker iterations, an exact 8,000,000-set support limit, 10M-iteration
   checkpoints, a 60-hour wall budget, and the existing five-reference-work
   cap. Durable output is
-  `/Volumes/Elements/cribbage/model16-policy/2026-07-17/realistic-300m`.
+  `/Volumes/Elements/cribbage/model16-policy/2026-07-17/realistic-2b`. The
+  fixed table sustained approximately 14,450 iterations/second during launch,
+  projecting to about 38.5 hours/2.55 reference workloads.
 
 ## Completion Log
 
