@@ -159,16 +159,30 @@ Active local run (not yet a completion record):
 - calibration artifacts: `model16-100k-min2.bin` (22,797,232 bytes,
   518,869 entries) and `model16-100k-min5.bin` (5,613,293 bytes, 126,678
   entries);
-- planned deterministic final checkpoint/status: `model16-250k.cfr` and
-  `model16-250k.status.json`, seed `0x16c0ffee`, one worker;
-- repository release asset after threshold selection:
-  `rust/cribbage-shadow-engine/assets/model16-pegging-policy.bin`;
+- completed deterministic final checkpoint/status: `model16-250k.cfr` (289
+  MB) and `model16-250k.status.json`, seed `0x16c0ffee`, one worker, checkpoint
+  checksum `3e3b4554816e72e1`;
+- selected release candidate: `model16-250k-min5.bin`, 451,192 entries,
+  19,886,119 bytes, artifact checksum `1cd4954985859055`, SHA-256
+  `2205e83f4fd75ce92960f5087f92e4dee5c92cb0d326fb44edb7659c4cef516c`;
+- repository release asset pending held-out validation:
+  `rust/cribbage-shadow-engine/assets/model16-pegging-policy.bin` (an exact
+  copy of the selected candidate, currently untracked);
 - paired held-out evaluation root:
   `/Volumes/Elements/cribbage/model16-policy/2026-07-17/release-eval`;
 - resumable evaluator: `scripts/run-model16-release-eval.sh`; each matchup
   writes `status.json`, `games.db`, and append-only `sessions.jsonl` below the
   evaluation root. Matchups are 16-vs-13, 13-vs-16, 16-vs-15.2, and
   15.2-vs-16 with the same seeds used for each side swap.
+
+The final trainer completed 250,000 iterations in 117.7 seconds at 2,134
+iterations/second, retaining 3,213,626 trained plus 7,139,584 singleton states.
+It used 3.27 GB maximum RSS/4.66 GB peak footprint with no swap. Relative to
+the 100k calibration, positive-regret-per-update fell from 0.004257215 to
+0.003423015 and max-positive-regret-per-update fell from 0.003585713 to
+0.002903875. The minimum-five candidate covered 237/404 (58.7%) contested
+choices in an eight-game held-out smoke. Minimum three covered 252/419 (60.1%)
+but doubled the artifact to 40,657,581 bytes, so minimum five was selected.
 
 ## Completion Log
 
