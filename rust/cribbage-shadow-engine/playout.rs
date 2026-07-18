@@ -1,7 +1,10 @@
 use crate::board::Role;
 use crate::cards::{score_count, score_hand, Card};
 use crate::game::{CribbageGame, Phase, Side};
-use crate::model::{evaluate_decision, Decision, DecisionInput, DecisionKind, PlayerKey};
+use crate::model::{
+    evaluate_decision, Decision, DecisionInput, DecisionKind, Model16PolicyDecision,
+    Model16PolicyMode, PlayerKey,
+};
 use crate::model_id::ModelId;
 use std::time::Instant;
 
@@ -75,6 +78,7 @@ pub struct CompactPegPlayRecord {
     pub model: Option<ModelId>,
     pub selected_ev: Option<f64>,
     pub selected_win_probability: Option<f64>,
+    pub model16_policy: Option<Model16PolicyDecision>,
     pub decision_elapsed_us: Option<u64>,
     pub legal_count: Option<usize>,
     pub action: u8,
@@ -93,6 +97,8 @@ pub struct ModelPlayout {
     pub right_model: ModelId,
     pub peg_leads: [Option<u8>; 2],
     pub record: CompactPlayoutRecord,
+    model16_policy_mode: Model16PolicyMode,
+    model16_policy_seed: u64,
 }
 
 impl ModelPlayout {
@@ -121,9 +127,15 @@ impl ModelPlayout {
             right_model,
             peg_leads: [None, None],
             record: CompactPlayoutRecord::default(),
+            model16_policy_mode: Model16PolicyMode::Argmax,
+            model16_policy_seed: u64::from(seed),
         };
         playout.start_hand_record();
         Ok(playout)
+    }
+
+    pub fn set_model16_policy_mode(&mut self, mode: Model16PolicyMode) {
+        self.model16_policy_mode = mode;
     }
 
     pub fn play_to_end(&mut self, root: &str, max_steps: u32) -> Result<PlayoutResult, String> {
@@ -233,6 +245,7 @@ impl ModelPlayout {
                 model: None,
                 selected_ev: None,
                 selected_win_probability: None,
+                model16_policy: None,
                 decision_elapsed_us: None,
                 legal_count: None,
                 action: 2,
@@ -263,6 +276,7 @@ impl ModelPlayout {
                 model: Some(self.model(side)),
                 selected_ev: None,
                 selected_win_probability: None,
+                model16_policy: None,
                 decision_elapsed_us: None,
                 legal_count: Some(0),
                 action: 1,
@@ -301,6 +315,7 @@ impl ModelPlayout {
                 model: Some(self.model(side)),
                 selected_ev: Some(ev),
                 selected_win_probability: None,
+                model16_policy: None,
                 decision_elapsed_us: None,
                 legal_count: Some(1),
                 action: 0,
@@ -332,6 +347,7 @@ impl ModelPlayout {
                     model: Some(self.model(side)),
                     selected_ev: None,
                     selected_win_probability: None,
+                    model16_policy: None,
                     decision_elapsed_us: Some(decision_elapsed_us),
                     legal_count: Some(legal.len()),
                     action: 1,
@@ -350,6 +366,7 @@ impl ModelPlayout {
                 card_id: Some(card_id),
                 ev,
                 win_probability,
+                model16_policy,
                 ..
             } => {
                 let card = self
@@ -376,6 +393,7 @@ impl ModelPlayout {
                     model: Some(self.model(side)),
                     selected_ev: ev,
                     selected_win_probability: win_probability,
+                    model16_policy,
                     decision_elapsed_us: Some(decision_elapsed_us),
                     legal_count: Some(legal.len()),
                     action: 0,
@@ -428,7 +446,20 @@ impl ModelPlayout {
             }),
             plays: self.game.plays.clone(),
             peg_lead: self.peg_leads[side.index()],
+            model16_policy_mode: self.model16_policy_mode,
+            model16_policy_sample: self.model16_policy_sample(side),
         }
+    }
+
+    fn model16_policy_sample(&self, side: Side) -> u16 {
+        let mut value = self.model16_policy_seed
+            ^ u64::from(self.game.hand_number).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+            ^ (self.record.peg_plays.len() as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9)
+            ^ (side.index() as u64).wrapping_mul(0x94d0_49bb_1331_11eb);
+        value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        value ^= value >> 31;
+        (value % u64::from(crate::policy::POLICY_WEIGHT_TOTAL)) as u16
     }
 
     fn model(&self, side: Side) -> ModelId {
@@ -679,5 +710,40 @@ mod tests {
             ModelId::Schell152,
         );
         assert!(playout.is_ok());
+    }
+
+    #[test]
+    fn model16_policy_sampling_is_reproducible_and_separate_from_deal_rng() {
+        let first = ModelPlayout::new(
+            0x1600_6001,
+            Side::Left,
+            ModelId::Schell160,
+            ModelId::Schell13,
+        )
+        .unwrap();
+        let second = ModelPlayout::new(
+            0x1600_6001,
+            Side::Left,
+            ModelId::Schell160,
+            ModelId::Schell13,
+        )
+        .unwrap();
+        let different = ModelPlayout::new(
+            0x1600_6002,
+            Side::Left,
+            ModelId::Schell160,
+            ModelId::Schell13,
+        )
+        .unwrap();
+
+        assert_eq!(
+            first.model16_policy_sample(Side::Left),
+            second.model16_policy_sample(Side::Left)
+        );
+        assert_ne!(
+            first.model16_policy_sample(Side::Left),
+            different.model16_policy_sample(Side::Left)
+        );
+        assert_eq!(first.game.rng_state, second.game.rng_state);
     }
 }

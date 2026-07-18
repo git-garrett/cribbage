@@ -1,6 +1,6 @@
 use crate::board::Role;
 use crate::game::{CribbageGame, Side};
-use crate::model::{self, Decision, DecisionInput, DecisionKind, PlayerKey};
+use crate::model::{self, Decision, DecisionInput, DecisionKind, Model16PolicyMode, PlayerKey};
 use crate::model_id::ModelId;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -138,6 +138,7 @@ fn review_value(decision: Decision, kind: DecisionKind) -> Result<ReviewedDecisi
                 card_id: Some(card_id),
                 ev,
                 win_probability,
+                ..
             },
         ) if action == "play" => Ok(ReviewedDecisionValue {
             card_ids: vec![card_id],
@@ -190,6 +191,8 @@ fn decision_input(
         last_player: mapped_player(game.last_player, side),
         plays: game.plays.clone(),
         peg_lead,
+        model16_policy_mode: Model16PolicyMode::Argmax,
+        model16_policy_sample: 0,
     }
 }
 

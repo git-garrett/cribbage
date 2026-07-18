@@ -37,6 +37,27 @@ pub enum PlayerKey {
     Ai,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Model16PolicyMode {
+    #[default]
+    Argmax,
+    Sample,
+    Fallback,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Model16PolicySource {
+    Learned,
+    Fallback,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Model16PolicyDecision {
+    pub source: Model16PolicySource,
+    pub confidence: Option<u32>,
+    pub selected_weight: Option<u16>,
+}
+
 #[derive(Clone, Debug)]
 pub struct DecisionInput {
     pub kind: DecisionKind,
@@ -59,6 +80,12 @@ pub struct DecisionInput {
     pub last_player: Option<PlayerKey>,
     pub plays: Vec<Card>,
     pub peg_lead: Option<u8>,
+    /// Runner-only policy deployment control. Production decision inputs use
+    /// the default argmax mode until sampled deployment passes its gate.
+    pub model16_policy_mode: Model16PolicyMode,
+    /// A reproducible draw in 0..65,535 supplied by the game runner. It is
+    /// independent of the deal RNG so policy experiments preserve paired deals.
+    pub model16_policy_sample: u16,
 }
 
 #[derive(Clone, Debug)]
@@ -74,6 +101,7 @@ pub enum Decision {
         card_id: Option<u8>,
         ev: Option<f64>,
         win_probability: Option<f64>,
+        model16_policy: Option<Model16PolicyDecision>,
     },
 }
 
@@ -348,6 +376,12 @@ pub fn parse_decision_input(input_text: &str) -> Result<DecisionInput, String> {
         last_player: parse_optional_player(fields.get("last").copied().unwrap_or("-"))?,
         plays: parse_cards(fields.get("plays").copied().unwrap_or(""))?,
         peg_lead: parse_optional_u8(fields.get("pegLead").copied().unwrap_or("-"))?,
+        model16_policy_mode: parse_model16_policy_mode(
+            fields.get("model16PolicyMode").copied().unwrap_or("argmax"),
+        )?,
+        model16_policy_sample: parse_u16(
+            fields.get("model16PolicySample").copied().unwrap_or("0"),
+        )?,
     })
 }
 
@@ -448,6 +482,7 @@ pub fn decision_json(decision: &Decision) -> String {
             card_id,
             ev,
             win_probability: _,
+            ..
         } => {
             if action == "go" {
                 return "{\"action\":\"go\"}".to_string();
@@ -588,6 +623,7 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
             card_id: None,
             ev: None,
             win_probability: None,
+            model16_policy: None,
         });
     }
     if legal.len() == 1 {
@@ -599,6 +635,7 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
             card_id: Some(card.id),
             ev: Some(score_count(&plays) as f64),
             win_probability: None,
+            model16_policy: None,
         });
     }
 
@@ -624,6 +661,7 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
                     card_id: Some(card.id),
                     ev: Some(ev),
                     win_probability: None,
+                    model16_policy: None,
                 });
             }
         }
@@ -694,6 +732,7 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
         card_id: Some(best_card.id),
         ev: Some(ev),
         win_probability: Some(win_probability),
+        model16_policy: None,
     })
 }
 
@@ -715,13 +754,53 @@ fn recommend_peg_model16(
     }
 
     MODEL16_POLICY_LOOKUPS.fetch_add(1, Ordering::Relaxed);
-    let policy_entry = policy.and_then(|artifact| artifact.lookup(&key));
+    let policy_entry = if input.model16_policy_mode == Model16PolicyMode::Fallback {
+        None
+    } else {
+        policy.and_then(|artifact| artifact.lookup(&key))
+    };
     if policy_entry.is_some() {
         MODEL16_POLICY_HITS.fetch_add(1, Ordering::Relaxed);
     }
-    let weights = policy_entry.map(|entry| &entry.weights);
     let available_ranks = remaining_rank_counts(&known_cards_for_pegging(input));
-    let selected = legal
+    let selected = match (policy_entry, input.model16_policy_mode) {
+        (Some(entry), Model16PolicyMode::Sample) => {
+            sample_model16_policy_card(legal, &entry.weights, input.model16_policy_sample)?
+        }
+        (entry, _) => select_model16_argmax_or_fallback(
+            input,
+            legal,
+            entry.map(|value| &value.weights),
+            &available_ranks,
+        )?,
+    };
+    let model16_policy = Some(Model16PolicyDecision {
+        source: if policy_entry.is_some() {
+            Model16PolicySource::Learned
+        } else {
+            Model16PolicySource::Fallback
+        },
+        confidence: policy_entry.map(|entry| entry.confidence),
+        selected_weight: policy_entry.map(|entry| entry.weights[selected.rank as usize]),
+    });
+
+    Ok(Decision::Peg {
+        action: "play".to_string(),
+        card_id: Some(selected.id),
+        // Policy probability and the tactical backoff score are not EV or WP.
+        ev: None,
+        win_probability: None,
+        model16_policy,
+    })
+}
+
+fn select_model16_argmax_or_fallback(
+    input: &DecisionInput,
+    legal: &[Card],
+    weights: Option<&[u16; 14]>,
+    available_ranks: &[u8; 13],
+) -> Result<Card, String> {
+    legal
         .iter()
         .copied()
         .max_by(|left, right| {
@@ -731,23 +810,41 @@ fn recommend_peg_model16(
                 .cmp(&right_weight)
                 .then_with(|| {
                     compare_model16_heuristic(
-                        model16_heuristic_key(input, *left, &available_ranks),
-                        model16_heuristic_key(input, *right, &available_ranks),
+                        model16_heuristic_key(input, *left, available_ranks),
+                        model16_heuristic_key(input, *right, available_ranks),
                     )
                 })
                 // Cards of the same rank are strategically identical. Pick
                 // the lowest id so suit/order cannot make play nondeterministic.
                 .then_with(|| right.id.cmp(&left.id))
         })
-        .ok_or_else(|| "model16 received no legal pegging cards".to_string())?;
+        .ok_or_else(|| "model16 received no legal pegging cards".to_string())
+}
 
-    Ok(Decision::Peg {
-        action: "play".to_string(),
-        card_id: Some(selected.id),
-        // Policy probability and the tactical backoff score are not EV or WP.
-        ev: None,
-        win_probability: None,
-    })
+fn sample_model16_policy_card(
+    legal: &[Card],
+    weights: &[u16; 14],
+    sample: u16,
+) -> Result<Card, String> {
+    let target = u32::from(sample) % crate::policy::POLICY_WEIGHT_TOTAL;
+    let mut cumulative = 0_u32;
+    let mut last_legal = None;
+    for (rank, weight) in weights.iter().copied().enumerate().take(13) {
+        let Some(card) = legal
+            .iter()
+            .copied()
+            .filter(|card| card.rank as usize == rank)
+            .min_by_key(|card| card.id)
+        else {
+            continue;
+        };
+        last_legal = Some(card);
+        cumulative += u32::from(weight);
+        if target < cumulative {
+            return Ok(card);
+        }
+    }
+    last_legal.ok_or_else(|| "model16 sampled policy has no legal card".to_string())
 }
 
 fn model16_policy_key(input: &DecisionInput) -> Result<PolicyInformationSetKey, String> {
@@ -1095,6 +1192,7 @@ fn recommend_peg_model13(
                     card_id: Some(card.id),
                     ev: Some(ev),
                     win_probability: None,
+                    model16_policy: None,
                 });
             }
         }
@@ -1164,6 +1262,7 @@ fn recommend_peg_model13(
         card_id: Some(best_card.id),
         ev: Some(ev),
         win_probability: Some(win_probability),
+        model16_policy: None,
     })
 }
 
@@ -1195,6 +1294,7 @@ fn review_peg_model13(
             card_id: Some(selected.id),
             ev: Some(score_count(&plays) as f64),
             win_probability: None,
+            model16_policy: None,
         });
     }
     let tables = runtime_tables(root)?;
@@ -1225,6 +1325,7 @@ fn review_peg_model13(
         card_id: Some(selected.id),
         ev: Some(ev),
         win_probability: Some(win_probability),
+        model16_policy: None,
     })
 }
 
@@ -4268,6 +4369,21 @@ fn parse_u8(value: &str) -> Result<u8, String> {
         .map_err(|error| format!("invalid u8 {}: {}", value, error))
 }
 
+fn parse_u16(value: &str) -> Result<u16, String> {
+    value
+        .parse::<u16>()
+        .map_err(|error| format!("invalid u16 {}: {}", value, error))
+}
+
+fn parse_model16_policy_mode(value: &str) -> Result<Model16PolicyMode, String> {
+    match value {
+        "argmax" => Ok(Model16PolicyMode::Argmax),
+        "sample" => Ok(Model16PolicyMode::Sample),
+        "fallback" => Ok(Model16PolicyMode::Fallback),
+        other => Err(format!("invalid Model 16 policy mode: {}", other)),
+    }
+}
+
 fn parse_optional_u8(value: &str) -> Result<Option<u8>, String> {
     if value == "-" || value.is_empty() {
         return Ok(None);
@@ -4325,6 +4441,8 @@ mod tests {
             last_player: Some(PlayerKey::Human),
             plays: cards_from_ids(&[9]).unwrap(),
             peg_lead: None,
+            model16_policy_mode: Model16PolicyMode::Argmax,
+            model16_policy_sample: 0,
         }
     }
 
@@ -4553,6 +4671,10 @@ mod tests {
             fallback,
             Decision::Peg {
                 card_id: Some(4),
+                model16_policy: Some(Model16PolicyDecision {
+                    source: Model16PolicySource::Fallback,
+                    ..
+                }),
                 ..
             }
         ));
@@ -4562,6 +4684,73 @@ mod tests {
                 card_id: Some(5),
                 ev: None,
                 win_probability: None,
+                model16_policy: Some(Model16PolicyDecision {
+                    source: Model16PolicySource::Learned,
+                    confidence: Some(10),
+                    selected_weight: Some(65535),
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn model16_sampled_average_policy_respects_weight_boundaries() {
+        let mut input = model16_peg_input();
+        input.model16_policy_mode = Model16PolicyMode::Sample;
+        let mut artifact = model16_artifact(&input, 5);
+        artifact.entries[0].weights = [0; 14];
+        artifact.entries[0].weights[4] = 32_767;
+        artifact.entries[0].weights[5] = 32_768;
+
+        input.model16_policy_sample = 0;
+        assert!(matches!(
+            recommend_peg_model16(&input, &input.ai_hand, Some(&artifact)).unwrap(),
+            Decision::Peg {
+                card_id: Some(4),
+                ..
+            }
+        ));
+        input.model16_policy_sample = 32_766;
+        assert!(matches!(
+            recommend_peg_model16(&input, &input.ai_hand, Some(&artifact)).unwrap(),
+            Decision::Peg {
+                card_id: Some(4),
+                ..
+            }
+        ));
+        input.model16_policy_sample = 32_767;
+        assert!(matches!(
+            recommend_peg_model16(&input, &input.ai_hand, Some(&artifact)).unwrap(),
+            Decision::Peg {
+                card_id: Some(5),
+                ..
+            }
+        ));
+        input.model16_policy_sample = 65_534;
+        assert!(matches!(
+            recommend_peg_model16(&input, &input.ai_hand, Some(&artifact)).unwrap(),
+            Decision::Peg {
+                card_id: Some(5),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn model16_fallback_override_bypasses_present_policy() {
+        let mut input = model16_peg_input();
+        input.model16_policy_mode = Model16PolicyMode::Fallback;
+        let artifact = model16_artifact(&input, 5);
+        assert!(matches!(
+            recommend_peg_model16(&input, &input.ai_hand, Some(&artifact)).unwrap(),
+            Decision::Peg {
+                card_id: Some(4),
+                model16_policy: Some(Model16PolicyDecision {
+                    source: Model16PolicySource::Fallback,
+                    confidence: None,
+                    selected_weight: None,
+                }),
                 ..
             }
         ));

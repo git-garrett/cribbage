@@ -1,5 +1,7 @@
 use cribbage_shadow_engine::game::Side;
-use cribbage_shadow_engine::model::{model16_policy_stats, reset_model16_policy_stats};
+use cribbage_shadow_engine::model::{
+    model16_policy_stats, reset_model16_policy_stats, Model16PolicyMode, Model16PolicySource,
+};
 use cribbage_shadow_engine::model_id::ModelId;
 use cribbage_shadow_engine::playout::{CompactPlayoutRecord, ModelPlayout, PlayoutResult};
 use std::env;
@@ -28,6 +30,7 @@ struct Config {
     db_path: Option<PathBuf>,
     run_id: String,
     matchup_id: String,
+    model16_policy_mode: Model16PolicyMode,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -182,6 +185,7 @@ fn run_game_index(config: &Config, index: u32) -> Result<(u32, PlayoutResult), S
     };
     let seed = config.seed.wrapping_add(index);
     let mut playout = ModelPlayout::new(seed, first_deal, config.left, config.right)?;
+    playout.set_model16_policy_mode(config.model16_policy_mode);
     let result = playout.play_to_end(&config.model_root, config.max_steps)?;
     Ok((seed, result))
 }
@@ -212,6 +216,7 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
     let mut db_path: Option<PathBuf> = None;
     let mut run_id: Option<String> = None;
     let mut matchup_id: Option<String> = None;
+    let mut model16_policy_mode = Model16PolicyMode::Argmax;
 
     let mut index = 0usize;
     while index < args.len() {
@@ -236,6 +241,7 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
             "--db" => db_path = Some(PathBuf::from(value)),
             "--run-id" => run_id = Some(value.clone()),
             "--matchup-id" => matchup_id = Some(value.clone()),
+            "--model16-policy-mode" => model16_policy_mode = parse_model16_policy_mode(value)?,
             other => return Err(format!("unknown argument: {}", other)),
         }
         index += 2;
@@ -282,6 +288,7 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
         db_path,
         run_id: resolved_run_id,
         matchup_id: resolved_matchup_id,
+        model16_policy_mode,
     })
 }
 
@@ -299,6 +306,18 @@ fn parse_seed(value: &str) -> Result<u32, String> {
     parse_u32("--seed", value)
 }
 
+fn parse_model16_policy_mode(value: &str) -> Result<Model16PolicyMode, String> {
+    match value {
+        "argmax" => Ok(Model16PolicyMode::Argmax),
+        "sample" => Ok(Model16PolicyMode::Sample),
+        "fallback" => Ok(Model16PolicyMode::Fallback),
+        other => Err(format!(
+            "invalid --model16-policy-mode '{}'; expected argmax, sample, or fallback",
+            other
+        )),
+    }
+}
+
 fn average(total: i64, count: u32) -> f64 {
     if count == 0 {
         0.0
@@ -313,7 +332,8 @@ fn print_usage() {
         "--left <model> --right <model> --games <n> ",
         "[--start-index <n>] [--total-games <n>] ",
         "[--seed <u32|0xhex>] [--model-root <path>] [--max-steps <n>] ",
-        "[--workers <n>] [--out-dir <path>] [--db <path>] [--run-id <id>]"
+        "[--workers <n>] [--out-dir <path>] [--db <path>] [--run-id <id>] ",
+        "[--model16-policy-mode <argmax|sample|fallback>]"
     ));
 }
 
@@ -431,10 +451,11 @@ fn initialize_db(db_path: &Path, config: &Config, started_at: &str) -> Result<()
             sql_text(&format!("{}", config.seed)),
             sql_text(started_at),
             sql_text(&format!(
-                "{{\"left\":\"{}\",\"right\":\"{}\",\"workers\":{}}}",
+                "{{\"left\":\"{}\",\"right\":\"{}\",\"workers\":{},\"model16PolicyMode\":\"{}\"}}",
                 json_escape(config.left.as_str()),
                 json_escape(config.right.as_str()),
-                config.workers
+                config.workers,
+                model16_policy_mode_name(config.model16_policy_mode)
             ))
         )
     );
@@ -570,8 +591,9 @@ fn append_peg_rows(sql: &mut String, game_id: &str, record: &CompactPlayoutRecor
         sql.push_str(&format!(
             concat!(
                 "INSERT OR REPLACE INTO compact_peg_plays (game_id, hand_number, sequence, player, role, model, selected_ev, ",
-                "selected_win_probability, decision_elapsed_us, legal_count, action, card, count_before, count_after, points, left_score, right_score) ",
-                "VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n"
+                "selected_win_probability, model16_policy_source, model16_policy_confidence, model16_policy_selected_weight, ",
+                "decision_elapsed_us, legal_count, action, card, count_before, count_after, points, left_score, right_score) ",
+                "VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n"
             ),
             sql_text(game_id),
             play.hand_number,
@@ -581,6 +603,17 @@ fn append_peg_rows(sql: &mut String, game_id: &str, record: &CompactPlayoutRecor
             play.model.map(|model| sql_text(model.as_str())).unwrap_or_else(|| "NULL".to_string()),
             sql_opt_f64(play.selected_ev),
             sql_opt_f64(play.selected_win_probability),
+            play.model16_policy
+                .map(|trace| sql_text(model16_policy_source_name(trace.source)))
+                .unwrap_or_else(|| "NULL".to_string()),
+            play.model16_policy
+                .and_then(|trace| trace.confidence)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "NULL".to_string()),
+            play.model16_policy
+                .and_then(|trace| trace.selected_weight)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "NULL".to_string()),
             sql_opt_u64(play.decision_elapsed_us),
             play.legal_count.map(|count| count.to_string()).unwrap_or_else(|| "NULL".to_string()),
             play.action,
@@ -678,6 +711,9 @@ CREATE TABLE IF NOT EXISTS compact_peg_plays (
   model TEXT,
   selected_ev REAL,
   selected_win_probability REAL,
+  model16_policy_source TEXT,
+  model16_policy_confidence INTEGER,
+  model16_policy_selected_weight INTEGER,
   decision_elapsed_us INTEGER,
   legal_count INTEGER,
   action INTEGER NOT NULL,
@@ -750,6 +786,19 @@ fn ensure_compact_schema_columns(db_path: &Path) -> Result<(), String> {
     {
         sql.push_str("ALTER TABLE compact_peg_plays ADD COLUMN decision_elapsed_us INTEGER;\n");
     }
+    let policy_columns = [
+        ("model16_policy_source", "TEXT"),
+        ("model16_policy_confidence", "INTEGER"),
+        ("model16_policy_selected_weight", "INTEGER"),
+    ];
+    for (column, definition) in policy_columns {
+        if !peg_columns.iter().any(|existing| existing == column) {
+            sql.push_str(&format!(
+                "ALTER TABLE compact_peg_plays ADD COLUMN {} {};\n",
+                column, definition
+            ));
+        }
+    }
     if sql.is_empty() {
         Ok(())
     } else {
@@ -814,6 +863,21 @@ fn role_code(role: cribbage_shadow_engine::board::Role) -> u8 {
     match role {
         cribbage_shadow_engine::board::Role::Pone => 0,
         cribbage_shadow_engine::board::Role::Dealer => 1,
+    }
+}
+
+fn model16_policy_mode_name(mode: Model16PolicyMode) -> &'static str {
+    match mode {
+        Model16PolicyMode::Argmax => "argmax",
+        Model16PolicyMode::Sample => "sample",
+        Model16PolicyMode::Fallback => "fallback",
+    }
+}
+
+fn model16_policy_source_name(source: Model16PolicySource) -> &'static str {
+    match source {
+        Model16PolicySource::Learned => "learned",
+        Model16PolicySource::Fallback => "fallback",
     }
 }
 
@@ -883,4 +947,29 @@ fn iso_now() -> String {
         }
     }
     "1970-01-01T00:00:00Z".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_model16_policy_ablation_modes() {
+        for (name, expected) in [
+            ("argmax", Model16PolicyMode::Argmax),
+            ("sample", Model16PolicyMode::Sample),
+            ("fallback", Model16PolicyMode::Fallback),
+        ] {
+            assert_eq!(parse_model16_policy_mode(name).unwrap(), expected);
+        }
+        assert!(parse_model16_policy_mode("other").is_err());
+    }
+
+    #[test]
+    fn compact_schema_contains_model16_decision_telemetry() {
+        let schema = compact_schema_sql();
+        assert!(schema.contains("model16_policy_source TEXT"));
+        assert!(schema.contains("model16_policy_confidence INTEGER"));
+        assert!(schema.contains("model16_policy_selected_weight INTEGER"));
+    }
 }
