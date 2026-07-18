@@ -23,6 +23,7 @@ struct Config {
     resume: bool,
     probe_without_checkpoint: bool,
     corpus: Option<PathBuf>,
+    freeze_at_information_set_limit: bool,
 }
 
 struct TrainingSource {
@@ -38,6 +39,7 @@ struct Progress {
     pending_information_sets: usize,
     elapsed: Duration,
     checksum: Option<String>,
+    information_sets_frozen: bool,
 }
 
 fn main() {
@@ -91,6 +93,9 @@ fn run(config: &Config) -> Result<(), String> {
         }
         (SharedTrainer::new(), 0)
     };
+    if config.freeze_at_information_set_limit {
+        trainer.set_information_set_limit(config.max_information_sets)?;
+    }
 
     let started = Instant::now();
     let mut completed = starting_iteration;
@@ -119,6 +124,7 @@ fn run(config: &Config) -> Result<(), String> {
             pending_information_sets: trainer.pending_count(),
             elapsed: started.elapsed(),
             checksum: last_checksum.clone(),
+            information_sets_frozen: trainer.information_sets_frozen(),
         },
     )?;
 
@@ -156,7 +162,11 @@ fn run(config: &Config) -> Result<(), String> {
         if elapsed >= config.wall_budget {
             final_state = "wall_budget_exhausted";
         } else if trainer.information_set_count() >= config.max_information_sets {
-            final_state = "information_set_limit_exceeded";
+            if config.freeze_at_information_set_limit {
+                trainer.freeze_new_information_sets();
+            } else {
+                final_state = "information_set_limit_exceeded";
+            }
         } else if session_iterations >= 1_000
             && projected_equivalents >= config.max_reference_equivalents
         {
@@ -180,6 +190,7 @@ fn run(config: &Config) -> Result<(), String> {
                     pending_information_sets: trainer.pending_count(),
                     elapsed,
                     checksum: last_checksum.clone(),
+                    information_sets_frozen: trainer.information_sets_frozen(),
                 },
             )?;
             break;
@@ -195,6 +206,7 @@ fn run(config: &Config) -> Result<(), String> {
                 pending_information_sets: trainer.pending_count(),
                 elapsed,
                 checksum: last_checksum.clone(),
+                information_sets_frozen: trainer.information_sets_frozen(),
             },
         )?;
     }
@@ -263,6 +275,7 @@ fn write_status(
             "  \"informationSets\": {},\n",
             "  \"trainedInformationSets\": {},\n",
             "  \"pendingInformationSets\": {},\n",
+            "  \"informationSetsFrozen\": {},\n",
             "  \"elapsedSeconds\": {:.6},\n",
             "  \"iterationsPerSecond\": {:.6},\n",
             "  \"etaSeconds\": {:.3},\n",
@@ -287,6 +300,7 @@ fn write_status(
         progress.trained_information_sets + progress.pending_information_sets,
         progress.trained_information_sets,
         progress.pending_information_sets,
+        progress.information_sets_frozen,
         progress.elapsed.as_secs_f64(),
         iterations_per_second,
         eta_seconds,
@@ -379,6 +393,7 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
     let mut resume = false;
     let mut probe_without_checkpoint = false;
     let mut corpus = None;
+    let mut freeze_at_information_set_limit = false;
 
     let mut index = 0;
     while index < args.len() {
@@ -390,6 +405,11 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
         }
         if key == "--probe-without-checkpoint" {
             probe_without_checkpoint = true;
+            index += 1;
+            continue;
+        }
+        if key == "--freeze-at-information-set-limit" {
+            freeze_at_information_set_limit = true;
             index += 1;
             continue;
         }
@@ -446,6 +466,7 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
         resume,
         probe_without_checkpoint,
         corpus,
+        freeze_at_information_set_limit,
     })
 }
 
@@ -504,6 +525,7 @@ fn print_usage() {
         "  --wall-budget-seconds N\n",
         "  --max-reference-equivalents N\n",
         "  --max-information-sets N\n",
+        "  --freeze-at-information-set-limit\n",
         "  --probe-without-checkpoint\n",
         "  --resume"
     ));
@@ -542,6 +564,19 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(config.corpus, Some(PathBuf::from("hands.tsv")));
+    }
+
+    #[test]
+    fn parses_fixed_support_training_mode() {
+        let config = parse_args(vec![
+            "--iterations".into(),
+            "100".into(),
+            "--checkpoint".into(),
+            "run.cfr".into(),
+            "--freeze-at-information-set-limit".into(),
+        ])
+        .unwrap();
+        assert!(config.freeze_at_information_set_limit);
     }
 
     #[test]

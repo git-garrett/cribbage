@@ -23,7 +23,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::thread;
 
@@ -453,6 +453,9 @@ struct PolicyShard {
 
 pub struct SharedTrainer {
     shards: Vec<Mutex<PolicyShard>>,
+    freeze_new_information_sets: AtomicBool,
+    information_set_count: AtomicUsize,
+    information_set_limit: AtomicUsize,
 }
 
 impl SharedTrainer {
@@ -461,6 +464,9 @@ impl SharedTrainer {
             shards: (0..TABLE_SHARDS)
                 .map(|_| Mutex::new(PolicyShard::default()))
                 .collect(),
+            freeze_new_information_sets: AtomicBool::new(false),
+            information_set_count: AtomicUsize::new(0),
+            information_set_limit: AtomicUsize::new(usize::MAX),
         }
     }
 
@@ -496,6 +502,10 @@ impl SharedTrainer {
                 return Err("checkpoint contains a duplicate pending fingerprint".to_string());
             }
         }
+        trainer.information_set_count.store(
+            checkpoint.nodes.len() + checkpoint.pending_fingerprints.len(),
+            Ordering::Relaxed,
+        );
         Ok(trainer)
     }
 
@@ -603,7 +613,27 @@ impl SharedTrainer {
     }
 
     pub fn information_set_count(&self) -> usize {
-        self.node_count() + self.pending_count()
+        self.information_set_count.load(Ordering::Relaxed)
+    }
+
+    pub fn freeze_new_information_sets(&self) {
+        self.freeze_new_information_sets
+            .store(true, Ordering::Relaxed);
+    }
+
+    pub fn information_sets_frozen(&self) -> bool {
+        self.freeze_new_information_sets.load(Ordering::Relaxed)
+    }
+
+    pub fn set_information_set_limit(&self, limit: usize) -> Result<(), String> {
+        if limit == 0 {
+            return Err("information-set limit must be greater than zero".to_string());
+        }
+        self.information_set_limit.store(limit, Ordering::Relaxed);
+        if self.information_set_count() >= limit {
+            self.freeze_new_information_sets();
+        }
+        Ok(())
     }
 
     fn shard(&self, key: &PolicyInformationSetKey) -> usize {
@@ -633,8 +663,19 @@ impl SharedTrainer {
             let strategy = node.current_strategy();
             shard.nodes.insert(key, node);
             return Ok(strategy);
-        } else {
-            shard.pending_fingerprints.insert(fingerprint);
+        } else if !self.information_sets_frozen() {
+            let limit = self.information_set_limit.load(Ordering::Relaxed);
+            if self
+                .information_set_count
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                    (count < limit).then_some(count + 1)
+                })
+                .is_ok()
+            {
+                shard.pending_fingerprints.insert(fingerprint);
+            } else {
+                self.freeze_new_information_sets();
+            }
         }
         Ok(normalized_positive(&[0.0; ACTION_COUNT], legal_mask))
     }
@@ -1641,5 +1682,26 @@ mod tests {
             first.checkpoint(0x16c0ffee, 100).unwrap().checksum(),
             second.checkpoint(0x16c0ffee, 100).unwrap().checksum()
         );
+    }
+
+    #[test]
+    fn frozen_information_set_support_keeps_training_without_growing() {
+        let trainer = SharedTrainer::new();
+        trainer.train_range(0x16c0ffee, 0, 100, 1).unwrap();
+        let before = trainer.information_set_count();
+        assert!(before > 0);
+        trainer.freeze_new_information_sets();
+        trainer.train_range(0x16c0ffee, 100, 300, 1).unwrap();
+        assert!(trainer.information_sets_frozen());
+        assert_eq!(trainer.information_set_count(), before);
+    }
+
+    #[test]
+    fn information_set_limit_freezes_at_exact_capacity() {
+        let trainer = SharedTrainer::new();
+        trainer.set_information_set_limit(100).unwrap();
+        trainer.train_range(0x16c0ffee, 0, 1_000, 1).unwrap();
+        assert!(trainer.information_sets_frozen());
+        assert_eq!(trainer.information_set_count(), 100);
     }
 }
