@@ -289,19 +289,43 @@ Active correction work:
   new information-set admission at an exact configured capacity while
   continuing to refine admitted frequent states; QA froze at exactly 100
   states and completed all 1,000 requested iterations.
-- weekend supervisor commit: `691d4ca`; detached screen
-  `cribbage-model16-weekend` (screen id `73719`) targets 2,000,000,000
-  single-worker iterations, an exact 8,000,000-set support limit, 10M-iteration
-  checkpoints, a 60-hour wall budget, and the existing five-reference-work
-  cap. Durable output is
-  `/Volumes/Elements/cribbage/model16-policy/2026-07-17/realistic-2b`. The
-  fixed table sustained approximately 14,450 iterations/second during launch,
-  projecting to about 38.5 hours/2.55 reference workloads without competing
-  evaluation load. With the four-worker ablation active, the first frozen-table
-  status measured 10,484 iterations/second and a conservative 53.0-hour ETA,
-  still inside the 60-hour/5-reference hard gates. Live progress is
-  `realistic-2b/status.json` and supervisor state is
-  `realistic-2b/supervisor-status.json`.
+- weekend supervisor implementation began at `691d4ca`. The original
+  `/Volumes/Elements/cribbage/model16-policy/2026-07-17/realistic-2b` launch
+  was stopped before its first 10M checkpoint after live measurement exposed
+  that singleton-to-node promotion continued after the nominal support freeze
+  and masked the projection gate. It is retained only as run-history/status;
+  it is not an active or promotable checkpoint.
+- fixed-support correction commits: `e81322c` prevents promotion after freeze
+  and makes the wall/projection guards independent; `6764c09` removes
+  singleton fingerprints that can no longer become trainable nodes;
+  `f6ed8b6` excludes checkpoint reconstruction/checksum time from training
+  ETA; `7f004e3` explicitly preserves frozen support across resume;
+  `10d9db8` adds read-only resume probes; `8905d69` sizes the default run from
+  measured steady throughput; and `27ca0ec` requires a 100k post-resume sample
+  before enforcing the projected-work ceiling. Release-mode QA held compacted
+  support constant, exercised stop/resume, passed 26 focused unit tests plus
+  doc tests, strict trainer Clippy, and the release build. Only the pre-existing
+  shadow-engine dead-code warning remains.
+- steady-state sizing probe: 100,000 resumed iterations completed in 20.045
+  seconds at 4,989 iterations/second with 3,678,229 trained nodes, zero pending
+  fingerprints, and no checkpoint mutation. The selected target is therefore
+  1,000,000,000 iterations: approximately 55.7 hours/3.69 reference workloads
+  at the probe rate, below both the 60-hour wall budget and five-reference
+  ceiling.
+- active corrected run: detached screen `cribbage-model16-weekend-fixed`
+  (screen id `86746`), one worker, target 1,000,000,000, 10M-iteration
+  checkpoints, 60-hour wall budget, seed `0x16c0ffee`, and immutable support
+  of 3,678,229 trained nodes. Durable root:
+  `/Volumes/Elements/cribbage/model16-policy/2026-07-17/realistic-1_75b-fixed-support`.
+  The directory name and reused checkpoint filename retain the superseded
+  1.75B launch label so the saved 310k checkpoint did not need to be copied;
+  `status.json` is authoritative for the current 1B target. Checkpoint:
+  `model16-realistic-1750000000.cfr`; live trainer status: `status.json`;
+  supervisor status: `supervisor-status.json`; append-only console log:
+  `/Volumes/Elements/cribbage/model16-policy/2026-07-17/realistic-1_75b-fixed-support.log`.
+  At 450,000 completed iterations it was healthy at 5,113 iterations/second,
+  with a 54.3-hour ETA/3.61 projected reference workloads. Production remains
+  on 13.0.
 
 ## Completion Log
 
@@ -398,4 +422,4 @@ Active correction work:
   p50 was 2/3/4 microseconds, p95 was 13/10/15 microseconds, and p99 was
   22/21/27 microseconds. The candidate is rejected for release, production
   remains on 13.0, and the untracked asset is retained only to support the
-  Step 6 correction ablations. Evaluation record commit: pending.
+  Step 6 correction ablations. Evaluation record commit: `e07e145`.
