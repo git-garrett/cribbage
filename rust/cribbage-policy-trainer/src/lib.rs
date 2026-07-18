@@ -658,7 +658,11 @@ impl SharedTrainer {
             return Ok(node.current_strategy());
         }
         let fingerprint = policy_key_fingerprint(&key);
-        if shard.pending_fingerprints.remove(&fingerprint) {
+        if shard.pending_fingerprints.contains(&fingerprint) {
+            if self.information_sets_frozen() {
+                return Ok(normalized_positive(&[0.0; ACTION_COUNT], legal_mask));
+            }
+            shard.pending_fingerprints.remove(&fingerprint);
             let node = PolicyNode::new(legal_mask);
             let strategy = node.current_strategy();
             shard.nodes.insert(key, node);
@@ -1689,11 +1693,17 @@ mod tests {
         let trainer = SharedTrainer::new();
         trainer.train_range(0x16c0ffee, 0, 100, 1).unwrap();
         let before = trainer.information_set_count();
+        let before_nodes = trainer.node_count();
+        let before_pending = trainer.pending_count();
         assert!(before > 0);
+        assert!(before_nodes > 0);
+        assert!(before_pending > 0);
         trainer.freeze_new_information_sets();
         trainer.train_range(0x16c0ffee, 100, 300, 1).unwrap();
         assert!(trainer.information_sets_frozen());
         assert_eq!(trainer.information_set_count(), before);
+        assert_eq!(trainer.node_count(), before_nodes);
+        assert_eq!(trainer.pending_count(), before_pending);
     }
 
     #[test]

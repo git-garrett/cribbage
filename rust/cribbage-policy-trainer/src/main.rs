@@ -159,18 +159,21 @@ fn run(config: &Config) -> Result<(), String> {
         };
         let projected_equivalents = projected_seconds / REFERENCE_WALL_SECONDS;
 
-        if elapsed >= config.wall_budget {
-            final_state = "wall_budget_exhausted";
-        } else if trainer.information_set_count() >= config.max_information_sets {
-            if config.freeze_at_information_set_limit {
-                trainer.freeze_new_information_sets();
-            } else {
-                final_state = "information_set_limit_exceeded";
-            }
-        } else if session_iterations >= 1_000
-            && projected_equivalents >= config.max_reference_equivalents
-        {
-            final_state = "projection_limit_exceeded";
+        let information_set_limit_reached =
+            trainer.information_set_count() >= config.max_information_sets;
+        if information_set_limit_reached && config.freeze_at_information_set_limit {
+            trainer.freeze_new_information_sets();
+        }
+        if let Some(state) = stopping_state(
+            elapsed,
+            config.wall_budget,
+            information_set_limit_reached,
+            config.freeze_at_information_set_limit,
+            session_iterations,
+            projected_equivalents,
+            config.max_reference_equivalents,
+        ) {
+            final_state = state;
         }
         if final_state != "complete" || completed == config.iterations {
             if last_checkpoint_iteration != completed && !config.probe_without_checkpoint {
@@ -374,6 +377,26 @@ fn rate(iterations: u64, elapsed: Duration) -> f64 {
         0.0
     } else {
         iterations as f64 / elapsed.as_secs_f64()
+    }
+}
+
+fn stopping_state(
+    elapsed: Duration,
+    wall_budget: Duration,
+    information_set_limit_reached: bool,
+    freeze_at_information_set_limit: bool,
+    session_iterations: u64,
+    projected_equivalents: f64,
+    max_reference_equivalents: f64,
+) -> Option<&'static str> {
+    if elapsed >= wall_budget {
+        Some("wall_budget_exhausted")
+    } else if information_set_limit_reached && !freeze_at_information_set_limit {
+        Some("information_set_limit_exceeded")
+    } else if session_iterations >= 1_000 && projected_equivalents >= max_reference_equivalents {
+        Some("projection_limit_exceeded")
+    } else {
+        None
     }
 }
 
@@ -588,5 +611,21 @@ mod tests {
             "run.cfr".into(),
         ])
         .is_err());
+    }
+
+    #[test]
+    fn frozen_support_does_not_mask_projection_limit() {
+        assert_eq!(
+            stopping_state(
+                Duration::from_secs(1),
+                Duration::from_secs(60),
+                true,
+                true,
+                1_000,
+                5.1,
+                5.0,
+            ),
+            Some("projection_limit_exceeded")
+        );
     }
 }
