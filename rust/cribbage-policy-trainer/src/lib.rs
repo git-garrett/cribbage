@@ -621,6 +621,25 @@ impl SharedTrainer {
             .store(true, Ordering::Relaxed);
     }
 
+    pub fn compact_frozen_support(&self) -> Result<usize, String> {
+        if !self.information_sets_frozen() {
+            return Err("information-set support must be frozen before compaction".to_string());
+        }
+        let mut node_count = 0;
+        let mut removed = 0;
+        for shard in &self.shards {
+            let mut shard = shard
+                .lock()
+                .map_err(|_| "policy shard lock poisoned".to_string())?;
+            node_count += shard.nodes.len();
+            removed += shard.pending_fingerprints.len();
+            shard.pending_fingerprints.clear();
+        }
+        self.information_set_count
+            .store(node_count, Ordering::Relaxed);
+        Ok(removed)
+    }
+
     pub fn information_sets_frozen(&self) -> bool {
         self.freeze_new_information_sets.load(Ordering::Relaxed)
     }
@@ -1704,6 +1723,24 @@ mod tests {
         assert_eq!(trainer.information_set_count(), before);
         assert_eq!(trainer.node_count(), before_nodes);
         assert_eq!(trainer.pending_count(), before_pending);
+    }
+
+    #[test]
+    fn frozen_support_compaction_discards_untrainable_singletons() {
+        let trainer = SharedTrainer::new();
+        trainer.train_range(0x16c0ffee, 0, 100, 1).unwrap();
+        let before_nodes = trainer.node_count();
+        let before_pending = trainer.pending_count();
+        assert!(before_pending > 0);
+        trainer.freeze_new_information_sets();
+        assert_eq!(trainer.compact_frozen_support().unwrap(), before_pending);
+        assert_eq!(trainer.node_count(), before_nodes);
+        assert_eq!(trainer.pending_count(), 0);
+        assert_eq!(trainer.information_set_count(), before_nodes);
+        trainer.train_range(0x16c0ffee, 100, 300, 1).unwrap();
+        assert_eq!(trainer.node_count(), before_nodes);
+        assert_eq!(trainer.pending_count(), 0);
+        assert_eq!(trainer.information_set_count(), before_nodes);
     }
 
     #[test]

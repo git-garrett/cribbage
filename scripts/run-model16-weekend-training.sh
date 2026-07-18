@@ -73,4 +73,5 @@ if [[ -f "$CHECKPOINT" ]]; then
 fi
 
 "$TRAINER" "${args[@]}"
-write_supervisor_status "complete"
+trainer_state="$(sed -n 's/.*"state": "\([^"]*\)".*/\1/p' "$STATUS" | head -n 1)"
+write_supervisor_status "${trainer_state:-unknown}"

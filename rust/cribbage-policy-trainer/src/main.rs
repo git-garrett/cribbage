@@ -95,10 +95,16 @@ fn run(config: &Config) -> Result<(), String> {
     };
     if config.freeze_at_information_set_limit {
         trainer.set_information_set_limit(config.max_information_sets)?;
+        if trainer.information_sets_frozen() {
+            trainer.compact_frozen_support()?;
+        }
     }
 
     let started = Instant::now();
     let mut completed = starting_iteration;
+    let mut projection_start_iteration = starting_iteration;
+    let mut projection_start_elapsed = Duration::ZERO;
+    let mut support_compacted = trainer.information_sets_frozen();
     let mut last_checkpoint_iteration = starting_iteration;
     let mut last_checksum = if config.resume {
         Some(
@@ -140,6 +146,17 @@ fn run(config: &Config) -> Result<(), String> {
             source.corpus.as_ref(),
         )?;
         completed = batch_end;
+        let information_set_limit_reached =
+            trainer.information_set_count() >= config.max_information_sets;
+        if config.freeze_at_information_set_limit
+            && trainer.information_sets_frozen()
+            && !support_compacted
+        {
+            trainer.compact_frozen_support()?;
+            support_compacted = true;
+            projection_start_iteration = completed;
+            projection_start_elapsed = started.elapsed();
+        }
         let checkpoint_due = completed == config.iterations
             || completed - last_checkpoint_iteration >= config.checkpoint_every;
         if checkpoint_due && !config.probe_without_checkpoint {
@@ -150,17 +167,16 @@ fn run(config: &Config) -> Result<(), String> {
         }
 
         let mut elapsed = started.elapsed();
-        let session_iterations = completed - starting_iteration;
-        let rate = rate(session_iterations, elapsed);
-        let projected_seconds = if rate > 0.0 {
-            config.iterations as f64 / rate
+        let projection_iterations = completed - projection_start_iteration;
+        let projection_elapsed = elapsed.saturating_sub(projection_start_elapsed);
+        let projection_rate = rate(projection_iterations, projection_elapsed);
+        let projected_seconds = if projection_rate > 0.0 {
+            config.iterations as f64 / projection_rate
         } else {
             f64::INFINITY
         };
         let projected_equivalents = projected_seconds / REFERENCE_WALL_SECONDS;
 
-        let information_set_limit_reached =
-            trainer.information_set_count() >= config.max_information_sets;
         if information_set_limit_reached && config.freeze_at_information_set_limit {
             trainer.freeze_new_information_sets();
         }
@@ -169,7 +185,7 @@ fn run(config: &Config) -> Result<(), String> {
             config.wall_budget,
             information_set_limit_reached,
             config.freeze_at_information_set_limit,
-            session_iterations,
+            projection_iterations,
             projected_equivalents,
             config.max_reference_equivalents,
         ) {
