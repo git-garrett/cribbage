@@ -136,13 +136,13 @@ QA:
 
 ### 5. Bounded Training and Release Evaluation
 
-- [ ] Train only within the approved five-equivalent hard cap.
-- [ ] Report actual iterations/second, wall time, CPU time, artifact size,
+- [x] Train only within the approved five-equivalent hard cap.
+- [x] Report actual iterations/second, wall time, CPU time, artifact size,
   coverage, and exploitability/regret proxies.
-- [ ] Compare runtime p50/p95/p99 against the frozen 15.2 baseline.
-- [ ] Run paired-deal, side-swapped validation against 15.2 and 13.0 with
+- [x] Compare runtime p50/p95/p99 against the frozen 15.2 baseline.
+- [x] Run paired-deal, side-swapped validation against 15.2 and 13.0 with
   held-out seeds.
-- [ ] Keep the policy in 16.0 only if wall-clock latency does not regress and
+- [x] Keep the policy in 16.0 only if wall-clock latency does not regress and
   play evidence is non-inferior or promising.
 
 QA:
@@ -223,7 +223,7 @@ QA:
 - production remains 13.0 unless the promotion gate passes;
 - clean worktree and pushed completion record.
 
-Active local run (not yet a completion record):
+Completed first-generation local run:
 
 - durable root: `/Volumes/Elements/cribbage/model16-policy/2026-07-17`;
 - 100k calibration checkpoint/status: `model16-100k.cfr` and
@@ -237,7 +237,8 @@ Active local run (not yet a completion record):
 - selected release candidate: `model16-250k-min5.bin`, 451,192 entries,
   19,886,119 bytes, artifact checksum `1cd4954985859055`, SHA-256
   `2205e83f4fd75ce92960f5087f92e4dee5c92cb0d326fb44edb7659c4cef516c`;
-- repository release asset pending held-out validation:
+- rejected repository release asset retained temporarily for correction
+  ablations:
   `rust/cribbage-shadow-engine/assets/model16-pegging-policy.bin` (an exact
   copy of the selected candidate, currently untracked);
 - paired held-out evaluation root:
@@ -246,11 +247,10 @@ Active local run (not yet a completion record):
   writes `status.json`, `games.db`, and append-only `sessions.jsonl` below the
   evaluation root. Matchups are 16-vs-13, 13-vs-16, 16-vs-15.2, and
   15.2-vs-16 with the same seeds used for each side swap.
-- active evaluator: detached screen session `cribbage-model16-eval` (screen id
-  `73687`), started 2026-07-17 at approximately 17:34 PDT with four workers,
-  500 games per side ordering/2,000 total. Supervisor output is
-  `release-eval/runner.log`; the currently active matchup's live ETA is in its
-  `status.json`. No launchd job was created.
+- completed evaluator: detached screen session `cribbage-model16-eval` ran
+  with four workers, 500 games per side ordering/2,000 total, and exited
+  normally. Supervisor output is `release-eval/runner.log`; each leg's final
+  status remains in its `status.json`. No launchd job was created.
 
 The final trainer completed 250,000 iterations in 117.7 seconds at 2,134
 iterations/second, retaining 3,213,626 trained plus 7,139,584 singleton states.
@@ -343,3 +343,17 @@ but doubled the artifact to 40,657,581 bytes, so minimum five was selected.
   release build, frontend TypeScript check, and production frontend build with
   its protected-artifact check. The temporary timing database was removed.
   Implementation commit: `3f5f908`.
+- 2026-07-17, Step 5: The deterministic 250k-iteration candidate completed in
+  117.1 seconds at 2,134 iterations/second, far inside the hard compute cap.
+  Its 451,192-entry minimum-five artifact was 19,886,119 bytes and achieved
+  29,150/50,207 learned-policy hits (58.06%) over the final 2,000-game held-out
+  evaluation. Regret proxies and memory measurements are recorded above.
+
+  Model 16 won 434/1,000 games (43.4%) against 13.0 and 413/1,000 games
+  (41.3%) against 15.2 after side swapping, so the play-quality promotion gate
+  failed decisively. Across 50,207 timed contested Model 16 decisions, latency
+  remained far below the frozen 15.2 gate: for 2/3/4 legal cards respectively,
+  p50 was 2/3/4 microseconds, p95 was 13/10/15 microseconds, and p99 was
+  22/21/27 microseconds. The candidate is rejected for release, production
+  remains on 13.0, and the untracked asset is retained only to support the
+  Step 6 correction ablations. Evaluation record commit: pending.
