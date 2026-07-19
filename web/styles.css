@@ -2037,10 +2037,22 @@ button:disabled {
   transform: translate(36%, -23%) rotate(7deg);
 }
 
+/* The deal-cut results occupy the columns directly beside the deck.  Keep
+   its lifted top within the center column so it cannot cover the AI card or
+   the crib badge at desktop widths.  The later turn-card ceremony retains its
+   wider animated cut. */
+.deal-cut-row .cut-deck-cut::after {
+  transform: translate(0, -18%) rotate(0deg);
+}
+
 .deal-cut-row .cut-deck-cutting::after,
 .pegging-row .turn-cut-deck-cutting::after,
 .played-active.pegging-row .turn-cut-deck-cutting::after {
   animation: deck-cut-slide 0.58s ease both;
+}
+
+.deal-cut-row .cut-deck-cutting::after {
+  animation-name: deal-cut-deck-slide;
 }
 
 .pegging-row .turn-cut-deck:focus-visible,
@@ -2090,6 +2102,23 @@ button:disabled {
   100% {
     opacity: 0.9;
     transform: translate(36%, -23%) rotate(7deg);
+  }
+}
+
+@keyframes deal-cut-deck-slide {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg);
+  }
+
+  38% {
+    opacity: 1;
+    transform: translate(0, -8%) rotate(0deg);
+  }
+
+  100% {
+    opacity: 0.9;
+    transform: translate(0, -18%) rotate(0deg);
   }
 }
 

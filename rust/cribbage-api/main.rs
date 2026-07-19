@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cribbage_shadow_engine::cards::{Card, RANKS, SUIT_NAMES, VALUES};
+use cribbage_shadow_engine::cards::{full_deck, Card, RANKS, SUIT_NAMES, VALUES};
 use cribbage_shadow_engine::decision::{
     recommend_discard_for_side, recommend_peg_for_side, review_discard_for_side,
     review_peg_for_side, DecisionReview as EngineDecisionReview, PegDecision,
@@ -328,10 +328,14 @@ fn game_action(server: &Server, body: &str) -> Response {
 fn new_session(model: ModelId, tag: Option<String>) -> Session {
     let counter = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
     let seed = (unix_millis() as u32).wrapping_add((counter as u32).wrapping_mul(0x9e37_79b9));
-    let first_deal = if seed & 1 == 0 { HUMAN } else { AI };
+    new_session_from_seed(model, tag, seed, counter)
+}
+
+fn new_session_from_seed(model: ModelId, tag: Option<String>, seed: u32, counter: u64) -> Session {
+    let deal_cuts = deal_cuts_for_seed(seed);
+    let first_deal = first_dealer_for_deal_cuts(deal_cuts)
+        .expect("deal-cut generator must resolve tied ranks");
     let game = CribbageGame::new_with_seed(seed, first_deal);
-    let first = Card::new(((seed >> 8) % 52) as u8).expect("cut card in range");
-    let second = Card::new(((seed.rotate_left(11) % 51) + 1) as u8).expect("cut card in range");
     Session {
         id: format!("rust-{:x}-{:x}", unix_millis(), counter),
         tag,
@@ -341,10 +345,44 @@ fn new_session(model: ModelId, tag: Option<String>) -> Session {
         deal_cut_revealed: false,
         waiting_for_ai_discard: false,
         turn_card_revealed: false,
-        deal_cuts: [first, second],
+        deal_cuts,
         created_at: isoish_now(),
         decision_reviews: Vec::new(),
         next_review_id: 1,
+    }
+}
+
+/// Simulate the initial cut from a shuffled deck.  A tied pair is discarded
+/// and both players cut again, so every presented result has a definite lower
+/// rank and the cards are always distinct.
+fn deal_cuts_for_seed(seed: u32) -> [Card; 2] {
+    let mut cut_rng = seed ^ 0xa5a5_5a5a;
+    loop {
+        let mut deck = full_deck();
+        for index in (1..deck.len()).rev() {
+            cut_rng = cut_rng
+                .wrapping_mul(1_664_525)
+                .wrapping_add(1_013_904_223);
+            let swap_index = ((u64::from(cut_rng) * (index as u64 + 1)) >> 32) as usize;
+            deck.swap(index, swap_index);
+        }
+        if let Some(cuts) = first_non_tied_deal_cuts(&deck) {
+            return cuts;
+        }
+    }
+}
+
+fn first_non_tied_deal_cuts(deck: &[Card]) -> Option<[Card; 2]> {
+    deck.chunks_exact(2)
+        .find(|pair| pair[0].rank != pair[1].rank)
+        .map(|pair| [pair[0], pair[1]])
+}
+
+fn first_dealer_for_deal_cuts(deal_cuts: [Card; 2]) -> Option<Side> {
+    match deal_cuts[0].rank.cmp(&deal_cuts[1].rank) {
+        std::cmp::Ordering::Less => Some(HUMAN),
+        std::cmp::Ordering::Greater => Some(AI),
+        std::cmp::Ordering::Equal => None,
     }
 }
 
@@ -1460,6 +1498,49 @@ mod tests {
     #[test]
     fn model_metadata_includes_model16() {
         assert!(model_json().contains("schell_table-peg_table-16.0"));
+    }
+
+    #[test]
+    fn lower_deal_cut_receives_first_deal_and_crib() {
+        let human_two = Card::new(1).unwrap();
+        let ai_five = Card::new(4).unwrap();
+        let first_deal = first_dealer_for_deal_cuts([human_two, ai_five]).unwrap();
+        let game = CribbageGame::new_with_seed(17, first_deal);
+
+        assert_eq!(first_deal, HUMAN);
+        assert_eq!(game.first_deal, HUMAN);
+        assert_eq!(game.dealer, HUMAN);
+        assert_eq!(game.pone, AI);
+    }
+
+    #[test]
+    fn tied_deal_cuts_are_recut_before_a_result_is_shown() {
+        let ace_diamonds = Card::new(0).unwrap();
+        let ace_clubs = Card::new(13).unwrap();
+        let human_two = Card::new(1).unwrap();
+        let ai_five = Card::new(4).unwrap();
+
+        assert_eq!(
+            first_non_tied_deal_cuts(&[ace_diamonds, ace_clubs, human_two, ai_five]),
+            Some([human_two, ai_five])
+        );
+    }
+
+    #[test]
+    fn generated_deal_cuts_are_distinct_and_have_a_matching_dealer() {
+        for seed in 0..1_024 {
+            let cuts = deal_cuts_for_seed(seed);
+            assert_ne!(cuts[0].id, cuts[1].id);
+            assert_ne!(cuts[0].rank, cuts[1].rank);
+            assert_eq!(
+                first_dealer_for_deal_cuts(cuts),
+                Some(if cuts[0].rank < cuts[1].rank { HUMAN } else { AI })
+            );
+
+            let session = new_session_from_seed(ModelId::Schell13, None, seed, 1);
+            assert_eq!(session.game.first_deal, first_dealer_for_deal_cuts(session.deal_cuts).unwrap());
+            assert_eq!(session.game.dealer, session.game.first_deal);
+        }
     }
 
     #[test]
