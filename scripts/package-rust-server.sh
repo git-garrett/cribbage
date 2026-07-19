@@ -30,4 +30,5 @@ COPYFILE_DISABLE=1 tar --no-xattrs -czf "$ARCHIVE" \
   rust/cribbage-policy-trainer \
   rust/cribbage-runner \
   rust/cribbage-shadow-engine \
+  scripts/migrate-legacy-leaderboard.py \
   docs/nanode-rocky-server-setup.md

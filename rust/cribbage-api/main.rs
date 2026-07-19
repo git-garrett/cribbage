@@ -333,8 +333,8 @@ fn new_session(model: ModelId, tag: Option<String>) -> Session {
 
 fn new_session_from_seed(model: ModelId, tag: Option<String>, seed: u32, counter: u64) -> Session {
     let deal_cuts = deal_cuts_for_seed(seed);
-    let first_deal = first_dealer_for_deal_cuts(deal_cuts)
-        .expect("deal-cut generator must resolve tied ranks");
+    let first_deal =
+        first_dealer_for_deal_cuts(deal_cuts).expect("deal-cut generator must resolve tied ranks");
     let game = CribbageGame::new_with_seed(seed, first_deal);
     Session {
         id: format!("rust-{:x}-{:x}", unix_millis(), counter),
@@ -360,9 +360,7 @@ fn deal_cuts_for_seed(seed: u32) -> [Card; 2] {
     loop {
         let mut deck = full_deck();
         for index in (1..deck.len()).rev() {
-            cut_rng = cut_rng
-                .wrapping_mul(1_664_525)
-                .wrapping_add(1_013_904_223);
+            cut_rng = cut_rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             let swap_index = ((u64::from(cut_rng) * (index as u64 + 1)) >> 32) as usize;
             deck.swap(index, swap_index);
         }
@@ -1323,7 +1321,7 @@ fn decode_field(value: &str) -> Result<String, String> {
     Ok(output)
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct PlayerTotals {
     games: i32,
     wins: i32,
@@ -1334,13 +1332,28 @@ struct PlayerTotals {
     margin_total: i32,
 }
 
+struct LeaderboardWin {
+    player: String,
+    margin: i32,
+    human_score: i32,
+    ai_score: i32,
+    result: String,
+    model: String,
+    ended_at: String,
+}
+
 fn leaderboard_json(server: &Server) -> Result<String, String> {
     let app = server
         .state
         .lock()
         .map_err(|_| "server state lock poisoned".to_string())?;
+    Ok(leaderboard_summary_json(&app.uploads))
+}
+
+fn leaderboard_summary_json(uploads: &HashMap<String, UploadedGame>) -> String {
     let mut totals: HashMap<String, PlayerTotals> = HashMap::new();
-    for upload in app.uploads.values() {
+    let mut best_wins = Vec::new();
+    for upload in uploads.values() {
         let total = totals.entry(upload.player.clone()).or_default();
         total.games += 1;
         let won = upload.winner.as_deref() == Some("human");
@@ -1362,6 +1375,17 @@ fn leaderboard_json(server: &Server) -> Result<String, String> {
                 total.skunked += 1;
             }
         }
+        if won {
+            best_wins.push(LeaderboardWin {
+                player: upload.player.clone(),
+                margin,
+                human_score: upload.human_score,
+                ai_score: upload.ai_score,
+                result: upload.result.clone(),
+                model: upload.model.clone(),
+                ended_at: upload.ended_at.clone(),
+            });
+        }
     }
     let mut rows = totals.into_iter().collect::<Vec<_>>();
     rows.sort_by(|(left_name, left), (right_name, right)| {
@@ -1371,18 +1395,78 @@ fn leaderboard_json(server: &Server) -> Result<String, String> {
             .then_with(|| right.wins.cmp(&left.wins))
             .then_with(|| left_name.cmp(right_name))
     });
-    let player_stats = rows.iter().map(|(player, total)| {
-        let games = total.games.max(1) as f64;
-        format!(
-            "{{\"player\":\"{}\",\"games\":{},\"wins\":{},\"losses\":{},\"skunks\":{},\"skunked\":{},\"leaderboardPoints\":{},\"leaderboardPointsPerGame\":{:.3},\"winRate\":{:.3},\"avgMargin\":{:.3}}}",
-            json_escape(player), total.games, total.wins, total.losses, total.skunks, total.skunked, total.points,
-            total.points as f64 / games, total.wins as f64 / games, total.margin_total as f64 / games,
-        )
-    }).collect::<Vec<_>>().join(",");
-    Ok(format!(
-        "{{\"generatedAt\":\"{}\",\"source\":\"rust-api-tsv\",\"model\":\"13.0 public\",\"games\":{},\"playerStats\":[{}],\"bestWinRate\":[],\"winRate14_3\":[],\"bestWins\":[],\"mostSkunks\":[]}}",
-        isoish_now(), app.uploads.len(), player_stats
-    ))
+    let player_stats = leaderboard_player_json(&rows);
+    let mut skunk_rows = rows
+        .iter()
+        .filter(|(_, total)| total.skunks > 0)
+        .collect::<Vec<_>>();
+    skunk_rows.sort_by(|(left_name, left), (right_name, right)| {
+        right
+            .skunks
+            .cmp(&left.skunks)
+            .then_with(|| right.points.cmp(&left.points))
+            .then_with(|| left_name.cmp(right_name))
+    });
+    let most_skunks = leaderboard_player_json(&skunk_rows);
+    best_wins.sort_by(|left, right| {
+        right
+            .margin
+            .cmp(&left.margin)
+            .then_with(|| left.ended_at.cmp(&right.ended_at))
+            .then_with(|| left.player.cmp(&right.player))
+    });
+    let best_wins_json = best_wins
+        .iter()
+        .map(|win| {
+            format!(
+                "{{\"player\":\"{}\",\"margin\":{},\"humanScore\":{},\"aiScore\":{},\"result\":\"{}\",\"opponent\":\"{}\",\"endedAt\":\"{}\"}}",
+                json_escape(&win.player),
+                win.margin,
+                win.human_score,
+                win.ai_score,
+                json_escape(&win.result),
+                json_escape(&win.model),
+                json_escape(&win.ended_at),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"generatedAt\":\"{}\",\"source\":\"rust-api-tsv\",\"model\":\"historical\",\"games\":{},\"playerStats\":[{}],\"bestWinRate\":[{}],\"winRate14_3\":[{}],\"bestWins\":[{}],\"mostSkunks\":[{}]}}",
+        isoish_now(),
+        uploads.len(),
+        player_stats,
+        player_stats,
+        player_stats,
+        best_wins_json,
+        most_skunks,
+    )
+}
+
+fn leaderboard_player_json<T>(rows: &[T]) -> String
+where
+    T: std::borrow::Borrow<(String, PlayerTotals)>,
+{
+    rows.iter()
+        .map(|row| {
+            let (player, total) = row.borrow();
+            let games = total.games.max(1) as f64;
+            format!(
+                "{{\"player\":\"{}\",\"games\":{},\"wins\":{},\"losses\":{},\"skunks\":{},\"skunked\":{},\"leaderboardPoints\":{},\"leaderboardPointsPerGame\":{:.3},\"winRate\":{:.3},\"avgMargin\":{:.3}}}",
+                json_escape(player),
+                total.games,
+                total.wins,
+                total.losses,
+                total.skunks,
+                total.skunked,
+                total.points,
+                total.points as f64 / games,
+                total.wins as f64 / games,
+                total.margin_total as f64 / games,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn json_string(input: &str, key: &str) -> Option<String> {
@@ -1501,6 +1585,46 @@ mod tests {
     }
 
     #[test]
+    fn leaderboard_summary_preserves_players_wins_and_skunks() {
+        let uploads = HashMap::from([
+            (
+                "garrett-win".to_string(),
+                UploadedGame {
+                    game_id: "garrett-win".to_string(),
+                    player: "Garrett".to_string(),
+                    winner: Some("human".to_string()),
+                    result: "skunk".to_string(),
+                    human_score: 121,
+                    ai_score: 90,
+                    model: "schell_table-peg_table-15.2".to_string(),
+                    ended_at: "2026-07-01T00:00:00Z".to_string(),
+                },
+            ),
+            (
+                "kurtis-loss".to_string(),
+                UploadedGame {
+                    game_id: "kurtis-loss".to_string(),
+                    player: "Kurtis".to_string(),
+                    winner: Some("ai".to_string()),
+                    result: "regular".to_string(),
+                    human_score: 111,
+                    ai_score: 121,
+                    model: "schell_table-peg_table-13.0".to_string(),
+                    ended_at: "2026-07-02T00:00:00Z".to_string(),
+                },
+            ),
+        ]);
+
+        let summary = leaderboard_summary_json(&uploads);
+
+        assert!(summary.contains("\"games\":2"));
+        assert!(summary.contains("\"player\":\"Garrett\""));
+        assert!(summary.contains("\"player\":\"Kurtis\""));
+        assert!(summary.contains("\"bestWins\":[{\"player\":\"Garrett\""));
+        assert!(summary.contains("\"mostSkunks\":[{\"player\":\"Garrett\""));
+    }
+
+    #[test]
     fn lower_deal_cut_receives_first_deal_and_crib() {
         let human_two = Card::new(1).unwrap();
         let ai_five = Card::new(4).unwrap();
@@ -1534,11 +1658,18 @@ mod tests {
             assert_ne!(cuts[0].rank, cuts[1].rank);
             assert_eq!(
                 first_dealer_for_deal_cuts(cuts),
-                Some(if cuts[0].rank < cuts[1].rank { HUMAN } else { AI })
+                Some(if cuts[0].rank < cuts[1].rank {
+                    HUMAN
+                } else {
+                    AI
+                })
             );
 
             let session = new_session_from_seed(ModelId::Schell13, None, seed, 1);
-            assert_eq!(session.game.first_deal, first_dealer_for_deal_cuts(session.deal_cuts).unwrap());
+            assert_eq!(
+                session.game.first_deal,
+                first_dealer_for_deal_cuts(session.deal_cuts).unwrap()
+            );
             assert_eq!(session.game.dealer, session.game.first_deal);
         }
     }

@@ -3547,9 +3547,14 @@ function renderLeaderboard(): void {
   const summary = state.leaderboardSummary;
   const rankedPlayers = summary.playerStats?.length ? summary.playerStats : summary.winRate14_3 ?? [];
   const bestWins = summary.bestWins ?? [];
+  const leaderboardScope = summary.source === "rust-api-tsv"
+    ? "production"
+    : summary.model
+      ? engineName(summary.model)
+      : "production";
   els.leaderboardSummary.textContent = state.leaderboardLoading
     ? "Refreshing leaderboard..."
-    : `${summary.games} completed ${summary.model ? engineName(summary.model) : "production"} game${summary.games === 1 ? "" : "s"} recorded.`;
+    : `${summary.games} completed ${leaderboardScope} game${summary.games === 1 ? "" : "s"} recorded.`;
   els.leaderboardHighlights.innerHTML = "";
   const topPlayer = rankedPlayers[0] ?? null;
   const skunks = summary.mostSkunks?.length ? summary.mostSkunks : [];

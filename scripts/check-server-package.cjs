@@ -25,6 +25,7 @@ const required = [
   "rust/cribbage-shadow-engine/assets/empirical-discard-keep-14.8.bin",
   "rust/cribbage-shadow-engine/assets/crib-rank-score-by-discard-cut.json",
   "rust/cribbage-shadow-engine/assets/crib-score-histogram-by-discard-cut.json",
+  "scripts/migrate-legacy-leaderboard.py",
 ];
 
 if (!existsSync(archive)) {
