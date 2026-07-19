@@ -15,7 +15,7 @@ the crib badge on desktop.
   generated cuts.
 - [x] Keep the deal-cut deck animation inside its own grid column.
 - [x] Run Rust, TypeScript, production-build, package, and API-flow QA.
-- [ ] Commit, push, deploy, and verify production.
+- [x] Commit, push, deploy, and verify production.
 
 ## Notes
 
@@ -29,3 +29,7 @@ the crib badge on desktop.
   release-built local API game cut User 8 versus AI 7 and correctly assigned
   the first deal and crib to the AI. The generated client artifact contains
   the deal-cut-specific animation that keeps its lifted deck top centered.
+- Deployed on 2026-07-18 in commit `51a4c2e` (`Fix first-deal cut and
+  layout`). Production health reports Rust API 16.0.0 with Model 13.0. A
+  tagged production QA game (`rust-19f7886ec91-1`) cut User K versus AI 2 and
+  correctly assigned the AI both first deal and crib.
