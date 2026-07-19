@@ -25,6 +25,12 @@ player and win history to the public API.
   shown in the UI), with win rate and average margin as quality tie-breakers.
 - [x] Add regression coverage, deploy, and verify the live ordering.
 
+## Loading-State Amendment
+
+- [ ] Show a throbber while the leaderboard request is pending; reserve empty
+  states for completed empty responses.
+- [ ] Build, deploy, and verify the production client bundle.
+
 ## Recovery Evidence
 
 - On 2026-07-18, the live Rust endpoint read 47 TSV records, all tagged

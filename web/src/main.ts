@@ -3556,6 +3556,20 @@ function renderLeaderboard(): void {
     ? "Refreshing leaderboard..."
     : `${summary.games} completed ${leaderboardScope} game${summary.games === 1 ? "" : "s"} recorded.`;
   els.leaderboardHighlights.innerHTML = "";
+  els.leaderboardList.innerHTML = "";
+  if (state.leaderboardLoading) {
+    const loading = document.createElement("p");
+    loading.className = "analytics-empty leaderboard-loading";
+    loading.setAttribute("role", "status");
+    const throbber = document.createElement("span");
+    throbber.className = "throbber";
+    throbber.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.textContent = "Loading leaderboard...";
+    loading.append(throbber, label);
+    els.leaderboardList.append(loading);
+    return;
+  }
   const topPlayer = rankedPlayers[0] ?? null;
   const skunks = summary.mostSkunks?.length ? summary.mostSkunks : [];
   els.leaderboardHighlights.append(
@@ -3572,7 +3586,6 @@ function renderLeaderboard(): void {
         : "No skunks yet",
     ),
   );
-  els.leaderboardList.innerHTML = "";
   appendLeaderboardSection("Leaderboard score vs AI", rankedPlayers, (player) => [
     leaderboardCell(player.player),
     leaderboardCell(`${formatLeaderboardScore(player)} (${formatLeaderboardPointsDetail(player)})`),
