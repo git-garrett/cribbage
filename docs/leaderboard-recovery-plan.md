@@ -27,9 +27,9 @@ player and win history to the public API.
 
 ## Loading-State Amendment
 
-- [ ] Show a throbber while the leaderboard request is pending; reserve empty
+- [x] Show a throbber while the leaderboard request is pending; reserve empty
   states for completed empty responses.
-- [ ] Build, deploy, and verify the production client bundle.
+- [x] Build, deploy, and verify the production client bundle.
 
 ## Recovery Evidence
 
@@ -56,3 +56,7 @@ player and win history to the public API.
   points per game—the percentage displayed in the UI—with win rate and
   average margin as tie-breakers. Live public QA confirmed the descending
   order begins Garrett (51.1%), Kristina (50.0%), and Kurtis (46.9%).
+- Loading-state amendment deployed on 2026-07-18 in commit `57c2d6c`
+  (`Show leaderboard loading spinner`). TypeScript, production build, and
+  package QA passed. Production serves bundle `index-C8PyQZyS.js` and its
+  paired stylesheet, both containing the new loading state.
