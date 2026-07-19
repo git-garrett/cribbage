@@ -19,6 +19,12 @@ player and win history to the public API.
   API contains the recovered players and all completed games.
 - [x] Commit, push, deploy, and record the recovery.
 
+## Quality Ranking Amendment
+
+- [ ] Sort leaderboard rows by leaderboard points per game (the percentage
+  shown in the UI), with win rate and average margin as quality tie-breakers.
+- [ ] Add regression coverage, deploy, and verify the live ordering.
+
 ## Recovery Evidence
 
 - On 2026-07-18, the live Rust endpoint read 47 TSV records, all tagged

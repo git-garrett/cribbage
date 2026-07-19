@@ -1388,13 +1388,7 @@ fn leaderboard_summary_json(uploads: &HashMap<String, UploadedGame>) -> String {
         }
     }
     let mut rows = totals.into_iter().collect::<Vec<_>>();
-    rows.sort_by(|(left_name, left), (right_name, right)| {
-        right
-            .points
-            .cmp(&left.points)
-            .then_with(|| right.wins.cmp(&left.wins))
-            .then_with(|| left_name.cmp(right_name))
-    });
+    rows.sort_by(compare_leaderboard_players);
     let player_stats = leaderboard_player_json(&rows);
     let mut skunk_rows = rows
         .iter()
@@ -1441,6 +1435,27 @@ fn leaderboard_summary_json(uploads: &HashMap<String, UploadedGame>) -> String {
         best_wins_json,
         most_skunks,
     )
+}
+
+/// Rank by the score percentage shown in the UI (leaderboard points per game),
+/// never by accumulated points.  Cross multiplication keeps the comparison
+/// exact and lets equal percentages fall through to other quality measures.
+fn compare_leaderboard_players(
+    (left_name, left): &(String, PlayerTotals),
+    (right_name, right): &(String, PlayerTotals),
+) -> std::cmp::Ordering {
+    let left_games = i64::from(left.games.max(1));
+    let right_games = i64::from(right.games.max(1));
+    (i64::from(right.points) * left_games)
+        .cmp(&(i64::from(left.points) * right_games))
+        .then_with(|| {
+            (i64::from(right.wins) * left_games).cmp(&(i64::from(left.wins) * right_games))
+        })
+        .then_with(|| {
+            (i64::from(right.margin_total) * left_games)
+                .cmp(&(i64::from(left.margin_total) * right_games))
+        })
+        .then_with(|| left_name.cmp(right_name))
 }
 
 fn leaderboard_player_json<T>(rows: &[T]) -> String
@@ -1622,6 +1637,35 @@ mod tests {
         assert!(summary.contains("\"player\":\"Kurtis\""));
         assert!(summary.contains("\"bestWins\":[{\"player\":\"Garrett\""));
         assert!(summary.contains("\"mostSkunks\":[{\"player\":\"Garrett\""));
+    }
+
+    #[test]
+    fn leaderboard_ranks_quality_percentage_over_accumulated_points() {
+        let mut rows = vec![
+            (
+                "Volume".to_string(),
+                PlayerTotals {
+                    games: 40,
+                    wins: 20,
+                    points: 20,
+                    ..PlayerTotals::default()
+                },
+            ),
+            (
+                "Quality".to_string(),
+                PlayerTotals {
+                    games: 3,
+                    wins: 2,
+                    points: 2,
+                    ..PlayerTotals::default()
+                },
+            ),
+        ];
+
+        rows.sort_by(compare_leaderboard_players);
+
+        assert_eq!(rows[0].0, "Quality");
+        assert_eq!(rows[1].0, "Volume");
     }
 
     #[test]
