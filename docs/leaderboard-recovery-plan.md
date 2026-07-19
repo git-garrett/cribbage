@@ -15,9 +15,9 @@ player and win history to the public API.
   including biggest wins and skunk highlights.
 - [x] Test the importer and Rust API output; build and verify the deployment
   package.
-- [ ] Back up and migrate production data; restart safely and verify the live
+- [x] Back up and migrate production data; restart safely and verify the live
   API contains the recovered players and all completed games.
-- [ ] Commit, push, deploy, and record the recovery.
+- [x] Commit, push, deploy, and record the recovery.
 
 ## Recovery Evidence
 
@@ -33,3 +33,9 @@ player and win history to the public API.
 - Local QA on 2026-07-18: importer self-test, focused seven-test Rust API
   suite, complete 83-test Rust workspace suite, TypeScript check, production
   build, and package integrity check all passed.
+- Recovery deployed on 2026-07-18 in commit `d112927` (`Restore legacy
+  leaderboard history`). Production dry-run validated 47 already-present
+  records and 77 additions; the applied migration produced 124 records and
+  created `leaderboard-games.tsv.20260719T041032Z.pre-legacy-import` as a
+  rollback copy. After the safe service restart, the public API reports all
+  eight historical players, 44 biggest-win records, and four skunk leaders.
