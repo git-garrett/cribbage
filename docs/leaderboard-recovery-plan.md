@@ -21,9 +21,9 @@ player and win history to the public API.
 
 ## Quality Ranking Amendment
 
-- [ ] Sort leaderboard rows by leaderboard points per game (the percentage
+- [x] Sort leaderboard rows by leaderboard points per game (the percentage
   shown in the UI), with win rate and average margin as quality tie-breakers.
-- [ ] Add regression coverage, deploy, and verify the live ordering.
+- [x] Add regression coverage, deploy, and verify the live ordering.
 
 ## Recovery Evidence
 
@@ -45,3 +45,8 @@ player and win history to the public API.
   created `leaderboard-games.tsv.20260719T041032Z.pre-legacy-import` as a
   rollback copy. After the safe service restart, the public API reports all
   eight historical players, 44 biggest-win records, and four skunk leaders.
+- Quality-ranking amendment deployed on 2026-07-18 in commit `077de45`
+  (`Rank leaderboard by quality percentage`). Rows now sort by leaderboard
+  points per game—the percentage displayed in the UI—with win rate and
+  average margin as tie-breakers. Live public QA confirmed the descending
+  order begins Garrett (51.1%), Kristina (50.0%), and Kurtis (46.9%).
