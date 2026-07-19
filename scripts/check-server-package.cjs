@@ -12,6 +12,8 @@ const required = [
   "rust/Cargo.lock",
   "rust/cribbage-api/Cargo.toml",
   "rust/cribbage-api/main.rs",
+  "rust/cribbage-policy-trainer/Cargo.toml",
+  "rust/cribbage-policy-trainer/src/lib.rs",
   "rust/cribbage-runner/Cargo.toml",
   "rust/cribbage-runner/src/main.rs",
   "rust/cribbage-shadow-engine/Cargo.toml",

@@ -10,6 +10,7 @@ for required in \
   "${ROOT_DIR}/rust/Cargo.toml" \
   "${ROOT_DIR}/rust/Cargo.lock" \
   "${ROOT_DIR}/rust/cribbage-api" \
+  "${ROOT_DIR}/rust/cribbage-policy-trainer" \
   "${ROOT_DIR}/rust/cribbage-runner" \
   "${ROOT_DIR}/rust/cribbage-shadow-engine" \
   "${ROOT_DIR}/rust/cribbage-shadow-engine/assets"; do
@@ -26,6 +27,7 @@ COPYFILE_DISABLE=1 tar --no-xattrs -czf "$ARCHIVE" \
   rust/Cargo.toml \
   rust/Cargo.lock \
   rust/cribbage-api \
+  rust/cribbage-policy-trainer \
   rust/cribbage-runner \
   rust/cribbage-shadow-engine \
   docs/nanode-rocky-server-setup.md
