@@ -184,6 +184,7 @@ export interface GameState {
   turn: string | null;
   count: number;
   turnCard: SerializedCard | null;
+  turnCardRevealed: boolean;
   plays: SerializedCard[];
   completedPlays: SerializedCard[][];
   peggingResetPending: boolean;
@@ -230,7 +231,8 @@ export interface GameSnapshot {
   handNumber?: number;
   human: PlayerSnapshot;
   ai: PlayerSnapshot;
-  turnCard: number;
+  turnCard: number | null;
+  turnCardRevealed: boolean;
   crib: number[];
   cutDeck?: number[];
   cutCards?: { human?: number | null; ai?: number | null };

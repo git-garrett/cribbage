@@ -229,7 +229,7 @@ const state: {
   nextHandPreparation: null,
 };
 
-type TurnCutProgress = "ai-turn" | "revealed" | "confirmed" | null;
+type TurnCutProgress = "ai-turn" | "user-turn" | null;
 
 let interactionEpoch = 0;
 let gameStateGeneration = 0;
@@ -550,7 +550,17 @@ function loadSavedGame(): SavedGameRecord | null {
   try {
     const parsed = JSON.parse(saved) as Partial<SavedGameRecord>;
     if (parsed.version !== 1 || !parsed.snapshot || !parsed.state) return null;
-    return parsed as SavedGameRecord;
+    const record = parsed as SavedGameRecord;
+    // Snapshots from before server-authoritative reveal support may already
+    // contain the turn card. Treat any missing reveal marker as private.
+    if (record.snapshot.turnCardRevealed !== true || record.state.turnCardRevealed !== true) {
+      record.snapshot.turnCard = null;
+      record.snapshot.turnCardRevealed = false;
+      record.state.turnCard = null;
+      record.state.turnCardRevealed = false;
+    }
+    delete record.snapshot.rngState;
+    return record;
   } catch {
     safeLocalStorageRemove(SAVE_KEY);
     return null;
@@ -1997,6 +2007,9 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
         bestLead: typeof body?.bestLead === "number" ? body.bestLead : null,
       });
     }
+    if (path === "/api/reveal-turn-card") {
+      return serverGameAction("reveal-turn-card");
+    }
     if (path === "/api/play") {
       return serverGameAction("play", { id: body?.id as number });
     }
@@ -3203,15 +3216,15 @@ function cardFromId(id: number, index: number | null = null): GameState["humanHa
 }
 
 function optimisticAiDiscardingState(game: GameState | null, discardedIds: number[]): GameState | null {
-  const turnCardId = currentSnapshot?.turnCard;
-  if (!game || game.phase !== "discard" || typeof turnCardId !== "number" || game.aiHandCount !== 6) return null;
+  if (!game || game.phase !== "discard" || game.aiHandCount !== 6) return null;
   const discarded = new Set(discardedIds);
   return {
     ...game,
     phase: "ai_discarding",
     message: "Waiting for AI to discard.",
     result: [...game.result, "User discarded two cards to the crib.", "Waiting for AI to discard."],
-    turnCard: cardFromId(turnCardId),
+    turnCard: null,
+    turnCardRevealed: false,
     humanHand: game.humanHand.filter((card) => !discarded.has(card.id)),
     legalCardIds: [],
   };
@@ -4247,7 +4260,7 @@ function render(game: GameState | null): void {
   els.thinkingOverlayLabel.textContent = showModelLoadingUi ? "Loading model" : "AI thinking";
   els.modelLoading.hidden = !showModelLoadingUi;
   renderServerBusy();
-  renderCutCard(state.turnCutRevealStage ? null : game.turnCard);
+  renderCutCard(state.turnCutRevealStage || !game.turnCardRevealed ? null : game.turnCard);
   renderScoring(game.scoring);
   renderResult(game);
   renderGameOver(game);
@@ -4427,10 +4440,32 @@ function waitForTurnCutInteraction(): Promise<void> {
   });
 }
 
-async function playTurnCardReveal(game: GameState): Promise<void> {
-  if (game.phase !== "pegging" || !game.turnCard) {
+function canRevealTurnCard(game: GameState): boolean {
+  return game.phase === "pegging" || game.phase === "game_over";
+}
+
+async function revealAndConfirmTurnCard(): Promise<GameState> {
+  const revealedGame = await api("/api/reveal-turn-card", {});
+  if (!revealedGame.turnCard || !revealedGame.turnCardRevealed) {
+    throw new Error("The server did not reveal the turn card.");
+  }
+  state.turnCutRevealStage = "revealed";
+  state.resultOverride = [`Cut card is ${cutCardText(revealedGame.turnCard)}.`];
+  const confirmed = waitForTurnCutInteraction();
+  render(revealedGame);
+  await waitForPaint();
+  await confirmed;
+  state.turnCutRevealStage = null;
+  state.turnCutResolve = null;
+  state.resultOverride = null;
+  render(revealedGame);
+  return revealedGame;
+}
+
+async function playTurnCardReveal(game: GameState): Promise<GameState> {
+  if (!canRevealTurnCard(game)) {
     render(game);
-    return;
+    return game;
   }
   if (game.dealer === "AI") {
     state.turnCutRevealStage = "user-cut";
@@ -4459,16 +4494,7 @@ async function playTurnCardReveal(game: GameState): Promise<void> {
     await waitForPaint();
     await waitForTurnCutInteraction();
   }
-  state.turnCutRevealStage = "revealed";
-  state.resultOverride = [`Cut card is ${cutCardText(game.turnCard)}.`];
-  const confirmed = waitForTurnCutInteraction();
-  render(game);
-  await waitForPaint();
-  await confirmed;
-  state.turnCutRevealStage = null;
-  state.turnCutResolve = null;
-  state.resultOverride = null;
-  render(game);
+  return revealAndConfirmTurnCard();
 }
 
 async function playTurnCutWhileFinishingDiscard(game: GameState | null): Promise<TurnCutProgress> {
@@ -4488,13 +4514,7 @@ async function playTurnCutWhileFinishingDiscard(game: GameState | null): Promise
     render(game);
     await waitForPaint();
     await waitMs(450);
-    state.turnCutRevealStage = "revealed";
-    state.resultOverride = [`Cut card is ${cutCardText(game.turnCard)}.`];
-    const confirmed = waitForTurnCutInteraction();
-    render(game);
-    await waitForPaint();
-    await confirmed;
-    return "confirmed";
+    return "ai-turn";
   }
   state.turnCutRevealStage = "ai-cutting";
   state.resultOverride = ["AI cuts the deck."];
@@ -4506,33 +4526,19 @@ async function playTurnCutWhileFinishingDiscard(game: GameState | null): Promise
   render(game);
   await waitForPaint();
   await waitForTurnCutInteraction();
-  state.turnCutRevealStage = "revealed";
-  state.resultOverride = [`Cut card is ${cutCardText(game.turnCard)}.`];
-  const confirmed = waitForTurnCutInteraction();
-  render(game);
-  await waitForPaint();
-  await confirmed;
-  return "confirmed";
+  return "user-turn";
 }
 
-async function finishTurnCardReveal(game: GameState, startStage: TurnCutProgress): Promise<void> {
-  if (startStage === "confirmed") {
+async function finishTurnCardReveal(game: GameState, startStage: TurnCutProgress): Promise<GameState> {
+  if (!canRevealTurnCard(game)) {
     state.turnCutRevealStage = null;
     state.turnCutResolve = null;
     state.resultOverride = null;
     render(game);
-    return;
-  }
-  if (game.phase !== "pegging" || !game.turnCard) {
-    state.turnCutRevealStage = null;
-    state.turnCutResolve = null;
-    state.resultOverride = null;
-    render(game);
-    return;
+    return game;
   }
   if (!startStage) {
-    await playTurnCardReveal(game);
-    return;
+    return playTurnCardReveal(game);
   }
   if (startStage === "ai-turn") {
     state.turnCutRevealStage = "ai-turn";
@@ -4541,16 +4547,7 @@ async function finishTurnCardReveal(game: GameState, startStage: TurnCutProgress
     await waitForPaint();
     await waitMs(700);
   }
-  state.turnCutRevealStage = "revealed";
-  state.resultOverride = [`Cut card is ${cutCardText(game.turnCard)}.`];
-  const confirmed = waitForTurnCutInteraction();
-  render(game);
-  await waitForPaint();
-  await confirmed;
-  state.turnCutRevealStage = null;
-  state.turnCutResolve = null;
-  state.resultOverride = null;
-  render(game);
+  return revealAndConfirmTurnCard();
 }
 
 async function prepareModel13Pegging(game: GameState): Promise<void> {
@@ -5171,12 +5168,12 @@ async function finishDiscardInBackground(
     const next = await finish;
     if (!isCurrent()) return;
     setAiThinking(false);
-    await finishTurnCardReveal(next, startStage);
+    const revealedGame = await finishTurnCardReveal(next, startStage);
     if (!isCurrent()) return;
     setAiThinking(true);
-    await prepareModel13Pegging(next);
+    await prepareModel13Pegging(revealedGame);
     if (!isCurrent()) return;
-    await continuePeggingAfterRender(next);
+    await continuePeggingAfterRender(revealedGame);
   } catch (error) {
     if (!isCurrent()) return;
     failed = true;

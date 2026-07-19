@@ -32,6 +32,7 @@ struct Session {
     waiting_for_deal_cut: bool,
     deal_cut_revealed: bool,
     waiting_for_ai_discard: bool,
+    turn_card_revealed: bool,
     deal_cuts: [Card; 2],
     created_at: String,
     decision_reviews: Vec<SavedDecisionReview>,
@@ -339,6 +340,7 @@ fn new_session(model: ModelId, tag: Option<String>) -> Session {
         waiting_for_deal_cut: true,
         deal_cut_revealed: false,
         waiting_for_ai_discard: false,
+        turn_card_revealed: false,
         deal_cuts: [first, second],
         created_at: isoish_now(),
         decision_reviews: Vec::new(),
@@ -408,6 +410,18 @@ fn apply_action(
             session.waiting_for_ai_discard = false;
             Ok(())
         }
+        "reveal-turn-card" => {
+            if session.waiting_for_deal_cut || session.waiting_for_ai_discard {
+                return Err("It is not time to reveal the turn card.".to_string());
+            }
+            match session.game.phase {
+                Phase::Pegging | Phase::GameOver => {
+                    session.turn_card_revealed = true;
+                    Ok(())
+                }
+                _ => Err("It is not time to reveal the turn card.".to_string()),
+            }
+        }
         "play" | "play-human" => {
             require_phase(session, Phase::Pegging)?;
             let id = json_number(body, "id").ok_or_else(|| "Missing card id.".to_string())? as u8;
@@ -438,7 +452,12 @@ fn apply_action(
         }
         "continue-scoring" => {
             require_phase(session, Phase::PeggingComplete)?;
-            session.game.score_after_pegging()
+            let hand_number = session.game.hand_number;
+            session.game.score_after_pegging()?;
+            if session.game.hand_number != hand_number {
+                session.turn_card_revealed = false;
+            }
+            Ok(())
         }
         "complete-decision-reviews" => complete_decision_reviews(
             session,
@@ -569,6 +588,11 @@ fn response_with_discard_recommendation(
 fn game_state_json(session: &Session) -> String {
     let game = &session.game;
     let phase = public_phase(session);
+    let turn_card = if session.turn_card_revealed {
+        card_json(game.turn_card, None)
+    } else {
+        "null".to_string()
+    };
     let human_hand = cards_json(&game.player(HUMAN).hand, Some("User"));
     let human_table = cards_json(&game.player(HUMAN).table, Some("User"));
     let ai_table = cards_json(&game.player(AI).table, Some("AI"));
@@ -610,7 +634,7 @@ fn game_state_json(session: &Session) -> String {
         "null".to_string()
     };
     format!(
-        "{{\"phase\":\"{}\",\"message\":\"{}\",\"log\":[],\"result\":{},\"handNumber\":{},\"scores\":{{\"human\":{},\"ai\":{}}},\"pegPositions\":{{\"human\":[{},{}],\"ai\":[{},{}]}},\"dealer\":\"{}\",\"firstDealer\":\"{}\",\"cribOwner\":\"{}\",\"turn\":{},\"count\":{},\"turnCard\":{},\"plays\":{},\"completedPlays\":{},\"peggingResetPending\":{},\"humanHand\":{},\"aiHandCount\":{},\"humanTable\":{},\"aiTable\":{},\"legalCardIds\":{},\"aiLegalCardIds\":{},\"canGo\":{},\"scoring\":null,\"cutForDeal\":{},\"analyticsEvents\":{}}}",
+        "{{\"phase\":\"{}\",\"message\":\"{}\",\"log\":[],\"result\":{},\"handNumber\":{},\"scores\":{{\"human\":{},\"ai\":{}}},\"pegPositions\":{{\"human\":[{},{}],\"ai\":[{},{}]}},\"dealer\":\"{}\",\"firstDealer\":\"{}\",\"cribOwner\":\"{}\",\"turn\":{},\"count\":{},\"turnCard\":{},\"turnCardRevealed\":{},\"plays\":{},\"completedPlays\":{},\"peggingResetPending\":{},\"humanHand\":{},\"aiHandCount\":{},\"humanTable\":{},\"aiTable\":{},\"legalCardIds\":{},\"aiLegalCardIds\":{},\"canGo\":{},\"scoring\":null,\"cutForDeal\":{},\"analyticsEvents\":{}}}",
         phase,
         json_escape(&message_for(session)),
         result_json(session),
@@ -626,7 +650,8 @@ fn game_state_json(session: &Session) -> String {
         side_label(game.dealer),
         turn,
         game.count,
-        card_json(game.turn_card, None),
+        turn_card,
+        session.turn_card_revealed,
         cards_json(&game.plays, None),
         nested_cards_json(&game.completed_plays),
         game.pegging_reset_pending,
@@ -644,10 +669,14 @@ fn game_state_json(session: &Session) -> String {
 
 fn snapshot_json(session: &Session) -> String {
     let game = &session.game;
+    let turn_card = if session.turn_card_revealed {
+        game.turn_card.id.to_string()
+    } else {
+        "null".to_string()
+    };
     format!(
-        "{{\"version\":1,\"gameId\":\"{}\",\"rngState\":{},\"analyticsCounter\":0,\"analyticsEvents\":{},\"opponent\":\"{}\",\"deal\":{},\"firstDeal\":{},\"handNumber\":{},\"human\":{},\"ai\":{},\"turnCard\":{},\"crib\":{},\"plays\":{},\"playOwners\":{},\"completedPlays\":{},\"completedPlayOwners\":[],\"peggingResetPending\":{},\"count\":{},\"turn\":{},\"goPlayer\":{},\"lastPlayer\":{},\"scoringReview\":null,\"phase\":\"{}\",\"message\":\"{}\",\"log\":[],\"result\":{},\"pegPositions\":{{\"human\":[{},{}],\"ai\":[{},{}]}},\"pendingDiscardReviews\":{},\"pendingPeggingReviews\":{}}}",
+        "{{\"version\":1,\"gameId\":\"{}\",\"analyticsCounter\":0,\"analyticsEvents\":{},\"opponent\":\"{}\",\"deal\":{},\"firstDeal\":{},\"handNumber\":{},\"human\":{},\"ai\":{},\"turnCard\":{},\"turnCardRevealed\":{},\"crib\":{},\"plays\":{},\"playOwners\":{},\"completedPlays\":{},\"completedPlayOwners\":[],\"peggingResetPending\":{},\"count\":{},\"turn\":{},\"goPlayer\":{},\"lastPlayer\":{},\"scoringReview\":null,\"phase\":\"{}\",\"message\":\"{}\",\"log\":[],\"result\":{},\"pegPositions\":{{\"human\":[{},{}],\"ai\":[{},{}]}},\"pendingDiscardReviews\":{},\"pendingPeggingReviews\":{}}}",
         json_escape(&session.id),
-        game.rng_state,
         analytics_events_json(session),
         session.model.as_str(),
         side_number(game.deal),
@@ -655,7 +684,8 @@ fn snapshot_json(session: &Session) -> String {
         game.hand_number,
         player_snapshot_json(game, HUMAN),
         player_snapshot_json(game, AI),
-        game.turn_card.id,
+        turn_card,
+        session.turn_card_revealed,
         "[]",
         number_array_json(&game.plays.iter().map(|card| card.id).collect::<Vec<_>>()),
         side_array_json(&game.play_owners),
@@ -1463,5 +1493,43 @@ mod tests {
         assert!(snapshot.contains("\"ai\":{\"hand\":[]"));
         assert!(!snapshot.contains(&format!("\"hand\":{}", ai_hand)));
         assert_eq!(snapshot.matches("\"crib\":[]").count(), 3);
+    }
+
+    #[test]
+    fn turn_card_stays_private_until_the_reveal_action() {
+        let mut session = new_session(ModelId::Schell13, None);
+        session.waiting_for_deal_cut = false;
+        let turn_card = session.game.turn_card;
+        let dealer = session.game.dealer;
+        let pone = session.game.pone;
+        let dealer_discards = [
+            session.game.player(dealer).hand[0].id,
+            session.game.player(dealer).hand[1].id,
+        ];
+        let pone_discards = [
+            session.game.player(pone).hand[0].id,
+            session.game.player(pone).hand[1].id,
+        ];
+
+        assert!(game_state_json(&session).contains("\"turnCard\":null,\"turnCardRevealed\":false"));
+        assert!(snapshot_json(&session).contains("\"turnCard\":null,\"turnCardRevealed\":false"));
+        assert!(!snapshot_json(&session).contains("\"rngState\""));
+
+        session.game.discard(dealer, dealer_discards).unwrap();
+        session.game.discard(pone, pone_discards).unwrap();
+        assert_eq!(session.game.phase, Phase::Pegging);
+        assert!(game_state_json(&session).contains("\"turnCard\":null,\"turnCardRevealed\":false"));
+        assert!(snapshot_json(&session).contains("\"turnCard\":null,\"turnCardRevealed\":false"));
+
+        apply_action(&mut session, "reveal-turn-card", "{}", ".").unwrap();
+
+        assert!(game_state_json(&session).contains(&format!(
+            "\"turnCard\":{},\"turnCardRevealed\":true",
+            card_json(turn_card, None)
+        )));
+        assert!(snapshot_json(&session).contains(&format!(
+            "\"turnCard\":{},\"turnCardRevealed\":true",
+            turn_card.id
+        )));
     }
 }
