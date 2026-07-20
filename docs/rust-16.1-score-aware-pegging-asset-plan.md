@@ -56,8 +56,9 @@ QA and release gate:
 
 ### 2. Full Legal-Information Pegging Policy
 
-- [ ] Add a Model 16.1 policy key containing the exact legal observation,
-  including scores, own discards, and cut context.
+- [x] Add a lossless Model 16.1 policy-key serialization containing the exact
+  legal observation: scores, own retained/discard ranks, cut rank, role,
+  count, relative actors, and ordered public history.
 - [ ] Train the four-card pegging subgame with exhaustive CFR where feasible;
   use only an explicitly documented exact chance partition where exhaustive
   traversal is not tractable.

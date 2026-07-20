@@ -6,6 +6,10 @@ const RANKS: usize = 13;
 const MAX_PUBLIC_HISTORY: usize = 32;
 pub const POLICY_ACTION_COUNT: usize = 14;
 pub const PACKED_POLICY_KEY_BYTES: usize = 37;
+/// Lossless, full legal-information key used by the Model 16.1 policy path.
+/// It intentionally remains distinct from the smaller, generalized Model
+/// 16.0 learning key above.
+pub const EXACT_PEG_POLICY_KEY_BYTES: usize = 57;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum InfoActor {
@@ -95,11 +99,88 @@ impl PegInformationSetKey {
     }
 
     pub fn history(&self) -> Result<Vec<PublicPegEvent>, String> {
+        if self.history_len as usize > MAX_PUBLIC_HISTORY {
+            return Err("packed exact pegging history length exceeds capacity".to_string());
+        }
         self.history[..self.history_len as usize]
             .iter()
             .copied()
             .map(decode_public_event)
             .collect()
+    }
+
+    pub fn to_packed_bytes(&self) -> [u8; EXACT_PEG_POLICY_KEY_BYTES] {
+        let mut bytes = [0_u8; EXACT_PEG_POLICY_KEY_BYTES];
+        bytes[0] = match self.role {
+            Role::Pone => 0,
+            Role::Dealer => 1,
+        };
+        bytes[1] = self.my_score;
+        bytes[2] = self.opponent_score;
+        bytes[3..11].copy_from_slice(&self.own_hand_ranks.to_le_bytes());
+        bytes[11..19].copy_from_slice(&self.own_discard_ranks.to_le_bytes());
+        bytes[19] = self.turn_rank;
+        bytes[20] = self.count;
+        bytes[21] = encode_exact_actor(self.current);
+        bytes[22] = encode_exact_optional_actor(self.go_player);
+        bytes[23] = encode_exact_optional_actor(self.last_player);
+        bytes[24] = self.history_len;
+        bytes[25..].copy_from_slice(&self.history);
+        bytes
+    }
+
+    pub fn from_packed_bytes(bytes: &[u8]) -> Result<PegInformationSetKey, String> {
+        if bytes.len() != EXACT_PEG_POLICY_KEY_BYTES {
+            return Err(format!(
+                "packed exact pegging key has {} bytes; expected {}",
+                bytes.len(),
+                EXACT_PEG_POLICY_KEY_BYTES
+            ));
+        }
+        let role = match bytes[0] {
+            0 => Role::Pone,
+            1 => Role::Dealer,
+            value => return Err(format!("invalid exact policy role {}", value)),
+        };
+        let own_hand_ranks = u64::from_le_bytes(bytes[3..11].try_into().unwrap());
+        let own_discard_ranks = u64::from_le_bytes(bytes[11..19].try_into().unwrap());
+        validate_policy_rank_counts(own_hand_ranks)?;
+        validate_policy_rank_counts(own_discard_ranks)?;
+        if bytes[19] >= RANKS as u8 {
+            return Err(format!("invalid exact policy turn rank {}", bytes[19]));
+        }
+        if bytes[20] > 31 {
+            return Err(format!("invalid exact policy count {}", bytes[20]));
+        }
+        let history_len = bytes[24] as usize;
+        if history_len > MAX_PUBLIC_HISTORY {
+            return Err(format!(
+                "invalid exact policy history length {}",
+                history_len
+            ));
+        }
+        let mut history = [0_u8; MAX_PUBLIC_HISTORY];
+        history.copy_from_slice(&bytes[25..]);
+        for event in history.iter().take(history_len) {
+            decode_public_event(*event)?;
+        }
+        if history.iter().skip(history_len).any(|event| *event != 0) {
+            return Err("exact policy key has data after its history".to_string());
+        }
+        Ok(PegInformationSetKey {
+            role,
+            my_score: bytes[1],
+            opponent_score: bytes[2],
+            own_hand_ranks,
+            own_discard_ranks,
+            turn_rank: bytes[19],
+            count: bytes[20],
+            current: decode_exact_actor(bytes[21])?,
+            go_player: decode_exact_optional_actor(bytes[22])?,
+            last_player: decode_exact_optional_actor(bytes[23])?,
+            history,
+            history_len: history_len as u8,
+        })
     }
 }
 
@@ -148,6 +229,38 @@ fn actor(side: Side, perspective: Side) -> InfoActor {
         InfoActor::SelfPlayer
     } else {
         InfoActor::Opponent
+    }
+}
+
+fn encode_exact_actor(actor: InfoActor) -> u8 {
+    match actor {
+        InfoActor::SelfPlayer => 0,
+        InfoActor::Opponent => 1,
+    }
+}
+
+fn decode_exact_actor(value: u8) -> Result<InfoActor, String> {
+    match value {
+        0 => Ok(InfoActor::SelfPlayer),
+        1 => Ok(InfoActor::Opponent),
+        value => Err(format!("invalid exact policy actor {}", value)),
+    }
+}
+
+fn encode_exact_optional_actor(actor: Option<InfoActor>) -> u8 {
+    match actor {
+        None => 0,
+        Some(InfoActor::SelfPlayer) => 1,
+        Some(InfoActor::Opponent) => 2,
+    }
+}
+
+fn decode_exact_optional_actor(value: u8) -> Result<Option<InfoActor>, String> {
+    match value {
+        0 => Ok(None),
+        1 => Ok(Some(InfoActor::SelfPlayer)),
+        2 => Ok(Some(InfoActor::Opponent)),
+        value => Err(format!("invalid exact policy optional actor {}", value)),
     }
 }
 
@@ -772,6 +885,37 @@ mod tests {
             first.information_set(PegSeat::Zero).unwrap(),
             second.information_set(PegSeat::Zero).unwrap()
         );
+    }
+
+    #[test]
+    fn exact_policy_key_round_trips_and_rejects_trailing_history() {
+        let mut game = state([hand(&[(4, 1), (9, 1)]), hand(&[(6, 1), (7, 1)])]);
+        game.scores = [119, 118];
+        game.count = 13;
+        game.plays = vec![4, 7];
+        game.go_player = Some(PegSeat::One);
+        game.last_player = Some(PegSeat::Zero);
+        game.history = vec![
+            RankPegEvent::Play {
+                seat: PegSeat::Zero,
+                rank: 4,
+            },
+            RankPegEvent::Play {
+                seat: PegSeat::One,
+                rank: 7,
+            },
+        ];
+        let key = game.information_set(PegSeat::Zero).unwrap();
+        let bytes = key.to_packed_bytes();
+
+        assert_eq!(
+            PegInformationSetKey::from_packed_bytes(&bytes).unwrap(),
+            key
+        );
+        let mut corrupt = bytes;
+        corrupt[25 + 3] = 29;
+        assert!(PegInformationSetKey::from_packed_bytes(&corrupt).is_err());
+        assert!(PegInformationSetKey::from_packed_bytes(&bytes[..56]).is_err());
     }
 
     #[test]
