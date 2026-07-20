@@ -1,4 +1,7 @@
-# Six-Card Discard Frontier Handoff
+# Archived: Six-Card Discard Frontier Handoff
+
+> Historical handoff and calibration record. The active execution plan is
+> [`docs/model-improvement-roadmap.md`](../../model-improvement-roadmap.md).
 
 ## Current Goal
 
@@ -15,7 +18,7 @@ The intended model behavior:
 
 The main plan is in:
 
-- `docs/six-card-discard-frontier-plan.md`
+- `docs/archive/model-improvement/six-card-discard-frontier-plan.md`
 
 This handoff file summarizes what has actually been built and what the calibration showed.
 
@@ -186,8 +189,8 @@ This avoids storing every fully joined own-hand/opponent-hand/crib/pegging/cut o
 
 Known git-visible changes after the compact-table continuation:
 
-- `docs/six-card-discard-frontier-plan.md`
-- `docs/six-card-discard-frontier-handoff.md`
+- `docs/archive/model-improvement/six-card-discard-frontier-plan.md`
+- `docs/archive/model-improvement/six-card-discard-frontier-handoff.md`
 - `scripts/build-six-card-discard-frontier-table.cjs`
 - `scripts/pack-six-card-discard-frontier-table.cjs`
 - `scripts/lib/six-card-rank-utils.cjs`

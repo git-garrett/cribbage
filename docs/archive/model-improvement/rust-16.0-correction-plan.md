@@ -1,4 +1,8 @@
-# Rust Model 16.0 Correction Plan
+# Archived: Rust Model 16.0 Correction Plan
+
+> Historical implementation record. The active execution plan is
+> [`docs/model-improvement-roadmap.md`](../../model-improvement-roadmap.md).
+> Do not treat the checklist below as current instructions.
 
 ## Goal
 

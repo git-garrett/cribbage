@@ -1,4 +1,8 @@
-# Rust 16.0 Information-Set Pegging Policy Plan
+# Archived: Rust 16.0 Information-Set Pegging Policy Plan
+
+> Historical implementation record. The active execution plan is
+> [`docs/model-improvement-roadmap.md`](../../model-improvement-roadmap.md).
+> Do not treat the checklists below as current instructions.
 
 ## Goal
 

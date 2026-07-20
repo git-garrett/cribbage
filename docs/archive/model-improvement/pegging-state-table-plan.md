@@ -1,4 +1,8 @@
-# Pegging State Table Plan
+# Archived: Pegging State Table Plan
+
+> Historical design and calibration record. The active execution plan is
+> [`docs/model-improvement-roadmap.md`](../../model-improvement-roadmap.md).
+> The unshippable full-state graph below is not an active implementation path.
 
 Goal: replace static keep-vs-keep pegging approximations with a compact rank-only pegging scoring-event graph that lets the app evaluate future board-position outcomes without storing every intermediate non-scoring state.
 

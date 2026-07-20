@@ -1,4 +1,8 @@
-# Model 16.1 Score-Aware Information-Set Pegging Asset
+# Archived: Model 16.1 Score-Aware Information-Set Pegging Asset
+
+> Historical implementation record. The active execution plan is
+> [`docs/model-improvement-roadmap.md`](../../model-improvement-roadmap.md).
+> Do not treat the checklists below as current instructions.
 
 ## Objective
 
