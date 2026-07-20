@@ -59,6 +59,9 @@ QA and release gate:
 - [x] Add a lossless Model 16.1 policy-key serialization containing the exact
   legal observation: scores, own retained/discard ranks, cut rank, role,
   count, relative actors, and ordered public history.
+- [x] Add a separately versioned, checksummed full-observation policy artifact
+  (`C161POL1`) so Model 16.1 cannot accidentally load a compressed 16.0
+  policy table.
 - [ ] Train the four-card pegging subgame with exhaustive CFR where feasible;
   use only an explicitly documented exact chance partition where exhaustive
   traversal is not tractable.

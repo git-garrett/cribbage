@@ -182,6 +182,21 @@ impl PegInformationSetKey {
             history_len: history_len as u8,
         })
     }
+
+    pub fn expected_legal_mask(&self) -> u16 {
+        let mut mask = 0_u16;
+        for rank in 0..RANKS {
+            let copies = (self.own_hand_ranks >> (rank * 3)) & 0b111;
+            if copies != 0 && self.count + peg_card_for_rank(rank as u8).value <= 31 {
+                mask |= 1 << rank;
+            }
+        }
+        if mask == 0 {
+            1 << (POLICY_ACTION_COUNT - 1)
+        } else {
+            mask
+        }
+    }
 }
 
 pub fn perspective_history(game: &CribbageGame, perspective: Side) -> Vec<PublicPegEvent> {
