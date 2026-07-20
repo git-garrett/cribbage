@@ -10,8 +10,10 @@ WORKERS="${WORKERS:-1}"
 MAX_INFORMATION_SETS="${MAX_INFORMATION_SETS:-8000000}"
 CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-10000000}"
 STATUS_EVERY="${STATUS_EVERY:-10000}"
-WALL_BUDGET_SECONDS="${WALL_BUDGET_SECONDS:-216000}"
-MAX_REFERENCE_EQUIVALENTS="${MAX_REFERENCE_EQUIVALENTS:-5}"
+# Leave these unset for a run that completes its requested iteration target.
+# They remain available as explicit opt-in safety rails for exploratory runs.
+WALL_BUDGET_SECONDS="${WALL_BUDGET_SECONDS:-}"
+MAX_REFERENCE_EQUIVALENTS="${MAX_REFERENCE_EQUIVALENTS:-}"
 SEED="${SEED:-0x16c0ffee}"
 WAIT_FOR_LOG="${WAIT_FOR_LOG:-}"
 CHECKPOINT="${CHECKPOINT:-${OUT_DIR}/model16-realistic-${ITERATIONS}.cfr}"
@@ -62,12 +64,16 @@ args=(
   --status "$STATUS"
   --checkpoint-every "$CHECKPOINT_EVERY"
   --status-every "$STATUS_EVERY"
-  --wall-budget-seconds "$WALL_BUDGET_SECONDS"
-  --max-reference-equivalents "$MAX_REFERENCE_EQUIVALENTS"
   --max-information-sets "$MAX_INFORMATION_SETS"
   --freeze-at-information-set-limit
   --corpus "$CORPUS"
 )
+if [[ -n "$WALL_BUDGET_SECONDS" ]]; then
+  args+=(--wall-budget-seconds "$WALL_BUDGET_SECONDS")
+fi
+if [[ -n "$MAX_REFERENCE_EQUIVALENTS" ]]; then
+  args+=(--max-reference-equivalents "$MAX_REFERENCE_EQUIVALENTS")
+fi
 if [[ -f "$CHECKPOINT" ]]; then
   args+=(--resume --start-frozen-support)
 fi

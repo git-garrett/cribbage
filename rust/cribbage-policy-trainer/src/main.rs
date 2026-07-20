@@ -18,8 +18,10 @@ struct Config {
     status: PathBuf,
     checkpoint_every: u64,
     status_every: u64,
-    wall_budget: Duration,
-    max_reference_equivalents: f64,
+    // These are optional safety rails. A run without either limit ends only
+    // when it reaches its requested iteration target (or another hard error).
+    wall_budget: Option<Duration>,
+    max_reference_equivalents: Option<f64>,
     max_information_sets: usize,
     resume: bool,
     probe_without_checkpoint: bool,
@@ -299,8 +301,8 @@ fn write_status(
             "  \"etaSeconds\": {:.3},\n",
             "  \"projectedTotalSeconds\": {:.3},\n",
             "  \"projectedReferenceEquivalents\": {:.6},\n",
-            "  \"wallBudgetSeconds\": {:.3},\n",
-            "  \"maxReferenceEquivalents\": {:.3},\n",
+            "  \"wallBudgetSeconds\": {},\n",
+            "  \"maxReferenceEquivalents\": {},\n",
             "  \"maxInformationSets\": {},\n",
             "  \"trainingCorpus\": {},\n",
             "  \"trainingCorpusEntries\": {},\n",
@@ -324,8 +326,14 @@ fn write_status(
         eta_seconds,
         projected_total_seconds,
         projected_total_seconds / REFERENCE_WALL_SECONDS,
-        config.wall_budget.as_secs_f64(),
-        config.max_reference_equivalents,
+        config
+            .wall_budget
+            .map(|value| format!("{:.3}", value.as_secs_f64()))
+            .unwrap_or_else(|| "null".to_string()),
+        config
+            .max_reference_equivalents
+            .map(|value| format!("{:.3}", value))
+            .unwrap_or_else(|| "null".to_string()),
         config.max_information_sets,
         corpus_path,
         corpus_entries,
@@ -397,20 +405,20 @@ fn rate(iterations: u64, elapsed: Duration) -> f64 {
 
 fn stopping_state(
     elapsed: Duration,
-    wall_budget: Duration,
+    wall_budget: Option<Duration>,
     information_set_limit_reached: bool,
     freeze_at_information_set_limit: bool,
     session_iterations: u64,
     projected_equivalents: f64,
-    max_reference_equivalents: f64,
+    max_reference_equivalents: Option<f64>,
 ) -> Option<&'static str> {
-    if elapsed >= wall_budget {
+    if wall_budget.is_some_and(|limit| elapsed >= limit) {
         Some("wall_budget_exhausted")
     } else if information_set_limit_reached && !freeze_at_information_set_limit {
         Some("information_set_limit_exceeded")
-    } else if session_iterations >= MIN_PROJECTION_ITERATIONS
-        && projected_equivalents >= max_reference_equivalents
-    {
+    } else if max_reference_equivalents.is_some_and(|limit| {
+        session_iterations >= MIN_PROJECTION_ITERATIONS && projected_equivalents >= limit
+    }) {
         Some("projection_limit_exceeded")
     } else {
         None
@@ -427,8 +435,8 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
     let mut status = None;
     let mut checkpoint_every = 10_000_u64;
     let mut status_every = 1_000_u64;
-    let mut wall_budget_seconds = 8.0 * 60.0 * 60.0;
-    let mut max_reference_equivalents = 10.0;
+    let mut wall_budget_seconds = None;
+    let mut max_reference_equivalents = None;
     let mut max_information_sets = 12_000_000_usize;
     let mut resume = false;
     let mut probe_without_checkpoint = false;
@@ -473,8 +481,10 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
             "--status" => status = Some(PathBuf::from(value)),
             "--checkpoint-every" => checkpoint_every = parse_u64(key, value)?,
             "--status-every" => status_every = parse_u64(key, value)?,
-            "--wall-budget-seconds" => wall_budget_seconds = parse_f64(key, value)?,
-            "--max-reference-equivalents" => max_reference_equivalents = parse_f64(key, value)?,
+            "--wall-budget-seconds" => wall_budget_seconds = Some(parse_f64(key, value)?),
+            "--max-reference-equivalents" => {
+                max_reference_equivalents = Some(parse_f64(key, value)?)
+            }
             "--max-information-sets" => max_information_sets = parse_usize(key, value)?,
             "--corpus" => corpus = Some(PathBuf::from(value)),
             other => return Err(format!("unknown argument: {}", other)),
@@ -495,8 +505,8 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
         || workers == 0
         || checkpoint_every == 0
         || status_every == 0
-        || wall_budget_seconds <= 0.0
-        || max_reference_equivalents <= 0.0
+        || wall_budget_seconds.is_some_and(|value| value <= 0.0)
+        || max_reference_equivalents.is_some_and(|value| value <= 0.0)
         || max_information_sets == 0
     {
         return Err("numeric arguments must be greater than zero".to_string());
@@ -509,7 +519,7 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
         status,
         checkpoint_every,
         status_every,
-        wall_budget: Duration::from_secs_f64(wall_budget_seconds),
+        wall_budget: wall_budget_seconds.map(Duration::from_secs_f64),
         max_reference_equivalents,
         max_information_sets,
         resume,
@@ -572,8 +582,8 @@ fn print_usage() {
         "  --corpus PATH\n",
         "  --checkpoint-every N\n",
         "  --status-every N\n",
-        "  --wall-budget-seconds N\n",
-        "  --max-reference-equivalents N\n",
+        "  --wall-budget-seconds N (optional safety limit)\n",
+        "  --max-reference-equivalents N (optional safety limit)\n",
         "  --max-information-sets N\n",
         "  --freeze-at-information-set-limit\n",
         "  --start-frozen-support\n",
@@ -601,6 +611,8 @@ mod tests {
         assert_eq!(config.seed, 16);
         assert!(config.resume);
         assert_eq!(config.status, PathBuf::from("run.status.json"));
+        assert_eq!(config.wall_budget, None);
+        assert_eq!(config.max_reference_equivalents, None);
     }
 
     #[test]
@@ -691,14 +703,30 @@ mod tests {
         assert_eq!(
             stopping_state(
                 Duration::from_secs(1),
-                Duration::from_secs(60),
+                Some(Duration::from_secs(60)),
                 true,
                 true,
                 MIN_PROJECTION_ITERATIONS,
                 5.1,
-                5.0,
+                Some(5.0),
             ),
             Some("projection_limit_exceeded")
+        );
+    }
+
+    #[test]
+    fn no_optional_safety_limit_allows_the_target_to_complete() {
+        assert_eq!(
+            stopping_state(
+                Duration::from_secs(60 * 60 * 60),
+                None,
+                false,
+                false,
+                MIN_PROJECTION_ITERATIONS,
+                999.0,
+                None,
+            ),
+            None
         );
     }
 }

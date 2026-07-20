@@ -327,6 +327,28 @@ Active correction work:
   with a 54.3-hour ETA/3.61 projected reference workloads. Production remains
   on 13.0.
 
+### Active 2B Continuation (No Artificial Stop Limit)
+
+- [x] On 2026-07-19, changed `cribbage-policy-trainer` and
+  `scripts/run-model16-weekend-training.sh` so wall-clock and
+  reference-equivalent limits are explicit opt-in safety rails. When omitted,
+  the requested iteration target is the only normal completion condition.
+  The 8M frozen-support ceiling remains unchanged.
+- [x] Resumed the retained realistic 2B checkpoint in detached screen
+  `cribbage-model16-2b`; durable root:
+  `/Volumes/Elements/cribbage/model16-policy/2026-07-17/realistic-2b/`.
+  It uses the original seed `0x16c0ffee`, one worker, 90,296-hand corpus,
+  10M-iteration checkpoints, target 2,000,000,000 iterations, and
+  `--start-frozen-support`. Status is
+  `realistic-2b/status.json`; the append-only log is
+  `/Volumes/Elements/cribbage/model16-policy/2026-07-17/realistic-2b.log`.
+- [x] Verified the resumed process reports `wallBudgetSeconds: null` and
+  `maxReferenceEquivalents: null`. It safely resumed from the 1,150,000,000
+  checkpoint; the controlled handoff replayed only the subsequent 3,050,000
+  uncheckpointed iterations. Its first post-resume sample was 5,444
+  iterations/second, yielding an approximately 43.4-hour ETA at that early
+  rate. This is a live estimate, not a promotion result.
+
 ## Completion Log
 
 - 2026-07-17, Step 0: Queried the retained 10k database directly and froze
