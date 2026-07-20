@@ -67,6 +67,8 @@ QA and release gate:
 
 ### 3. Exact Transition Compiler
 
+- [x] Add an engine-owned rank-state policy adapter that invokes the existing
+  Model 16 selector using only the acting seat's cards and public history.
 - [ ] Enumerate every compatible retained-rank pair and every reachable public
   pegging history.
 - [ ] Traverse both actors' final information-set policies exactly; do not
@@ -79,6 +81,8 @@ QA and release gate:
 QA and release gate:
 
 - Small exhaustive fixtures match a direct legal-information simulator.
+- The adapter matches the live learned-policy decision and is invariant when
+  only the actor-invisible opponent holding changes.
 - Repeated builds with the same checkpoint are byte-identical.
 - Aggregate rows differ from the old P12 asset only where the legal-policy or
   ordered-scoring change warrants it.

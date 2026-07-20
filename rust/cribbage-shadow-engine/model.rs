@@ -18,7 +18,10 @@ use crate::cards::{
     rank_counts, remaining_rank_counts, score_count, score_flush_and_right_jack, score_hand,
     score_hand_rank_only, Card,
 };
-use crate::information_set::{InfoActor, PolicyInformationSetKey, PolicyRankObservation};
+use crate::information_set::{
+    InfoActor, PegSeat, PolicyInformationSetKey, PolicyRankObservation, RankPegAction,
+    RankPegEvent, RankPegState,
+};
 use crate::model_id::{
     MODEL_13_0, MODEL_14_3, MODEL_14_8, MODEL_14_8_1, MODEL_15_0, MODEL_15_1, MODEL_15_2,
     MODEL_16_0,
@@ -218,6 +221,18 @@ static MODEL16_POLICY_HITS: AtomicU64 = AtomicU64::new(0);
 pub struct Model16PolicyStats {
     pub lookups: u64,
     pub hits: u64,
+}
+
+/// A rank-level Model 16 policy result for offline compilers.  The input state
+/// contains both players' cards so it can advance a simulated deal, but this
+/// function deliberately constructs the decision view from the acting seat's
+/// cards and public history only.  It therefore shares the live policy's
+/// legal-information boundary instead of treating the state as
+/// perfect-information.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Model16RankPolicyAction {
+    pub action: RankPegAction,
+    pub source: Model16PolicySource,
 }
 
 impl Model16PolicyStats {
@@ -792,6 +807,109 @@ fn recommend_peg_model16(
         win_probability: None,
         model16_policy,
     })
+}
+
+/// Select the exact currently deployed Model 16 action for a rank-level
+/// simulator.  `RankPegState` necessarily contains both private hands so the
+/// simulator can advance the deal; this adapter exposes only the acting
+/// player's cards, scores, and public history to `recommend_peg_model16`.
+///
+/// Keeping this adapter inside the engine is intentional: offline asset
+/// generation must not duplicate a subtly different policy/fallback chooser.
+pub fn model16_policy_action_from_rank_state(
+    state: &RankPegState,
+    actor: PegSeat,
+    policy: Option<&PolicyArtifact>,
+) -> Result<Model16RankPolicyAction, String> {
+    if state.complete || state.winner.is_some() {
+        return Err("cannot select a Model 16 action for a completed pegging state".to_string());
+    }
+    if state.current != actor {
+        return Err("Model 16 policy actor does not match the current pegging seat".to_string());
+    }
+    let legal_actions = state.legal_actions();
+    if legal_actions == [RankPegAction::Go] {
+        return Ok(Model16RankPolicyAction {
+            action: RankPegAction::Go,
+            source: Model16PolicySource::Fallback,
+        });
+    }
+
+    let mut own_played = [0_u8; 13];
+    let mut opponent_played = [0_u8; 13];
+    for event in &state.history {
+        let RankPegEvent::Play { seat, rank } = *event else {
+            continue;
+        };
+        let played = if seat == actor {
+            &mut own_played
+        } else {
+            &mut opponent_played
+        };
+        played[rank as usize] = played[rank as usize].saturating_add(1);
+    }
+    let relative_player = |seat: PegSeat| {
+        if seat == actor {
+            PlayerKey::Ai
+        } else {
+            PlayerKey::Human
+        }
+    };
+    let input = DecisionInput {
+        kind: DecisionKind::Peg,
+        model: MODEL_16_0.to_string(),
+        player: PlayerKey::Ai,
+        role: if actor == state.dealer {
+            Role::Dealer
+        } else {
+            Role::Pone
+        },
+        ai_score: state.scores[actor.index()],
+        human_score: state.scores[actor.other().index()],
+        ai_hand: cards_for_rank_counts_for_scoring(&state.hands[actor.index()]),
+        ai_table: cards_for_rank_counts_for_scoring(&own_played),
+        human_table: cards_for_rank_counts_for_scoring(&opponent_played),
+        human_hand_count: rank_count_total(&state.hands[actor.other().index()]) as usize,
+        own_discards: cards_for_rank_counts_for_scoring(&state.own_discards[actor.index()]),
+        turn_card: peg_card_for_rank(state.turn_rank),
+        count: state.count,
+        turn: PlayerKey::Ai,
+        go_player: state.go_player.map(relative_player),
+        last_player: state.last_player.map(relative_player),
+        plays: state.plays.iter().copied().map(peg_card_for_rank).collect(),
+        peg_lead: None,
+        model16_policy_mode: Model16PolicyMode::Argmax,
+        model16_policy_sample: 0,
+    };
+    let legal = input
+        .ai_hand
+        .iter()
+        .copied()
+        .filter(|card| input.count + card.value <= 31)
+        .collect::<Vec<_>>();
+    let decision = recommend_peg_model16(&input, &legal, policy)?;
+    match decision {
+        Decision::Peg {
+            action,
+            card_id: Some(card_id),
+            model16_policy: Some(policy_decision),
+            ..
+        } if action == "play" => Ok(Model16RankPolicyAction {
+            action: RankPegAction::Play(
+                Card::new(card_id)
+                    .map_err(|error| format!("Model 16 policy returned invalid card: {}", error))?
+                    .rank,
+            ),
+            source: policy_decision.source,
+        }),
+        Decision::Peg { action, .. } => Err(format!(
+            "Model 16 policy returned unexpected rank-state action {}",
+            action
+        )),
+        Decision::Discard { .. } => {
+            Err("Model 16 policy returned a discard during pegging".to_string())
+        }
+    }
 }
 
 fn select_model16_argmax_or_fallback(
@@ -4472,6 +4590,37 @@ mod tests {
         .unwrap()
     }
 
+    fn model16_rank_state() -> RankPegState {
+        let mut ai_hand = [0_u8; 13];
+        ai_hand[4] = 1;
+        ai_hand[5] = 1;
+        let mut human_hand = [0_u8; 13];
+        human_hand[0] = 1;
+        human_hand[1] = 1;
+        human_hand[2] = 1;
+        let mut ai_discards = [0_u8; 13];
+        ai_discards[0] = 1;
+        ai_discards[1] = 1;
+        RankPegState {
+            hands: [ai_hand, human_hand],
+            own_discards: [ai_discards, [0_u8; 13]],
+            turn_rank: 2,
+            scores: [120, 116],
+            dealer: PegSeat::One,
+            current: PegSeat::Zero,
+            plays: vec![9],
+            count: 10,
+            go_player: None,
+            last_player: Some(PegSeat::One),
+            history: vec![RankPegEvent::Play {
+                seat: PegSeat::One,
+                rank: 9,
+            }],
+            winner: None,
+            complete: false,
+        }
+    }
+
     fn current_hand_outcome(
         own_pegging: i32,
         opponent_pegging: i32,
@@ -4692,6 +4841,30 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn rank_state_policy_adapter_matches_live_model16_and_hides_opponent_cards() {
+        let input = model16_peg_input();
+        let artifact = model16_artifact(&input, 5);
+        let first = model16_rank_state();
+        let mut second = first.clone();
+        second.hands[PegSeat::One.index()] = [0_u8; 13];
+        second.hands[PegSeat::One.index()][7] = 3;
+
+        let first_action =
+            model16_policy_action_from_rank_state(&first, PegSeat::Zero, Some(&artifact)).unwrap();
+        let second_action =
+            model16_policy_action_from_rank_state(&second, PegSeat::Zero, Some(&artifact)).unwrap();
+
+        assert_eq!(
+            first_action,
+            Model16RankPolicyAction {
+                action: RankPegAction::Play(5),
+                source: Model16PolicySource::Learned,
+            }
+        );
+        assert_eq!(first_action, second_action);
     }
 
     #[test]
