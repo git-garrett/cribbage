@@ -20,6 +20,12 @@ and relevant score region, it will represent the exact distribution induced by
 the final Model 16.1 average policy. A leaf carries the ordered scoring events
 needed to evaluate count-outs before hands and crib.
 
+`C16TRN01` is the first, fixed-width reference format. It records those
+ordered scoring events for a supplied set of exact score contexts and is
+resumable/checksummed. It deliberately precedes the deployable DAG compaction:
+the reference matrix gives us a correct oracle and measurements before adding
+lossless interning or a runtime reader.
+
 The builder will enumerate chance and policy branches exactly. MCCFR/CFR is
 used to learn the policy; it is not used to estimate artifact rows. Equivalent
 subtrees and score regions are interned losslessly so the deployed reader can
@@ -37,10 +43,10 @@ explicitly measured and recorded.
 - [x] Preserve Model 13.0 and Model 16.0 artifacts and decision paths.
 - [x] Record artifact requirements, legal-information boundary, and promotion
   gates in this document.
-- [ ] Define the versioned on-disk transition-DAG format, deterministic
-  checksums, and corruption rejection tests.
-- [ ] Add a resumable local compiler with atomic `status.json`, throughput,
-  ETA, and output checksum reporting.
+- [x] Define versioned `C16TRN01` reference records with ordered score events,
+  deterministic byte encoding, and malformed-header/record rejection tests.
+- [x] Add a resumable local reference compiler with atomic `status.json`,
+  checkpoint truncation safety, throughput, ETA, and output checksum reporting.
 
 QA and release gate:
 
@@ -69,8 +75,11 @@ QA and release gate:
 
 - [x] Add an engine-owned rank-state policy adapter that invokes the existing
   Model 16 selector using only the acting seat's cards and public history.
+- [x] Compile compatible retained-rank pairs through the current deterministic
+  Model 16 policy for configured exact score contexts, preserving every
+  reached scoring event in order.
 - [ ] Enumerate every compatible retained-rank pair and every reachable public
-  pegging history.
+  pegging history under the final Model 16.1 average policy.
 - [ ] Traverse both actors' final information-set policies exactly; do not
   select actions using hidden cards.
 - [ ] Record ordered scoring transitions and terminal outcomes, then intern
@@ -83,6 +92,9 @@ QA and release gate:
 - Small exhaustive fixtures match a direct legal-information simulator.
 - The adapter matches the live learned-policy decision and is invariant when
   only the actor-invisible opponent holding changes.
+- A two-unit release compiler smoke build completed 3,093 rows in 0.046 seconds
+  at `/private/tmp/cribbage-model161-transition-smoke`; the resulting record
+  file checksum was `bf839d067d4354a9`.
 - Repeated builds with the same checkpoint are byte-identical.
 - Aggregate rows differ from the old P12 asset only where the legal-policy or
   ordered-scoring change warrants it.

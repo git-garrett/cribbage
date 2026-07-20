@@ -8,6 +8,7 @@ pub mod model;
 pub mod model_id;
 pub mod playout;
 pub mod policy;
+pub mod policy_transition;
 pub mod sidecar;
 
 #[cfg(test)]
