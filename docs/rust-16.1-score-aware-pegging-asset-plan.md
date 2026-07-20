@@ -124,6 +124,19 @@ QA and release gate:
 - Local source and this plan: `/Users/garrett/Dev/cribbage`.
 - Durable generated checkpoints, compiler status, logs, and non-source assets:
   `/Volumes/Elements/cribbage/model16.1-pairwise/`.
+- Active reference build: `C16TRN01` matrix using the frozen 1B Model 16.0
+  policy (`checksum 1cd4954985859055`) over 37 exact score contexts. It began
+  on 2026-07-19 in detached screen session `cribbage-model161-reference`.
+  Durable root:
+  `/Volumes/Elements/cribbage/model16.1-pairwise/2026-07-19/c16trn01-policy1b-pressure-matrix/`.
+  `status.json` is authoritative; `checkpoint.txt` records the safe resume
+  boundary; `records.bin` is the raw reference matrix; the sibling `.log` file
+  is append-only process output. The first ten units measured 2.47 units per
+  second, projecting roughly 24.5 minutes; the live ETA supersedes this note.
+- Completed calibration reference:
+  `/Volumes/Elements/cribbage/model16.1-pairwise/2026-07-19/c16trn01-policy1b-calibration/`.
+  It compiled 6,530,759 rows across the same contexts in 49.069 seconds with
+  output checksum `92d0ce68944808b3`.
 - The final deployable asset will be copied into
   `rust/cribbage-shadow-engine/assets/` only after validation. It will not
   replace `model13-pairwise.bin`.
