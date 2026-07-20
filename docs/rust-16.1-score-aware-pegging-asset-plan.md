@@ -1,0 +1,113 @@
+# Model 16.1 Score-Aware Information-Set Pegging Asset
+
+## Objective
+
+Build a new, offline-generated Model 16.1 discard-pegging asset that improves
+on the retained `model13-pairwise.bin` without adding human-visible decision
+latency. The asset must preserve the legal-information boundary: a simulated
+player may use its own cards and public history, but never the other player's
+unrevealed cards.
+
+Model 13.0 and Model 16.0 remain immutable comparison baselines. No
+production-model change is implicit in this work.
+
+## Target Design
+
+The production artifact will be a compact, versioned transition DAG rather
+than a table containing only aggregate `(own_pegging, opponent_pegging)`
+totals. For each compatible four-card rank pair, role, public pegging state,
+and relevant score region, it will represent the exact distribution induced by
+the final Model 16.1 average policy. A leaf carries the ordered scoring events
+needed to evaluate count-outs before hands and crib.
+
+The builder will enumerate chance and policy branches exactly. MCCFR/CFR is
+used to learn the policy; it is not used to estimate artifact rows. Equivalent
+subtrees and score regions are interned losslessly so the deployed reader can
+select a leaf with a compact lookup instead of a live rollout.
+
+The final policy must use all legally observable features relevant to a
+pegging decision: exact scores, own retained/discard information, cut context,
+role, count, and public pegging history. Any generalized backoff must be
+explicitly measured and recorded.
+
+## Work Log
+
+### 1. Durable Contract and Build Controls
+
+- [x] Preserve Model 13.0 and Model 16.0 artifacts and decision paths.
+- [x] Record artifact requirements, legal-information boundary, and promotion
+  gates in this document.
+- [ ] Define the versioned on-disk transition-DAG format, deterministic
+  checksums, and corruption rejection tests.
+- [ ] Add a resumable local compiler with atomic `status.json`, throughput,
+  ETA, and output checksum reporting.
+
+QA and release gate:
+
+- Artifact format round-trips byte-for-byte.
+- Two hidden opponent holdings that are indistinguishable to the actor select
+  the same policy action distribution.
+
+### 2. Full Legal-Information Pegging Policy
+
+- [ ] Add a Model 16.1 policy key containing the exact legal observation,
+  including scores, own discards, and cut context.
+- [ ] Train the four-card pegging subgame with exhaustive CFR where feasible;
+  use only an explicitly documented exact chance partition where exhaustive
+  traversal is not tractable.
+- [ ] Save resumable checkpoints and frozen average-policy artifacts outside
+  the repository on `/Volumes/Elements`.
+
+QA and release gate:
+
+- No policy key includes unrevealed opponent data.
+- Deterministic checkpoint/resume and policy pack tests pass.
+- Coverage, regret/exploitability proxies, and fallback rate meet the recorded
+  release threshold.
+
+### 3. Exact Transition Compiler
+
+- [ ] Enumerate every compatible retained-rank pair and every reachable public
+  pegging history.
+- [ ] Traverse both actors' final information-set policies exactly; do not
+  select actions using hidden cards.
+- [ ] Record ordered scoring transitions and terminal outcomes, then intern
+  equivalent subtrees and score regions losslessly.
+- [ ] Make compiler status, ETA, checkpoint, and checksum durable on
+  `/Volumes/Elements/cribbage/model16.1-pairwise/`.
+
+QA and release gate:
+
+- Small exhaustive fixtures match a direct legal-information simulator.
+- Repeated builds with the same checkpoint are byte-identical.
+- Aggregate rows differ from the old P12 asset only where the legal-policy or
+  ordered-scoring change warrants it.
+
+### 4. Runtime Reader and Model 16.1 Integration
+
+- [ ] Add a compact reader and use it only for Model 16.1 discard evaluation.
+- [ ] Preserve the current fast Model 13/14/15/16.0 paths unchanged.
+- [ ] Use a stable per-game sampling seed if the final average policy remains
+  mixed; compiler and runtime must use identical behavior.
+
+QA and release gate:
+
+- Ordered count-out fixtures are exact.
+- Artifact corruption and missing-asset behavior fail safely.
+- Discard p50/p95/p99 is no slower than the established human-latency budget.
+
+### 5. Evaluation and Promotion Decision
+
+- [ ] Run paired, side-swapped held-out matches against Model 16.0 and Model
+  13.0, with confidence intervals and a fixed seed manifest.
+- [ ] Compare fallback/on-book behavior and latency distributions.
+- [ ] Deploy only if Model 16.1 clears both quality and latency gates.
+
+## Status and Artifact Locations
+
+- Local source and this plan: `/Users/garrett/Dev/cribbage`.
+- Durable generated checkpoints, compiler status, logs, and non-source assets:
+  `/Volumes/Elements/cribbage/model16.1-pairwise/`.
+- The final deployable asset will be copied into
+  `rust/cribbage-shadow-engine/assets/` only after validation. It will not
+  replace `model13-pairwise.bin`.
