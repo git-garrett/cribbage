@@ -182,7 +182,6 @@ const state: {
   cutForDealPreparation: CutForDealPreparation | null;
   aiDiscardPreparation: { key: string; promise: Promise<AiDiscardPreparationResult> } | null;
   finishingDiscardKey: string | null;
-  nextHandPreparation: NextHandPreparation | null;
 } = {
   game: null,
   selected: new Set(),
@@ -226,14 +225,12 @@ const state: {
   cutForDealPreparation: null,
   aiDiscardPreparation: null,
   finishingDiscardKey: null,
-  nextHandPreparation: null,
 };
 
 type TurnCutProgress = "ai-turn" | "user-turn" | null;
 
 let interactionEpoch = 0;
 let gameStateGeneration = 0;
-const failedNextHandPreparationKeys = new Set<string>();
 
 function resetTransientGameUi(): void {
   interactionEpoch += 1;
@@ -264,8 +261,6 @@ function resetTransientGameUi(): void {
   state.turnCutResolve = null;
   state.cutForDealPreparation = null;
   state.aiDiscardPreparation = null;
-  state.nextHandPreparation = null;
-  failedNextHandPreparationKeys.clear();
   closeDecisionSnapshot();
   state.analyticsOpen = false;
   state.gameLogOpen = false;
@@ -1729,13 +1724,6 @@ interface CutForDealPreparation {
   promise: Promise<ServerCutForDealPreparationResponse>;
 }
 
-interface NextHandPreparation {
-  key: string;
-  generation: number;
-  snapshot: GameSnapshot;
-  promise: Promise<ServerAiDiscardPreparationResponse>;
-}
-
 async function serverGameAction(action: string, payload: Record<string, unknown> | null = null): Promise<GameState> {
   const requestSnapshot = currentSnapshot;
   const requestGeneration = currentSnapshotGeneration();
@@ -1756,7 +1744,6 @@ async function serverGameAction(action: string, payload: Record<string, unknown>
   applyAuthoritativeGameState(response.snapshot, response.state);
   startCutForDealPreparation(response.state);
   startAiDiscardPreparation(response.state);
-  startNextHandPreparation(response.state);
   return response.state;
 }
 
@@ -1920,60 +1907,6 @@ function finishDiscardKeyFor(game: GameState | null): string | null {
   return `${currentSnapshot.gameId ?? "game"}:${game.handNumber}:${game.dealer}`;
 }
 
-function nextHandPreparationKey(game: GameState): string | null {
-  if (
-    !currentSnapshot ||
-    !game.scoring ||
-    game.phase !== "score_crib" ||
-    game.scoring.stage !== "crib"
-  ) {
-    return null;
-  }
-  return `${currentSnapshot.gameId ?? "game"}:${game.handNumber}:next`;
-}
-
-function startNextHandPreparation(game: GameState): void {
-  const key = nextHandPreparationKey(game);
-  if (!key) return;
-  if (state.nextHandPreparation?.key === key) return;
-  if (failedNextHandPreparationKeys.has(key)) return;
-  const snapshot = currentSnapshot;
-  if (!snapshot) return;
-  const promise = serverJson<ServerAiDiscardPreparationResponse>("/api/game/action", {
-    action: "prepare-next-hand-ai-discard",
-    payload: {},
-    snapshot,
-    tag: currentSessionTag() || null,
-  });
-  void promise.catch(() => {
-    failedNextHandPreparationKeys.add(key);
-    if (state.nextHandPreparation?.key === key) state.nextHandPreparation = null;
-  });
-  state.nextHandPreparation = { key, generation: currentSnapshotGeneration(), snapshot, promise };
-}
-
-function preparedNextHandFor(game: GameState | null): NextHandPreparation | null {
-  if (!game || game.phase !== "score_crib" || game.scoring?.stage !== "crib") return null;
-  const key = nextHandPreparationKey(game);
-  return key && state.nextHandPreparation?.key === key ? state.nextHandPreparation : null;
-}
-
-function applyPreparedNextHand(
-  response: ServerAiDiscardPreparationResponse,
-  preparation: NextHandPreparation | null = state.nextHandPreparation,
-): GameState {
-  if (preparation && !canApplySnapshotResponse(preparation.snapshot, preparation.generation)) {
-    console.warn("Ignored stale prepared next-hand response.");
-    if (state.nextHandPreparation === preparation) state.nextHandPreparation = null;
-    return state.game ?? response.state;
-  }
-  applyAuthoritativeGameState(response.snapshot, response.state);
-  storePreparedAiDiscard(response.state, response.recommendation);
-  if (!preparation || state.nextHandPreparation === preparation) state.nextHandPreparation = null;
-  failedNextHandPreparationKeys.delete(nextHandPreparationKey(response.state) ?? "");
-  return response.state;
-}
-
 async function api(path: string, body: Record<string, unknown> | null = null): Promise<GameState> {
   try {
     if (path === "/api/state") {
@@ -2032,21 +1965,6 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       return serverGameAction("complete-decision-reviews", {
         limit: typeof body?.limit === "number" ? body.limit : undefined,
       });
-    }
-    if (path === "/api/prepare-next-hand-ai-discard") {
-      const requestSnapshot = currentSnapshot;
-      const requestGeneration = currentSnapshotGeneration();
-      const response = await serverJson<ServerAiDiscardPreparationResponse>("/api/game/action", {
-        action: "prepare-next-hand-ai-discard",
-        payload: {},
-        snapshot: requestSnapshot,
-        tag: currentSessionTag() || null,
-      });
-      if (!canApplySnapshotResponse(requestSnapshot, requestGeneration)) {
-        console.warn("Ignored stale explicit next-hand preparation response.");
-        return state.game ?? response.state;
-      }
-      return applyPreparedNextHand(response);
     }
     if (path === "/api/continue-scoring") {
       return serverGameAction("continue-scoring");
@@ -4992,18 +4910,7 @@ els.continueScoring.addEventListener("click", async () => {
   render(state.game);
   try {
     state.resultOverride = null;
-    const preparedNext = preparedNextHandFor(state.game);
-    let next: GameState;
-    if (preparedNext) {
-      try {
-        next = applyPreparedNextHand(await preparedNext.promise, preparedNext);
-      } catch {
-        state.nextHandPreparation = null;
-        next = await api("/api/continue-scoring", {});
-      }
-    } else {
-      next = await api("/api/continue-scoring", {});
-    }
+    const next = await api("/api/continue-scoring", {});
     state.selected.clear();
     render(next);
     await playDealAnimationIfNeeded(next);
@@ -5215,7 +5122,6 @@ async function initializeGameState(): Promise<void> {
     const initialGame = remoteGame ?? await api("/api/state");
     startCutForDealPreparation(initialGame);
     startAiDiscardPreparation(initialGame);
-    startNextHandPreparation(initialGame);
     render(initialGame);
     markAppReady();
     if (initialGame.phase === "ai_discarding") finishDiscardInBackground(interactionEpoch);

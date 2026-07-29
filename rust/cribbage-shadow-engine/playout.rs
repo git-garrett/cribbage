@@ -153,6 +153,9 @@ impl ModelPlayout {
                         self.start_hand_record();
                     }
                 }
+                Phase::ScorePone | Phase::ScoreDealer | Phase::ScoreCrib => {
+                    self.game.continue_scoring()?;
+                }
                 Phase::GameOver => {
                     let left_score = self.game.player(Side::Left).score;
                     let right_score = self.game.player(Side::Right).score;

@@ -42,6 +42,9 @@ pub enum Phase {
     Discard,
     Pegging,
     PeggingComplete,
+    ScorePone,
+    ScoreDealer,
+    ScoreCrib,
     GameOver,
 }
 
@@ -304,26 +307,59 @@ impl CribbageGame {
         }
     }
 
-    pub fn score_after_pegging(&mut self) -> Result<(), String> {
+    /// Start the post-pegging count with the pone's hand. The interactive
+    /// client advances through each scoring phase with `continue_scoring` so
+    /// players can see every hand and the crib before the next deal.
+    pub fn start_scoring(&mut self) -> Result<(), String> {
         if self.phase != Phase::PeggingComplete {
             return Err("pegging is not complete".to_string());
         }
         let pone_points = score_hand(&self.player(self.pone).table, self.turn_card, false);
         self.peg(self.pone, i32::from(pone_points));
-        if self.phase == Phase::GameOver {
-            return Ok(());
-        }
-        let dealer_points = score_hand(&self.player(self.dealer).table, self.turn_card, false);
-        self.peg(self.dealer, i32::from(dealer_points));
-        if self.phase == Phase::GameOver {
-            return Ok(());
-        }
-        let crib_points = score_hand(&self.player(self.dealer).crib, self.turn_card, true);
-        self.peg(self.dealer, i32::from(crib_points));
         if self.phase != Phase::GameOver {
-            self.deal = self.deal.other();
-            self.hand_number += 1;
-            self.start_hand();
+            self.phase = Phase::ScorePone;
+        }
+        Ok(())
+    }
+
+    /// Count the next hand or crib, or deal the next hand after the crib has
+    /// been acknowledged.
+    pub fn continue_scoring(&mut self) -> Result<(), String> {
+        match self.phase {
+            Phase::ScorePone => {
+                let dealer_points =
+                    score_hand(&self.player(self.dealer).table, self.turn_card, false);
+                self.peg(self.dealer, i32::from(dealer_points));
+                if self.phase != Phase::GameOver {
+                    self.phase = Phase::ScoreDealer;
+                }
+            }
+            Phase::ScoreDealer => {
+                let crib_points = score_hand(&self.player(self.dealer).crib, self.turn_card, true);
+                self.peg(self.dealer, i32::from(crib_points));
+                if self.phase != Phase::GameOver {
+                    self.phase = Phase::ScoreCrib;
+                }
+            }
+            Phase::ScoreCrib => {
+                self.deal = self.deal.other();
+                self.hand_number += 1;
+                self.start_hand();
+            }
+            _ => return Err("there is no hand score to continue".to_string()),
+        }
+        Ok(())
+    }
+
+    /// Complete scoring without pausing. Simulations and batch runners use
+    /// this convenience method; the web game uses the two methods above.
+    pub fn score_after_pegging(&mut self) -> Result<(), String> {
+        self.start_scoring()?;
+        while matches!(
+            self.phase,
+            Phase::ScorePone | Phase::ScoreDealer | Phase::ScoreCrib
+        ) {
+            self.continue_scoring()?;
         }
         Ok(())
     }
@@ -483,6 +519,9 @@ mod tests {
                 }
                 Phase::PeggingComplete => {
                     game.score_after_pegging().unwrap();
+                }
+                Phase::ScorePone | Phase::ScoreDealer | Phase::ScoreCrib => {
+                    game.continue_scoring().unwrap();
                 }
                 Phase::GameOver => {
                     assert!(

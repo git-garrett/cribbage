@@ -272,10 +272,38 @@ pub fn legal_peg_ranks(ranks: &[u8; 13], count: u8) -> Vec<u8> {
 }
 
 pub fn score_hand(hand: &[Card], turn_card: Card, crib: bool) -> u8 {
-    score_fifteens(hand, turn_card)
-        + score_sets(hand, turn_card)
-        + score_runs(hand, turn_card)
-        + score_flush_and_right_jack(hand, turn_card, crib)
+    score_hand_components(hand, turn_card, crib).total()
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct HandScoreComponents {
+    pub fifteens: u8,
+    pub pairs: u8,
+    pub runs: u8,
+    pub flush: u8,
+    pub knobs: u8,
+}
+
+impl HandScoreComponents {
+    pub fn total(self) -> u8 {
+        self.fifteens + self.pairs + self.runs + self.flush + self.knobs
+    }
+}
+
+/// Return conventional hand-score categories separately for display. A crib
+/// requires the cut card for a flush, while a hand may count a four-card flush.
+pub fn score_hand_components(hand: &[Card], turn_card: Card, crib: bool) -> HandScoreComponents {
+    let knobs = hand
+        .iter()
+        .any(|card| card.rank == 10 && card.suit == turn_card.suit) as u8;
+    let flush_and_knobs = score_flush_and_right_jack(hand, turn_card, crib);
+    HandScoreComponents {
+        fifteens: score_fifteens(hand, turn_card),
+        pairs: score_sets(hand, turn_card),
+        runs: score_runs(hand, turn_card),
+        flush: flush_and_knobs.saturating_sub(knobs),
+        knobs,
+    }
 }
 
 pub fn score_hand_rank_only(hand: &[Card], turn_card: Card) -> u8 {

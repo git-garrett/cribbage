@@ -9,7 +9,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cribbage_shadow_engine::cards::{full_deck, Card, RANKS, SUIT_NAMES, VALUES};
+use cribbage_shadow_engine::cards::{
+    full_deck, score_hand_components, Card, HandScoreComponents, RANKS, SUIT_NAMES, VALUES,
+};
 use cribbage_shadow_engine::decision::{
     recommend_discard_for_side, recommend_peg_for_side, review_discard_for_side,
     review_peg_for_side, DecisionReview as EngineDecisionReview, PegDecision,
@@ -311,7 +313,7 @@ fn game_action(server: &Server, body: &str) -> Response {
         let response = response_for_session(session)?;
         if matches!(
             action.as_str(),
-            "prepare-cut-for-deal" | "prepare-ai-discard" | "prepare-next-hand-ai-discard"
+            "prepare-cut-for-deal" | "prepare-ai-discard"
         ) && !session.waiting_for_deal_cut
             && session.game.phase == Phase::Discard
         {
@@ -406,7 +408,10 @@ fn apply_action(
             session.deal_cut_revealed = true;
             Ok(())
         }
-        "prepare-ai-discard" | "prepare-next-hand-ai-discard" => Ok(()),
+        "prepare-ai-discard" => Ok(()),
+        "prepare-next-hand-ai-discard" => {
+            Err("The next hand must begin with an explicit scoring acknowledgement.".to_string())
+        }
         "discard" => {
             require_phase(session, Phase::Discard)?;
             if session.waiting_for_deal_cut || session.waiting_for_ai_discard {
@@ -487,9 +492,12 @@ fn apply_action(
             Ok(())
         }
         "continue-scoring" => {
-            require_phase(session, Phase::PeggingComplete)?;
             let hand_number = session.game.hand_number;
-            session.game.score_after_pegging()?;
+            if session.game.phase == Phase::PeggingComplete {
+                session.game.start_scoring()?;
+            } else {
+                session.game.continue_scoring()?;
+            }
             if session.game.hand_number != hand_number {
                 session.turn_card_revealed = false;
             }
@@ -632,6 +640,7 @@ fn game_state_json(session: &Session) -> String {
     let human_hand = cards_json(&game.player(HUMAN).hand, Some("User"));
     let human_table = cards_json(&game.player(HUMAN).table, Some("User"));
     let ai_table = cards_json(&game.player(AI).table, Some("AI"));
+    let scoring = scoring_json(game);
     let legal_human = if phase == "pegging" && game.current_player() == HUMAN {
         number_array_json(
             &game
@@ -670,7 +679,7 @@ fn game_state_json(session: &Session) -> String {
         "null".to_string()
     };
     format!(
-        "{{\"phase\":\"{}\",\"message\":\"{}\",\"log\":[],\"result\":{},\"handNumber\":{},\"scores\":{{\"human\":{},\"ai\":{}}},\"pegPositions\":{{\"human\":[{},{}],\"ai\":[{},{}]}},\"dealer\":\"{}\",\"firstDealer\":\"{}\",\"cribOwner\":\"{}\",\"turn\":{},\"count\":{},\"turnCard\":{},\"turnCardRevealed\":{},\"plays\":{},\"completedPlays\":{},\"peggingResetPending\":{},\"humanHand\":{},\"aiHandCount\":{},\"humanTable\":{},\"aiTable\":{},\"legalCardIds\":{},\"aiLegalCardIds\":{},\"canGo\":{},\"scoring\":null,\"cutForDeal\":{},\"analyticsEvents\":{}}}",
+        "{{\"phase\":\"{}\",\"message\":\"{}\",\"log\":[],\"result\":{},\"handNumber\":{},\"scores\":{{\"human\":{},\"ai\":{}}},\"pegPositions\":{{\"human\":[{},{}],\"ai\":[{},{}]}},\"dealer\":\"{}\",\"firstDealer\":\"{}\",\"cribOwner\":\"{}\",\"turn\":{},\"count\":{},\"turnCard\":{},\"turnCardRevealed\":{},\"plays\":{},\"completedPlays\":{},\"peggingResetPending\":{},\"humanHand\":{},\"aiHandCount\":{},\"humanTable\":{},\"aiTable\":{},\"legalCardIds\":{},\"aiLegalCardIds\":{},\"canGo\":{},\"scoring\":{},\"cutForDeal\":{},\"analyticsEvents\":{}}}",
         phase,
         json_escape(&message_for(session)),
         result_json(session),
@@ -698,20 +707,85 @@ fn game_state_json(session: &Session) -> String {
         legal_human,
         legal_ai,
         phase == "pegging" && game.current_player() == HUMAN && game.legal_cards(HUMAN).is_empty(),
+        scoring,
         cut_for_deal,
         analytics_events_json(session),
     )
 }
 
+fn score_stage_details(
+    game: &CribbageGame,
+) -> Option<(&'static str, Side, &[Card], bool, &'static str)> {
+    match game.phase {
+        Phase::ScorePone => Some((
+            "pone",
+            game.pone,
+            &game.player(game.pone).table,
+            false,
+            "Show dealer hand",
+        )),
+        Phase::ScoreDealer => Some((
+            "dealer",
+            game.dealer,
+            &game.player(game.dealer).table,
+            false,
+            "Show crib",
+        )),
+        Phase::ScoreCrib => Some((
+            "crib",
+            game.dealer,
+            &game.player(game.dealer).crib,
+            true,
+            "Next hand",
+        )),
+        _ => None,
+    }
+}
+
+fn hand_score_components_json(components: HandScoreComponents) -> String {
+    format!(
+        "{{\"total\":{},\"fifteens\":{},\"pairs\":{},\"runs\":{},\"flush\":{},\"knobs\":{}}}",
+        components.total(),
+        components.fifteens,
+        components.pairs,
+        components.runs,
+        components.flush,
+        components.knobs,
+    )
+}
+
+fn scoring_json(game: &CribbageGame) -> String {
+    let Some((stage, owner, cards, crib, next_label)) = score_stage_details(game) else {
+        return "null".to_string();
+    };
+    let components = score_hand_components(cards, game.turn_card, crib);
+    let title = format!(
+        "{} {}",
+        side_label(owner),
+        if crib { "crib" } else { "hand" }
+    );
+    format!(
+        "{{\"stage\":\"{}\",\"title\":\"{}\",\"owner\":\"{}\",\"cards\":{},\"points\":{},\"components\":{},\"nextLabel\":\"{}\"}}",
+        stage,
+        json_escape(&title),
+        side_label(owner),
+        cards_json(cards, Some(side_label(owner))),
+        components.total(),
+        hand_score_components_json(components),
+        next_label,
+    )
+}
+
 fn snapshot_json(session: &Session) -> String {
     let game = &session.game;
+    let scoring_review = scoring_snapshot_json(game);
     let turn_card = if session.turn_card_revealed {
         game.turn_card.id.to_string()
     } else {
         "null".to_string()
     };
     format!(
-        "{{\"version\":1,\"gameId\":\"{}\",\"analyticsCounter\":0,\"analyticsEvents\":{},\"opponent\":\"{}\",\"deal\":{},\"firstDeal\":{},\"handNumber\":{},\"human\":{},\"ai\":{},\"turnCard\":{},\"turnCardRevealed\":{},\"crib\":{},\"plays\":{},\"playOwners\":{},\"completedPlays\":{},\"completedPlayOwners\":[],\"peggingResetPending\":{},\"count\":{},\"turn\":{},\"goPlayer\":{},\"lastPlayer\":{},\"scoringReview\":null,\"phase\":\"{}\",\"message\":\"{}\",\"log\":[],\"result\":{},\"pegPositions\":{{\"human\":[{},{}],\"ai\":[{},{}]}},\"pendingDiscardReviews\":{},\"pendingPeggingReviews\":{}}}",
+        "{{\"version\":1,\"gameId\":\"{}\",\"analyticsCounter\":0,\"analyticsEvents\":{},\"opponent\":\"{}\",\"deal\":{},\"firstDeal\":{},\"handNumber\":{},\"human\":{},\"ai\":{},\"turnCard\":{},\"turnCardRevealed\":{},\"crib\":{},\"plays\":{},\"playOwners\":{},\"completedPlays\":{},\"completedPlayOwners\":[],\"peggingResetPending\":{},\"count\":{},\"turn\":{},\"goPlayer\":{},\"lastPlayer\":{},\"scoringReview\":{},\"phase\":\"{}\",\"message\":\"{}\",\"log\":[],\"result\":{},\"pegPositions\":{{\"human\":[{},{}],\"ai\":[{},{}]}},\"pendingDiscardReviews\":{},\"pendingPeggingReviews\":{}}}",
         json_escape(&session.id),
         analytics_events_json(session),
         session.model.as_str(),
@@ -731,6 +805,7 @@ fn snapshot_json(session: &Session) -> String {
         if game.current_player() == HUMAN { 0 } else { 1 },
         option_player_json(game.go_player),
         option_player_json(game.last_player),
+        scoring_review,
         public_phase(session),
         json_escape(&message_for(session)),
         result_json(session),
@@ -740,6 +815,28 @@ fn snapshot_json(session: &Session) -> String {
         game.player(AI).score,
         pending_reviews_json(session, ReviewKind::Discard),
         pending_reviews_json(session, ReviewKind::Peg),
+    )
+}
+
+fn scoring_snapshot_json(game: &CribbageGame) -> String {
+    let Some((stage, owner, cards, crib, next_label)) = score_stage_details(game) else {
+        return "null".to_string();
+    };
+    let components = score_hand_components(cards, game.turn_card, crib);
+    let title = format!(
+        "{} {}",
+        side_label(owner),
+        if crib { "crib" } else { "hand" }
+    );
+    format!(
+        "{{\"stage\":\"{}\",\"title\":\"{}\",\"owner\":\"{}\",\"rawCards\":{},\"points\":{},\"components\":{},\"nextLabel\":\"{}\"}}",
+        stage,
+        json_escape(&title),
+        side_label(owner),
+        number_array_json(&cards.iter().map(|card| card.id).collect::<Vec<_>>()),
+        components.total(),
+        hand_score_components_json(components),
+        next_label,
     )
 }
 
@@ -773,6 +870,9 @@ fn public_phase(session: &Session) -> &'static str {
         Phase::Discard => "discard",
         Phase::Pegging => "pegging",
         Phase::PeggingComplete => "pegging_complete",
+        Phase::ScorePone => "score_pone",
+        Phase::ScoreDealer => "score_dealer",
+        Phase::ScoreCrib => "score_crib",
         Phase::GameOver => "game_over",
     }
 }
@@ -787,6 +887,9 @@ fn message_for(session: &Session) -> String {
         "ai_discarding" => "AI is choosing two cards to discard.".to_string(),
         "pegging" => format!("{} to play.", side_label(session.game.current_player())),
         "pegging_complete" => "Pegging complete. Continue to score the hand.".to_string(),
+        "score_pone" => format!("{} hand counted.", side_label(session.game.pone)),
+        "score_dealer" => format!("{} hand counted.", side_label(session.game.dealer)),
+        "score_crib" => format!("{} crib counted.", side_label(session.game.dealer)),
         "game_over" => "Game over.".to_string(),
         _ => String::new(),
     }
@@ -1787,5 +1890,58 @@ mod tests {
             "\"turnCard\":{},\"turnCardRevealed\":true",
             turn_card.id
         )));
+    }
+
+    #[test]
+    fn scoring_is_revealed_one_stage_at_a_time_with_a_breakdown() {
+        let mut session = new_session(ModelId::Schell13, None);
+        session.waiting_for_deal_cut = false;
+        session.turn_card_revealed = true;
+        let pone = session.game.pone;
+        let dealer = session.game.dealer;
+        session.game.phase = Phase::PeggingComplete;
+        session.game.turn_card = Card::new(8).unwrap();
+        session.game.player_mut(pone).table = vec![
+            Card::new(4).unwrap(),
+            Card::new(5).unwrap(),
+            Card::new(6).unwrap(),
+            Card::new(7).unwrap(),
+        ];
+        session.game.player_mut(dealer).table = vec![
+            Card::new(9).unwrap(),
+            Card::new(10).unwrap(),
+            Card::new(11).unwrap(),
+            Card::new(12).unwrap(),
+        ];
+        session.game.player_mut(dealer).crib = vec![
+            Card::new(13).unwrap(),
+            Card::new(14).unwrap(),
+            Card::new(15).unwrap(),
+            Card::new(16).unwrap(),
+        ];
+
+        apply_action(&mut session, "continue-scoring", "{}", ".").unwrap();
+        let pone_state = game_state_json(&session);
+        assert_eq!(session.game.phase, Phase::ScorePone);
+        assert!(pone_state.contains("\"phase\":\"score_pone\""));
+        assert!(pone_state.contains("\"stage\":\"pone\""));
+        assert!(pone_state.contains("\"fifteens\":4"));
+        assert!(pone_state.contains("\"runs\":5"));
+        assert!(pone_state.contains("\"flush\":5"));
+
+        apply_action(&mut session, "continue-scoring", "{}", ".").unwrap();
+        assert_eq!(session.game.phase, Phase::ScoreDealer);
+        assert!(game_state_json(&session).contains("\"stage\":\"dealer\""));
+
+        apply_action(&mut session, "continue-scoring", "{}", ".").unwrap();
+        assert_eq!(session.game.phase, Phase::ScoreCrib);
+        assert!(game_state_json(&session).contains("\"stage\":\"crib\""));
+
+        assert!(apply_action(&mut session, "prepare-next-hand-ai-discard", "{}", ".").is_err());
+        assert_eq!(session.game.phase, Phase::ScoreCrib);
+        assert!(game_state_json(&session).contains("\"stage\":\"crib\""));
+
+        apply_action(&mut session, "continue-scoring", "{}", ".").unwrap();
+        assert_eq!(session.game.phase, Phase::Discard);
     }
 }
