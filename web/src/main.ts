@@ -404,10 +404,36 @@ els.serverBusyRetry.addEventListener("click", () => {
   const retry = state.serverBusy?.retry;
   if (!retry) return;
   clearServerBusy();
-  void Promise.resolve(retry()).catch((error) => {
+  void retryAfterServerBusy(retry).catch((error) => {
     showServerBusy(error, retry);
   });
 });
+
+async function retryAfterServerBusy(retry: ServerBusyRetry): Promise<void> {
+  const recovered = await reconcileRemoteGameState();
+  if (recovered && await resumeReconciledGame(recovered)) return;
+  await retry();
+}
+
+async function reconcileRemoteGameState(): Promise<GameState | null> {
+  // An action may have reached the server even if its response was interrupted.
+  // Before replaying it, use the authoritative session to avoid leaving the UI
+  // behind an already-revealed cut card or an AI discard that has completed.
+  if (!usesRemoteAi() || !currentSnapshot?.gameId) return null;
+  return serverGameAction("state");
+}
+
+async function resumeReconciledGame(game: GameState): Promise<boolean> {
+  if (game.phase === "ai_discarding") {
+    await finishDiscardInBackground(interactionEpoch);
+    return true;
+  }
+  if (game.turnCardRevealed && game.phase === "pegging") {
+    await continuePeggingAfterRender(game);
+    return true;
+  }
+  return game.turnCardRevealed && game.phase === "game_over";
+}
 
 const SHARED_PAR_HOLES = [17, 33, 43, 59, 69, 85, 95];
 const GRANULAR_PARS = {

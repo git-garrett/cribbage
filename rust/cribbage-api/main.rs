@@ -285,7 +285,12 @@ fn game_action(server: &Server, body: &str) -> Response {
     let tag = json_string(body, "tag")
         .filter(|value| !value.trim().is_empty())
         .map(|value| value.chars().take(80).collect());
-    let result = (|| -> Result<String, String> {
+    // A discard recommendation can take appreciably longer than the state
+    // transition itself. Capture the exact post-transition game while holding
+    // the lock, then evaluate it after releasing the global session lock. A
+    // slow preparation for one game must not make every other game appear
+    // unavailable.
+    let result = (|| -> Result<(String, Option<(CribbageGame, ModelId)>), String> {
         let mut app = server
             .state
             .lock()
@@ -297,7 +302,8 @@ fn game_action(server: &Server, body: &str) -> Response {
             let session = new_session(model, tag);
             let id = session.id.clone();
             app.sessions.insert(id.clone(), session);
-            return response_for_session(app.sessions.get(&id).expect("new session exists"));
+            return response_for_session(app.sessions.get(&id).expect("new session exists"))
+                .map(|response| (response, None));
         }
 
         let session_id =
@@ -311,18 +317,28 @@ fn game_action(server: &Server, body: &str) -> Response {
         }
         apply_action(session, &action, body, &server.model_root)?;
         let response = response_for_session(session)?;
-        if matches!(
+        let recommendation_game = if matches!(
             action.as_str(),
             "prepare-cut-for-deal" | "prepare-ai-discard"
         ) && !session.waiting_for_deal_cut
             && session.game.phase == Phase::Discard
         {
-            return response_with_discard_recommendation(response, session, &server.model_root);
-        }
-        Ok(response)
+            Some((session.game.clone(), session.model))
+        } else {
+            None
+        };
+        Ok((response, recommendation_game))
     })();
     match result {
-        Ok(json) => Response::json(200, json),
+        Ok((response, Some((game, model)))) => {
+            match response_with_discard_recommendation(response, &game, model, &server.model_root) {
+                Ok(json) => Response::json(200, json),
+                Err(error) => {
+                    Response::json(400, format!("{{\"error\":\"{}\"}}", json_escape(&error)))
+                }
+            }
+        }
+        Ok((json, None)) => Response::json(200, json),
         Err(error) => Response::json(400, format!("{{\"error\":\"{}\"}}", json_escape(&error))),
     }
 }
@@ -611,10 +627,11 @@ fn response_for_session(session: &Session) -> Result<String, String> {
 
 fn response_with_discard_recommendation(
     mut response: String,
-    session: &Session,
+    game: &CribbageGame,
+    model: ModelId,
     model_root: &str,
 ) -> Result<String, String> {
-    let decision = recommend_discard_for_side(&session.game, AI, session.model, model_root)?;
+    let decision = recommend_discard_for_side(game, AI, model, model_root)?;
     let Some(body) = response.strip_suffix('}').map(str::to_string) else {
         return Err("could not append Rust discard recommendation".to_string());
     };
