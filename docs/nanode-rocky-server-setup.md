@@ -47,7 +47,7 @@ The easiest path is the deploy helper:
 scripts/deploy-nanode.sh deploy
 ```
 
-By default it targets `root@172.239.170.10` using `../../keys/strongcribbage_admin_ed25519`, builds locally, uploads the artifact, installs the systemd unit, writes the Caddy reverse proxy for `cribbage.strongcribbage.com` and `strongcribbage.com`, restarts services, and checks health.
+By default it targets `root@172.239.170.10` using `../../keys/strongcribbage_admin_ed25519`, builds locally, uploads the artifact, installs the systemd unit, writes the Caddy routes for the game at `cribbage.strongcribbage.com` and the public landing page at `strongcribbage.com`, restarts services, and checks health.
 
 On the build machine:
 
@@ -147,7 +147,7 @@ curl http://127.0.0.1:8787/health
 Set `/etc/caddy/Caddyfile`:
 
 ```caddyfile
-cribbage.strongcribbage.com, strongcribbage.com {
+cribbage.strongcribbage.com {
 	encode zstd gzip
 	@api path /api/* /health
 	handle @api {
@@ -159,6 +159,13 @@ cribbage.strongcribbage.com, strongcribbage.com {
 		file_server
 	}
 }
+
+strongcribbage.com {
+	encode zstd gzip
+	root * /opt/cribbage/dist
+	try_files {path} /coming-soon.html
+	file_server
+}
 ```
 
 Then reload:
@@ -169,7 +176,9 @@ sudo systemctl reload caddy
 curl https://cribbage.strongcribbage.com/health
 ```
 
-Caddy serves the browser client and the Rust API handles only game routes.
+Caddy serves the browser client and routes `/api/*` and `/health` to the Rust
+API only on `cribbage.strongcribbage.com`. The apex domain serves the public
+landing page in `dist/coming-soon.html`.
 
 ## 8. Operating Notes
 

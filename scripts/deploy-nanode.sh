@@ -11,7 +11,8 @@ REMOTE_APP_DIR="${REMOTE_APP_DIR:-/opt/cribbage}"
 REMOTE_DATA_DIR="${REMOTE_DATA_DIR:-/var/lib/cribbage}"
 REMOTE_PORT_APP="${REMOTE_PORT_APP:-8787}"
 REMOTE_BIND_HOST="${REMOTE_BIND_HOST:-127.0.0.1}"
-DOMAIN="${DOMAIN:-cribbage.strongcribbage.com, strongcribbage.com}"
+GAME_DOMAIN="${GAME_DOMAIN:-cribbage.strongcribbage.com}"
+MARKETING_DOMAIN="${MARKETING_DOMAIN:-strongcribbage.com}"
 ARCHIVE="${ROOT_DIR}/cribbage-server-${VERSION}.tgz"
 
 SSH_BASE=(ssh -p "$REMOTE_PORT" -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
@@ -29,7 +30,8 @@ Environment overrides:
   REMOTE_HOST=${REMOTE_HOST}
   REMOTE_USER=${REMOTE_USER}
   SSH_KEY=${SSH_KEY}
-  DOMAIN=${DOMAIN}
+  GAME_DOMAIN=${GAME_DOMAIN}
+  MARKETING_DOMAIN=${MARKETING_DOMAIN}
 
 The pull action downloads production SQLite files to production-pulls/<timestamp>/.
 USAGE
@@ -119,7 +121,7 @@ SERVICE
 
   echo "Writing Caddy reverse proxy..."
   "${SSH_BASE[@]}" "$REMOTE" "cat > /etc/caddy/Caddyfile" <<CADDY
-${DOMAIN} {
+${GAME_DOMAIN} {
 	encode zstd gzip
 	@api path /api/* /health
 	handle @api {
@@ -130,6 +132,13 @@ ${DOMAIN} {
 		try_files {path} /index.html
 		file_server
 	}
+}
+
+${MARKETING_DOMAIN} {
+	encode zstd gzip
+	root * ${REMOTE_APP_DIR}/dist
+	try_files {path} /coming-soon.html
+	file_server
 }
 CADDY
 
