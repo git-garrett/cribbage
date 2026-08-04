@@ -1,6 +1,7 @@
 use crate::cards::{full_deck, score_count, score_hand, Card};
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum Side {
     Left,
     Right,
@@ -22,7 +23,7 @@ impl Side {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum PegTurn {
     Pone,
     Dealer,
@@ -37,7 +38,7 @@ impl PegTurn {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum Phase {
     Discard,
     Pegging,
@@ -48,14 +49,14 @@ pub enum Phase {
     GameOver,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum PegHistoryEvent {
     Play { side: Side, rank: u8 },
     Go { side: Side },
     Reset,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct PlayerState {
     pub hand: Vec<Card>,
     pub table: Vec<Card>,
@@ -67,7 +68,7 @@ pub struct PlayerState {
     pub score: i32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CribbageGame {
     pub players: [PlayerState; 2],
     pub deal: Side,

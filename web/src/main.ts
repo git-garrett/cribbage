@@ -102,6 +102,7 @@ type AppFontSize = "normal" | "large" | "x-large";
 
 const FONT_SIZE_STORAGE_KEY = "strong-cribbage.fontSize";
 const DISMISSED_GAME_OVER_STORAGE_KEY = "strong-cribbage.dismissedGameOverId";
+const LEADERBOARD_CACHE_KEY = "strong-cribbage.leaderboard.v1";
 
 function normalizeAppFontSize(value: string | null): AppFontSize {
   return value === "large" || value === "x-large" ? value : "normal";
@@ -132,6 +133,27 @@ function safeLocalStorageRemove(key: string): void {
   }
 }
 
+function loadCachedLeaderboardSummary(): LeaderboardSummarySource | null {
+  try {
+    const parsed = JSON.parse(safeLocalStorageGet(LEADERBOARD_CACHE_KEY) || "null") as Partial<LeaderboardSummarySource> | null;
+    if (
+      !parsed ||
+      typeof parsed.generatedAt !== "string" ||
+      typeof parsed.games !== "number" ||
+      !Array.isArray(parsed.playerStats) ||
+      !Array.isArray(parsed.mostSkunks)
+    ) {
+      return null;
+    }
+    return parsed as LeaderboardSummarySource;
+  } catch {
+    safeLocalStorageRemove(LEADERBOARD_CACHE_KEY);
+    return null;
+  }
+}
+
+const cachedLeaderboardSummary = loadCachedLeaderboardSummary();
+
 const state: {
   game: GameState | null;
   selected: Set<number>;
@@ -147,6 +169,10 @@ const state: {
   gameLogOpen: boolean;
   leaderboardOpen: boolean;
   leaderboardLoading: boolean;
+  leaderboardLoaded: boolean;
+  leaderboardFetched: boolean;
+  leaderboardRevision: number;
+  leaderboardAnimateNext: boolean;
   leaderboardSummary: LeaderboardSummarySource;
   modelInfoOpen: boolean;
   decisionReviewOpen: boolean;
@@ -197,7 +223,11 @@ const state: {
   gameLogOpen: false,
   leaderboardOpen: false,
   leaderboardLoading: false,
-  leaderboardSummary: EMPTY_LEADERBOARD_SUMMARY,
+  leaderboardLoaded: cachedLeaderboardSummary !== null,
+  leaderboardFetched: false,
+  leaderboardRevision: 0,
+  leaderboardAnimateNext: false,
+  leaderboardSummary: cachedLeaderboardSummary ?? EMPTY_LEADERBOARD_SUMMARY,
   modelInfoOpen: false,
   decisionReviewOpen: false,
   selectedModelInfo: DEFAULT_OPPONENT,
@@ -508,6 +538,12 @@ interface ServerPeggingResponse {
   ev?: number;
 }
 
+interface CompletedGameUploadResponse {
+  ok: boolean;
+  updated?: boolean;
+  leaderboard?: LeaderboardSummarySource;
+}
+
 interface AnalyticsTotals {
   games: number;
   wins: number;
@@ -592,7 +628,6 @@ function saveGame(): void {
   if (!currentSnapshot || !state.game) return;
   safeLocalStorageSet(SAVE_KEY, JSON.stringify({ version: 1, snapshot: currentSnapshot, state: state.game }));
   syncAnalytics(currentSnapshot.analyticsEvents ?? state.game.analyticsEvents ?? []);
-  persistRemoteGameSession();
 }
 
 let currentSnapshot: GameSnapshot | null = null;
@@ -945,7 +980,7 @@ function uploadCompletedGame(gameId: string, force = false): void {
   const events = store.events.filter((event) => event.gameId === gameId).map((event) => tagPhoneRecord(event));
   if (!events.length) return;
   const endEvent = events.find((event) => event.type === "game" && event.action === "end");
-  void serverJson("/api/games", {
+  void serverJson<CompletedGameUploadResponse>("/api/games", {
     gameId,
     tag: currentSessionTag() || null,
     appVersion: __APP_VERSION__,
@@ -953,9 +988,11 @@ function uploadCompletedGame(gameId: string, force = false): void {
     finalResult: endEvent ?? null,
     snapshot: currentSnapshot?.gameId === gameId ? currentSnapshot : null,
     events,
-  }).then(() => {
+  }).then((response) => {
     if (endEvent) markGameUploaded(gameId);
-    if (state.leaderboardOpen) void refreshLeaderboard();
+    if (response.updated && response.leaderboard) {
+      applyLeaderboardSummary(response.leaderboard, { animate: true });
+    }
   }).catch((error) => {
     console.warn("Completed game upload failed", error);
   });
@@ -1786,43 +1823,6 @@ function syncNewGameControl(game: GameState | null): boolean {
   els.newGame.hidden = false;
   els.newGame.disabled = !canStartNewGame;
   return canStartNewGame;
-}
-
-let remoteSessionSaveTimer = 0;
-
-function persistRemoteGameSession(): void {
-  if (!usesRemoteAi() || !currentSnapshot || !state.game) return;
-  const tag = currentSessionTag();
-  if (!tag) return;
-  window.clearTimeout(remoteSessionSaveTimer);
-  const game = state.game;
-  const snapshot = currentSnapshot;
-  remoteSessionSaveTimer = window.setTimeout(() => {
-    const path = game.phase === "game_over" ? "/api/game/session/complete" : "/api/game/session/save";
-    void serverJson(path, remoteGameSessionPayload(tag, snapshot, game)).catch((error) => {
-      console.warn("Active game session sync failed", error);
-    });
-  }, 200);
-}
-
-function remoteGameSessionPayload(tag: string, snapshot: GameSnapshot, game: GameState): Record<string, unknown> {
-  return {
-    gameId: snapshot.gameId ?? null,
-    tag,
-    model: snapshot.opponent,
-    clientRevision: gameStateGeneration,
-    snapshot,
-    state: game,
-  };
-}
-
-function flushRemoteGameSession(): void {
-  if (!usesRemoteAi() || !currentSnapshot || !state.game || state.game.phase === "game_over") return;
-  const tag = currentSessionTag();
-  if (!tag || !navigator.sendBeacon) return;
-  window.clearTimeout(remoteSessionSaveTimer);
-  const body = JSON.stringify(remoteGameSessionPayload(tag, currentSnapshot, state.game));
-  navigator.sendBeacon(`${REMOTE_AI_BASE}/api/game/session/save`, new Blob([body], { type: "application/json" }));
 }
 
 async function loadRemoteActiveGameSession(): Promise<GameState | null> {
@@ -3472,23 +3472,56 @@ function formatLeaderboardPointsDetail(player: LeaderboardPlayer): string {
   return `${playerLeaderboardPoints(player)} pts in ${player.games} game${player.games === 1 ? "" : "s"}`;
 }
 
-async function refreshLeaderboard(): Promise<void> {
-  if (!usesRemoteAi()) return;
+function leaderboardSummaryKey(summary: LeaderboardSummarySource): string {
+  return JSON.stringify(summary);
+}
+
+function applyLeaderboardSummary(
+  summary: LeaderboardSummarySource,
+  { animate = false }: { animate?: boolean } = {},
+): void {
+  const changed = leaderboardSummaryKey(state.leaderboardSummary) !== leaderboardSummaryKey(summary);
+  state.leaderboardSummary = summary;
+  state.leaderboardLoaded = true;
+  safeLocalStorageSet(LEADERBOARD_CACHE_KEY, JSON.stringify(summary));
+  if (!changed) return;
+  state.leaderboardRevision += 1;
+  state.leaderboardAnimateNext = animate && state.leaderboardOpen;
+  if (state.leaderboardOpen) render(state.game);
+}
+
+async function loadInitialLeaderboard(): Promise<void> {
+  if (!usesRemoteAi() || state.leaderboardFetched || state.leaderboardLoading) return;
   state.leaderboardLoading = true;
+  const requestedRevision = state.leaderboardRevision;
   render(state.game);
   try {
-    uploadLocalCompletedGames(true);
-    state.leaderboardSummary = await serverGetJson<LeaderboardSummarySource>("/api/leaderboard");
+    const summary = await serverGetJson<LeaderboardSummarySource>("/api/leaderboard");
+    // A completed game may arrive while this first-load request is in flight.
+    // Its upload response is newer and must win over this older snapshot.
+    if (state.leaderboardRevision === requestedRevision) applyLeaderboardSummary(summary);
+    state.leaderboardFetched = true;
   } catch (error) {
-    console.warn("Leaderboard refresh failed", error);
+    console.warn("Initial leaderboard load failed", error);
   } finally {
     state.leaderboardLoading = false;
-    render(state.game);
+    if (state.leaderboardOpen) render(state.game);
   }
 }
 
+interface LeaderboardRowData {
+  key: string;
+  cells: string[];
+}
+
+let renderedLeaderboardKey = "";
+
 function renderLeaderboard(): void {
+  const loading = state.leaderboardLoading && !state.leaderboardLoaded;
   const summary = state.leaderboardSummary;
+  const renderKey = `${loading ? "loading" : "ready"}:${leaderboardSummaryKey(summary)}`;
+  if (renderKey === renderedLeaderboardKey) return;
+  renderedLeaderboardKey = renderKey;
   const rankedPlayers = summary.playerStats?.length ? summary.playerStats : summary.winRate14_3 ?? [];
   const bestWins = summary.bestWins ?? [];
   const leaderboardScope = summary.source === "rust-api-tsv"
@@ -3496,87 +3529,198 @@ function renderLeaderboard(): void {
     : summary.model
       ? engineName(summary.model)
       : "production";
-  els.leaderboardSummary.textContent = state.leaderboardLoading
-    ? "Refreshing leaderboard..."
+  els.leaderboardSummary.textContent = loading
+    ? "Loading leaderboard..."
     : `${summary.games} completed ${leaderboardScope} game${summary.games === 1 ? "" : "s"} recorded.`;
-  els.leaderboardHighlights.innerHTML = "";
-  els.leaderboardList.innerHTML = "";
-  if (state.leaderboardLoading) {
-    const loading = document.createElement("p");
-    loading.className = "analytics-empty leaderboard-loading";
-    loading.setAttribute("role", "status");
-    const throbber = document.createElement("span");
-    throbber.className = "throbber";
-    throbber.setAttribute("aria-hidden", "true");
-    const label = document.createElement("span");
-    label.textContent = "Loading leaderboard...";
-    loading.append(throbber, label);
-    els.leaderboardList.append(loading);
+  if (loading) {
+    els.leaderboardHighlights.replaceChildren();
+    els.leaderboardList.replaceChildren(leaderboardLoadingElement());
     return;
   }
+
+  const animate = state.leaderboardAnimateNext;
+  state.leaderboardAnimateNext = false;
   const topPlayer = rankedPlayers[0] ?? null;
   const skunks = summary.mostSkunks?.length ? summary.mostSkunks : [];
-  els.leaderboardHighlights.append(
-    leaderboardCard(
-      "Top leaderboard score",
-      topPlayer
-        ? `${topPlayer.player} ${formatLeaderboardScore(topPlayer)} (${formatLeaderboardPointsDetail(topPlayer)})`
-        : "No games yet",
-    ),
-    leaderboardCard(
-      "Skunked the AI:",
-      skunks.length
-        ? skunks.map((player) => `${player.player} ${player.skunks}`).join(", ")
-        : "No skunks yet",
-    ),
+  reconcileLeaderboardCard(
+    "top-score",
+    "Top leaderboard score",
+    topPlayer
+      ? `${topPlayer.player} ${formatLeaderboardScore(topPlayer)} (${formatLeaderboardPointsDetail(topPlayer)})`
+      : "No games yet",
+    animate,
   );
-  appendLeaderboardSection("Leaderboard score vs AI", rankedPlayers, (player) => [
-    leaderboardCell(player.player),
-    leaderboardCell(`${formatLeaderboardScore(player)} (${formatLeaderboardPointsDetail(player)})`),
-    leaderboardCell(`${player.wins}-${player.losses}; skunks ${player.skunks}`),
-  ]);
-  appendLeaderboardSection("Biggest human wins", bestWins, (win) => [
-    leaderboardCell(win.player),
-    leaderboardCell(`Margin ${formatSigned(win.margin)}`),
-    leaderboardCell(`${engineName(win.opponent)} · ${shortDate(win.endedAt)}${win.result !== "regular" ? ` · ${win.result}` : ""}`),
-  ]);
-  if (!rankedPlayers.length && !bestWins.length) {
-    const empty = document.createElement("p");
-    empty.className = "analytics-empty";
-    empty.textContent = "No leaderboard data yet.";
-    els.leaderboardList.append(empty);
-  }
+  reconcileLeaderboardCard(
+    "skunks",
+    "Skunked the AI:",
+    skunks.length
+      ? skunks.map((player) => `${player.player} ${player.skunks}`).join(", ")
+      : "No skunks yet",
+    animate,
+  );
+  reconcileLeaderboardSection(
+    "players",
+    "Leaderboard score vs AI",
+    rankedPlayers.map((player) => ({
+      key: player.player,
+      cells: [
+        player.player,
+        `${formatLeaderboardScore(player)} (${formatLeaderboardPointsDetail(player)})`,
+        `${player.wins}-${player.losses}; skunks ${player.skunks}`,
+      ],
+    })),
+    animate,
+  );
+  reconcileLeaderboardSection(
+    "wins",
+    "Biggest human wins",
+    bestWins.map((win) => ({
+      key: `${win.player}\u0000${win.endedAt}\u0000${win.margin}`,
+      cells: [
+        win.player,
+        `Margin ${formatSigned(win.margin)}`,
+        `${engineName(win.opponent)} · ${shortDate(win.endedAt)}${win.result !== "regular" ? ` · ${win.result}` : ""}`,
+      ],
+    })),
+    animate,
+  );
+  reconcileLeaderboardEmpty(rankedPlayers.length === 0 && bestWins.length === 0);
 }
 
-function appendLeaderboardSection<T>(title: string, rows: T[], cellsForRow: (row: T) => HTMLElement[]): void {
-  if (!rows.length) return;
-  const heading = document.createElement("h2");
-  heading.className = "leaderboard-section-title";
-  heading.textContent = title;
-  els.leaderboardList.append(heading);
-  for (const rowData of rows) {
-    const row = document.createElement("div");
-    row.className = "analytics-row leaderboard-row";
-    row.append(...cellsForRow(rowData));
-    els.leaderboardList.append(row);
-  }
+function leaderboardLoadingElement(): HTMLElement {
+  const loading = document.createElement("p");
+  loading.className = "analytics-empty leaderboard-loading";
+  loading.setAttribute("role", "status");
+  const throbber = document.createElement("span");
+  throbber.className = "throbber";
+  throbber.setAttribute("aria-hidden", "true");
+  const label = document.createElement("span");
+  label.textContent = "Loading leaderboard...";
+  loading.append(throbber, label);
+  return loading;
 }
 
-function leaderboardCard(label: string, value: string): HTMLElement {
-  const card = document.createElement("div");
-  card.className = "analytics-total";
-  const title = document.createElement("span");
+function reconcileLeaderboardCard(key: string, label: string, value: string, animate: boolean): void {
+  let card = Array.from(els.leaderboardHighlights.children).find(
+    (element) => (element as HTMLElement).dataset.leaderboardCard === key,
+  ) as HTMLElement | undefined;
+  if (!card) {
+    card = document.createElement("div");
+    card.className = "analytics-total";
+    card.dataset.leaderboardCard = key;
+    const title = document.createElement("span");
+    const strong = document.createElement("strong");
+    card.append(title, strong);
+    els.leaderboardHighlights.append(card);
+  }
+  const [title, strong] = Array.from(card.children) as [HTMLElement, HTMLElement];
   title.textContent = label;
-  const strong = document.createElement("strong");
+  const changed = strong.textContent !== value;
   strong.textContent = value;
-  card.append(title, strong);
-  return card;
+  if (changed && animate) pulseLeaderboardElement(card, "leaderboard-card-updated");
 }
 
-function leaderboardCell(text: string): HTMLElement {
-  const span = document.createElement("span");
-  span.textContent = text;
-  return span;
+function reconcileLeaderboardSection(
+  key: string,
+  title: string,
+  rows: LeaderboardRowData[],
+  animate: boolean,
+): void {
+  let section = Array.from(els.leaderboardList.children).find(
+    (element) => (element as HTMLElement).dataset.leaderboardSection === key,
+  ) as HTMLElement | undefined;
+  if (!section) {
+    section = document.createElement("section");
+    section.className = "leaderboard-section";
+    section.dataset.leaderboardSection = key;
+    const heading = document.createElement("h2");
+    heading.className = "leaderboard-section-title";
+    const list = document.createElement("div");
+    list.className = "leaderboard-rows";
+    section.append(heading, list);
+    els.leaderboardList.append(section);
+  }
+  const heading = section.children[0] as HTMLElement;
+  const list = section.children[1] as HTMLElement;
+  heading.textContent = title;
+  section.hidden = rows.length === 0;
+
+  const existingRows = new Map(
+    Array.from(list.children).map((element) => [(element as HTMLElement).dataset.leaderboardRow ?? "", element as HTMLElement]),
+  );
+  const before = animate
+    ? new Map(Array.from(existingRows.entries()).map(([rowKey, row]) => [rowKey, row.getBoundingClientRect()]))
+    : new Map<string, DOMRect>();
+  const nextRows: HTMLElement[] = [];
+  const changedRows = new Set<HTMLElement>();
+  for (const data of rows) {
+    let row = existingRows.get(data.key);
+    if (!row) {
+      row = document.createElement("div");
+      row.className = "analytics-row leaderboard-row";
+      row.dataset.leaderboardRow = data.key;
+      if (animate) changedRows.add(row);
+    }
+    if (updateLeaderboardRow(row, data.cells)) changedRows.add(row);
+    nextRows.push(row);
+    existingRows.delete(data.key);
+  }
+  for (const row of existingRows.values()) row.remove();
+  for (const row of nextRows) list.append(row);
+  if (!animate) return;
+  for (const row of nextRows) {
+    const prior = before.get(row.dataset.leaderboardRow ?? "");
+    if (prior) animateLeaderboardMove(row, prior);
+    if (changedRows.has(row)) pulseLeaderboardElement(row, "leaderboard-row-updated");
+  }
+}
+
+function updateLeaderboardRow(row: HTMLElement, cells: string[]): boolean {
+  let changed = false;
+  while (row.children.length < cells.length) row.append(document.createElement("span"));
+  while (row.children.length > cells.length) row.lastElementChild?.remove();
+  cells.forEach((text, index) => {
+    const cell = row.children[index] as HTMLElement;
+    if (cell.textContent === text) return;
+    cell.textContent = text;
+    changed = true;
+  });
+  return changed;
+}
+
+function reconcileLeaderboardEmpty(empty: boolean): void {
+  const existing = Array.from(els.leaderboardList.children).find(
+    (element) => (element as HTMLElement).dataset.leaderboardEmpty === "true",
+  ) as HTMLElement | undefined;
+  if (!empty) {
+    existing?.remove();
+    return;
+  }
+  if (existing) return;
+  const message = document.createElement("p");
+  message.className = "analytics-empty";
+  message.dataset.leaderboardEmpty = "true";
+  message.textContent = "No leaderboard data yet.";
+  els.leaderboardList.append(message);
+}
+
+function animateLeaderboardMove(row: HTMLElement, prior: DOMRect): void {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const current = row.getBoundingClientRect();
+  const deltaY = prior.top - current.top;
+  if (Math.abs(deltaY) < 1 || typeof row.animate !== "function") return;
+  row.animate(
+    [{ transform: `translateY(${deltaY}px)` }, { transform: "translateY(0)" }],
+    { duration: 260, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
+  );
+}
+
+function pulseLeaderboardElement(element: HTMLElement, className: string): void {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  element.classList.remove(className);
+  void element.offsetWidth;
+  element.classList.add(className);
+  window.setTimeout(() => element.classList.remove(className), 520);
 }
 
 function formatSigned(value: number): string {
@@ -4137,7 +4281,13 @@ function displayAppVersion(version: string): string {
 }
 
 function shortDate(value: string): string {
-  return new Date(value).toLocaleString([], {
+  // Older production rows used a Unix-millisecond value with a trailing Z
+  // (for example, "1785700000000Z"), which is not a valid browser date.
+  // Continue to render those rows while new server records use ISO 8601.
+  const legacyMillis = /^\d{11,}Z?$/.test(value) ? Number(value.replace(/Z$/, "")) : NaN;
+  const date = Number.isFinite(legacyMillis) ? new Date(legacyMillis) : new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown date";
+  return date.toLocaleString([], {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -4628,7 +4778,6 @@ els.gameLogClose.addEventListener("click", () => {
 els.leaderboardOpen.addEventListener("click", () => {
   closeDecisionSnapshot();
   state.leaderboardOpen = true;
-  state.leaderboardLoading = usesRemoteAi();
   state.analyticsOpen = false;
   state.gameLogOpen = false;
   state.modelInfoOpen = false;
@@ -4636,7 +4785,7 @@ els.leaderboardOpen.addEventListener("click", () => {
   els.settingsPanel.hidden = true;
   els.menuToggle.setAttribute("aria-expanded", "false");
   render(state.game);
-  void refreshLeaderboard();
+  void loadInitialLeaderboard();
 });
 
 els.leaderboardClose.addEventListener("click", () => {
@@ -5077,7 +5226,6 @@ els.troubleGame.addEventListener("click", async () => {
 window.addEventListener("resize", () => render(state.game));
 window.addEventListener("pagehide", () => {
   uploadLocalCompletedGames(true);
-  flushRemoteGameSession();
 });
 
 async function finishDiscardInBackground(

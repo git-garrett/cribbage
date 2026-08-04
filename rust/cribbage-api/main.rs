@@ -18,6 +18,9 @@ use cribbage_shadow_engine::decision::{
 };
 use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
 use cribbage_shadow_engine::model_id::{ModelId, MODEL_13_0};
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 const HUMAN: Side = Side::Left;
 const AI: Side = Side::Right;
@@ -30,6 +33,7 @@ struct Session {
     id: String,
     tag: Option<String>,
     model: ModelId,
+    seed: u32,
     game: CribbageGame,
     waiting_for_deal_cut: bool,
     deal_cut_revealed: bool,
@@ -37,17 +41,21 @@ struct Session {
     turn_card_revealed: bool,
     deal_cuts: [Card; 2],
     created_at: String,
+    updated_at: String,
+    completed_at: Option<String>,
     decision_reviews: Vec<SavedDecisionReview>,
     next_review_id: u32,
+    event_sequence: u64,
+    pending_final_scoring: Option<FinalScoring>,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
 enum ReviewKind {
     Discard,
     Peg,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Deserialize, Serialize)]
 struct SavedDecisionReview {
     id: String,
     at: String,
@@ -57,7 +65,7 @@ struct SavedDecisionReview {
     completed: Option<CompletedDecisionReview>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Deserialize, Serialize)]
 struct CompletedDecisionReview {
     selected_card_ids: Vec<u8>,
     recommended_card_ids: Vec<u8>,
@@ -65,6 +73,43 @@ struct CompletedDecisionReview {
     recommended_ev: f64,
     selected_win_probability: Option<f64>,
     recommended_win_probability: Option<f64>,
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+enum FinalScoringStage {
+    Pone,
+    Dealer,
+    Crib,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct FinalScoring {
+    stage: FinalScoringStage,
+}
+
+/// The private, server-owned game session as stored in SQLite.  The browser
+/// snapshot intentionally excludes the AI's cards, so it must never be used
+/// as a recovery source.
+#[derive(Deserialize, Serialize)]
+struct PersistedSession {
+    version: u8,
+    id: String,
+    tag: Option<String>,
+    model: String,
+    seed: u32,
+    game: CribbageGame,
+    waiting_for_deal_cut: bool,
+    deal_cut_revealed: bool,
+    waiting_for_ai_discard: bool,
+    turn_card_revealed: bool,
+    deal_cuts: [Card; 2],
+    created_at: String,
+    updated_at: String,
+    completed_at: Option<String>,
+    decision_reviews: Vec<SavedDecisionReview>,
+    next_review_id: u32,
+    event_sequence: u64,
+    pending_final_scoring: Option<FinalScoring>,
 }
 
 #[derive(Clone)]
@@ -83,6 +128,7 @@ struct UploadedGame {
 struct AppState {
     sessions: HashMap<String, Session>,
     uploads: HashMap<String, UploadedGame>,
+    leaderboard_summary: String,
 }
 
 struct Server {
@@ -104,16 +150,29 @@ fn main() {
     let data_dir = env::var("CRIBBAGE_DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(&model_root).join("data"));
+    initialize_game_database(&data_dir).unwrap_or_else(|error| {
+        panic!(
+            "could not initialize durable game storage in {}: {}",
+            data_dir.display(),
+            error
+        )
+    });
     let uploads = load_uploads(&data_dir).unwrap_or_else(|error| {
         eprintln!("Rust API leaderboard history was not loaded: {}", error);
+        HashMap::new()
+    });
+    let leaderboard_summary = leaderboard_summary_json(&uploads);
+    let sessions = load_active_sessions(&data_dir).unwrap_or_else(|error| {
+        eprintln!("Durable game sessions were not loaded: {}", error);
         HashMap::new()
     });
     let listener = TcpListener::bind(&address)
         .unwrap_or_else(|error| panic!("could not bind Rust API server at {}: {}", address, error));
     let server = Arc::new(Server {
         state: Mutex::new(AppState {
-            sessions: HashMap::new(),
+            sessions,
             uploads,
+            leaderboard_summary,
         }),
         model_root,
         data_dir,
@@ -296,10 +355,26 @@ fn game_action(server: &Server, body: &str) -> Response {
             .lock()
             .map_err(|_| "server state lock poisoned".to_string())?;
         if action == "new" || action == "state" && json_string(body, "gameId").is_none() {
+            if let Some(existing) = tag.as_deref().and_then(|tag| {
+                app.sessions
+                    .values()
+                    .filter(|session| {
+                        session.tag.as_deref() == Some(tag)
+                            && session_status(session) == "active"
+                            && !session.waiting_for_deal_cut
+                    })
+                    .max_by_key(|session| &session.updated_at)
+            }) {
+                return response_for_session(existing).map(|response| (response, None));
+            }
             let model = json_string(body, "opponent")
                 .and_then(|value| ModelId::from_str(&value).ok())
                 .unwrap_or(ModelId::Schell13);
-            let session = new_session(model, tag);
+            let mut session = new_session(model, tag);
+            session.event_sequence = 1;
+            if let Err(error) = persist_session_event(&server.data_dir, &session, "new", body) {
+                return Err(error);
+            }
             let id = session.id.clone();
             app.sessions.insert(id.clone(), session);
             return response_for_session(app.sessions.get(&id).expect("new session exists"))
@@ -308,14 +383,44 @@ fn game_action(server: &Server, body: &str) -> Response {
 
         let session_id =
             json_string(body, "gameId").ok_or_else(|| "Missing game session id.".to_string())?;
+        if !app.sessions.contains_key(&session_id) {
+            if let Some(session) = load_session_by_id(&server.data_dir, &session_id)? {
+                app.sessions.insert(session_id.clone(), session);
+            }
+        }
         let session = app
             .sessions
             .get_mut(&session_id)
             .ok_or_else(|| "Game session was not found; start a new game.".to_string())?;
+        let before = session.clone();
         if tag.is_some() {
             session.tag = tag;
         }
-        apply_action(session, &action, body, &server.model_root)?;
+        if let Err(error) = apply_action(session, &action, body, &server.model_root) {
+            *session = before;
+            return Err(error);
+        }
+        if session.game.phase == Phase::GameOver
+            && session.pending_final_scoring.is_none()
+            && session.completed_at.is_none()
+        {
+            session.completed_at = Some(isoish_now());
+        }
+        let records_event = !matches!(action.as_str(), "state" | "prepare-ai-discard");
+        if records_event {
+            session.updated_at = isoish_now();
+            session.event_sequence += 1;
+            if let Err(error) = persist_session_event(&server.data_dir, session, &action, body) {
+                *session = before;
+                return Err(error);
+            }
+        } else if session.tag != before.tag {
+            session.updated_at = isoish_now();
+            if let Err(error) = persist_session_snapshot(&server.data_dir, session) {
+                *session = before;
+                return Err(error);
+            }
+        }
         let response = response_for_session(session)?;
         let recommendation_game = if matches!(
             action.as_str(),
@@ -358,6 +463,7 @@ fn new_session_from_seed(model: ModelId, tag: Option<String>, seed: u32, counter
         id: format!("rust-{:x}-{:x}", unix_millis(), counter),
         tag,
         model,
+        seed,
         game,
         waiting_for_deal_cut: true,
         deal_cut_revealed: false,
@@ -365,9 +471,299 @@ fn new_session_from_seed(model: ModelId, tag: Option<String>, seed: u32, counter
         turn_card_revealed: false,
         deal_cuts,
         created_at: isoish_now(),
+        updated_at: isoish_now(),
+        completed_at: None,
         decision_reviews: Vec::new(),
         next_review_id: 1,
+        event_sequence: 0,
+        pending_final_scoring: None,
     }
+}
+
+fn game_database_path(data_dir: &Path) -> PathBuf {
+    // This is the established production SQLite database.  The Rust API uses
+    // namespaced tables so the older service's data is left untouched.
+    data_dir.join("cribbage-server.sqlite")
+}
+
+fn open_game_database(data_dir: &Path) -> Result<Connection, String> {
+    std::fs::create_dir_all(data_dir)
+        .map_err(|error| format!("create {}: {}", data_dir.display(), error))?;
+    let connection = Connection::open(game_database_path(data_dir))
+        .map_err(|error| format!("open game database: {}", error))?;
+    connection
+        .busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(|error| format!("configure game database timeout: {}", error))?;
+    Ok(connection)
+}
+
+fn initialize_game_database(data_dir: &Path) -> Result<(), String> {
+    let connection = open_game_database(data_dir)?;
+    connection
+        .execute_batch(
+            "PRAGMA journal_mode=WAL;
+             PRAGMA synchronous=NORMAL;
+             CREATE TABLE IF NOT EXISTS cribbage_game_sessions (
+               session_id TEXT PRIMARY KEY,
+               tag TEXT,
+               model TEXT NOT NULL,
+               status TEXT NOT NULL,
+               created_at TEXT NOT NULL,
+               updated_at TEXT NOT NULL,
+               session_json TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS cribbage_game_sessions_active_tag
+               ON cribbage_game_sessions(tag, status, updated_at DESC);
+             CREATE TABLE IF NOT EXISTS cribbage_game_events (
+               session_id TEXT NOT NULL,
+               event_sequence INTEGER NOT NULL,
+               occurred_at TEXT NOT NULL,
+               action TEXT NOT NULL,
+               request_json TEXT NOT NULL,
+               game_json TEXT NOT NULL,
+               public_state_json TEXT NOT NULL,
+               PRIMARY KEY(session_id, event_sequence)
+             );
+             CREATE INDEX IF NOT EXISTS cribbage_game_events_by_time
+               ON cribbage_game_events(occurred_at DESC);
+             CREATE TABLE IF NOT EXISTS cribbage_completed_game_uploads (
+               game_id TEXT PRIMARY KEY,
+               received_at TEXT NOT NULL,
+               payload_json TEXT NOT NULL
+             );",
+        )
+        .map_err(|error| format!("create game tables: {}", error))
+}
+
+fn persisted_session(session: &Session) -> PersistedSession {
+    PersistedSession {
+        version: 1,
+        id: session.id.clone(),
+        tag: session.tag.clone(),
+        model: session.model.as_str().to_string(),
+        seed: session.seed,
+        game: session.game.clone(),
+        waiting_for_deal_cut: session.waiting_for_deal_cut,
+        deal_cut_revealed: session.deal_cut_revealed,
+        waiting_for_ai_discard: session.waiting_for_ai_discard,
+        turn_card_revealed: session.turn_card_revealed,
+        deal_cuts: session.deal_cuts,
+        created_at: session.created_at.clone(),
+        updated_at: session.updated_at.clone(),
+        completed_at: session.completed_at.clone(),
+        decision_reviews: session.decision_reviews.clone(),
+        next_review_id: session.next_review_id,
+        event_sequence: session.event_sequence,
+        pending_final_scoring: session.pending_final_scoring.clone(),
+    }
+}
+
+fn restore_persisted_session(stored: PersistedSession) -> Result<Session, String> {
+    if stored.version != 1 {
+        return Err(format!("unsupported saved game version {}", stored.version));
+    }
+    let model = ModelId::from_str(&stored.model)?;
+    Ok(Session {
+        id: stored.id,
+        tag: stored.tag,
+        model,
+        seed: stored.seed,
+        game: stored.game,
+        waiting_for_deal_cut: stored.waiting_for_deal_cut,
+        deal_cut_revealed: stored.deal_cut_revealed,
+        waiting_for_ai_discard: stored.waiting_for_ai_discard,
+        turn_card_revealed: stored.turn_card_revealed,
+        deal_cuts: stored.deal_cuts,
+        created_at: stored.created_at,
+        updated_at: stored.updated_at,
+        completed_at: stored.completed_at,
+        decision_reviews: stored.decision_reviews,
+        next_review_id: stored.next_review_id,
+        event_sequence: stored.event_sequence,
+        pending_final_scoring: stored.pending_final_scoring,
+    })
+}
+
+fn session_status(session: &Session) -> &'static str {
+    if session.game.phase == Phase::GameOver && session.pending_final_scoring.is_none() {
+        "complete"
+    } else {
+        "active"
+    }
+}
+
+fn persist_session_snapshot(data_dir: &Path, session: &Session) -> Result<(), String> {
+    let session_json = serde_json::to_string(&persisted_session(session))
+        .map_err(|error| format!("serialize game session: {}", error))?;
+    let connection = open_game_database(data_dir)?;
+    connection
+        .execute(
+            "INSERT INTO cribbage_game_sessions
+             (session_id, tag, model, status, created_at, updated_at, session_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(session_id) DO UPDATE SET
+               tag = excluded.tag,
+               model = excluded.model,
+               status = excluded.status,
+               updated_at = excluded.updated_at,
+               session_json = excluded.session_json",
+            params![
+                session.id,
+                session.tag,
+                session.model.as_str(),
+                session_status(session),
+                session.created_at,
+                session.updated_at,
+                session_json,
+            ],
+        )
+        .map_err(|error| format!("save game session: {}", error))?;
+    Ok(())
+}
+
+fn action_request_json(action: &str, body: &str) -> String {
+    let payload = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|request| request.get("payload").cloned())
+        .unwrap_or(Value::Null);
+    json!({
+        "action": action,
+        "payload": payload,
+    })
+    .to_string()
+}
+
+fn persist_session_event(
+    data_dir: &Path,
+    session: &Session,
+    action: &str,
+    body: &str,
+) -> Result<(), String> {
+    let session_json = serde_json::to_string(&persisted_session(session))
+        .map_err(|error| format!("serialize game session: {}", error))?;
+    let game_json = serde_json::to_string(&session.game)
+        .map_err(|error| format!("serialize game state: {}", error))?;
+    let public_state_json = game_state_json(session);
+    let connection = open_game_database(data_dir)?;
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|error| format!("begin game event transaction: {}", error))?;
+    transaction
+        .execute(
+            "INSERT INTO cribbage_game_sessions
+             (session_id, tag, model, status, created_at, updated_at, session_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(session_id) DO UPDATE SET
+               tag = excluded.tag,
+               model = excluded.model,
+               status = excluded.status,
+               updated_at = excluded.updated_at,
+               session_json = excluded.session_json",
+            params![
+                session.id,
+                session.tag,
+                session.model.as_str(),
+                session_status(session),
+                session.created_at,
+                session.updated_at,
+                session_json,
+            ],
+        )
+        .map_err(|error| format!("save game session: {}", error))?;
+    transaction
+        .execute(
+            "INSERT INTO cribbage_game_events
+             (session_id, event_sequence, occurred_at, action, request_json, game_json, public_state_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                session.id,
+                session.event_sequence,
+                session.updated_at,
+                action,
+                action_request_json(action, body),
+                game_json,
+                public_state_json,
+            ],
+        )
+        .map_err(|error| format!("save game event: {}", error))?;
+    transaction
+        .commit()
+        .map_err(|error| format!("commit game event: {}", error))?;
+    Ok(())
+}
+
+fn load_active_sessions(data_dir: &Path) -> Result<HashMap<String, Session>, String> {
+    let connection = open_game_database(data_dir)?;
+    let mut statement = connection
+        .prepare(
+            "SELECT session_json FROM cribbage_game_sessions
+             WHERE status = 'active' ORDER BY updated_at DESC",
+        )
+        .map_err(|error| format!("read active sessions: {}", error))?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| format!("read active session rows: {}", error))?;
+    let mut sessions = HashMap::new();
+    for row in rows {
+        let stored = row.map_err(|error| format!("read active session: {}", error))?;
+        let saved: PersistedSession = serde_json::from_str(&stored)
+            .map_err(|error| format!("parse saved game session: {}", error))?;
+        let session = restore_persisted_session(saved)?;
+        sessions.insert(session.id.clone(), session);
+    }
+    Ok(sessions)
+}
+
+fn load_session_by_id(data_dir: &Path, session_id: &str) -> Result<Option<Session>, String> {
+    let connection = open_game_database(data_dir)?;
+    let saved = connection
+        .query_row(
+            "SELECT session_json FROM cribbage_game_sessions WHERE session_id = ?1",
+            [session_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| format!("find saved game session: {}", error))?;
+    saved
+        .map(|text| {
+            let stored = serde_json::from_str::<PersistedSession>(&text)
+                .map_err(|error| format!("parse saved game session: {}", error))?;
+            restore_persisted_session(stored)
+        })
+        .transpose()
+}
+
+fn load_session_by_tag(data_dir: &Path, tag: &str) -> Result<Option<Session>, String> {
+    let connection = open_game_database(data_dir)?;
+    let saved = connection
+        .query_row(
+            "SELECT session_json FROM cribbage_game_sessions
+             WHERE tag = ?1 AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
+            [tag],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| format!("find saved game by tag: {}", error))?;
+    saved
+        .map(|text| {
+            let stored = serde_json::from_str::<PersistedSession>(&text)
+                .map_err(|error| format!("parse saved game session: {}", error))?;
+            restore_persisted_session(stored)
+        })
+        .transpose()
+}
+
+fn persist_completed_game_upload(data_dir: &Path, game_id: &str, body: &str) -> Result<(), String> {
+    let connection = open_game_database(data_dir)?;
+    connection
+        .execute(
+            "INSERT INTO cribbage_completed_game_uploads (game_id, received_at, payload_json)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(game_id) DO NOTHING",
+            params![game_id, isoish_now(), body],
+        )
+        .map_err(|error| format!("save completed game upload: {}", error))?;
+    Ok(())
 }
 
 /// Simulate the initial cut from a shuffled deck.  A tied pair is discarded
@@ -508,11 +904,34 @@ fn apply_action(
             Ok(())
         }
         "continue-scoring" => {
+            if session.pending_final_scoring.is_some() {
+                // The final scoring review is intentionally acknowledged on
+                // its own click.  This lets the player see the hand or crib
+                // that crossed 121 before the winner view replaces it.
+                session.pending_final_scoring = None;
+                return Ok(());
+            }
             let hand_number = session.game.hand_number;
-            if session.game.phase == Phase::PeggingComplete {
-                session.game.start_scoring()?;
-            } else {
-                session.game.continue_scoring()?;
+            let final_stage = match session.game.phase {
+                Phase::PeggingComplete => {
+                    session.game.start_scoring()?;
+                    Some(FinalScoringStage::Pone)
+                }
+                Phase::ScorePone => {
+                    session.game.continue_scoring()?;
+                    Some(FinalScoringStage::Dealer)
+                }
+                Phase::ScoreDealer => {
+                    session.game.continue_scoring()?;
+                    Some(FinalScoringStage::Crib)
+                }
+                _ => {
+                    session.game.continue_scoring()?;
+                    None
+                }
+            };
+            if session.game.phase == Phase::GameOver {
+                session.pending_final_scoring = final_stage.map(|stage| FinalScoring { stage });
             }
             if session.game.hand_number != hand_number {
                 session.turn_card_revealed = false;
@@ -553,7 +972,7 @@ fn complete_decision_reviews(
     limit: usize,
     model_root: &str,
 ) -> Result<(), String> {
-    if session.game.phase != Phase::GameOver {
+    if session.game.phase != Phase::GameOver || session.pending_final_scoring.is_some() {
         return Err("Decision review is available after the game ends.".to_string());
     }
     let mut completed = 0;
@@ -657,7 +1076,7 @@ fn game_state_json(session: &Session) -> String {
     let human_hand = cards_json(&game.player(HUMAN).hand, Some("User"));
     let human_table = cards_json(&game.player(HUMAN).table, Some("User"));
     let ai_table = cards_json(&game.player(AI).table, Some("AI"));
-    let scoring = scoring_json(game);
+    let scoring = scoring_json(session);
     let legal_human = if phase == "pegging" && game.current_player() == HUMAN {
         number_array_json(
             &game
@@ -759,6 +1178,42 @@ fn score_stage_details(
     }
 }
 
+fn final_score_stage_details(
+    session: &Session,
+) -> Option<(&'static str, Side, &[Card], bool, &'static str)> {
+    let pending = session.pending_final_scoring.as_ref()?;
+    let game = &session.game;
+    match pending.stage {
+        FinalScoringStage::Pone => Some((
+            "pone",
+            game.pone,
+            &game.player(game.pone).table,
+            false,
+            "View game result",
+        )),
+        FinalScoringStage::Dealer => Some((
+            "dealer",
+            game.dealer,
+            &game.player(game.dealer).table,
+            false,
+            "View game result",
+        )),
+        FinalScoringStage::Crib => Some((
+            "crib",
+            game.dealer,
+            &game.player(game.dealer).crib,
+            true,
+            "View game result",
+        )),
+    }
+}
+
+fn scoring_stage_details(
+    session: &Session,
+) -> Option<(&'static str, Side, &[Card], bool, &'static str)> {
+    final_score_stage_details(session).or_else(|| score_stage_details(&session.game))
+}
+
 fn hand_score_components_json(components: HandScoreComponents) -> String {
     format!(
         "{{\"total\":{},\"fifteens\":{},\"pairs\":{},\"runs\":{},\"flush\":{},\"knobs\":{}}}",
@@ -771,8 +1226,9 @@ fn hand_score_components_json(components: HandScoreComponents) -> String {
     )
 }
 
-fn scoring_json(game: &CribbageGame) -> String {
-    let Some((stage, owner, cards, crib, next_label)) = score_stage_details(game) else {
+fn scoring_json(session: &Session) -> String {
+    let game = &session.game;
+    let Some((stage, owner, cards, crib, next_label)) = scoring_stage_details(session) else {
         return "null".to_string();
     };
     let components = score_hand_components(cards, game.turn_card, crib);
@@ -795,7 +1251,7 @@ fn scoring_json(game: &CribbageGame) -> String {
 
 fn snapshot_json(session: &Session) -> String {
     let game = &session.game;
-    let scoring_review = scoring_snapshot_json(game);
+    let scoring_review = scoring_snapshot_json(session);
     let turn_card = if session.turn_card_revealed {
         game.turn_card.id.to_string()
     } else {
@@ -835,8 +1291,9 @@ fn snapshot_json(session: &Session) -> String {
     )
 }
 
-fn scoring_snapshot_json(game: &CribbageGame) -> String {
-    let Some((stage, owner, cards, crib, next_label)) = score_stage_details(game) else {
+fn scoring_snapshot_json(session: &Session) -> String {
+    let game = &session.game;
+    let Some((stage, owner, cards, crib, next_label)) = scoring_stage_details(session) else {
         return "null".to_string();
     };
     let components = score_hand_components(cards, game.turn_card, crib);
@@ -883,6 +1340,13 @@ fn public_phase(session: &Session) -> &'static str {
     if session.waiting_for_ai_discard {
         return "ai_discarding";
     }
+    if let Some(pending) = &session.pending_final_scoring {
+        return match pending.stage {
+            FinalScoringStage::Pone => "score_pone",
+            FinalScoringStage::Dealer => "score_dealer",
+            FinalScoringStage::Crib => "score_crib",
+        };
+    }
     match session.game.phase {
         Phase::Discard => "discard",
         Phase::Pegging => "pegging",
@@ -913,7 +1377,7 @@ fn message_for(session: &Session) -> String {
 }
 
 fn result_json(session: &Session) -> String {
-    if session.game.phase != Phase::GameOver {
+    if session.game.phase != Phase::GameOver || session.pending_final_scoring.is_some() {
         return "[]".to_string();
     }
     let winner = if session.game.player(HUMAN).score >= 121 {
@@ -940,7 +1404,7 @@ fn analytics_events_json(session: &Session) -> String {
             .iter()
             .map(|review| decision_review_event_json(session, review)),
     );
-    if game.phase == Phase::GameOver {
+    if game.phase == Phase::GameOver && session.pending_final_scoring.is_none() {
         let human_score = game.player(HUMAN).score;
         let ai_score = game.player(AI).score;
         let winner = if human_score >= 121 { "human" } else { "ai" };
@@ -956,7 +1420,7 @@ fn analytics_events_json(session: &Session) -> String {
         events.push(format!(
             "{{\"id\":\"{}-end\",\"at\":\"{}\",\"type\":\"game\",\"action\":\"end\",\"gameId\":\"{}\",\"opponent\":\"{}\",\"winner\":\"{}\",\"loser\":\"{}\",\"result\":\"{}\",\"finalScores\":{{\"human\":{},\"ai\":{}}}}}",
             json_escape(&session.id),
-            isoish_now(),
+            json_escape(session.completed_at.as_deref().unwrap_or(&session.updated_at)),
             json_escape(&session.id),
             session.model.as_str(),
             winner,
@@ -1239,11 +1703,22 @@ fn save_session(server: &Server, body: &str) -> Response {
             .state
             .lock()
             .map_err(|_| "server state lock poisoned".to_string())?;
+        if !app.sessions.contains_key(&session_id) {
+            if let Some(session) = load_session_by_id(&server.data_dir, &session_id)? {
+                app.sessions.insert(session_id.clone(), session);
+            }
+        }
         let session = app
             .sessions
             .get_mut(&session_id)
             .ok_or_else(|| "Game session was not found.".to_string())?;
+        let before = session.clone();
         session.tag = tag;
+        session.updated_at = isoish_now();
+        if let Err(error) = persist_session_snapshot(&server.data_dir, session) {
+            *session = before;
+            return Err(error);
+        }
         Ok(())
     })();
     match result {
@@ -1255,18 +1730,36 @@ fn save_session(server: &Server, body: &str) -> Response {
 fn load_session(server: &Server, body: &str) -> Response {
     let tag = json_string(body, "tag").unwrap_or_default();
     let result = (|| -> Result<String, String> {
-        let app = server
+        let mut app = server
             .state
             .lock()
             .map_err(|_| "server state lock poisoned".to_string())?;
-        let session = app
+        let in_memory_id = app
             .sessions
             .values()
             .filter(|session| {
-                session.tag.as_deref() == Some(tag.as_str())
-                    && session.game.phase != Phase::GameOver
+                session.tag.as_deref() == Some(tag.as_str()) && session_status(session) == "active"
             })
-            .max_by_key(|session| &session.created_at);
+            .max_by_key(|session| &session.updated_at)
+            .map(|session| session.id.clone());
+        if in_memory_id.is_none() {
+            if let Some(session) = load_session_by_tag(&server.data_dir, &tag)? {
+                let id = session.id.clone();
+                app.sessions.insert(id, session);
+            }
+        }
+        let session = in_memory_id
+            .as_deref()
+            .and_then(|id| app.sessions.get(id))
+            .or_else(|| {
+                app.sessions
+                    .values()
+                    .filter(|session| {
+                        session.tag.as_deref() == Some(tag.as_str())
+                            && session_status(session) == "active"
+                    })
+                    .max_by_key(|session| &session.updated_at)
+            });
         if let Some(session) = session {
             return Ok(format!(
                 "{{\"ok\":true,\"session\":{{\"gameId\":\"{}\",\"updatedAt\":\"{}\",\"snapshot\":{},\"state\":{}}}}}",
@@ -1285,7 +1778,7 @@ fn load_session(server: &Server, body: &str) -> Response {
 }
 
 fn upload_game(server: &Server, body: &str) -> Response {
-    let result = (|| -> Result<(), String> {
+    let result = (|| -> Result<(bool, String), String> {
         let game_id =
             json_string(body, "gameId").ok_or_else(|| "Missing completed game id.".to_string())?;
         let player = json_string(body, "tag").unwrap_or_else(|| "Anonymous".to_string());
@@ -1308,12 +1801,32 @@ fn upload_game(server: &Server, body: &str) -> Response {
             .state
             .lock()
             .map_err(|_| "server state lock poisoned".to_string())?;
-        app.uploads.insert(game_id, upload);
-        persist_uploads(&server.data_dir, &app.uploads)?;
-        Ok(())
+        if app.uploads.contains_key(&game_id) {
+            return Ok((false, app.leaderboard_summary.clone()));
+        }
+        app.uploads.insert(game_id.clone(), upload);
+        if let Err(error) = persist_uploads(&server.data_dir, &app.uploads) {
+            app.uploads.remove(&game_id);
+            return Err(error);
+        }
+        if let Err(error) = persist_completed_game_upload(&server.data_dir, &game_id, body) {
+            app.uploads.remove(&game_id);
+            // Keep the TSV and in-memory leaderboard transactionally aligned
+            // with the permanent payload log when a database write fails.
+            let _ = persist_uploads(&server.data_dir, &app.uploads);
+            return Err(error);
+        }
+        app.leaderboard_summary = leaderboard_summary_json(&app.uploads);
+        Ok((true, app.leaderboard_summary.clone()))
     })();
     match result {
-        Ok(()) => Response::json(200, "{\"ok\":true}".to_string()),
+        Ok((updated, leaderboard)) => Response::json(
+            200,
+            format!(
+                "{{\"ok\":true,\"updated\":{},\"leaderboard\":{}}}",
+                updated, leaderboard
+            ),
+        ),
         Err(error) => Response::json(400, format!("{{\"error\":\"{}\"}}", json_escape(&error))),
     }
 }
@@ -1467,7 +1980,7 @@ fn leaderboard_json(server: &Server) -> Result<String, String> {
         .state
         .lock()
         .map_err(|_| "server state lock poisoned".to_string())?;
-    Ok(leaderboard_summary_json(&app.uploads))
+    Ok(app.leaderboard_summary.clone())
 }
 
 fn leaderboard_summary_json(uploads: &HashMap<String, UploadedGame>) -> String {
@@ -1707,7 +2220,41 @@ fn unix_millis() -> u128 {
 }
 
 fn isoish_now() -> String {
-    format!("{}Z", unix_millis())
+    iso8601_from_unix_millis(unix_millis() as u64)
+}
+
+fn iso8601_from_unix_millis(millis: u64) -> String {
+    let seconds = millis / 1_000;
+    let days = (seconds / 86_400) as i64;
+    let seconds_of_day = seconds % 86_400;
+    let (year, month, day) = civil_date_from_days(days);
+    let hour = seconds_of_day / 3_600;
+    let minute = (seconds_of_day % 3_600) / 60;
+    let second = seconds_of_day % 60;
+    format!(
+        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis_part:03}Z",
+        millis_part = millis % 1_000,
+    )
+}
+
+// Gregorian civil-date conversion for days since 1970-01-01.  Keeping this
+// tiny conversion local avoids another runtime dependency just to timestamp
+// game records in standards-compliant ISO 8601.
+fn civil_date_from_days(days_since_epoch: i64) -> (i64, u64, u64) {
+    let z = days_since_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let day_of_era = z - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let mut year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    if month <= 2 {
+        year += 1;
+    }
+    (year, month as u64, day as u64)
 }
 
 #[cfg(test)]
@@ -1786,6 +2333,39 @@ mod tests {
 
         assert_eq!(rows[0].0, "Quality");
         assert_eq!(rows[1].0, "Volume");
+    }
+
+    #[test]
+    fn leaderboard_totals_change_only_for_a_new_completed_game() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-leaderboard-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let uploads = HashMap::new();
+        let server = Server {
+            state: Mutex::new(AppState {
+                sessions: HashMap::new(),
+                uploads,
+                leaderboard_summary: leaderboard_summary_json(&HashMap::new()),
+            }),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+        let game = r#"{"gameId":"finished-game","tag":"Garrett","winner":"human","result":"regular","model":"schell_table-peg_table-13.0","human":121,"ai":100}"#;
+
+        let first = upload_game(&server, game);
+        assert!(first.body.contains("\"updated\":true"));
+        assert!(first.body.contains("\"games\":1"));
+        let cached_after_first = leaderboard_json(&server).unwrap();
+
+        let duplicate = upload_game(&server, game);
+        assert!(duplicate.body.contains("\"updated\":false"));
+        assert_eq!(leaderboard_json(&server).unwrap(), cached_after_first);
+        assert_eq!(server.state.lock().unwrap().uploads.len(), 1);
+
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[test]
@@ -1960,5 +2540,84 @@ mod tests {
 
         apply_action(&mut session, "continue-scoring", "{}", ".").unwrap();
         assert_eq!(session.game.phase, Phase::Discard);
+    }
+
+    #[test]
+    fn final_hand_is_shown_before_the_game_over_result() {
+        let mut session = new_session(ModelId::Schell13, None);
+        session.waiting_for_deal_cut = false;
+        session.turn_card_revealed = true;
+        session.game.phase = Phase::PeggingComplete;
+        session.game.dealer = AI;
+        session.game.pone = HUMAN;
+        session.game.turn_card = Card::new(8).unwrap();
+        session.game.player_mut(HUMAN).score = 110;
+        session.game.player_mut(HUMAN).table = vec![
+            Card::new(4).unwrap(),
+            Card::new(5).unwrap(),
+            Card::new(6).unwrap(),
+            Card::new(7).unwrap(),
+        ];
+
+        apply_action(&mut session, "continue-scoring", "{}", ".").unwrap();
+
+        assert_eq!(session.game.phase, Phase::GameOver);
+        assert!(session.pending_final_scoring.is_some());
+        let count = game_state_json(&session);
+        assert!(count.contains("\"phase\":\"score_pone\""));
+        assert!(count.contains("\"nextLabel\":\"View game result\""));
+        assert!(count.contains("\"result\":[]"));
+        assert!(!analytics_events_json(&session).contains("\"action\":\"end\""));
+
+        apply_action(&mut session, "continue-scoring", "{}", ".").unwrap();
+        assert!(session.pending_final_scoring.is_none());
+        assert!(game_state_json(&session).contains("\"phase\":\"game_over\""));
+        assert!(analytics_events_json(&session).contains("\"action\":\"end\""));
+    }
+
+    #[test]
+    fn durable_sessions_restore_private_game_state_and_action_history() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-durable-session-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let mut session = new_session_from_seed(
+            ModelId::Schell13,
+            Some("Garrett".to_string()),
+            0x1234_5678,
+            1,
+        );
+        let ai_private_card = session.game.player(AI).hand[0].id;
+        session.event_sequence = 1;
+        persist_session_event(&data_dir, &session, "new", "{\"action\":\"new\"}").unwrap();
+
+        let restored = load_session_by_id(&data_dir, &session.id).unwrap().unwrap();
+        assert_eq!(restored.id, session.id);
+        assert_eq!(restored.tag.as_deref(), Some("Garrett"));
+        assert_eq!(restored.seed, 0x1234_5678);
+        assert_eq!(restored.game.player(AI).hand[0].id, ai_private_card);
+        assert_eq!(restored.event_sequence, 1);
+
+        let connection = open_game_database(&data_dir).unwrap();
+        let events: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM cribbage_game_events WHERE session_id = ?1",
+                [session.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(events, 1);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn game_timestamps_are_valid_iso_8601() {
+        assert_eq!(iso8601_from_unix_millis(0), "1970-01-01T00:00:00.000Z");
+        assert_eq!(
+            iso8601_from_unix_millis(1_735_689_600_123),
+            "2025-01-01T00:00:00.123Z"
+        );
     }
 }

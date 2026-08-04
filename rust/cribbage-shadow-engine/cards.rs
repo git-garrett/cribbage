@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 pub const RANKS: [&str; 13] = [
     "A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K",
 ];
@@ -5,7 +7,7 @@ pub const SUIT_ASCII: [&str; 4] = ["d", "c", "h", "s"];
 pub const SUIT_NAMES: [&str; 4] = ["diamonds", "clubs", "hearts", "spades"];
 pub const VALUES: [u8; 13] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Card {
     pub id: u8,
     pub rank: u8,
