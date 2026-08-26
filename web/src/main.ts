@@ -13,6 +13,7 @@ import type {
 } from "./api-types";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 import { resolveRemoteAiBase } from "./runtime-config";
+import { shouldRevealCribOwner, shouldShowStrategicGuides } from "./ui-visibility";
 import { shouldUploadCompletedGame } from "./upload-policy";
 
 const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-13.0";
@@ -1184,7 +1185,7 @@ function renderBoard(
   const fallback = fallbackPegPositions(scores);
   const firstDealerPlayer = firstDealer === "User" ? "human" : "ai";
   const completedHands = completedHandCount(phase, handNumber);
-  const showParGuides = state.parGuides;
+  const showParGuides = shouldShowStrategicGuides(state.parGuides, SIMPLE_NETWORK_MODE);
   const projections = showParGuides ? projectedCourse(scores, firstDealerPlayer, completedHands) : {
     human: new Map<string, { hand: number; score: number }>(),
     ai: new Map<string, { hand: number; score: number }>(),
@@ -1524,11 +1525,12 @@ function approximateDisplayWinProbability(myScore: number, opponentScore: number
 
 function renderScorePace(game: GameState): void {
   const firstDealerPlayer = game.firstDealer === "User" ? "human" : "ai";
+  const showParGuides = shouldShowStrategicGuides(state.parGuides, SIMPLE_NETWORK_MODE);
   void winProbabilityPhaseForGame(game);
   for (const player of ["human", "ai"] as const) {
     const pace = player === "human" ? els.humanPace : els.aiPace;
     const final = player === "human" ? els.humanFinal : els.aiFinal;
-    if (!state.parGuides) {
+    if (!showParGuides) {
       pace.replaceChildren();
       pace.classList.remove("ahead", "behind");
       final.textContent = "";
@@ -2095,7 +2097,11 @@ function cutCardText(card: NonNullable<GameState["cutForDeal"]>["human"]): strin
 }
 
 function appendCutDealerBadge(label: HTMLElement, game: GameState, player: "User" | "AI", showAiCut: boolean): void {
-  if (!showAiCut || game.phase === "cut_for_deal" || game.dealer !== player) return;
+  if (
+    !showAiCut ||
+    !shouldRevealCribOwner(game.phase, state.dealCutRevealStage) ||
+    game.dealer !== player
+  ) return;
   const badge = document.createElement("span");
   badge.className = "dealer-button cut-dealer-badge";
   badge.textContent = "Crib";
@@ -4353,7 +4359,8 @@ function render(game: GameState | null): void {
             ? "decision-review"
             : "game";
   els.app.dataset.inlineResult = shouldInlineResult(game) ? "true" : "false";
-  els.app.dataset.parGuides = state.parGuides ? "true" : "false";
+  const showParGuides = shouldShowStrategicGuides(state.parGuides, SIMPLE_NETWORK_MODE);
+  els.app.dataset.parGuides = showParGuides ? "true" : "false";
   els.analyticsPage.hidden = !state.analyticsOpen;
   els.gameLogPage.hidden = !state.gameLogOpen;
   els.leaderboardPage.hidden = !state.leaderboardOpen;
@@ -4368,8 +4375,9 @@ function render(game: GameState | null): void {
   els.aiScore.textContent = String(game.scores.ai);
   els.currentModel.textContent = engineName(currentSnapshot?.opponent ?? els.opponent.value ?? DEFAULT_OPPONENT);
   renderScorePace(game);
-  els.humanDealer.hidden = game.dealer !== "User";
-  els.aiDealer.hidden = game.dealer !== "AI";
+  const revealCribOwner = shouldRevealCribOwner(game.phase, state.dealCutRevealStage);
+  els.humanDealer.hidden = !revealCribOwner || game.dealer !== "User";
+  els.aiDealer.hidden = !revealCribOwner || game.dealer !== "AI";
   els.dealer.textContent = game.dealer;
   els.turn.textContent = game.turn || "-";
   els.count.textContent = String(game.count);
