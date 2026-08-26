@@ -1,3 +1,5 @@
+import { Capacitor } from "@capacitor/core";
+
 import type {
   AnalyticsDecisionReview,
   AnalyticsEvent,
@@ -10,6 +12,8 @@ import type {
   ScorePhase,
 } from "./api-types";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
+import { resolveRemoteAiBase } from "./runtime-config";
+import { shouldUploadCompletedGame } from "./upload-policy";
 
 const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-13.0";
 
@@ -507,7 +511,7 @@ const PLAYER_FIRST_NAME_KEY = "strong-cribbage.playerFirstName.v1";
 const SIMPLE_NETWORK_SESSION_KEY = "strong-cribbage.simpleNetworkSession";
 const SIMPLE_NETWORK_OPPONENT_KEY = "strong-cribbage.simpleNetworkOpponent.v1";
 const REMOTE_AI_DISABLED = URL_PARAMS.get("local") === "1";
-const REMOTE_AI_BASE = (URL_PARAMS.get("api") || "").replace(/\/$/, "");
+const REMOTE_AI_BASE = resolveRemoteAiBase(window.location.search, Capacitor.isNativePlatform());
 const REMOTE_AI_EXPLICIT = URL_PARAMS.has("api");
 const IS_VITE_DEV = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV);
 const LOCAL_NETWORK_MODE = isLocalNetworkHostname(window.location.hostname);
@@ -899,6 +903,7 @@ function saveSplashName(): boolean {
   els.splashFirstName.setCustomValidity("");
   playerFirstName = name;
   safeLocalStorageSet(PLAYER_FIRST_NAME_KEY, playerFirstName);
+  uploadLocalCompletedGames();
   return true;
 }
 
@@ -975,14 +980,20 @@ function markGameUploaded(gameId: string): void {
 }
 
 function uploadCompletedGame(gameId: string, force = false): void {
-  if (!usesRemoteAi() || (!force && uploadedGameIds().has(gameId))) return;
+  const playerTag = currentSessionTag();
+  if (!shouldUploadCompletedGame({
+    remoteEnabled: usesRemoteAi(),
+    force,
+    alreadyUploaded: uploadedGameIds().has(gameId),
+    playerTag,
+  })) return;
   const store = loadAnalytics();
   const events = store.events.filter((event) => event.gameId === gameId).map((event) => tagPhoneRecord(event));
   if (!events.length) return;
   const endEvent = events.find((event) => event.type === "game" && event.action === "end");
   void serverJson<CompletedGameUploadResponse>("/api/games", {
     gameId,
-    tag: currentSessionTag() || null,
+    tag: playerTag,
     appVersion: __APP_VERSION__,
     model: currentSnapshot?.opponent ?? SIMPLE_NETWORK_OPPONENT,
     finalResult: endEvent ?? null,

@@ -955,23 +955,6 @@ button:disabled {
   font-size: var(--menu-font);
 }
 
-.leaderboard-rule-notice {
-  padding: 14px 16px;
-  border: 2px solid #17654b;
-  border-radius: 8px;
-  background: #e5f4ec;
-  color: #123427;
-  font-size: var(--subheading-font);
-  line-height: 1.35;
-}
-
-.leaderboard-rule-notice strong {
-  display: block;
-  margin-bottom: 3px;
-  color: #0f5138;
-  font-size: var(--heading-font);
-}
-
 .analytics-totals {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
