@@ -26,6 +26,7 @@ const required = [
   "rust/cribbage-shadow-engine/assets/crib-rank-score-by-discard-cut.json",
   "rust/cribbage-shadow-engine/assets/crib-score-histogram-by-discard-cut.json",
   "scripts/migrate-legacy-leaderboard.py",
+  "scripts/repair_leaderboard_timestamps.py",
 ];
 
 if (!existsSync(archive)) {

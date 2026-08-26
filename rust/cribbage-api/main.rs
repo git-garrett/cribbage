@@ -1787,6 +1787,9 @@ fn upload_game(server: &Server, body: &str) -> Response {
         let model = json_string(body, "model").unwrap_or_else(|| MODEL_13_0.to_string());
         let human_score = json_number_after(body, "human").unwrap_or(0) as i32;
         let ai_score = json_number_after(body, "ai").unwrap_or(0) as i32;
+        let ended_at = completed_game_timestamp(body)
+            .or_else(|| game_start_timestamp(&game_id))
+            .unwrap_or_else(isoish_now);
         let upload = UploadedGame {
             game_id: game_id.clone(),
             player,
@@ -1795,7 +1798,7 @@ fn upload_game(server: &Server, body: &str) -> Response {
             human_score,
             ai_score,
             model,
-            ended_at: isoish_now(),
+            ended_at,
         };
         let mut app = server
             .state
@@ -1829,6 +1832,27 @@ fn upload_game(server: &Server, body: &str) -> Response {
         ),
         Err(error) => Response::json(400, format!("{{\"error\":\"{}\"}}", json_escape(&error))),
     }
+}
+
+fn completed_game_timestamp(body: &str) -> Option<String> {
+    let payload = serde_json::from_str::<Value>(body).ok()?;
+    let value = payload.get("finalResult")?.get("at")?.as_str()?;
+    canonical_utc_timestamp(value)
+}
+
+/// Historical browser game IDs encode their creation instant in base 36;
+/// Rust session IDs encode the same value in hexadecimal.  This is a start
+/// time, not an exact completion time, so it is only used when the uploaded
+/// completion event has no valid timestamp.
+fn game_start_timestamp(game_id: &str) -> Option<String> {
+    let millis = if let Some(encoded) = game_id.strip_prefix("game-") {
+        u64::from_str_radix(encoded.split('-').next()?, 36).ok()?
+    } else if let Some(encoded) = game_id.strip_prefix("rust-") {
+        u64::from_str_radix(encoded.split('-').next()?, 16).ok()?
+    } else {
+        return None;
+    };
+    Some(iso8601_from_unix_millis(millis))
 }
 
 fn uploads_path(data_dir: &Path) -> PathBuf {
@@ -2223,6 +2247,95 @@ fn isoish_now() -> String {
     iso8601_from_unix_millis(unix_millis() as u64)
 }
 
+fn canonical_utc_timestamp(value: &str) -> Option<String> {
+    let millis = parse_utc_timestamp_millis(value)?;
+    Some(iso8601_from_unix_millis(millis))
+}
+
+fn parse_utc_timestamp_millis(value: &str) -> Option<u64> {
+    let legacy_digits = value.strip_suffix('Z').unwrap_or(value);
+    if (11..=16).contains(&legacy_digits.len())
+        && legacy_digits.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return legacy_digits.parse().ok();
+    }
+
+    let bytes = value.as_bytes();
+    let valid_length = bytes.len() == 20 || (22..=24).contains(&bytes.len());
+    if !valid_length
+        || bytes.get(4) != Some(&b'-')
+        || bytes.get(7) != Some(&b'-')
+        || bytes.get(10) != Some(&b'T')
+        || bytes.get(13) != Some(&b':')
+        || bytes.get(16) != Some(&b':')
+        || bytes.last() != Some(&b'Z')
+    {
+        return None;
+    }
+    let fraction_millis = if bytes.len() == 20 {
+        0
+    } else {
+        if bytes.get(19) != Some(&b'.') {
+            return None;
+        }
+        let fraction = &value[20..value.len() - 1];
+        if fraction.is_empty()
+            || fraction.len() > 3
+            || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return None;
+        }
+        fraction.parse::<u64>().ok()? * 10_u64.pow((3 - fraction.len()) as u32)
+    };
+    let number = |start: usize, end: usize| value.get(start..end)?.parse::<u64>().ok();
+    let year = number(0, 4)?;
+    let month = number(5, 7)?;
+    let day = number(8, 10)?;
+    let hour = number(11, 13)?;
+    let minute = number(14, 16)?;
+    let second = number(17, 19)?;
+    if year < 1970
+        || !(1..=12).contains(&month)
+        || day == 0
+        || day > days_in_month(year, month)
+        || hour > 23
+        || minute > 59
+        || second > 59
+    {
+        return None;
+    }
+    let days = days_from_civil(year as i64, month as i64, day as i64);
+    if days < 0 {
+        return None;
+    }
+    let seconds = (days as u64)
+        .checked_mul(86_400)?
+        .checked_add(hour * 3_600 + minute * 60 + second)?;
+    seconds.checked_mul(1_000)?.checked_add(fraction_millis)
+}
+
+fn days_in_month(year: u64, month: u64) -> u64 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn days_from_civil(mut year: i64, month: i64, day: i64) -> i64 {
+    if month <= 2 {
+        year -= 1;
+    }
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month_prime = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * month_prime + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
 fn iso8601_from_unix_millis(millis: u64) -> String {
     let seconds = millis / 1_000;
     let days = (seconds / 86_400) as i64;
@@ -2365,6 +2478,59 @@ mod tests {
         assert_eq!(leaderboard_json(&server).unwrap(), cached_after_first);
         assert_eq!(server.state.lock().unwrap().uploads.len(), 1);
 
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn historical_batch_uploads_preserve_each_completed_game_time() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-historical-upload-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let server = Server {
+            state: Mutex::new(AppState {
+                sessions: HashMap::new(),
+                uploads: HashMap::new(),
+                leaderboard_summary: leaderboard_summary_json(&HashMap::new()),
+            }),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+        let june_game = r#"{"gameId":"game-mqw4gr42-a76tvpv","tag":"Garrett","model":"schell_table-peg_table-13.0","finalResult":{"at":"2026-06-27T09:12:34.567Z","winner":"human","result":"regular","finalScores":{"human":121,"ai":119}}}"#;
+        let july_game = r#"{"gameId":"game-mrdnucml-p0cssyr","tag":"Garrett","model":"schell_table-peg_table-13.0","finalResult":{"at":"2026-07-09T15:49:01.234Z","winner":"human","result":"regular","finalScores":{"human":121,"ai":118}}}"#;
+
+        upload_game(&server, june_game);
+        let response = upload_game(&server, july_game);
+
+        assert!(response.body.contains("\"endedAt\":\"2026-06-27T09:12:34.567Z\""));
+        assert!(response.body.contains("\"endedAt\":\"2026-07-09T15:49:01.234Z\""));
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn historical_upload_without_a_valid_end_time_uses_the_game_start_time() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-historical-fallback-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let server = Server {
+            state: Mutex::new(AppState {
+                sessions: HashMap::new(),
+                uploads: HashMap::new(),
+                leaderboard_summary: leaderboard_summary_json(&HashMap::new()),
+            }),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+        let game = r#"{"gameId":"game-mqw4gr42-a76tvpv","tag":"Garrett","model":"schell_table-peg_table-13.0","finalResult":{"at":"2026-02-30T12:00:00.000Z","winner":"human","result":"regular","finalScores":{"human":121,"ai":119}}}"#;
+
+        let response = upload_game(&server, game);
+
+        assert!(response.body.contains("\"endedAt\":\"2026-06-27T08:52:48.578Z\""));
         std::fs::remove_dir_all(data_dir).unwrap();
     }
 
