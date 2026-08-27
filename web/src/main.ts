@@ -12,6 +12,7 @@ import type {
   ScorePhase,
 } from "./api-types";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
+import { rankLeaderboardWins } from "./leaderboard";
 import { resolveRemoteAiBase } from "./runtime-config";
 import { shouldRevealCribOwner, shouldShowStrategicGuides } from "./ui-visibility";
 import { shouldUploadCompletedGame } from "./upload-policy";
@@ -3540,7 +3541,7 @@ function renderLeaderboard(): void {
   if (renderKey === renderedLeaderboardKey) return;
   renderedLeaderboardKey = renderKey;
   const rankedPlayers = summary.playerStats?.length ? summary.playerStats : summary.winRate14_3 ?? [];
-  const bestWins = summary.bestWins ?? [];
+  const bestWins = rankLeaderboardWins(summary.bestWins ?? []);
   const leaderboardScope = summary.source === "rust-api-tsv"
     ? "production"
     : summary.model
