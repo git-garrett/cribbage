@@ -877,6 +877,7 @@ fn model16_policy_mode_name(mode: Model16PolicyMode) -> &'static str {
 fn model16_policy_source_name(source: Model16PolicySource) -> &'static str {
     match source {
         Model16PolicySource::Learned => "learned",
+        Model16PolicySource::Scorer => "scorer",
         Model16PolicySource::Fallback => "fallback",
     }
 }

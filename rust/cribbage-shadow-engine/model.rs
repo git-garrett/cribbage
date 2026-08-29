@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::PathBuf;
@@ -6,7 +7,8 @@ use std::sync::OnceLock;
 
 use crate::artifacts::{
     CribRankDiscardTables, CribTripolicyTable, EmpiricalDiscardKeepTable, EmpiricalEntry,
-    EmpiricalRoleTable, Model13HoldTable, PairwiseTable, TripolicyPolicy,
+    EmpiricalRoleTable, Model131DiscardHistogramTable, Model13HoldTable, Model91DiscardEvTable,
+    PairwiseTable, TripolicyPolicy,
 };
 use crate::board::{
     next_perspective_role, next_score_phase, score_phase_average,
@@ -19,12 +21,16 @@ use crate::cards::{
     score_hand_rank_only, Card,
 };
 use crate::information_set::{
-    InfoActor, PegSeat, PolicyInformationSetKey, PolicyRankObservation, RankPegAction,
-    RankPegEvent, RankPegState,
+    InfoActor, PegInformationSetKey, PegObservation, PegSeat, PolicyInformationSetKey,
+    PolicyRankObservation, PublicPegEvent, RankPegAction, RankPegEvent, RankPegState,
 };
+use crate::model162::Model162ActionScorer;
+use crate::model90::Model90DiscardTable;
+use crate::model91::{Model91Actor, Model91EmpiricalBeliefs, Model91Observation, Model91Policy};
+use crate::model91_discard::model91_schell_crib_ev;
 use crate::model_id::{
-    MODEL_13_0, MODEL_14_3, MODEL_14_8, MODEL_14_8_1, MODEL_15_0, MODEL_15_1, MODEL_15_2,
-    MODEL_16_0,
+    MODEL_13_0, MODEL_13_1, MODEL_14_3, MODEL_14_8, MODEL_14_8_1, MODEL_15_0, MODEL_15_1,
+    MODEL_15_2, MODEL_16_0, MODEL_16_1, MODEL_16_3, MODEL_9_0, MODEL_9_1, MYRMIDON_5,
 };
 use crate::policy::PolicyArtifact;
 
@@ -51,6 +57,7 @@ pub enum Model16PolicyMode {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Model16PolicySource {
     Learned,
+    Scorer,
     Fallback,
 }
 
@@ -82,6 +89,10 @@ pub struct DecisionInput {
     pub go_player: Option<PlayerKey>,
     pub last_player: Option<PlayerKey>,
     pub plays: Vec<Card>,
+    /// Ordered public events from the acting player's perspective.  Unlike
+    /// `plays`, this preserves completed series and go declarations, which
+    /// the Model 16.3 compact scorer uses as public context.
+    pub public_history: Vec<PublicPegEvent>,
     pub peg_lead: Option<u8>,
     /// Runner-only policy deployment control. Production decision inputs use
     /// the default argmax mode until sampled deployment passes its gate.
@@ -89,6 +100,9 @@ pub struct DecisionInput {
     /// A reproducible draw in 0..65,535 supplied by the game runner. It is
     /// independent of the deal RNG so policy experiments preserve paired deals.
     pub model16_policy_sample: u16,
+    /// Independent runner-supplied randomness for stochastic benchmark-only
+    /// opponents. It never advances or changes the deal RNG.
+    pub decision_seed: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -204,6 +218,10 @@ struct DiscardMemo {
 
 struct RuntimeTables {
     root: String,
+    discard90: OnceLock<Model90DiscardTable>,
+    discard91: OnceLock<Model91DiscardEvTable>,
+    discard_hist131: OnceLock<Model131DiscardHistogramTable>,
+    beliefs91: OnceLock<Model91EmpiricalBeliefs>,
     empirical: OnceLock<EmpiricalDiscardKeepTable>,
     pairwise: OnceLock<PairwiseTable>,
     pairwise14: OnceLock<PairwiseTable>,
@@ -211,9 +229,14 @@ struct RuntimeTables {
     crib_rank: OnceLock<CribRankDiscardTables>,
     crib_tripolicy14: OnceLock<CribTripolicyTable>,
     policy16: OnceLock<Option<PolicyArtifact>>,
+    scorer163: OnceLock<Option<Model162ActionScorer>>,
 }
 
 static RUNTIME_TABLES: OnceLock<RuntimeTables> = OnceLock::new();
+thread_local! {
+    static MODEL91_WORKER_POLICIES: RefCell<HashMap<String, Model91Policy>> =
+        RefCell::new(HashMap::new());
+}
 static MODEL16_POLICY_LOOKUPS: AtomicU64 = AtomicU64::new(0);
 static MODEL16_POLICY_HITS: AtomicU64 = AtomicU64::new(0);
 
@@ -390,6 +413,7 @@ pub fn parse_decision_input(input_text: &str) -> Result<DecisionInput, String> {
         go_player: parse_optional_player(fields.get("go").copied().unwrap_or("-"))?,
         last_player: parse_optional_player(fields.get("last").copied().unwrap_or("-"))?,
         plays: parse_cards(fields.get("plays").copied().unwrap_or(""))?,
+        public_history: parse_public_peg_history(fields.get("pegHistory").copied().unwrap_or(""))?,
         peg_lead: parse_optional_u8(fields.get("pegLead").copied().unwrap_or("-"))?,
         model16_policy_mode: parse_model16_policy_mode(
             fields.get("model16PolicyMode").copied().unwrap_or("argmax"),
@@ -397,6 +421,12 @@ pub fn parse_decision_input(input_text: &str) -> Result<DecisionInput, String> {
         model16_policy_sample: parse_u16(
             fields.get("model16PolicySample").copied().unwrap_or("0"),
         )?,
+        decision_seed: fields
+            .get("decisionSeed")
+            .copied()
+            .unwrap_or("0")
+            .parse::<u64>()
+            .map_err(|error| format!("invalid decision seed: {}", error))?,
     })
 }
 
@@ -430,7 +460,10 @@ pub fn review_decision(
 }
 
 fn is_supported_rust_model(model: &str) -> bool {
-    model == MODEL_13_0
+    model == MODEL_9_0
+        || model == MODEL_9_1
+        || model == MODEL_13_0
+        || model == MODEL_13_1
         || model == MODEL_14_3
         || model == MODEL_14_8
         || model == MODEL_14_8_1
@@ -438,6 +471,9 @@ fn is_supported_rust_model(model: &str) -> bool {
         || model == MODEL_15_1
         || model == MODEL_15_2
         || model == MODEL_16_0
+        || model == MODEL_16_1
+        || model == MODEL_16_3
+        || model == MYRMIDON_5
 }
 
 fn is_strength_model(input: &DecisionInput) -> bool {
@@ -445,6 +481,8 @@ fn is_strength_model(input: &DecisionInput) -> bool {
         || input.model == MODEL_15_1
         || input.model == MODEL_15_2
         || input.model == MODEL_16_0
+        || input.model == MODEL_16_1
+        || input.model == MODEL_16_3
 }
 
 fn uses_joint_future_pegging(input: &DecisionInput) -> bool {
@@ -452,11 +490,14 @@ fn uses_joint_future_pegging(input: &DecisionInput) -> bool {
 }
 
 fn uses_exact_joint_future_pegging(input: &DecisionInput) -> bool {
-    input.model == MODEL_15_2 || input.model == MODEL_16_0
+    input.model == MODEL_15_2
+        || input.model == MODEL_16_0
+        || input.model == MODEL_16_1
+        || input.model == MODEL_16_3
 }
 
 fn uses_ordered_current_hand_scoring(input: &DecisionInput) -> bool {
-    input.model == MODEL_16_0
+    input.model == MODEL_16_0 || input.model == MODEL_16_1 || input.model == MODEL_16_3
 }
 
 fn groups_equivalent_discard_candidates(input: &DecisionInput) -> bool {
@@ -532,6 +573,25 @@ fn recommend_discard(input: &DecisionInput, root: &str) -> Result<Decision, Stri
     }
     if input.model == MODEL_13_0 {
         return recommend_discard_model13(input, root);
+    }
+    if input.model == MODEL_13_1 {
+        return recommend_discard_model131(input, root);
+    }
+    if input.model == MODEL_9_0 {
+        return recommend_discard_model90(input, root);
+    }
+    if input.model == MODEL_9_1 {
+        return recommend_discard_model91(input, root);
+    }
+    if input.model == MYRMIDON_5 {
+        let cards =
+            crate::myrmidon::recommend_discard(&input.ai_hand, input.role, input.decision_seed)?;
+        return Ok(Decision::Discard {
+            card_ids: cards.to_vec(),
+            best_lead: None,
+            ev: None,
+            win_probability: None,
+        });
     }
     if input.model == MODEL_14_3 {
         return recommend_discard_model143(input, root);
@@ -655,10 +715,39 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
     }
 
     let tables = runtime_tables(root)?;
-    if input.model == MODEL_16_0 {
-        return recommend_peg_model16(input, &legal, tables.policy16()?);
+    if input.model == MODEL_9_0 || input.model == MODEL_9_1 {
+        return recommend_peg_model91(input, &legal, tables);
     }
-    if input.model == MODEL_13_0 {
+    if input.model == MYRMIDON_5 {
+        let card_id = crate::myrmidon::recommend_peg(&input.ai_hand, &input.plays, input.count)?;
+        return Ok(Decision::Peg {
+            action: "play".to_string(),
+            card_id: Some(card_id),
+            ev: None,
+            win_probability: None,
+            model16_policy: None,
+        });
+    }
+    if input.model == MODEL_16_0 {
+        return recommend_peg_model16(
+            input,
+            &legal,
+            tables.policy16()?,
+            Model16Fallback::Heuristic,
+        );
+    }
+    if input.model == MODEL_16_1 {
+        return recommend_peg_model16(
+            input,
+            &legal,
+            tables.policy16()?,
+            Model16Fallback::Model13(tables),
+        );
+    }
+    if input.model == MODEL_16_3 {
+        return recommend_peg_model163(input, &legal, tables.scorer163()?, tables);
+    }
+    if input.model == MODEL_13_0 || input.model == MODEL_13_1 {
         return recommend_peg_model13(input, tables);
     }
     let hold = tables.hold()?;
@@ -751,10 +840,16 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
     })
 }
 
+enum Model16Fallback<'a> {
+    Heuristic,
+    Model13(&'a RuntimeTables),
+}
+
 fn recommend_peg_model16(
     input: &DecisionInput,
     legal: &[Card],
     policy: Option<&PolicyArtifact>,
+    fallback: Model16Fallback<'_>,
 ) -> Result<Decision, String> {
     let key = model16_policy_key(input)?;
     let expected_mask = key.expected_legal_mask();
@@ -782,12 +877,31 @@ fn recommend_peg_model16(
         (Some(entry), Model16PolicyMode::Sample) => {
             sample_model16_policy_card(legal, &entry.weights, input.model16_policy_sample)?
         }
-        (entry, _) => select_model16_argmax_or_fallback(
-            input,
-            legal,
-            entry.map(|value| &value.weights),
-            &available_ranks,
-        )?,
+        (Some(entry), _) => {
+            select_model16_argmax_or_fallback(input, legal, Some(&entry.weights), &available_ranks)?
+        }
+        (None, _) => match fallback {
+            Model16Fallback::Heuristic => {
+                select_model16_argmax_or_fallback(input, legal, None, &available_ranks)?
+            }
+            Model16Fallback::Model13(tables) => {
+                // Do not merely borrow Model 13's pegging helper with a 16.1
+                // input: its scoring configuration is model-specific. Clone
+                // the same observable state and explicitly invoke frozen 13.0
+                // so every policy miss is exactly a Model 13 decision.
+                let mut model13_input = input.clone();
+                model13_input.model = MODEL_13_0.to_string();
+                let mut decision = recommend_peg_model13(&model13_input, tables)?;
+                if let Decision::Peg { model16_policy, .. } = &mut decision {
+                    *model16_policy = Some(Model16PolicyDecision {
+                        source: Model16PolicySource::Fallback,
+                        confidence: None,
+                        selected_weight: None,
+                    });
+                }
+                return Ok(decision);
+            }
+        },
     };
     let model16_policy = Some(Model16PolicyDecision {
         source: if policy_entry.is_some() {
@@ -807,6 +921,91 @@ fn recommend_peg_model16(
         win_probability: None,
         model16_policy,
     })
+}
+
+/// Model 16.3 is scorer-only: it uses compact public-information action
+/// advantages directly and falls back to frozen Model 13 only when there is
+/// no scorer evidence (or an evaluation explicitly requests fallback-only).
+fn recommend_peg_model163(
+    input: &DecisionInput,
+    legal: &[Card],
+    scorer: Option<&Model162ActionScorer>,
+    tables: &RuntimeTables,
+) -> Result<Decision, String> {
+    let key = model163_scorer_key(input)?;
+    let expected_mask = key.expected_legal_mask();
+    let actual_mask = legal
+        .iter()
+        .fold(0_u16, |mask, card| mask | (1 << card.rank));
+    if actual_mask != expected_mask {
+        return Err(format!(
+            "model16.3 scorer key legal mask {:#x} does not match cards {:#x}",
+            expected_mask, actual_mask
+        ));
+    }
+
+    MODEL16_POLICY_LOOKUPS.fetch_add(1, Ordering::Relaxed);
+    let available_ranks = remaining_rank_counts(&known_cards_for_pegging(input));
+    if input.model16_policy_mode != Model16PolicyMode::Fallback {
+        if let Some(scorer) = scorer {
+            let advantages = scorer.action_advantages(&key)?;
+            if let Some(selected) =
+                select_model162_scorer_action(input, legal, &advantages, &available_ranks)?
+            {
+                return Ok(Decision::Peg {
+                    action: "play".to_string(),
+                    card_id: Some(selected.id),
+                    ev: None,
+                    win_probability: None,
+                    model16_policy: Some(Model16PolicyDecision {
+                        source: Model16PolicySource::Scorer,
+                        confidence: None,
+                        selected_weight: None,
+                    }),
+                });
+            }
+        }
+    }
+
+    let mut model13_input = input.clone();
+    model13_input.model = MODEL_13_0.to_string();
+    let mut decision = recommend_peg_model13(&model13_input, tables)?;
+    if let Decision::Peg { model16_policy, .. } = &mut decision {
+        *model16_policy = Some(Model16PolicyDecision {
+            source: Model16PolicySource::Fallback,
+            confidence: None,
+            selected_weight: None,
+        });
+    }
+    Ok(decision)
+}
+
+fn select_model162_scorer_action(
+    input: &DecisionInput,
+    legal: &[Card],
+    advantages: &[Option<i32>; 14],
+    available_ranks: &[u8; 13],
+) -> Result<Option<Card>, String> {
+    let mut candidates = legal
+        .iter()
+        .copied()
+        .filter_map(|card| advantages[card.rank as usize].map(|advantage| (card, advantage)))
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+    candidates.sort_by(|(left, left_advantage), (right, right_advantage)| {
+        left_advantage
+            .cmp(right_advantage)
+            .then_with(|| {
+                compare_model16_heuristic(
+                    model16_heuristic_key(input, *left, available_ranks),
+                    model16_heuristic_key(input, *right, available_ranks),
+                )
+            })
+            .then_with(|| right.id.cmp(&left.id))
+    });
+    Ok(candidates.last().map(|(card, _)| *card))
 }
 
 /// Select the exact currently deployed Model 16 action for a rank-level
@@ -877,9 +1076,11 @@ pub fn model16_policy_action_from_rank_state(
         go_player: state.go_player.map(relative_player),
         last_player: state.last_player.map(relative_player),
         plays: state.plays.iter().copied().map(peg_card_for_rank).collect(),
+        public_history: state.information_set(actor)?.history()?,
         peg_lead: None,
         model16_policy_mode: Model16PolicyMode::Argmax,
         model16_policy_sample: 0,
+        decision_seed: 0,
     };
     let legal = input
         .ai_hand
@@ -887,7 +1088,7 @@ pub fn model16_policy_action_from_rank_state(
         .copied()
         .filter(|card| input.count + card.value <= 31)
         .collect::<Vec<_>>();
-    let decision = recommend_peg_model16(&input, &legal, policy)?;
+    let decision = recommend_peg_model16(&input, &legal, policy, Model16Fallback::Heuristic)?;
     match decision {
         Decision::Peg {
             action,
@@ -984,6 +1185,22 @@ fn model16_policy_key(input: &DecisionInput) -> Result<PolicyInformationSetKey, 
     })
 }
 
+fn model163_scorer_key(input: &DecisionInput) -> Result<PegInformationSetKey, String> {
+    PegInformationSetKey::from_observation(PegObservation {
+        role: input.role,
+        my_score: input.ai_score,
+        opponent_score: input.human_score,
+        own_hand: &input.ai_hand,
+        own_discards: &input.own_discards,
+        turn_card: input.turn_card,
+        count: input.count,
+        current: InfoActor::SelfPlayer,
+        go_player: model16_policy_actor(input.go_player),
+        last_player: model16_policy_actor(input.last_player),
+        history: &input.public_history,
+    })
+}
+
 fn model16_policy_actor(player: Option<PlayerKey>) -> Option<InfoActor> {
     player.map(|player| match player {
         PlayerKey::Ai => InfoActor::SelfPlayer,
@@ -1058,6 +1275,162 @@ fn compare_model16_heuristic(left: [f64; 7], right: [f64; 7]) -> std::cmp::Order
         }
     }
     std::cmp::Ordering::Equal
+}
+
+fn recommend_discard_model90(input: &DecisionInput, root: &str) -> Result<Decision, String> {
+    let table = runtime_tables(root)?.discard90()?;
+    let six = rank_counts(&input.ai_hand);
+    let mut deck = full_deck();
+    deck.retain(|card| !input.ai_hand.iter().any(|held| held.id == card.id));
+    let mut recommended: Option<(Vec<Card>, f64, Option<u8>)> = None;
+    for discard_indices in crate::cards::combinations_indices(input.ai_hand.len(), 2) {
+        let discard = discard_indices
+            .iter()
+            .map(|index| input.ai_hand[*index])
+            .collect::<Vec<_>>();
+        let keep = input
+            .ai_hand
+            .iter()
+            .enumerate()
+            .filter_map(|(index, card)| (!discard_indices.contains(&index)).then_some(*card))
+            .collect::<Vec<_>>();
+        let hand_ev = deck
+            .iter()
+            .map(|cut| f64::from(score_hand(&keep, *cut, false)))
+            .sum::<f64>()
+            / deck.len() as f64;
+        let crib_ev = model91_schell_crib_ev(&input.ai_hand, &discard, input.role)?;
+        let pegging = table
+            .get(&six, &rank_counts(&discard), input.role)
+            .ok_or_else(|| "historical Model 9.0 discard row is missing".to_string())?;
+        let total_ev = hand_ev
+            + match input.role {
+                Role::Dealer => crib_ev,
+                Role::Pone => -crib_ev,
+            }
+            + pegging.my_ev
+            - pegging.opponent_ev;
+        if recommended
+            .as_ref()
+            .is_none_or(|(_, current_ev, _)| total_ev > *current_ev)
+        {
+            recommended = Some((discard, total_ev, pegging.best_lead));
+        }
+    }
+    let (discard, total_ev, _historical_best_lead) = recommended
+        .ok_or_else(|| "no historical Model 9.0 discard candidate evaluated".to_string())?;
+    Ok(Decision::Discard {
+        card_ids: discard.iter().map(|card| card.id).collect(),
+        // The cut is not known until after both discards. Recompute the lead
+        // from the complete legal Model 9.x observation at pegging time.
+        best_lead: None,
+        ev: Some(total_ev),
+        win_probability: None,
+    })
+}
+
+fn recommend_discard_model91(input: &DecisionInput, root: &str) -> Result<Decision, String> {
+    let table = runtime_tables(root)?.discard91()?;
+    let six = rank_counts(&input.ai_hand);
+    let mut deck = full_deck();
+    deck.retain(|card| !input.ai_hand.iter().any(|held| held.id == card.id));
+    let mut recommended: Option<(Vec<Card>, f64, Option<u8>)> = None;
+    for discard_indices in crate::cards::combinations_indices(input.ai_hand.len(), 2) {
+        let discard = discard_indices
+            .iter()
+            .map(|index| input.ai_hand[*index])
+            .collect::<Vec<_>>();
+        let keep = input
+            .ai_hand
+            .iter()
+            .enumerate()
+            .filter_map(|(index, card)| (!discard_indices.contains(&index)).then_some(*card))
+            .collect::<Vec<_>>();
+        let hand_ev = deck
+            .iter()
+            .map(|cut| f64::from(score_hand(&keep, *cut, false)))
+            .sum::<f64>()
+            / deck.len() as f64;
+        let crib_ev = model91_schell_crib_ev(&input.ai_hand, &discard, input.role)?;
+        // This row was built by removing all six visible cards, exactly
+        // reweighting every compatible opponent four-card keep, and summing
+        // the observation-only pair outcomes. Runtime is therefore the
+        // requested direct lookup rather than a scan of opponent keeps.
+        let pegging = table
+            .record_for(&six, &rank_counts(&discard), input.role)
+            .ok_or_else(|| "Model 9.1 discard EV row is missing".to_string())?;
+        let total_ev = hand_ev
+            + match input.role {
+                Role::Dealer => crib_ev,
+                Role::Pone => -crib_ev,
+            }
+            + (f64::from(pegging.my_weighted_points) - f64::from(pegging.opponent_weighted_points))
+                / f64::from(pegging.total_weight);
+        if recommended
+            .as_ref()
+            .is_none_or(|(_, current_ev, _)| total_ev > *current_ev)
+        {
+            recommended = Some((discard, total_ev, pegging.best_lead));
+        }
+    }
+    let (discard, total_ev, _precomputed_best_lead) =
+        recommended.ok_or_else(|| "no Model 9.1 discard candidate evaluated".to_string())?;
+    Ok(Decision::Discard {
+        card_ids: discard.iter().map(|card| card.id).collect(),
+        // The cut is not known until after both discards. Recompute the lead
+        // from the complete legal Model 9.x observation at pegging time.
+        best_lead: None,
+        ev: Some(total_ev),
+        win_probability: None,
+    })
+}
+
+fn recommend_peg_model91(
+    input: &DecisionInput,
+    legal: &[Card],
+    tables: &RuntimeTables,
+) -> Result<Decision, String> {
+    let relative_actor = |player: PlayerKey| {
+        if player == PlayerKey::Ai {
+            Model91Actor::SelfPlayer
+        } else {
+            Model91Actor::Opponent
+        }
+    };
+    let current_series = input.plays.iter().map(|card| card.rank).collect::<Vec<_>>();
+    let observation = Model91Observation::from_public_state(
+        input.role,
+        rank_counts(&input.ai_hand),
+        rank_counts(&input.ai_table),
+        rank_counts(&input.human_table),
+        rank_counts(&input.own_discards),
+        Some(input.turn_card.rank),
+        &current_series,
+        input.count,
+        input.go_player.map(relative_actor),
+        input.last_player.map(relative_actor),
+    )?;
+    let action = tables.with_policy91(|policy| policy.choose_action(&observation))?;
+    let rank = match action {
+        RankPegAction::Play(rank) => rank,
+        RankPegAction::Go => {
+            return Err("Model 9.1 policy returned go when legal cards exist".to_string())
+        }
+    };
+    let card = legal
+        .iter()
+        .copied()
+        .find(|card| card.rank == rank)
+        .ok_or_else(|| "Model 9.1 policy selected an unavailable rank".to_string())?;
+    let mut plays = input.plays.clone();
+    plays.push(card);
+    Ok(Decision::Peg {
+        action: "play".to_string(),
+        card_id: Some(card.id),
+        ev: Some(f64::from(score_count(&plays))),
+        win_probability: None,
+        model16_policy: None,
+    })
 }
 
 #[derive(Clone)]
@@ -1140,11 +1513,81 @@ fn recommend_discard_model13(input: &DecisionInput, root: &str) -> Result<Decisi
     };
     Ok(Decision::Discard {
         card_ids: discard.iter().map(|card| card.id).collect(),
-        best_lead: if evaluation.best_lead >= 0 {
-            Some(evaluation.best_lead as u8)
-        } else {
-            None
-        },
+        // Preserve Model 13.0's lead-selection logic inside the discard
+        // forecast, but recompute the executable lead after the cut.
+        best_lead: None,
+        ev: Some(evaluation.total_ev),
+        win_probability: Some(evaluation.win_probability),
+    })
+}
+
+/// Model 13.1 is a narrow discard-asset ablation. It keeps the frozen Model
+/// 13.0 hand, crib, board, lead-selection, live-pegging, and tie-break logic,
+/// while replacing only the pegging distribution used to evaluate discards.
+fn recommend_discard_model131(input: &DecisionInput, root: &str) -> Result<Decision, String> {
+    let tables = runtime_tables(root)?;
+    let crib_rank = tables.crib_rank()?;
+    let histogram = tables.discard_hist131()?;
+    let mut seen_cards = [false; 52];
+    for card in &input.ai_hand {
+        seen_cards[card.id as usize] = true;
+    }
+    let deck: Vec<Card> = full_deck()
+        .into_iter()
+        .filter(|card| !seen_cards[card.id as usize])
+        .collect();
+    let role = input.role;
+    let mut board = BoardModel::new();
+    let crib_flush_bonus_by_suit = crib_flush_bonuses_by_suit(&input.ai_hand);
+    let mut recommended: Option<(Vec<Card>, CandidateEvaluation)> = None;
+
+    for discard_indices in crate::cards::combinations_indices(input.ai_hand.len(), 2) {
+        let discard = discard_indices
+            .iter()
+            .map(|index| input.ai_hand[*index])
+            .collect::<Vec<_>>();
+        let keep = input
+            .ai_hand
+            .iter()
+            .enumerate()
+            .filter_map(|(index, card)| (!discard_indices.contains(&index)).then_some(*card))
+            .collect::<Vec<_>>();
+        let Some(evaluation) = evaluate_discard_candidate_model131(
+            &input.ai_hand,
+            &keep,
+            &discard,
+            &deck,
+            role,
+            input.ai_score,
+            input.human_score,
+            &crib_flush_bonus_by_suit,
+            crib_rank,
+            histogram,
+            &mut board,
+        ) else {
+            continue;
+        };
+        let should_replace = match &recommended {
+            None => true,
+            Some((_, current)) => {
+                evaluation.win_probability > current.win_probability
+                    || (evaluation.win_probability == current.win_probability
+                        && evaluation.total_ev > current.total_ev)
+            }
+        };
+        if should_replace {
+            recommended = Some((discard, evaluation));
+        }
+    }
+
+    let Some((discard, evaluation)) = recommended else {
+        return Err("no 13.1 discard candidate evaluated".to_string());
+    };
+    Ok(Decision::Discard {
+        card_ids: discard.iter().map(|card| card.id).collect(),
+        // Preserve Model 13.0's lead-selection logic inside the discard
+        // forecast, but recompute the executable lead after the cut.
+        best_lead: None,
         ev: Some(evaluation.total_ev),
         win_probability: Some(evaluation.win_probability),
     })
@@ -1286,6 +1729,88 @@ fn evaluate_discard_candidate_model13(
     best
 }
 
+#[allow(clippy::too_many_arguments)]
+fn evaluate_discard_candidate_model131(
+    full_hand: &[Card],
+    keep: &[Card],
+    discard: &[Card],
+    deck: &[Card],
+    role: Role,
+    player_score: i32,
+    opponent_score: i32,
+    crib_flush_bonus_by_suit: &[f64; 4],
+    crib_rank: &CribRankDiscardTables,
+    histogram: &Model131DiscardHistogramTable,
+    board: &mut BoardModel,
+) -> Option<CandidateEvaluation> {
+    let (hand_score, crib_score) = model13_rank_cut_discard_scores(
+        keep,
+        discard,
+        deck,
+        role,
+        crib_flush_bonus_by_suit,
+        crib_rank,
+    );
+    let pegging = model131_pegging_discard_option(full_hand, discard, role, histogram)?;
+    let net_pegging = pegging.my_ev - pegging.opponent_ev;
+    let total_ev = (if role == Role::Dealer {
+        hand_score + crib_score
+    } else {
+        hand_score - crib_score
+    }) + net_pegging;
+    let win_probability = model13_discard_candidate_win_probability(
+        full_hand,
+        keep,
+        discard,
+        deck,
+        role,
+        &pegging,
+        player_score,
+        opponent_score,
+        crib_rank,
+        board,
+    );
+    Some(CandidateEvaluation {
+        win_probability,
+        total_ev,
+        best_lead: pegging.best_lead,
+    })
+}
+
+fn model131_pegging_discard_option(
+    full_hand: &[Card],
+    discard: &[Card],
+    role: Role,
+    histogram: &Model131DiscardHistogramTable,
+) -> Option<Model13PeggingOption> {
+    let six = rank_counts(full_hand);
+    let discard_ranks = rank_counts(discard);
+    let row = histogram.row_for(&six, &discard_ranks, role)?;
+    let mut hist = WeightedPairI32::default();
+    let mut my_total = 0_u64;
+    let mut opponent_total = 0_u64;
+    for bin in row.bins() {
+        add_weight_pair_i32(
+            &mut hist,
+            (i32::from(bin.my_points), i32::from(bin.opponent_points)),
+            f64::from(bin.weight),
+        );
+        my_total += u64::from(bin.my_points) * u64::from(bin.weight);
+        opponent_total += u64::from(bin.opponent_points) * u64::from(bin.weight);
+    }
+    let total_weight = f64::from(row.total_weight());
+    Some(Model13PeggingOption {
+        my_ev: my_total as f64 / total_weight,
+        opponent_ev: opponent_total as f64 / total_weight,
+        // Discard recommendations no longer return a pre-cut executable lead.
+        // The live Model 13 evaluator chooses the actual pone lead after the
+        // cut, so scanning the pairwise table here cannot affect the decision.
+        best_lead: -1,
+        hist,
+        total_weight,
+    })
+}
+
 fn recommend_peg_model13(
     input: &DecisionInput,
     tables: &RuntimeTables,
@@ -1297,24 +1822,6 @@ fn recommend_peg_model13(
         .copied()
         .filter(|card| input.count + card.value <= 31)
         .collect();
-    if input.role == Role::Pone
-        && input.count == 0
-        && input.plays.is_empty()
-        && input.ai_hand.len() == 4
-    {
-        if let Some(lead_rank) = input.peg_lead {
-            if let Some(card) = legal.iter().copied().find(|card| card.rank == lead_rank) {
-                let ev = exhaustive_pegging_play_ev_with_weighting(input, card, hold, false);
-                return Ok(Decision::Peg {
-                    action: "play".to_string(),
-                    card_id: Some(card.id),
-                    ev: Some(ev),
-                    win_probability: None,
-                    model16_policy: None,
-                });
-            }
-        }
-    }
     let opponent_role = other_role(input.role);
     let known_cards = known_cards_for_pegging(input);
     let available_ranks = remaining_rank_counts(&known_cards);
@@ -4321,6 +4828,10 @@ impl RuntimeTables {
     fn new(root: &str) -> RuntimeTables {
         RuntimeTables {
             root: root.to_string(),
+            discard90: OnceLock::new(),
+            discard91: OnceLock::new(),
+            discard_hist131: OnceLock::new(),
+            beliefs91: OnceLock::new(),
             empirical: OnceLock::new(),
             pairwise: OnceLock::new(),
             pairwise14: OnceLock::new(),
@@ -4328,7 +4839,46 @@ impl RuntimeTables {
             crib_rank: OnceLock::new(),
             crib_tripolicy14: OnceLock::new(),
             policy16: OnceLock::new(),
+            scorer163: OnceLock::new(),
         }
+    }
+
+    fn discard90(&self) -> Result<&Model90DiscardTable, String> {
+        load_cached(&self.discard90, "discard90", || {
+            Model90DiscardTable::load(self.asset_path("model90-discard-ev.bin"))
+        })
+    }
+
+    fn discard91(&self) -> Result<&Model91DiscardEvTable, String> {
+        load_cached(&self.discard91, "discard91", || {
+            Model91DiscardEvTable::load(self.asset_path("model91-discard-ev.bin"))
+        })
+    }
+
+    fn discard_hist131(&self) -> Result<&Model131DiscardHistogramTable, String> {
+        load_cached(&self.discard_hist131, "discard_hist131", || {
+            Model131DiscardHistogramTable::load(self.asset_path("model131-discard-histograms.bin"))
+        })
+    }
+
+    fn beliefs91(&self) -> Result<&Model91EmpiricalBeliefs, String> {
+        load_cached(&self.beliefs91, "beliefs91", || {
+            Model91EmpiricalBeliefs::load(self.asset_path("model91-pegging-beliefs.bin"))
+        })
+    }
+
+    fn with_policy91<T>(
+        &self,
+        use_policy: impl FnOnce(&mut Model91Policy) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let beliefs = self.beliefs91()?;
+        MODEL91_WORKER_POLICIES.with(|policies| {
+            let mut policies = policies.borrow_mut();
+            let policy = policies
+                .entry(self.root.clone())
+                .or_insert_with(|| Model91Policy::new(Some(beliefs.clone()), 100_000));
+            use_policy(policy)
+        })
     }
 
     fn empirical(&self) -> Result<&EmpiricalDiscardKeepTable, String> {
@@ -4385,6 +4935,23 @@ impl RuntimeTables {
             .get()
             .map(Option::as_ref)
             .ok_or_else(|| "RuntimeTables policy16 cache was not initialized".to_string())
+    }
+
+    fn scorer163(&self) -> Result<Option<&Model162ActionScorer>, String> {
+        if let Some(scorer) = self.scorer163.get() {
+            return Ok(scorer.as_ref());
+        }
+        let path = self.asset_path("model163-action-scorer.bin");
+        let scorer = match fs::metadata(&path) {
+            Ok(_) => Some(Model162ActionScorer::load(&path)?),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(format!("stat {} failed: {}", path.display(), error)),
+        };
+        let _ = self.scorer163.set(scorer);
+        self.scorer163
+            .get()
+            .map(Option::as_ref)
+            .ok_or_else(|| "RuntimeTables scorer163 cache was not initialized".to_string())
     }
 
     fn asset_path(&self, filename: &str) -> PathBuf {
@@ -4502,6 +5069,46 @@ fn parse_model16_policy_mode(value: &str) -> Result<Model16PolicyMode, String> {
     }
 }
 
+/// Parse the compact, public-only history used by the standalone decision
+/// interface: `s4,o8,sg,og,r` means self played rank 4, opponent played rank
+/// 8, self go, opponent go, reset.  Normal game and playout code supplies the
+/// same data directly from the authoritative game history.
+fn parse_public_peg_history(value: &str) -> Result<Vec<PublicPegEvent>, String> {
+    if value.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut history = Vec::new();
+    for event in value.split(',') {
+        let event = event.trim();
+        let parsed = if event == "sg" {
+            PublicPegEvent::SelfGo
+        } else if event == "og" {
+            PublicPegEvent::OpponentGo
+        } else if event == "r" {
+            PublicPegEvent::Reset
+        } else if let Some(rank) = event.strip_prefix('s') {
+            let rank = parse_u8(rank)?;
+            if rank >= 13 {
+                return Err(format!("invalid self public pegging rank {}", rank));
+            }
+            PublicPegEvent::SelfPlay(rank)
+        } else if let Some(rank) = event.strip_prefix('o') {
+            let rank = parse_u8(rank)?;
+            if rank >= 13 {
+                return Err(format!("invalid opponent public pegging rank {}", rank));
+            }
+            PublicPegEvent::OpponentPlay(rank)
+        } else {
+            return Err(format!("invalid public pegging history event {}", event));
+        };
+        history.push(parsed);
+    }
+    if history.len() > 32 {
+        return Err("public pegging history has more than 32 events".to_string());
+    }
+    Ok(history)
+}
+
 fn parse_optional_u8(value: &str) -> Result<Option<u8>, String> {
     if value == "-" || value.is_empty() {
         return Ok(None);
@@ -4537,6 +5144,7 @@ fn round_ev(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model162::Model162ActionAdvantageEntry;
     use crate::policy::{PolicyArtifactMetadata, QuantizedPolicyEntry, POLICY_WEIGHT_TOTAL};
 
     fn model16_peg_input() -> DecisionInput {
@@ -4558,9 +5166,11 @@ mod tests {
             go_player: None,
             last_player: Some(PlayerKey::Human),
             plays: cards_from_ids(&[9]).unwrap(),
+            public_history: vec![PublicPegEvent::OpponentPlay(2)],
             peg_lead: None,
             model16_policy_mode: Model16PolicyMode::Argmax,
             model16_policy_sample: 0,
+            decision_seed: 0,
         }
     }
 
@@ -4619,6 +5229,50 @@ mod tests {
             winner: None,
             complete: false,
         }
+    }
+
+    #[test]
+    fn model91_policy_access_allows_concurrent_workers() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::{Arc, Barrier};
+        use std::time::Duration;
+
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|path| path.parent())
+            .expect("workspace root")
+            .to_path_buf();
+        let tables = Arc::new(RuntimeTables::new(
+            root.to_str().expect("workspace root utf-8"),
+        ));
+        let start = Arc::new(Barrier::new(3));
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let mut workers = Vec::new();
+        for _ in 0..2 {
+            let tables = Arc::clone(&tables);
+            let start = Arc::clone(&start);
+            let active = Arc::clone(&active);
+            let peak = Arc::clone(&peak);
+            workers.push(std::thread::spawn(move || {
+                start.wait();
+                tables
+                    .with_policy91(|_| {
+                        let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(current, Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(250));
+                        active.fetch_sub(1, Ordering::SeqCst);
+                        Ok(())
+                    })
+                    .unwrap();
+            }));
+        }
+        start.wait();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+
+        assert_eq!(peak.load(Ordering::SeqCst), 2);
     }
 
     fn current_hand_outcome(
@@ -4812,9 +5466,17 @@ mod tests {
     #[test]
     fn model16_policy_overrides_backoff_without_hidden_hand_search() {
         let input = model16_peg_input();
-        let fallback = recommend_peg_model16(&input, &input.ai_hand, None).unwrap();
+        let fallback =
+            recommend_peg_model16(&input, &input.ai_hand, None, Model16Fallback::Heuristic)
+                .unwrap();
         let artifact = model16_artifact(&input, 5);
-        let learned = recommend_peg_model16(&input, &input.ai_hand, Some(&artifact)).unwrap();
+        let learned = recommend_peg_model16(
+            &input,
+            &input.ai_hand,
+            Some(&artifact),
+            Model16Fallback::Heuristic,
+        )
+        .unwrap();
 
         assert!(matches!(
             fallback,
@@ -4878,7 +5540,13 @@ mod tests {
 
         input.model16_policy_sample = 0;
         assert!(matches!(
-            recommend_peg_model16(&input, &input.ai_hand, Some(&artifact)).unwrap(),
+            recommend_peg_model16(
+                &input,
+                &input.ai_hand,
+                Some(&artifact),
+                Model16Fallback::Heuristic,
+            )
+            .unwrap(),
             Decision::Peg {
                 card_id: Some(4),
                 ..
@@ -4886,7 +5554,13 @@ mod tests {
         ));
         input.model16_policy_sample = 32_766;
         assert!(matches!(
-            recommend_peg_model16(&input, &input.ai_hand, Some(&artifact)).unwrap(),
+            recommend_peg_model16(
+                &input,
+                &input.ai_hand,
+                Some(&artifact),
+                Model16Fallback::Heuristic,
+            )
+            .unwrap(),
             Decision::Peg {
                 card_id: Some(4),
                 ..
@@ -4894,7 +5568,13 @@ mod tests {
         ));
         input.model16_policy_sample = 32_767;
         assert!(matches!(
-            recommend_peg_model16(&input, &input.ai_hand, Some(&artifact)).unwrap(),
+            recommend_peg_model16(
+                &input,
+                &input.ai_hand,
+                Some(&artifact),
+                Model16Fallback::Heuristic,
+            )
+            .unwrap(),
             Decision::Peg {
                 card_id: Some(5),
                 ..
@@ -4902,7 +5582,13 @@ mod tests {
         ));
         input.model16_policy_sample = 65_534;
         assert!(matches!(
-            recommend_peg_model16(&input, &input.ai_hand, Some(&artifact)).unwrap(),
+            recommend_peg_model16(
+                &input,
+                &input.ai_hand,
+                Some(&artifact),
+                Model16Fallback::Heuristic,
+            )
+            .unwrap(),
             Decision::Peg {
                 card_id: Some(5),
                 ..
@@ -4916,7 +5602,13 @@ mod tests {
         input.model16_policy_mode = Model16PolicyMode::Fallback;
         let artifact = model16_artifact(&input, 5);
         assert!(matches!(
-            recommend_peg_model16(&input, &input.ai_hand, Some(&artifact)).unwrap(),
+            recommend_peg_model16(
+                &input,
+                &input.ai_hand,
+                Some(&artifact),
+                Model16Fallback::Heuristic,
+            )
+            .unwrap(),
             Decision::Peg {
                 card_id: Some(4),
                 model16_policy: Some(Model16PolicyDecision {
@@ -4945,10 +5637,20 @@ mod tests {
             model16_policy_key(&alternate_world).unwrap()
         );
 
-        let first = recommend_peg_model16(&input, &input.ai_hand, Some(&artifact)).unwrap();
-        let second =
-            recommend_peg_model16(&alternate_world, &alternate_world.ai_hand, Some(&artifact))
-                .unwrap();
+        let first = recommend_peg_model16(
+            &input,
+            &input.ai_hand,
+            Some(&artifact),
+            Model16Fallback::Heuristic,
+        )
+        .unwrap();
+        let second = recommend_peg_model16(
+            &alternate_world,
+            &alternate_world.ai_hand,
+            Some(&artifact),
+            Model16Fallback::Heuristic,
+        )
+        .unwrap();
         assert_eq!(decision_json(&first), decision_json(&second));
     }
 
@@ -4970,6 +5672,224 @@ mod tests {
         assert!(std::ptr::eq(first, second));
         assert_eq!(first, &artifact);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn model161_policy_miss_delegates_to_the_frozen_model13_pegging_path() {
+        let mut input = model16_peg_input();
+        input.model = MODEL_16_1.to_string();
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|path| path.parent())
+            .expect("workspace root")
+            .to_path_buf();
+        let tables = RuntimeTables::new(root.to_str().expect("workspace root utf-8"));
+        let mut expected_input = input.clone();
+        expected_input.model = MODEL_13_0.to_string();
+        let expected = recommend_peg_model13(&expected_input, &tables).unwrap();
+        let actual = recommend_peg_model16(
+            &input,
+            &input.ai_hand,
+            None,
+            Model16Fallback::Model13(&tables),
+        )
+        .unwrap();
+
+        match (expected, actual) {
+            (
+                Decision::Peg {
+                    action: expected_action,
+                    card_id: expected_card_id,
+                    ev: expected_ev,
+                    win_probability: expected_win_probability,
+                    ..
+                },
+                Decision::Peg {
+                    action,
+                    card_id,
+                    ev,
+                    win_probability,
+                    model16_policy:
+                        Some(Model16PolicyDecision {
+                            source: Model16PolicySource::Fallback,
+                            confidence: None,
+                            selected_weight: None,
+                        }),
+                },
+            ) => {
+                assert_eq!(action, expected_action);
+                assert_eq!(card_id, expected_card_id);
+                assert_eq!(ev, expected_ev);
+                assert_eq!(win_probability, expected_win_probability);
+            }
+            other => panic!("expected Model 13 fallback parity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn model131_live_pegging_is_exactly_model13() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|path| path.parent())
+            .expect("workspace root")
+            .to_path_buf();
+        let mut model13_input = model16_peg_input();
+        model13_input.model = MODEL_13_0.to_string();
+        let expected =
+            recommend_peg(&model13_input, root.to_str().expect("workspace root utf-8")).unwrap();
+        let mut model131_input = model13_input.clone();
+        model131_input.model = MODEL_13_1.to_string();
+        let actual = recommend_peg(
+            &model131_input,
+            root.to_str().expect("workspace root utf-8"),
+        )
+        .unwrap();
+
+        match (expected, actual) {
+            (
+                Decision::Peg {
+                    action: expected_action,
+                    card_id: expected_card_id,
+                    ev: expected_ev,
+                    win_probability: expected_win_probability,
+                    ..
+                },
+                Decision::Peg {
+                    action,
+                    card_id,
+                    ev,
+                    win_probability,
+                    ..
+                },
+            ) => {
+                assert_eq!(action, expected_action);
+                assert_eq!(card_id, expected_card_id);
+                assert_eq!(ev, expected_ev);
+                assert_eq!(win_probability, expected_win_probability);
+            }
+            other => panic!("expected identical Model 13 pegging decisions, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn model131_discard_histogram_does_not_require_model13_pairwise_scan() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|path| path.parent())
+            .expect("workspace root")
+            .to_path_buf();
+        let tables = RuntimeTables::new(root.to_str().expect("workspace root utf-8"));
+        let full_hand = cards_from_ids(&[0, 5, 10, 15, 20, 25]).unwrap();
+        let discard = full_hand[..2].to_vec();
+        let actual = model131_pegging_discard_option(
+            &full_hand,
+            &discard,
+            Role::Pone,
+            tables.discard_hist131().unwrap(),
+        )
+        .expect("Model 13.1 discard pegging option");
+
+        assert_eq!(actual.best_lead, -1);
+        assert!(actual.total_weight > 0.0);
+        assert!(!actual.hist.entries.is_empty());
+    }
+
+    #[test]
+    fn model163_scorer_uses_public_history_without_an_exact_lookup() {
+        let mut input = model16_peg_input();
+        input.model = MODEL_16_3.to_string();
+        input.public_history = vec![
+            PublicPegEvent::OpponentPlay(2),
+            PublicPegEvent::OpponentGo,
+            PublicPegEvent::Reset,
+        ];
+        let key = model163_scorer_key(&input).unwrap();
+        let mut advantages = [0_i16; 14];
+        advantages[4] = -100;
+        advantages[5] = 100;
+        let scorer = Model162ActionScorer::build_from_action_advantages(
+            163,
+            &[Model162ActionAdvantageEntry {
+                key,
+                legal_mask: model163_scorer_key(&input).unwrap().expected_legal_mask(),
+                confidence: 1,
+                advantages,
+            }],
+            64,
+            1,
+            "model163-runtime-test".to_string(),
+        )
+        .unwrap();
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|path| path.parent())
+            .expect("workspace root")
+            .to_path_buf();
+        let tables = RuntimeTables::new(root.to_str().expect("workspace root utf-8"));
+        let decision =
+            recommend_peg_model163(&input, &input.ai_hand, Some(&scorer), &tables).unwrap();
+        assert!(matches!(
+            decision,
+            Decision::Peg {
+                card_id: Some(5),
+                model16_policy: Some(Model16PolicyDecision {
+                    source: Model16PolicySource::Scorer,
+                    confidence: None,
+                    ..
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn model163_without_a_scorer_is_exactly_model13() {
+        let mut input = model16_peg_input();
+        input.model = MODEL_16_3.to_string();
+        input.public_history = vec![
+            PublicPegEvent::OpponentPlay(2),
+            PublicPegEvent::OpponentGo,
+            PublicPegEvent::Reset,
+        ];
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|path| path.parent())
+            .expect("workspace root")
+            .to_path_buf();
+        let tables = RuntimeTables::new(root.to_str().expect("workspace root utf-8"));
+        let mut model13_input = input.clone();
+        model13_input.model = MODEL_13_0.to_string();
+        let expected = recommend_peg_model13(&model13_input, &tables).unwrap();
+        let actual = recommend_peg_model163(&input, &input.ai_hand, None, &tables).unwrap();
+        match (expected, actual) {
+            (
+                Decision::Peg {
+                    action: expected_action,
+                    card_id: expected_card_id,
+                    ev: expected_ev,
+                    win_probability: expected_win_probability,
+                    ..
+                },
+                Decision::Peg {
+                    action,
+                    card_id,
+                    ev,
+                    win_probability,
+                    model16_policy:
+                        Some(Model16PolicyDecision {
+                            source: Model16PolicySource::Fallback,
+                            confidence: None,
+                            selected_weight: None,
+                        }),
+                },
+            ) => {
+                assert_eq!(action, expected_action);
+                assert_eq!(card_id, expected_card_id);
+                assert_eq!(ev, expected_ev);
+                assert_eq!(win_probability, expected_win_probability);
+            }
+            other => panic!("expected Model 13 fallback parity, got {other:?}"),
+        }
     }
 
     #[test]
@@ -5001,6 +5921,8 @@ mod tests {
         let mut model16 = input.clone();
         model16.model = MODEL_16_0.to_string();
         assert!(!uses_ordered_current_hand_scoring(&input));
+        assert!(uses_ordered_current_hand_scoring(&model16));
+        model16.model = MODEL_16_1.to_string();
         assert!(uses_ordered_current_hand_scoring(&model16));
     }
 }

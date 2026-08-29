@@ -1,5 +1,6 @@
 use crate::board::Role;
 use crate::game::{CribbageGame, Side};
+use crate::information_set::perspective_history;
 use crate::model::{self, Decision, DecisionInput, DecisionKind, Model16PolicyMode, PlayerKey};
 use crate::model_id::ModelId;
 
@@ -190,9 +191,11 @@ fn decision_input(
         go_player: mapped_player(game.go_player, side),
         last_player: mapped_player(game.last_player, side),
         plays: game.plays.clone(),
+        public_history: perspective_history(game, side),
         peg_lead,
         model16_policy_mode: Model16PolicyMode::Argmax,
         model16_policy_sample: 0,
+        decision_seed: 0,
     }
 }
 
@@ -220,19 +223,18 @@ mod tests {
     use crate::model_id::ModelId;
 
     #[test]
-    fn accepts_model13_native_decisions() {
+    fn model13x_discard_decisions_defer_the_executable_lead() {
         let game = CribbageGame::new_with_seed(0x9e3779b9, Side::Left);
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
             .canonicalize()
             .unwrap();
-        let result = recommend_discard_for_side(
-            &game,
-            Side::Left,
-            ModelId::Schell13,
-            root.to_str().unwrap(),
-        );
-        assert!(result.is_ok(), "{:?}", result);
+        for model in [ModelId::Schell13, ModelId::Schell131] {
+            let decision =
+                recommend_discard_for_side(&game, Side::Left, model, root.to_str().unwrap())
+                    .unwrap();
+            assert_eq!(decision.best_lead, None);
+        }
     }
 
     #[test]
@@ -258,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    fn decision_input_exposes_only_the_actors_own_discards() {
+    fn model9_decision_input_exposes_own_discard_and_cut_but_not_opponent_discard() {
         let mut game = CribbageGame::new_with_seed(0x9e3779b9, Side::Left);
         game.discard(Side::Left, [29, 11]).unwrap();
         game.discard(Side::Right, [51, 15]).unwrap();
@@ -266,14 +268,14 @@ mod tests {
         let left = decision_input(
             &game,
             Side::Left,
-            ModelId::Schell13,
+            ModelId::Schell91,
             DecisionKind::Peg,
             None,
         );
         let right = decision_input(
             &game,
             Side::Right,
-            ModelId::Schell13,
+            ModelId::Schell91,
             DecisionKind::Peg,
             None,
         );
@@ -293,6 +295,107 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![51, 15]
         );
+        assert_eq!(left.turn_card, game.turn_card);
+        assert_eq!(right.turn_card, game.turn_card);
         assert_eq!(game.crib.len(), 4);
+    }
+
+    #[test]
+    fn model9_opening_lead_is_recomputed_after_the_cut() {
+        let mut game = CribbageGame::new_with_seed(0x9e3779b9, Side::Left);
+        game.discard(Side::Left, [29, 11]).unwrap();
+        game.discard(Side::Right, [51, 15]).unwrap();
+        let pone = game.pone;
+        let distinct_ranks = game.player(pone).hand.iter().map(|card| card.rank).fold(
+            Vec::new(),
+            |mut ranks, rank| {
+                if !ranks.contains(&rank) {
+                    ranks.push(rank);
+                }
+                ranks
+            },
+        );
+        assert!(distinct_ranks.len() >= 2);
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+
+        let first = recommend_peg_for_side(
+            &game,
+            pone,
+            ModelId::Schell91,
+            Some(distinct_ranks[0]),
+            root.to_str().unwrap(),
+        )
+        .unwrap();
+        let second = recommend_peg_for_side(
+            &game,
+            pone,
+            ModelId::Schell91,
+            Some(distinct_ranks[1]),
+            root.to_str().unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn model13x_opening_lead_is_recomputed_after_the_cut() {
+        let mut game = CribbageGame::new_with_seed(0x9e3779b9, Side::Left);
+        game.discard(Side::Left, [29, 11]).unwrap();
+        game.discard(Side::Right, [51, 15]).unwrap();
+        let pone = game.pone;
+        let distinct_ranks = game.player(pone).hand.iter().map(|card| card.rank).fold(
+            Vec::new(),
+            |mut ranks, rank| {
+                if !ranks.contains(&rank) {
+                    ranks.push(rank);
+                }
+                ranks
+            },
+        );
+        assert!(distinct_ranks.len() >= 2);
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+
+        for model in [ModelId::Schell13, ModelId::Schell131] {
+            let first = recommend_peg_for_side(
+                &game,
+                pone,
+                model,
+                Some(distinct_ranks[0]),
+                root.to_str().unwrap(),
+            )
+            .unwrap();
+            let second = recommend_peg_for_side(
+                &game,
+                pone,
+                model,
+                Some(distinct_ranks[1]),
+                root.to_str().unwrap(),
+            )
+            .unwrap();
+
+            assert_eq!(first, second);
+        }
+    }
+
+    #[test]
+    fn model9_discard_decisions_defer_the_opening_lead() {
+        let game = CribbageGame::new_with_seed(0x9e3779b9, Side::Left);
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        for model in [ModelId::Schell90, ModelId::Schell91] {
+            let decision =
+                recommend_discard_for_side(&game, Side::Left, model, root.to_str().unwrap())
+                    .unwrap();
+            assert_eq!(decision.best_lead, None);
+        }
     }
 }

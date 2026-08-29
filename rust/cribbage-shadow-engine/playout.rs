@@ -1,6 +1,7 @@
 use crate::board::Role;
 use crate::cards::{score_count, score_hand, Card};
 use crate::game::{CribbageGame, Phase, Side};
+use crate::information_set::perspective_history;
 use crate::model::{
     evaluate_decision, Decision, DecisionInput, DecisionKind, Model16PolicyDecision,
     Model16PolicyMode, PlayerKey,
@@ -448,10 +449,28 @@ impl ModelPlayout {
                 }
             }),
             plays: self.game.plays.clone(),
+            public_history: perspective_history(&self.game, side),
             peg_lead: self.peg_leads[side.index()],
             model16_policy_mode: self.model16_policy_mode,
             model16_policy_sample: self.model16_policy_sample(side),
+            decision_seed: self.decision_seed(side, kind),
         }
+    }
+
+    fn decision_seed(&self, side: Side, kind: DecisionKind) -> u64 {
+        let kind_value = match kind {
+            DecisionKind::Discard => 0x4449_5343_4152_4400,
+            DecisionKind::Peg => 0x5045_4747_494e_4700,
+        };
+        let mut value = self.model16_policy_seed
+            ^ kind_value
+            ^ u64::from(self.game.hand_number).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+            ^ (self.record.discards.len() as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9)
+            ^ (self.record.peg_plays.len() as u64).wrapping_mul(0x94d0_49bb_1331_11eb)
+            ^ (side.index() as u64).wrapping_mul(0xd6e8_feb8_6659_fd93);
+        value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        value ^ (value >> 31)
     }
 
     fn model16_policy_sample(&self, side: Side) -> u16 {
@@ -710,6 +729,28 @@ mod tests {
             0x9e3779b9,
             Side::Left,
             ModelId::Schell160,
+            ModelId::Schell152,
+        );
+        assert!(playout.is_ok());
+    }
+
+    #[test]
+    fn playout_accepts_model161() {
+        let playout = ModelPlayout::new(
+            0x9e3779b9,
+            Side::Left,
+            ModelId::Schell161,
+            ModelId::Schell152,
+        );
+        assert!(playout.is_ok());
+    }
+
+    #[test]
+    fn playout_accepts_model162() {
+        let playout = ModelPlayout::new(
+            0x9e3779b9,
+            Side::Left,
+            ModelId::Schell163,
             ModelId::Schell152,
         );
         assert!(playout.is_ok());

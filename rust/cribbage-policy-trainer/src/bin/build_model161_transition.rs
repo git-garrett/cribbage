@@ -225,7 +225,9 @@ fn compile_record(
         let action = model16_policy_action_from_rank_state(&state, actor, Some(policy))?;
         if matches!(action.action, RankPegAction::Play(_)) {
             match action.source {
-                Model16PolicySource::Learned => learned_actions = learned_actions.saturating_add(1),
+                Model16PolicySource::Learned | Model16PolicySource::Scorer => {
+                    learned_actions = learned_actions.saturating_add(1)
+                }
                 Model16PolicySource::Fallback => {
                     fallback_actions = fallback_actions.saturating_add(1)
                 }

@@ -1,10 +1,116 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::Path;
 
+use crate::board::Role;
 use crate::cards::{
     enumerate_rank_count_keys, rank_combination_count, rank_counts_from_key, RANKS,
 };
+use crate::model91::Model91EmpiricalBeliefs;
+
+const MODEL91_PAIR_MAGIC: &[u8; 8] = b"M91PR001";
+const MODEL91_LEAD_MAGIC: &[u8; 8] = b"M91LD001";
+const MODEL91_EV_MAGIC: &[u8; 8] = b"M91EV001";
+const MODEL91_HISTOGRAM_MAGIC: &[u8; 8] = b"M91HS001";
+const MODEL131_HISTOGRAM_MAGIC: &[u8; 8] = b"M131H001";
+const MODEL91_PAIR_HEADER_BYTES: usize = 40;
+const MODEL91_EV_HEADER_BYTES: usize = 24;
+const MODEL91_EV_RECORD_BYTES: usize = 13;
+const MODEL91_HISTOGRAM_HEADER_BYTES: usize = 24;
+const MODEL91_HISTOGRAM_BIN_BYTES: usize = 6;
+const MODEL131_HISTOGRAM_HEADER_BYTES: usize = 24;
+const MODEL131_HISTOGRAM_BIN_BYTES: usize = 4;
+const MODEL131_HISTOGRAM_TOTAL_WEIGHT: u32 = 163_185;
+const MODEL131_HISTOGRAM_WEIGHT_BITS: u32 = 17;
+const MODEL131_HISTOGRAM_PAIR_BITS: u32 = 10;
+const MODEL91_INVALID_PAIR: u16 = u16::MAX;
+const MODEL91_DISCARD_ROWS: usize = 330_590;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Model91PairOutcome {
+    pub dealer_points: u8,
+    pub pone_points: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Model91HistogramBin {
+    pub my_points: u8,
+    pub opponent_points: u8,
+    pub weight: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Model91PeggingSummary {
+    pub my_ev: f64,
+    pub opponent_ev: f64,
+    pub best_lead: Option<u8>,
+    pub total_weight: u32,
+    pub histogram: Vec<Model91HistogramBin>,
+}
+
+pub struct Model91PairTable {
+    pub keep_ranks: Vec<[u8; 13]>,
+    pub keep_id_by_key: HashMap<String, usize>,
+    outcomes: Vec<u16>,
+    pone_leads: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Model91DiscardEvRecord {
+    pub my_weighted_points: u32,
+    pub opponent_weighted_points: u32,
+    pub total_weight: u32,
+    pub best_lead: Option<u8>,
+}
+
+pub struct Model91DiscardEvTable {
+    records: Vec<Model91DiscardEvRecord>,
+    six_row_starts: HashMap<[u8; 13], usize>,
+}
+
+pub struct Model91DiscardHistogramTable {
+    offsets: Vec<u32>,
+    totals: Vec<u32>,
+    bins: Vec<Model91HistogramBin>,
+    six_row_starts: HashMap<[u8; 13], usize>,
+}
+
+/// A single exact Model 13.1 joint pegging histogram row.
+///
+/// The on-disk packing remains private to the artifact module. Callers see
+/// the same legal `(my points, opponent points, weight)` values as the source
+/// Model 9.1 histogram.
+pub struct Model131HistogramRow<'a> {
+    packed_bins: &'a [u8],
+}
+
+impl Model131HistogramRow<'_> {
+    pub fn total_weight(&self) -> u32 {
+        MODEL131_HISTOGRAM_TOTAL_WEIGHT
+    }
+
+    pub fn bins(&self) -> impl Iterator<Item = Model91HistogramBin> + '_ {
+        self.packed_bins
+            .chunks_exact(MODEL131_HISTOGRAM_BIN_BYTES)
+            .map(|bytes| {
+                let packed = u32::from_le_bytes(bytes.try_into().expect("four-byte bin"));
+                unpack_model131_histogram_bin(packed).expect("validated Model 13.1 bin")
+            })
+    }
+}
+
+/// Exact compact joint pegging histograms used by Model 13.1.
+///
+/// Row counts are stored as one byte because the complete source asset's
+/// maximum is 156. Each four-byte bin packs a ten-bit score pair and the
+/// original, unquantized seventeen-bit weight. This keeps the durable runtime
+/// asset below 100 MB without changing a single probability.
+pub struct Model131DiscardHistogramTable {
+    bytes: Vec<u8>,
+    row_bin_offsets: Vec<u32>,
+    bins_start: usize,
+    six_row_starts: HashMap<[u8; 13], usize>,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PairwiseRecord {
@@ -150,6 +256,662 @@ fn read_u32_vec(bytes: &[u8], offset: usize, count: usize) -> Result<Vec<u32>, S
         values.push(read_u32_le(bytes, offset + (index * 4))?);
     }
     Ok(values)
+}
+
+fn unpack_model91_pair(value: u16) -> Result<Option<Model91PairOutcome>, String> {
+    if value == MODEL91_INVALID_PAIR {
+        return Ok(None);
+    }
+    if value >> 10 != 0 {
+        return Err(format!(
+            "Model 9.1 pair record has reserved bits set: {:#06x}",
+            value
+        ));
+    }
+    Ok(Some(Model91PairOutcome {
+        dealer_points: (value & 0x1f) as u8,
+        pone_points: ((value >> 5) & 0x1f) as u8,
+    }))
+}
+
+impl Model91PairTable {
+    pub fn load(
+        pair_path: impl AsRef<Path>,
+        lead_path: impl AsRef<Path>,
+    ) -> Result<Model91PairTable, String> {
+        let pair_path = pair_path.as_ref();
+        let pair_bytes = fs::read(pair_path).map_err(|error| {
+            format!(
+                "read Model 9.1 pair table {} failed: {}",
+                pair_path.display(),
+                error
+            )
+        })?;
+        if pair_bytes.len() < MODEL91_PAIR_HEADER_BYTES || &pair_bytes[..8] != MODEL91_PAIR_MAGIC {
+            return Err("invalid Model 9.1 pair table header".to_string());
+        }
+        let version = read_u32_le(&pair_bytes, 8)?;
+        let keep_count = read_u32_le(&pair_bytes, 12)? as usize;
+        let dealer_start = read_u32_le(&pair_bytes, 16)? as usize;
+        let dealer_count = read_u32_le(&pair_bytes, 20)? as usize;
+        let pone_start = read_u32_le(&pair_bytes, 24)? as usize;
+        let pone_count = read_u32_le(&pair_bytes, 28)? as usize;
+        let keep_keys = enumerate_rank_count_keys(4);
+        if version != 1
+            || keep_count != keep_keys.len()
+            || dealer_start != 0
+            || dealer_count != keep_count
+            || pone_start != 0
+            || pone_count != keep_count
+        {
+            return Err(format!(
+                "unsupported or incomplete Model 9.1 pair table: v{}, keeps {}, dealer {}+{}, pone {}+{}",
+                version, keep_count, dealer_start, dealer_count, pone_start, pone_count
+            ));
+        }
+        let expected_pair_bytes = MODEL91_PAIR_HEADER_BYTES
+            .checked_add(
+                keep_count
+                    .checked_mul(keep_count)
+                    .and_then(|records| records.checked_mul(2))
+                    .ok_or_else(|| "Model 9.1 pair table size overflow".to_string())?,
+            )
+            .ok_or_else(|| "Model 9.1 pair table size overflow".to_string())?;
+        if pair_bytes.len() != expected_pair_bytes {
+            return Err(format!(
+                "Model 9.1 pair table has {} bytes; expected {}",
+                pair_bytes.len(),
+                expected_pair_bytes
+            ));
+        }
+
+        let lead_path = lead_path.as_ref();
+        let lead_bytes = fs::read(lead_path).map_err(|error| {
+            format!(
+                "read Model 9.1 pone leads {} failed: {}",
+                lead_path.display(),
+                error
+            )
+        })?;
+        if lead_bytes.len() < 24 || &lead_bytes[..8] != MODEL91_LEAD_MAGIC {
+            return Err("invalid Model 9.1 pone-lead table header".to_string());
+        }
+        let lead_version = read_u32_le(&lead_bytes, 8)?;
+        let lead_keep_count = read_u32_le(&lead_bytes, 12)? as usize;
+        let lead_start = read_u32_le(&lead_bytes, 16)? as usize;
+        let lead_count = read_u32_le(&lead_bytes, 20)? as usize;
+        if lead_version != 1
+            || lead_keep_count != keep_count
+            || lead_start != 0
+            || lead_count != keep_count
+            || lead_bytes.len() != 24 + keep_count
+        {
+            return Err("unsupported or incomplete Model 9.1 pone-lead table".to_string());
+        }
+
+        let keep_ranks = keep_keys
+            .iter()
+            .map(|key| rank_counts_from_key(key))
+            .collect::<Result<Vec<_>, _>>()?;
+        let keep_id_by_key = keep_keys
+            .into_iter()
+            .enumerate()
+            .map(|(index, key)| (key, index))
+            .collect::<HashMap<_, _>>();
+        let pone_leads = lead_bytes[24..].to_vec();
+        for (keep, lead) in keep_ranks.iter().zip(&pone_leads) {
+            if *lead >= 13 || keep[*lead as usize] == 0 {
+                return Err("Model 9.1 pone-lead table selects an absent rank".to_string());
+            }
+        }
+        let outcomes = pair_bytes[MODEL91_PAIR_HEADER_BYTES..]
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect::<Vec<_>>();
+        for (dealer_id, dealer) in keep_ranks.iter().enumerate() {
+            for (pone_id, pone) in keep_ranks.iter().enumerate() {
+                let compatible = dealer
+                    .iter()
+                    .zip(pone)
+                    .all(|(dealer_count, pone_count)| dealer_count + pone_count <= 4);
+                let outcome = unpack_model91_pair(outcomes[dealer_id * keep_count + pone_id])?;
+                if compatible != outcome.is_some() {
+                    return Err(format!(
+                        "Model 9.1 pair compatibility mismatch at dealer {}, pone {}",
+                        dealer_id, pone_id
+                    ));
+                }
+            }
+        }
+        Ok(Model91PairTable {
+            keep_ranks,
+            keep_id_by_key,
+            outcomes,
+            pone_leads,
+        })
+    }
+
+    pub fn outcome(
+        &self,
+        dealer_keep_id: usize,
+        pone_keep_id: usize,
+    ) -> Result<Option<Model91PairOutcome>, String> {
+        let keep_count = self.keep_ranks.len();
+        let index = dealer_keep_id
+            .checked_mul(keep_count)
+            .and_then(|base| base.checked_add(pone_keep_id))
+            .ok_or_else(|| "Model 9.1 pair index overflow".to_string())?;
+        let packed = self
+            .outcomes
+            .get(index)
+            .copied()
+            .ok_or_else(|| "Model 9.1 pair index is out of range".to_string())?;
+        unpack_model91_pair(packed)
+    }
+
+    /// Aggregate the complete keep-pair asset after removing all six cards the
+    /// actor can see at discard time. `available` must therefore describe the
+    /// 46 unseen physical cards, not merely the cards outside the retained keep.
+    pub fn aggregate(
+        &self,
+        own_keep: &[u8; 13],
+        role: Role,
+        available: &[u8; 13],
+    ) -> Result<Model91PeggingSummary, String> {
+        let own_key = own_keep
+            .iter()
+            .map(|count| char::from(b'0' + *count))
+            .collect::<String>();
+        let own_keep_id = self
+            .keep_id_by_key
+            .get(&own_key)
+            .copied()
+            .ok_or_else(|| "Model 9.1 own keep is not canonical".to_string())?;
+        let mut histogram = BTreeMap::<(u8, u8), u32>::new();
+        let mut my_weighted_points = 0_u64;
+        let mut opponent_weighted_points = 0_u64;
+        let mut total_weight = 0_u32;
+        for (opponent_keep_id, opponent_keep) in self.keep_ranks.iter().enumerate() {
+            let raw_weight = rank_combination_count(opponent_keep, available);
+            let weight = raw_weight.round() as u32;
+            if weight == 0 {
+                continue;
+            }
+            if (raw_weight - f64::from(weight)).abs() > f64::EPSILON {
+                return Err("Model 9.1 opponent keep weight is not integral".to_string());
+            }
+            let (dealer_id, pone_id) = match role {
+                Role::Dealer => (own_keep_id, opponent_keep_id),
+                Role::Pone => (opponent_keep_id, own_keep_id),
+            };
+            let outcome = self.outcome(dealer_id, pone_id)?.ok_or_else(|| {
+                "Model 9.1 compatible weighted opponent keep has no pair outcome".to_string()
+            })?;
+            let (my_points, opponent_points) = match role {
+                Role::Dealer => (outcome.dealer_points, outcome.pone_points),
+                Role::Pone => (outcome.pone_points, outcome.dealer_points),
+            };
+            *histogram.entry((my_points, opponent_points)).or_insert(0) = histogram
+                .get(&(my_points, opponent_points))
+                .copied()
+                .unwrap_or(0)
+                .checked_add(weight)
+                .ok_or_else(|| "Model 9.1 histogram bin weight overflow".to_string())?;
+            total_weight = total_weight
+                .checked_add(weight)
+                .ok_or_else(|| "Model 9.1 aggregate total weight overflow".to_string())?;
+            my_weighted_points += u64::from(my_points) * u64::from(weight);
+            opponent_weighted_points += u64::from(opponent_points) * u64::from(weight);
+        }
+        if total_weight == 0 {
+            return Err("Model 9.1 aggregate has no compatible opponent keeps".to_string());
+        }
+        let best_lead = match role {
+            Role::Dealer => None,
+            Role::Pone => Some(self.pone_leads[own_keep_id]),
+        };
+        Ok(Model91PeggingSummary {
+            my_ev: my_weighted_points as f64 / f64::from(total_weight),
+            opponent_ev: opponent_weighted_points as f64 / f64::from(total_weight),
+            best_lead,
+            total_weight,
+            histogram: histogram
+                .into_iter()
+                .map(
+                    |((my_points, opponent_points), weight)| Model91HistogramBin {
+                        my_points,
+                        opponent_points,
+                        weight,
+                    },
+                )
+                .collect(),
+        })
+    }
+}
+
+impl Model91DiscardEvTable {
+    pub fn load(path: impl AsRef<Path>) -> Result<Model91DiscardEvTable, String> {
+        let path = path.as_ref();
+        let bytes = fs::read(path).map_err(|error| {
+            format!(
+                "read Model 9.1 discard EV table {} failed: {}",
+                path.display(),
+                error
+            )
+        })?;
+        if bytes.len() < MODEL91_EV_HEADER_BYTES || &bytes[..8] != MODEL91_EV_MAGIC {
+            return Err("invalid Model 9.1 discard EV header".to_string());
+        }
+        let version = read_u32_le(&bytes, 8)?;
+        let row_count = read_u32_le(&bytes, 12)? as usize;
+        let record_bytes = read_u32_le(&bytes, 16)? as usize;
+        if version != 1
+            || row_count != MODEL91_DISCARD_ROWS
+            || record_bytes != MODEL91_EV_RECORD_BYTES
+            || read_u32_le(&bytes, 20)? != 0
+        {
+            return Err("unsupported Model 9.1 discard EV format".to_string());
+        }
+        let expected = MODEL91_EV_HEADER_BYTES
+            .checked_add(
+                row_count
+                    .checked_mul(record_bytes)
+                    .ok_or_else(|| "Model 9.1 discard EV size overflow".to_string())?,
+            )
+            .ok_or_else(|| "Model 9.1 discard EV size overflow".to_string())?;
+        if bytes.len() != expected {
+            return Err("Model 9.1 discard EV file length is inconsistent".to_string());
+        }
+        let mut records = Vec::with_capacity(row_count);
+        for row in 0..row_count {
+            let offset = MODEL91_EV_HEADER_BYTES + row * record_bytes;
+            let lead = bytes[offset + 12];
+            if lead != u8::MAX && lead >= 13 {
+                return Err(format!("Model 9.1 discard EV row {} has invalid lead", row));
+            }
+            let total_weight = read_u32_le(&bytes, offset + 8)?;
+            if total_weight != 163_185 {
+                return Err(format!(
+                    "Model 9.1 discard EV row {} has weight {}; expected 163185",
+                    row, total_weight
+                ));
+            }
+            if (row % 2 == 0 && lead == u8::MAX) || (row % 2 == 1 && lead != u8::MAX) {
+                return Err(format!(
+                    "Model 9.1 discard EV row {} has a role-inconsistent lead",
+                    row
+                ));
+            }
+            let my_weighted_points = read_u32_le(&bytes, offset)?;
+            let opponent_weighted_points = read_u32_le(&bytes, offset + 4)?;
+            let maximum_points = total_weight * 31;
+            if my_weighted_points > maximum_points || opponent_weighted_points > maximum_points {
+                return Err(format!(
+                    "Model 9.1 discard EV row {} has an impossible weighted sum",
+                    row
+                ));
+            }
+            records.push(Model91DiscardEvRecord {
+                my_weighted_points,
+                opponent_weighted_points,
+                total_weight,
+                best_lead: (lead != u8::MAX).then_some(lead),
+            });
+        }
+        Ok(Model91DiscardEvTable {
+            records,
+            six_row_starts: model91_six_row_starts()?,
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.records.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.records.is_empty()
+    }
+
+    pub fn record(&self, row: usize) -> Option<Model91DiscardEvRecord> {
+        self.records.get(row).copied()
+    }
+
+    pub fn record_for(
+        &self,
+        six: &[u8; 13],
+        discard: &[u8; 13],
+        role: Role,
+    ) -> Option<Model91DiscardEvRecord> {
+        let row = model91_discard_row(&self.six_row_starts, six, discard, role)?;
+        self.record(row)
+    }
+}
+
+impl Model91DiscardHistogramTable {
+    pub fn load(path: impl AsRef<Path>) -> Result<Model91DiscardHistogramTable, String> {
+        let path = path.as_ref();
+        let bytes = fs::read(path).map_err(|error| {
+            format!(
+                "read Model 9.1 discard histogram {} failed: {}",
+                path.display(),
+                error
+            )
+        })?;
+        if bytes.len() < MODEL91_HISTOGRAM_HEADER_BYTES || &bytes[..8] != MODEL91_HISTOGRAM_MAGIC {
+            return Err("invalid Model 9.1 discard histogram header".to_string());
+        }
+        let version = read_u32_le(&bytes, 8)?;
+        let row_count = read_u32_le(&bytes, 12)? as usize;
+        let bin_bytes = read_u32_le(&bytes, 16)? as usize;
+        let bin_count = read_u32_le(&bytes, 20)? as usize;
+        if version != 1
+            || row_count != MODEL91_DISCARD_ROWS
+            || bin_bytes != MODEL91_HISTOGRAM_BIN_BYTES
+        {
+            return Err("unsupported Model 9.1 discard histogram format".to_string());
+        }
+        let offsets_start = MODEL91_HISTOGRAM_HEADER_BYTES;
+        let totals_start = offsets_start
+            .checked_add(
+                (row_count + 1)
+                    .checked_mul(4)
+                    .ok_or_else(|| "Model 9.1 histogram directory overflow".to_string())?,
+            )
+            .ok_or_else(|| "Model 9.1 histogram directory overflow".to_string())?;
+        let bins_start = totals_start
+            .checked_add(
+                row_count
+                    .checked_mul(4)
+                    .ok_or_else(|| "Model 9.1 histogram totals overflow".to_string())?,
+            )
+            .ok_or_else(|| "Model 9.1 histogram totals overflow".to_string())?;
+        let expected = bins_start
+            .checked_add(
+                bin_count
+                    .checked_mul(bin_bytes)
+                    .ok_or_else(|| "Model 9.1 histogram bins overflow".to_string())?,
+            )
+            .ok_or_else(|| "Model 9.1 histogram bins overflow".to_string())?;
+        if bytes.len() != expected {
+            return Err("Model 9.1 discard histogram length is inconsistent".to_string());
+        }
+        let offsets = read_u32_vec(&bytes, offsets_start, row_count + 1)?;
+        let totals = read_u32_vec(&bytes, totals_start, row_count)?;
+        if offsets.first().copied() != Some(0)
+            || offsets.last().copied() != Some(bin_count as u32)
+            || offsets.windows(2).any(|window| window[0] > window[1])
+        {
+            return Err("Model 9.1 histogram offsets are invalid".to_string());
+        }
+        let mut bins = Vec::with_capacity(bin_count);
+        for bin in 0..bin_count {
+            let offset = bins_start + bin * bin_bytes;
+            let pair = unpack_model91_pair(read_u16_le(&bytes, offset)?)?
+                .ok_or_else(|| "Model 9.1 histogram contains invalid score pair".to_string())?;
+            let weight = read_u32_le(&bytes, offset + 2)?;
+            if weight == 0 {
+                return Err("Model 9.1 histogram contains a zero-weight bin".to_string());
+            }
+            bins.push(Model91HistogramBin {
+                my_points: pair.dealer_points,
+                opponent_points: pair.pone_points,
+                weight,
+            });
+        }
+        for row in 0..row_count {
+            let start = offsets[row] as usize;
+            let end = offsets[row + 1] as usize;
+            let mut total = 0_u32;
+            let mut previous_pair = None;
+            for bin in &bins[start..end] {
+                let pair = u16::from(bin.my_points) | (u16::from(bin.opponent_points) << 5);
+                if previous_pair.is_some_and(|previous| previous >= pair) {
+                    return Err(format!(
+                        "Model 9.1 histogram row {} is not strictly ordered",
+                        row
+                    ));
+                }
+                previous_pair = Some(pair);
+                total = total
+                    .checked_add(bin.weight)
+                    .ok_or_else(|| "Model 9.1 histogram row weight overflow".to_string())?;
+            }
+            if total != totals[row] || total != 163_185 {
+                return Err(format!(
+                    "Model 9.1 histogram row {} has total {}; expected directory total {} and canonical total 163185",
+                    row, total, totals[row]
+                ));
+            }
+        }
+        Ok(Model91DiscardHistogramTable {
+            offsets,
+            totals,
+            bins,
+            six_row_starts: model91_six_row_starts()?,
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.totals.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.totals.is_empty()
+    }
+
+    pub fn row(&self, row: usize) -> Option<(&[Model91HistogramBin], u32)> {
+        let start = *self.offsets.get(row)? as usize;
+        let end = *self.offsets.get(row + 1)? as usize;
+        Some((&self.bins[start..end], self.totals[row]))
+    }
+
+    pub fn row_for(
+        &self,
+        six: &[u8; 13],
+        discard: &[u8; 13],
+        role: Role,
+    ) -> Option<(&[Model91HistogramBin], u32)> {
+        let row = model91_discard_row(&self.six_row_starts, six, discard, role)?;
+        self.row(row)
+    }
+}
+
+fn unpack_model131_histogram_bin(packed: u32) -> Result<Model91HistogramBin, String> {
+    let used_bits = MODEL131_HISTOGRAM_PAIR_BITS + MODEL131_HISTOGRAM_WEIGHT_BITS;
+    if packed >> used_bits != 0 {
+        return Err("Model 13.1 histogram bin has reserved bits set".to_string());
+    }
+    let pair_mask = (1_u32 << MODEL131_HISTOGRAM_PAIR_BITS) - 1;
+    let pair = packed & pair_mask;
+    let weight = packed >> MODEL131_HISTOGRAM_PAIR_BITS;
+    if weight == 0 {
+        return Err("Model 13.1 histogram contains a zero-weight bin".to_string());
+    }
+    Ok(Model91HistogramBin {
+        my_points: (pair & 0x1f) as u8,
+        opponent_points: ((pair >> 5) & 0x1f) as u8,
+        weight,
+    })
+}
+
+impl Model131DiscardHistogramTable {
+    pub fn load(path: impl AsRef<Path>) -> Result<Model131DiscardHistogramTable, String> {
+        let path = path.as_ref();
+        let bytes = fs::read(path).map_err(|error| {
+            format!(
+                "read Model 13.1 discard histogram {} failed: {}",
+                path.display(),
+                error
+            )
+        })?;
+        if bytes.len() < MODEL131_HISTOGRAM_HEADER_BYTES || &bytes[..8] != MODEL131_HISTOGRAM_MAGIC
+        {
+            return Err("invalid Model 13.1 discard histogram header".to_string());
+        }
+        let version = read_u32_le(&bytes, 8)?;
+        let row_count = read_u32_le(&bytes, 12)? as usize;
+        let bin_count = read_u32_le(&bytes, 16)? as usize;
+        let total_weight = read_u32_le(&bytes, 20)?;
+        if version != 1
+            || row_count != MODEL91_DISCARD_ROWS
+            || total_weight != MODEL131_HISTOGRAM_TOTAL_WEIGHT
+        {
+            return Err("unsupported Model 13.1 discard histogram format".to_string());
+        }
+        let counts_start = MODEL131_HISTOGRAM_HEADER_BYTES;
+        let bins_start = counts_start
+            .checked_add(row_count)
+            .ok_or_else(|| "Model 13.1 histogram directory overflow".to_string())?;
+        let expected = bins_start
+            .checked_add(
+                bin_count
+                    .checked_mul(MODEL131_HISTOGRAM_BIN_BYTES)
+                    .ok_or_else(|| "Model 13.1 histogram bins overflow".to_string())?,
+            )
+            .ok_or_else(|| "Model 13.1 histogram size overflow".to_string())?;
+        if bytes.len() != expected {
+            return Err(format!(
+                "Model 13.1 histogram has {} bytes; expected {}",
+                bytes.len(),
+                expected
+            ));
+        }
+
+        let mut row_bin_offsets = Vec::with_capacity(row_count + 1);
+        row_bin_offsets.push(0_u32);
+        let mut consumed_bins = 0_u32;
+        for row in 0..row_count {
+            let row_bins = u32::from(bytes[counts_start + row]);
+            if row_bins == 0 {
+                return Err(format!("Model 13.1 histogram row {} is empty", row));
+            }
+            consumed_bins = consumed_bins
+                .checked_add(row_bins)
+                .ok_or_else(|| "Model 13.1 histogram directory overflow".to_string())?;
+            row_bin_offsets.push(consumed_bins);
+        }
+        if consumed_bins as usize != bin_count {
+            return Err(format!(
+                "Model 13.1 histogram directory covers {} bins; expected {}",
+                consumed_bins, bin_count
+            ));
+        }
+
+        for row in 0..row_count {
+            let start = row_bin_offsets[row] as usize;
+            let end = row_bin_offsets[row + 1] as usize;
+            let mut previous_pair = None;
+            let mut row_weight = 0_u32;
+            for bin in start..end {
+                let offset = bins_start + bin * MODEL131_HISTOGRAM_BIN_BYTES;
+                let packed = read_u32_le(&bytes, offset)?;
+                let decoded = unpack_model131_histogram_bin(packed)?;
+                let pair = u16::from(decoded.my_points) | (u16::from(decoded.opponent_points) << 5);
+                if previous_pair.is_some_and(|previous| previous >= pair) {
+                    return Err(format!(
+                        "Model 13.1 histogram row {} is not strictly ordered",
+                        row
+                    ));
+                }
+                previous_pair = Some(pair);
+                row_weight = row_weight
+                    .checked_add(decoded.weight)
+                    .ok_or_else(|| "Model 13.1 histogram row weight overflow".to_string())?;
+            }
+            if row_weight != MODEL131_HISTOGRAM_TOTAL_WEIGHT {
+                return Err(format!(
+                    "Model 13.1 histogram row {} has total {}; expected {}",
+                    row, MODEL131_HISTOGRAM_TOTAL_WEIGHT, row_weight
+                ));
+            }
+        }
+
+        Ok(Model131DiscardHistogramTable {
+            bytes,
+            row_bin_offsets,
+            bins_start,
+            six_row_starts: model91_six_row_starts()?,
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.row_bin_offsets.len().saturating_sub(1)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn row(&self, row: usize) -> Option<Model131HistogramRow<'_>> {
+        let start = *self.row_bin_offsets.get(row)? as usize;
+        let end = *self.row_bin_offsets.get(row + 1)? as usize;
+        let byte_start = self.bins_start + start * MODEL131_HISTOGRAM_BIN_BYTES;
+        let byte_end = self.bins_start + end * MODEL131_HISTOGRAM_BIN_BYTES;
+        Some(Model131HistogramRow {
+            packed_bins: self.bytes.get(byte_start..byte_end)?,
+        })
+    }
+
+    pub fn row_for(
+        &self,
+        six: &[u8; 13],
+        discard: &[u8; 13],
+        role: Role,
+    ) -> Option<Model131HistogramRow<'_>> {
+        let row = model91_discard_row(&self.six_row_starts, six, discard, role)?;
+        self.row(row)
+    }
+}
+
+fn model91_six_row_starts() -> Result<HashMap<[u8; 13], usize>, String> {
+    let mut starts = HashMap::with_capacity(18_395);
+    let mut row = 0_usize;
+    for key in enumerate_rank_count_keys(6) {
+        let six = rank_counts_from_key(&key)?;
+        starts.insert(six, row);
+        row += model91_discards_from_six(&six).len() * 2;
+    }
+    if starts.len() != 18_395 || row != MODEL91_DISCARD_ROWS {
+        return Err("Model 9.1 canonical discard index has invalid dimensions".to_string());
+    }
+    Ok(starts)
+}
+
+fn model91_discard_row(
+    starts: &HashMap<[u8; 13], usize>,
+    six: &[u8; 13],
+    discard: &[u8; 13],
+    role: Role,
+) -> Option<usize> {
+    let base = *starts.get(six)?;
+    let discard_index = model91_discards_from_six(six)
+        .iter()
+        .position(|candidate| candidate == discard)?;
+    let role_offset = match role {
+        Role::Pone => 0,
+        Role::Dealer => 1,
+    };
+    Some(base + discard_index * 2 + role_offset)
+}
+
+fn model91_discards_from_six(six: &[u8; 13]) -> Vec<[u8; 13]> {
+    let mut discards = Vec::new();
+    for first in 0..13 {
+        if six[first] == 0 {
+            continue;
+        }
+        for second in first..13 {
+            let needed = if first == second { 2 } else { 1 };
+            if six[second] < needed {
+                continue;
+            }
+            let mut discard = [0_u8; 13];
+            discard[first] += 1;
+            discard[second] += 1;
+            discards.push(discard);
+        }
+    }
+    discards
 }
 
 pub fn unpack_pairwise_record(record: u32) -> PairwiseRecord {
@@ -502,6 +1264,118 @@ pub fn pairwise_self_test(root: &str) -> Result<(), String> {
     }
     if table.keep_id_by_key.get("4000000000000").copied() != Some(1819) {
         return Err("last keep key mismatch".to_string());
+    }
+    Ok(())
+}
+
+pub fn model91_self_test(root: &str) -> Result<(), String> {
+    let asset_root = Path::new(root)
+        .join("rust")
+        .join("cribbage-shadow-engine")
+        .join("assets");
+    let table = Model91PairTable::load(
+        asset_root.join("model91-pair-outcomes.bin"),
+        asset_root.join("model91-pone-leads.bin"),
+    )?;
+    if table.keep_ranks.len() != 1_820 || table.keep_id_by_key.len() != 1_820 {
+        return Err("Model 9.1 self-test found an unexpected keep count".to_string());
+    }
+    let mut own_keep = [0_u8; 13];
+    own_keep[0..4].fill(1);
+    let mut available = [4_u8; 13];
+    for rank in 0..6 {
+        available[rank] -= 1;
+    }
+    for role in [Role::Pone, Role::Dealer] {
+        let summary = table.aggregate(&own_keep, role, &available)?;
+        if summary.total_weight != 163_185
+            || summary.histogram.iter().map(|bin| bin.weight).sum::<u32>() != 163_185
+        {
+            return Err(format!(
+                "Model 9.1 {:?} self-test aggregate has incorrect weight",
+                role
+            ));
+        }
+    }
+    let ev = Model91DiscardEvTable::load(asset_root.join("model91-discard-ev.bin"))?;
+    let mut six = [0_u8; 13];
+    six[0..6].fill(1);
+    let mut discard = [0_u8; 13];
+    discard[0..2].fill(1);
+    let mut selected_keep = six;
+    for rank in 0..13 {
+        selected_keep[rank] -= discard[rank];
+    }
+    for role in [Role::Pone, Role::Dealer] {
+        let record = ev
+            .record_for(&six, &discard, role)
+            .ok_or_else(|| format!("Model 9.1 {:?} self-test EV row is missing", role))?;
+        if record.total_weight != 163_185 {
+            return Err(format!(
+                "Model 9.1 {:?} self-test EV row has incorrect weight",
+                role
+            ));
+        }
+        let source = table.aggregate(&selected_keep, role, &available)?;
+        let my_ev = f64::from(record.my_weighted_points) / f64::from(record.total_weight);
+        let opponent_ev =
+            f64::from(record.opponent_weighted_points) / f64::from(record.total_weight);
+        if (my_ev - source.my_ev).abs() > 1e-12
+            || (opponent_ev - source.opponent_ev).abs() > 1e-12
+            || record.best_lead != source.best_lead
+        {
+            return Err(format!(
+                "Model 9.1 {:?} direct EV row does not match its pair source",
+                role
+            ));
+        }
+    }
+    Model91EmpiricalBeliefs::load(asset_root.join("model91-pegging-beliefs.bin"))?;
+    Ok(())
+}
+
+pub fn model131_self_test(root: &str) -> Result<(), String> {
+    let asset_root = Path::new(root)
+        .join("rust")
+        .join("cribbage-shadow-engine")
+        .join("assets");
+    let histogram =
+        Model131DiscardHistogramTable::load(asset_root.join("model131-discard-histograms.bin"))?;
+    let ev = Model91DiscardEvTable::load(asset_root.join("model91-discard-ev.bin"))?;
+    if histogram.len() != MODEL91_DISCARD_ROWS || histogram.len() != ev.len() {
+        return Err("Model 13.1 self-test row counts differ".to_string());
+    }
+    let mut six = [0_u8; 13];
+    six[0..6].fill(1);
+    let mut discard = [0_u8; 13];
+    discard[0..2].fill(1);
+    for role in [Role::Pone, Role::Dealer] {
+        let row = histogram
+            .row_for(&six, &discard, role)
+            .ok_or_else(|| format!("Model 13.1 {:?} histogram row is missing", role))?;
+        let record = ev
+            .record_for(&six, &discard, role)
+            .ok_or_else(|| format!("Model 13.1 {:?} EV row is missing", role))?;
+        let mut total = 0_u32;
+        let mut my_total = 0_u64;
+        let mut opponent_total = 0_u64;
+        for bin in row.bins() {
+            total = total
+                .checked_add(bin.weight)
+                .ok_or_else(|| "Model 13.1 self-test weight overflow".to_string())?;
+            my_total += u64::from(bin.my_points) * u64::from(bin.weight);
+            opponent_total += u64::from(bin.opponent_points) * u64::from(bin.weight);
+        }
+        if total != row.total_weight()
+            || total != record.total_weight
+            || my_total != u64::from(record.my_weighted_points)
+            || opponent_total != u64::from(record.opponent_weighted_points)
+        {
+            return Err(format!(
+                "Model 13.1 {:?} exact histogram does not match its EV twin",
+                role
+            ));
+        }
     }
     Ok(())
 }
@@ -1222,5 +2096,241 @@ fn generate_prefix_keys(size: usize, start: usize, ranks: &mut Vec<usize>, keys:
         ranks.push(rank);
         generate_prefix_keys(size, rank, ranks, keys);
         ranks.pop();
+    }
+}
+
+#[cfg(test)]
+mod model91_tests {
+    use super::*;
+    use std::env;
+    use std::process;
+
+    fn model91_temp_dir(label: &str) -> std::path::PathBuf {
+        let path = env::temp_dir().join(format!(
+            "cribbage-model91-artifacts-{}-{}",
+            label,
+            process::id()
+        ));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn model91_pair_reader_reweights_after_all_six_visible_cards() {
+        let root = model91_temp_dir("pair");
+        let pair_path = root.join("pair-outcomes.bin");
+        let lead_path = root.join("pone-leads.bin");
+        let keep_keys = enumerate_rank_count_keys(4);
+        let keeps = keep_keys
+            .iter()
+            .map(|key| rank_counts_from_key(key).unwrap())
+            .collect::<Vec<_>>();
+        let mut pair_bytes = Vec::with_capacity(40 + keeps.len() * keeps.len() * 2);
+        pair_bytes.extend_from_slice(MODEL91_PAIR_MAGIC);
+        pair_bytes.extend_from_slice(&1_u32.to_le_bytes());
+        pair_bytes.extend_from_slice(&(keeps.len() as u32).to_le_bytes());
+        pair_bytes.extend_from_slice(&0_u32.to_le_bytes());
+        pair_bytes.extend_from_slice(&(keeps.len() as u32).to_le_bytes());
+        pair_bytes.extend_from_slice(&0_u32.to_le_bytes());
+        pair_bytes.extend_from_slice(&(keeps.len() as u32).to_le_bytes());
+        pair_bytes.extend_from_slice(&0_u64.to_le_bytes());
+        for dealer in &keeps {
+            for pone in &keeps {
+                let compatible = dealer
+                    .iter()
+                    .zip(pone)
+                    .all(|(dealer_count, pone_count)| dealer_count + pone_count <= 4);
+                let value = if compatible {
+                    1_u16 | (2_u16 << 5)
+                } else {
+                    MODEL91_INVALID_PAIR
+                };
+                pair_bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        fs::write(&pair_path, pair_bytes).unwrap();
+
+        let mut lead_bytes = Vec::with_capacity(24 + keeps.len());
+        lead_bytes.extend_from_slice(MODEL91_LEAD_MAGIC);
+        lead_bytes.extend_from_slice(&1_u32.to_le_bytes());
+        lead_bytes.extend_from_slice(&(keeps.len() as u32).to_le_bytes());
+        lead_bytes.extend_from_slice(&0_u32.to_le_bytes());
+        lead_bytes.extend_from_slice(&(keeps.len() as u32).to_le_bytes());
+        for keep in &keeps {
+            lead_bytes.push(keep.iter().position(|count| *count > 0).unwrap() as u8);
+        }
+        fs::write(&lead_path, lead_bytes).unwrap();
+
+        let table = Model91PairTable::load(&pair_path, &lead_path).unwrap();
+        let own_keep = {
+            let mut ranks = [0_u8; 13];
+            ranks[0..4].fill(1);
+            ranks
+        };
+        let mut available = [4_u8; 13];
+        for rank in 0..6 {
+            available[rank] -= 1;
+        }
+        let pone = table.aggregate(&own_keep, Role::Pone, &available).unwrap();
+        assert_eq!(pone.total_weight, 163_185);
+        assert_eq!(pone.my_ev, 2.0);
+        assert_eq!(pone.opponent_ev, 1.0);
+        assert_eq!(pone.histogram.len(), 1);
+        assert!(pone.best_lead.is_some());
+
+        let dealer = table
+            .aggregate(&own_keep, Role::Dealer, &available)
+            .unwrap();
+        assert_eq!(dealer.total_weight, 163_185);
+        assert_eq!(dealer.my_ev, 1.0);
+        assert_eq!(dealer.opponent_ev, 2.0);
+        assert_eq!(dealer.best_lead, None);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn model91_ev_and_histogram_readers_preserve_exact_weighted_sums() {
+        let root = model91_temp_dir("aggregate");
+        let ev_path = root.join("discard-ev.bin");
+        let histogram_path = root.join("discard-histograms.bin");
+
+        let mut ev = Vec::new();
+        ev.extend_from_slice(MODEL91_EV_MAGIC);
+        ev.extend_from_slice(&1_u32.to_le_bytes());
+        ev.extend_from_slice(&(MODEL91_DISCARD_ROWS as u32).to_le_bytes());
+        ev.extend_from_slice(&(MODEL91_EV_RECORD_BYTES as u32).to_le_bytes());
+        ev.extend_from_slice(&0_u32.to_le_bytes());
+        for row in 0..MODEL91_DISCARD_ROWS {
+            let (my, opponent, total, lead) = if row % 2 == 0 {
+                (369_555_u32, 326_370_u32, 163_185_u32, 7_u8)
+            } else {
+                (652_740, 815_925, 163_185, u8::MAX)
+            };
+            ev.extend_from_slice(&my.to_le_bytes());
+            ev.extend_from_slice(&opponent.to_le_bytes());
+            ev.extend_from_slice(&total.to_le_bytes());
+            ev.push(lead);
+        }
+        fs::write(&ev_path, ev).unwrap();
+
+        let bin_count = (MODEL91_DISCARD_ROWS / 2) * 3 + (MODEL91_DISCARD_ROWS % 2) * 2;
+        let mut histogram = Vec::new();
+        histogram.extend_from_slice(MODEL91_HISTOGRAM_MAGIC);
+        histogram.extend_from_slice(&1_u32.to_le_bytes());
+        histogram.extend_from_slice(&(MODEL91_DISCARD_ROWS as u32).to_le_bytes());
+        histogram.extend_from_slice(&(MODEL91_HISTOGRAM_BIN_BYTES as u32).to_le_bytes());
+        histogram.extend_from_slice(&(bin_count as u32).to_le_bytes());
+        let mut offset = 0_u32;
+        histogram.extend_from_slice(&offset.to_le_bytes());
+        for row in 0..MODEL91_DISCARD_ROWS {
+            offset += if row % 2 == 0 { 2 } else { 1 };
+            histogram.extend_from_slice(&offset.to_le_bytes());
+        }
+        for _ in 0..MODEL91_DISCARD_ROWS {
+            histogram.extend_from_slice(&163_185_u32.to_le_bytes());
+        }
+        for row in 0..MODEL91_DISCARD_ROWS {
+            let bins = if row % 2 == 0 {
+                &[(1_u8, 2_u8, 60_000_u32), (3, 2, 103_185)][..]
+            } else {
+                &[(4_u8, 5_u8, 163_185_u32)][..]
+            };
+            for (my, opponent, weight) in bins {
+                let pair = u16::from(*my) | (u16::from(*opponent) << 5);
+                histogram.extend_from_slice(&pair.to_le_bytes());
+                histogram.extend_from_slice(&weight.to_le_bytes());
+            }
+        }
+        fs::write(&histogram_path, histogram).unwrap();
+
+        let ev = Model91DiscardEvTable::load(&ev_path).unwrap();
+        let hist = Model91DiscardHistogramTable::load(&histogram_path).unwrap();
+        assert_eq!(ev.len(), hist.len());
+        let first_six = rank_counts_from_key(&enumerate_rank_count_keys(6)[0]).unwrap();
+        let first_discard = model91_discards_from_six(&first_six)[0];
+        assert_eq!(
+            ev.record_for(&first_six, &first_discard, Role::Pone),
+            ev.record(0)
+        );
+        assert_eq!(
+            ev.record_for(&first_six, &first_discard, Role::Dealer),
+            ev.record(1)
+        );
+        assert_eq!(
+            hist.row_for(&first_six, &first_discard, Role::Pone),
+            hist.row(0)
+        );
+        assert_eq!(
+            hist.row_for(&first_six, &first_discard, Role::Dealer),
+            hist.row(1)
+        );
+        for row in 0..ev.len() {
+            let expected = ev.record(row).unwrap();
+            let (bins, total) = hist.row(row).unwrap();
+            let my = bins
+                .iter()
+                .map(|bin| u64::from(bin.my_points) * u64::from(bin.weight))
+                .sum::<u64>();
+            let opponent = bins
+                .iter()
+                .map(|bin| u64::from(bin.opponent_points) * u64::from(bin.weight))
+                .sum::<u64>();
+            assert_eq!(my, u64::from(expected.my_weighted_points));
+            assert_eq!(opponent, u64::from(expected.opponent_weighted_points));
+            assert_eq!(total, expected.total_weight);
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn model131_histogram_reader_preserves_exact_unquantized_bins() {
+        let root = model91_temp_dir("model131");
+        let path = root.join("model131-discard-histograms.bin");
+        let bins_per_row = 3_u8;
+        let bin_count = MODEL91_DISCARD_ROWS * usize::from(bins_per_row);
+        let mut bytes = Vec::with_capacity(
+            MODEL131_HISTOGRAM_HEADER_BYTES
+                + MODEL91_DISCARD_ROWS
+                + bin_count * MODEL131_HISTOGRAM_BIN_BYTES,
+        );
+        bytes.extend_from_slice(MODEL131_HISTOGRAM_MAGIC);
+        bytes.extend_from_slice(&1_u32.to_le_bytes());
+        bytes.extend_from_slice(&(MODEL91_DISCARD_ROWS as u32).to_le_bytes());
+        bytes.extend_from_slice(&(bin_count as u32).to_le_bytes());
+        bytes.extend_from_slice(&MODEL131_HISTOGRAM_TOTAL_WEIGHT.to_le_bytes());
+        bytes.extend(std::iter::repeat_n(bins_per_row, MODEL91_DISCARD_ROWS));
+        let expected = [
+            Model91HistogramBin {
+                my_points: 1,
+                opponent_points: 2,
+                weight: 60_000,
+            },
+            Model91HistogramBin {
+                my_points: 3,
+                opponent_points: 2,
+                weight: 60_000,
+            },
+            Model91HistogramBin {
+                my_points: 4,
+                opponent_points: 5,
+                weight: 43_185,
+            },
+        ];
+        for _ in 0..MODEL91_DISCARD_ROWS {
+            for bin in expected {
+                let pair = u32::from(bin.my_points) | (u32::from(bin.opponent_points) << 5);
+                let packed = pair | (bin.weight << MODEL131_HISTOGRAM_PAIR_BITS);
+                bytes.extend_from_slice(&packed.to_le_bytes());
+            }
+        }
+        fs::write(&path, bytes).unwrap();
+
+        let table = Model131DiscardHistogramTable::load(&path).unwrap();
+        assert_eq!(table.len(), MODEL91_DISCARD_ROWS);
+        let row = table.row(0).unwrap();
+        assert_eq!(row.total_weight(), MODEL131_HISTOGRAM_TOTAL_WEIGHT);
+        assert_eq!(row.bins().collect::<Vec<_>>(), expected);
+        fs::remove_dir_all(root).unwrap();
     }
 }

@@ -127,6 +127,24 @@ pub fn response_for_input(input: &str) -> Response {
         );
     }
 
+    if kind == "model91-self-test" {
+        let root = std::env::var("CRIBBAGE_RUST_MODEL_ROOT").unwrap_or_else(|_| ".".to_string());
+        return self_test_response(
+            "model91-self-test",
+            artifacts::model91_self_test(&root),
+            now_ms,
+        );
+    }
+
+    if kind == "model131-self-test" {
+        let root = std::env::var("CRIBBAGE_RUST_MODEL_ROOT").unwrap_or_else(|_| ".".to_string());
+        return self_test_response(
+            "model131-self-test",
+            artifacts::model131_self_test(&root),
+            now_ms,
+        );
+    }
+
     if kind == "empirical-self-test" {
         let root = std::env::var("CRIBBAGE_RUST_MODEL_ROOT").unwrap_or_else(|_| ".".to_string());
         return self_test_response(
