@@ -1,4 +1,17 @@
 export type DealCutRevealStage = "cutting" | "human" | "ai" | null;
+export type TurnCutRevealStage =
+  | "user-cut"
+  | "user-cutting"
+  | "ai-cutting"
+  | "user-turn"
+  | "ai-turn"
+  | "revealed"
+  | null;
+
+export interface TurnCutPresentation {
+  label: string;
+  action: { buttonLabel: string; ariaLabel: string } | null;
+}
 
 export function shouldShowStrategicGuides(
   preferenceEnabled: boolean,
@@ -21,6 +34,30 @@ export function shouldShowDecisionSnapshotCut(
   return decisionType === "pegging" && Boolean(cutCard);
 }
 
-export function shouldShowTurnCutPlayTitle(turnCutRevealStage: string | null): boolean {
-  return turnCutRevealStage !== "revealed";
+export function turnCutPresentation(stage: TurnCutRevealStage): TurnCutPresentation | null {
+  switch (stage) {
+    case "user-cut":
+      return {
+        label: "Cut the deck for AI",
+        action: { buttonLabel: "Cut deck", ariaLabel: "Cut deck" },
+      };
+    case "user-cutting":
+      return { label: "Cutting the deck", action: null };
+    case "ai-cutting":
+      return { label: "AI cuts the deck", action: null };
+    case "user-turn":
+      return {
+        label: "Turn the cut card",
+        action: { buttonLabel: "Turn cut card", ariaLabel: "Turn cut card" },
+      };
+    case "ai-turn":
+      return { label: "AI turns the cut card", action: null };
+    case "revealed":
+      return {
+        label: "Cut card",
+        action: { buttonLabel: "OK", ariaLabel: "Continue to pegging" },
+      };
+    default:
+      return null;
+  }
 }

@@ -3,7 +3,7 @@ import {
   shouldRevealCribOwner,
   shouldShowDecisionSnapshotCut,
   shouldShowStrategicGuides,
-  shouldShowTurnCutPlayTitle,
+  turnCutPresentation,
 } from "./ui-visibility";
 
 describe("shouldShowStrategicGuides", () => {
@@ -41,13 +41,23 @@ describe("shouldShowDecisionSnapshotCut", () => {
   });
 });
 
-describe("shouldShowTurnCutPlayTitle", () => {
-  it("hides the play-area title after the turn card is revealed", () => {
-    expect(shouldShowTurnCutPlayTitle("revealed")).toBe(false);
-  });
-
-  it("keeps the title during the interactive turn-cut steps", () => {
-    expect(shouldShowTurnCutPlayTitle("user-turn")).toBe(true);
-    expect(shouldShowTurnCutPlayTitle(null)).toBe(true);
+describe("turnCutPresentation", () => {
+  it("owns the primary label and optional action for every turn-cut stage", () => {
+    expect(turnCutPresentation(null)).toBeNull();
+    expect(turnCutPresentation("user-cut")).toEqual({
+      label: "Cut the deck for AI",
+      action: { buttonLabel: "Cut deck", ariaLabel: "Cut deck" },
+    });
+    expect(turnCutPresentation("user-cutting")).toEqual({ label: "Cutting the deck", action: null });
+    expect(turnCutPresentation("ai-cutting")).toEqual({ label: "AI cuts the deck", action: null });
+    expect(turnCutPresentation("user-turn")).toEqual({
+      label: "Turn the cut card",
+      action: { buttonLabel: "Turn cut card", ariaLabel: "Turn cut card" },
+    });
+    expect(turnCutPresentation("ai-turn")).toEqual({ label: "AI turns the cut card", action: null });
+    expect(turnCutPresentation("revealed")).toEqual({
+      label: "Cut card",
+      action: { buttonLabel: "OK", ariaLabel: "Continue to pegging" },
+    });
   });
 });

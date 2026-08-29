@@ -12,15 +12,17 @@ import type {
   ScorePhase,
 } from "./api-types";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
+import { singleGameReportRows } from "./game-report";
 import { rankLeaderboardWins } from "./leaderboard";
 import { mergedLifetimeResults } from "./my-stats";
 import { peggingDisplaySeries, recentPeggingCards } from "./pegging-display";
 import { resolveRemoteAiBase } from "./runtime-config";
 import {
+  type TurnCutRevealStage,
   shouldRevealCribOwner,
   shouldShowDecisionSnapshotCut,
   shouldShowStrategicGuides,
-  shouldShowTurnCutPlayTitle,
+  turnCutPresentation,
 } from "./ui-visibility";
 import { shouldUploadCompletedGame } from "./upload-policy";
 
@@ -209,14 +211,7 @@ const state: {
   dealAnimation: { key: string; dealer: string; pone: string } | null;
   animatedDealKeys: Set<string>;
   animatedTurnCutCardKeys: Set<string>;
-  turnCutRevealStage:
-    | "user-cut"
-    | "user-cutting"
-    | "ai-cutting"
-    | "user-turn"
-    | "ai-turn"
-    | "revealed"
-    | null;
+  turnCutRevealStage: TurnCutRevealStage;
   turnCutResolve: (() => void) | null;
   cutForDealPreparation: CutForDealPreparation | null;
   aiDiscardPreparation: { key: string; promise: Promise<AiDiscardPreparationResult> } | null;
@@ -2226,7 +2221,21 @@ function shouldAnimateTurnCutCard(game: GameState): boolean {
   return true;
 }
 
+function makeTurnCutControl(element: HTMLElement, ariaLabel: string): void {
+  element.setAttribute("role", "button");
+  element.tabIndex = 0;
+  element.setAttribute("aria-label", ariaLabel);
+  element.addEventListener("click", completeTurnCutInteraction);
+  element.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    completeTurnCutInteraction();
+  });
+}
+
 function renderTurnCut(game: GameState): void {
+  const presentation = turnCutPresentation(state.turnCutRevealStage);
+  if (!presentation) return;
   els.plays.innerHTML = "";
   els.plays.hidden = false;
   const row = document.createElement("div");
@@ -2246,35 +2255,10 @@ function renderTurnCut(game: GameState): void {
   ) {
     deck.classList.add("turn-cut-deck-cut");
   }
-  const userCanAct = state.turnCutRevealStage === "user-cut" ||
-    state.turnCutRevealStage === "user-turn" ||
-    state.turnCutRevealStage === "revealed";
-  if (userCanAct) {
-    deck.setAttribute("role", "button");
-    deck.tabIndex = 0;
-    deck.setAttribute(
-      "aria-label",
-      state.turnCutRevealStage === "revealed"
-        ? "Continue to pegging"
-        : state.turnCutRevealStage === "user-cut"
-          ? "Cut deck"
-          : "Turn cut card",
-    );
-    deck.addEventListener("click", completeTurnCutInteraction);
-    deck.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      completeTurnCutInteraction();
-    });
-  }
+  if (presentation.action) makeTurnCutControl(deck, presentation.action.ariaLabel);
   const label = document.createElement("div");
   label.className = "turn-cut-label";
-  if (state.turnCutRevealStage === "user-cut") label.textContent = "Cut the deck";
-  else if (state.turnCutRevealStage === "user-cutting") label.textContent = "Cutting the deck";
-  else if (state.turnCutRevealStage === "ai-cutting") label.textContent = "AI cuts the deck";
-  else if (state.turnCutRevealStage === "user-turn") label.textContent = "Turn the cut card";
-  else if (state.turnCutRevealStage === "ai-turn") label.textContent = "AI turns the cut card";
-  else label.textContent = "Cut card";
+  label.textContent = presentation.label;
 
   const showCutCard = state.turnCutRevealStage === "ai-turn" ||
     state.turnCutRevealStage === "revealed";
@@ -2285,15 +2269,7 @@ function renderTurnCut(game: GameState): void {
     cutLabel.textContent = "Cut";
     cut.append(cutLabel, cardElement(game.turnCard));
     if (state.turnCutRevealStage === "revealed") {
-      cut.setAttribute("role", "button");
-      cut.tabIndex = 0;
-      cut.setAttribute("aria-label", "Continue to pegging");
-      cut.addEventListener("click", completeTurnCutInteraction);
-      cut.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        completeTurnCutInteraction();
-      });
+      makeTurnCutControl(cut, presentation.action?.ariaLabel ?? "Continue to pegging");
     }
     cutSlot.append(cut);
   }
@@ -2537,11 +2513,7 @@ function renderGameReportInto(
   const finalScores = end.finalScores ?? fallbackScores;
   const result = end.result && end.result !== "regular" ? `, ${end.result}` : "";
   summary.textContent = `${shortDate(end.at)} vs AI. ${playerName(end.winner ?? "human")} won ${finalScores.human}-${finalScores.ai}${result}.`;
-  const cards = document.createElement("div");
-  cards.className = "single-game-report-cards";
-  cards.append(singleGameTotalCard("User", report.human, "human"));
-  cards.append(singleGameTotalCard("AI", report.ai, "ai"));
-  container.append(title, summary, cards, singleGameDecisionReview(events, end));
+  container.append(title, summary, singleGameReportTable(report), singleGameDecisionReview(events, end));
 }
 
 function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): HTMLElement {
@@ -4250,33 +4222,36 @@ function analyticsTotalCard(
   return card;
 }
 
-function singleGameTotalCard(
-  label: string,
-  totals: AnalyticsTotals,
-  kind: "human" | "ai",
-): HTMLElement {
-  const card = document.createElement("div");
-  card.className = `analytics-total ${kind}`;
-  const title = document.createElement("strong");
-  title.textContent = label;
-  card.append(title);
-  const add = (text: string, className = ""): void => {
-    const span = document.createElement("span");
-    if (className) span.className = className;
-    span.textContent = text;
-    card.append(span);
-  };
-  add(totals.wins ? "Win" : "Loss", "analytics-total-wide");
-  add(`Avg peg as dealer: ${averageLabel(totals.peggingDealer, totals.peggingDealerHands)}`);
-  add(`Avg peg as pone: ${averageLabel(totals.peggingPone, totals.peggingPoneHands)}`);
-  add(`Avg hand as dealer: ${averageLabel(totals.handDealer, totals.handDealerHands)}`);
-  add(`Avg hand as pone: ${averageLabel(totals.handPone, totals.handPoneHands)}`);
-  add(`Avg crib: ${averageLabel(totals.crib, totals.cribHands)}`);
-  if (totals.skunks) add("Skunk", "analytics-total-wide");
-  if (totals.skunked) add("Skunked", "analytics-total-wide");
-  if (totals.doubleSkunks) add("Double skunk", "analytics-total-wide");
-  if (totals.doubleSkunked) add("Double skunked", "analytics-total-wide");
-  return card;
+function singleGameReportTable(report: { human: AnalyticsTotals; ai: AnalyticsTotals }): HTMLTableElement {
+  const table = document.createElement("table");
+  table.className = "single-game-report-table";
+  table.setAttribute("aria-label", "Player and AI game comparison");
+
+  const head = table.createTHead();
+  const header = head.insertRow();
+  for (const [label, className] of [["Metric", ""], ["Player", "human"], ["AI", "ai"]]) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    if (className) cell.className = className;
+    cell.textContent = label;
+    header.append(cell);
+  }
+
+  const body = table.createTBody();
+  for (const row of singleGameReportRows(report.human, report.ai)) {
+    const tableRow = body.insertRow();
+    const label = document.createElement("th");
+    label.scope = "row";
+    label.textContent = row.label;
+    const player = tableRow.insertCell();
+    player.className = "human";
+    player.textContent = row.player;
+    const ai = tableRow.insertCell();
+    ai.className = "ai";
+    ai.textContent = row.ai;
+    tableRow.prepend(label);
+  }
+  return table;
 }
 
 function simpleAnalyticsCard(
@@ -4397,14 +4372,9 @@ function shortDate(value: string): string {
 
 function playAreaTitle(game: GameState): string {
   if (state.dealAnimation) return "";
-  if (!shouldShowTurnCutPlayTitle(state.turnCutRevealStage)) return "";
+  if (turnCutPresentation(state.turnCutRevealStage)) return "";
   if (state.dealCutRevealStage === "cutting") return "Cutting the deck";
   if (state.dealCutRevealStage) return "Cut result";
-  if (state.turnCutRevealStage === "user-cut") return "Cut the deck for AI";
-  if (state.turnCutRevealStage === "user-cutting") return "Cutting the deck";
-  if (state.turnCutRevealStage === "ai-cutting") return "AI cuts the deck";
-  if (state.turnCutRevealStage === "user-turn") return "Turn the cut card";
-  if (state.turnCutRevealStage === "ai-turn") return "AI turns the cut card";
   if (game.phase === "cut_for_deal") return game.cutForDeal?.prompt || "Tap the deck to cut for first deal";
   if (game.phase === "discard") {
     return game.cribOwner === "User"
@@ -4531,22 +4501,15 @@ function render(game: GameState | null): void {
 
   const gameActive = game.phase !== "game_over";
   const canStartNewGame = syncNewGameControl(game);
-  const waitingForTurnCutClick = state.turnCutRevealStage === "user-cut" ||
-    state.turnCutRevealStage === "user-turn" ||
-    state.turnCutRevealStage === "revealed";
+  const turnCut = turnCutPresentation(state.turnCutRevealStage);
+  const waitingForTurnCutClick = Boolean(turnCut?.action);
   const waitingForDealCutOk = Boolean(state.dealCutResolve);
   els.cutForDeal.hidden = !gameActive || (game.phase !== "cut_for_deal" && !waitingForTurnCutClick && !waitingForDealCutOk);
   els.discard.hidden = !gameActive || Boolean(state.dealAnimation) || waitingForDealCutOk || Boolean(state.turnCutRevealStage) || game.phase !== "discard";
   els.play.hidden = !gameActive || Boolean(state.dealAnimation) || waitingForDealCutOk || Boolean(state.turnCutRevealStage) || game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User");
   els.go.hidden = true;
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
-  els.cutForDeal.textContent = state.turnCutRevealStage === "user-turn"
-    ? "Turn cut card"
-    : state.turnCutRevealStage === "user-cut"
-      ? "Cut deck"
-      : state.turnCutRevealStage === "revealed" || waitingForDealCutOk
-        ? "OK"
-        : "Cut deck";
+  els.cutForDeal.textContent = turnCut?.action?.buttonLabel ?? (waitingForDealCutOk ? "OK" : "Cut deck");
   els.cutForDeal.disabled = game.phase !== "cut_for_deal" && !waitingForTurnCutClick && !waitingForDealCutOk;
   els.play.disabled = game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User" && selectedPlayableCard(game));
   els.go.disabled = !game.canGo;
@@ -4614,6 +4577,10 @@ function waitMs(ms: number): Promise<void> {
   });
 }
 
+function waitForTableMotion(ms: number): Promise<void> {
+  return waitMs(state.fontSize === "x-large" ? 0 : ms);
+}
+
 function completeDealCutReveal(): void {
   const resolve = state.dealCutResolve;
   if (!resolve) return;
@@ -4636,9 +4603,10 @@ function dealAnimationKey(game: GameState): string | null {
 async function playDealAnimationIfNeeded(game: GameState): Promise<void> {
   const key = dealAnimationKey(game);
   if (!key || state.animatedDealKeys.has(key)) return;
+  state.animatedDealKeys.add(key);
+  if (state.fontSize === "x-large") return;
   const dealer = game.dealer;
   const pone = dealer === "User" ? "AI" : "User";
-  state.animatedDealKeys.add(key);
   state.dealAnimation = { key, dealer, pone };
   state.resultOverride = [`Dealing hand ${game.handNumber}.`];
   render(game);
@@ -4655,6 +4623,16 @@ function waitForTurnCutInteraction(): Promise<void> {
   });
 }
 
+function showTurnCutStage(
+  game: GameState,
+  stage: Exclude<TurnCutRevealStage, null>,
+  notice: string | null = null,
+): void {
+  state.turnCutRevealStage = stage;
+  state.resultOverride = notice ? [notice] : null;
+  render(game);
+}
+
 function canRevealTurnCard(game: GameState): boolean {
   return game.phase === "pegging" || game.phase === "game_over";
 }
@@ -4664,10 +4642,8 @@ async function revealAndConfirmTurnCard(): Promise<GameState> {
   if (!revealedGame.turnCard || !revealedGame.turnCardRevealed) {
     throw new Error("The server did not reveal the turn card.");
   }
-  state.turnCutRevealStage = "revealed";
-  state.resultOverride = [`Cut card is ${cutCardText(revealedGame.turnCard)}.`];
+  showTurnCutStage(revealedGame, "revealed", `Cut card is ${cutCardText(revealedGame.turnCard)}.`);
   const confirmed = waitForTurnCutInteraction();
-  render(revealedGame);
   await waitForPaint();
   await confirmed;
   state.turnCutRevealStage = null;
@@ -4683,29 +4659,20 @@ async function playTurnCardReveal(game: GameState): Promise<GameState> {
     return game;
   }
   if (game.dealer === "AI") {
-    state.turnCutRevealStage = "user-cut";
-    state.resultOverride = ["Cut the deck for AI."];
-    render(game);
+    showTurnCutStage(game, "user-cut");
     await waitForPaint();
     await waitForTurnCutInteraction();
-    state.turnCutRevealStage = "user-cutting";
-    render(game);
+    showTurnCutStage(game, "user-cutting");
     await waitForPaint();
-    await waitMs(580);
-    state.turnCutRevealStage = "ai-turn";
-    state.resultOverride = ["AI turns the cut card."];
-    render(game);
+    await waitForTableMotion(580);
+    showTurnCutStage(game, "ai-turn");
     await waitForPaint();
-    await waitMs(750);
+    await waitForTableMotion(750);
   } else {
-    state.turnCutRevealStage = "ai-cutting";
-    state.resultOverride = ["AI cuts the deck."];
-    render(game);
+    showTurnCutStage(game, "ai-cutting");
     await waitForPaint();
-    await waitMs(650);
-    state.turnCutRevealStage = "user-turn";
-    state.resultOverride = ["Turn the cut card."];
-    render(game);
+    await waitForTableMotion(650);
+    showTurnCutStage(game, "user-turn");
     await waitForPaint();
     await waitForTurnCutInteraction();
   }
@@ -4715,30 +4682,21 @@ async function playTurnCardReveal(game: GameState): Promise<GameState> {
 async function playTurnCutWhileFinishingDiscard(game: GameState | null): Promise<TurnCutProgress> {
   if (!game || game.phase !== "ai_discarding") return null;
   if (game.dealer === "AI") {
-    state.turnCutRevealStage = "user-cut";
-    state.resultOverride = ["Cut the deck for AI."];
-    render(game);
+    showTurnCutStage(game, "user-cut");
     await waitForPaint();
     await waitForTurnCutInteraction();
-    state.turnCutRevealStage = "user-cutting";
-    render(game);
+    showTurnCutStage(game, "user-cutting");
     await waitForPaint();
-    await waitMs(580);
-    state.turnCutRevealStage = "ai-turn";
-    state.resultOverride = ["AI turns the cut card."];
-    render(game);
+    await waitForTableMotion(580);
+    showTurnCutStage(game, "ai-turn");
     await waitForPaint();
-    await waitMs(450);
+    await waitForTableMotion(450);
     return "ai-turn";
   }
-  state.turnCutRevealStage = "ai-cutting";
-  state.resultOverride = ["AI cuts the deck."];
-  render(game);
+  showTurnCutStage(game, "ai-cutting");
   await waitForPaint();
-  await waitMs(650);
-  state.turnCutRevealStage = "user-turn";
-  state.resultOverride = ["Turn the cut card."];
-  render(game);
+  await waitForTableMotion(650);
+  showTurnCutStage(game, "user-turn");
   await waitForPaint();
   await waitForTurnCutInteraction();
   return "user-turn";
@@ -4756,11 +4714,9 @@ async function finishTurnCardReveal(game: GameState, startStage: TurnCutProgress
     return playTurnCardReveal(game);
   }
   if (startStage === "ai-turn") {
-    state.turnCutRevealStage = "ai-turn";
-    state.resultOverride = ["AI turns the cut card."];
-    render(game);
+    showTurnCutStage(game, "ai-turn");
     await waitForPaint();
-    await waitMs(700);
+    await waitForTableMotion(700);
   }
   return revealAndConfirmTurnCard();
 }
@@ -5006,7 +4962,7 @@ async function cutForDeal(): Promise<void> {
   await waitForPaint();
   try {
     state.resultOverride = null;
-    const cutAnimation = waitMs(580);
+    const cutAnimation = waitForTableMotion(580);
     const preparedCut = preparedCutForDealFor(state.game);
     let next: GameState;
     if (preparedCut) {
@@ -5026,7 +4982,7 @@ async function cutForDeal(): Promise<void> {
       state.resultOverride = [`User cut ${cutCardText(next.cutForDeal.human)}.`];
       render(next);
       await waitForPaint();
-      await waitMs(800);
+      await waitForTableMotion(800);
       state.dealCutRevealStage = "ai";
       state.resultOverride = [next.cutForDeal.prompt];
       const confirmed = waitForDealCutOk();
