@@ -334,7 +334,7 @@ fn health_json() -> String {
 
 fn model_json() -> String {
     format!(
-        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"schell_table-peg_table-13.0\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\"]}}",
+        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\"]}}",
         APP_VERSION, MODEL_13_0
     )
 }
@@ -2410,8 +2410,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn model_metadata_includes_model16() {
+    fn model_metadata_includes_experimental_models() {
+        assert!(model_json().contains("schell_table-peg_table-13.1"));
         assert!(model_json().contains("schell_table-peg_table-16.0"));
+        assert!(model_json().contains("schell_table-peg_table-16.1"));
+        assert!(model_json().contains("schell_table-peg_table-16.3"));
     }
 
     #[test]
@@ -2561,8 +2564,12 @@ mod tests {
         upload_game(&server, june_game);
         let response = upload_game(&server, july_game);
 
-        assert!(response.body.contains("\"endedAt\":\"2026-06-27T09:12:34.567Z\""));
-        assert!(response.body.contains("\"endedAt\":\"2026-07-09T15:49:01.234Z\""));
+        assert!(response
+            .body
+            .contains("\"endedAt\":\"2026-06-27T09:12:34.567Z\""));
+        assert!(response
+            .body
+            .contains("\"endedAt\":\"2026-07-09T15:49:01.234Z\""));
         std::fs::remove_dir_all(data_dir).unwrap();
     }
 
@@ -2587,7 +2594,9 @@ mod tests {
 
         let response = upload_game(&server, game);
 
-        assert!(response.body.contains("\"endedAt\":\"2026-06-27T08:52:48.578Z\""));
+        assert!(response
+            .body
+            .contains("\"endedAt\":\"2026-06-27T08:52:48.578Z\""));
         std::fs::remove_dir_all(data_dir).unwrap();
     }
 

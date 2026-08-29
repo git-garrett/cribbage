@@ -498,6 +498,8 @@ const SIMPLE_NETWORK_PUBLIC_OPPONENTS = new Set<string>([
 ]);
 const SIMPLE_NETWORK_LOCAL_OPPONENTS = new Set<string>([
   ...SIMPLE_NETWORK_PUBLIC_OPPONENTS,
+  "schell_table-peg_table-16.3",
+  "schell_table-peg_table-16.1",
   "schell_table-peg_table-16.0",
   "schell_table-peg_table-15.2",
   "schell_table-peg_table-15.1",
@@ -655,7 +657,7 @@ function applyAuthoritativeGameState(snapshot: GameSnapshot, game: GameState): v
 }
 
 function simpleNetworkSessionValue(): string {
-  return SIMPLE_NETWORK_LOCAL_AI_MODE ? "rust-13.0-14.3-14.8-14.8.1-15.0-15.1-15.2-16.0" : "rust-13.0";
+  return SIMPLE_NETWORK_LOCAL_AI_MODE ? "rust-13.0-14.3-14.8-14.8.1-15.0-15.1-15.2-16.0-16.1-16.3" : "rust-13.0";
 }
 function isValidSimpleNetworkSessionValue(value: string | null): boolean {
   return value === simpleNetworkSessionValue() || value === SIMPLE_NETWORK_OPPONENT;
@@ -4030,6 +4032,8 @@ function sortedAnalyticsEngines(
 function analyticsEngineSortKey(engine: Opponent): number {
   return [
     "schell_table-peg_table-13.0",
+    "schell_table-peg_table-16.3",
+    "schell_table-peg_table-16.1",
     "schell_table-peg_table-16.0",
     "schell_table-peg_table-15.2",
     "schell_table-peg_table-15.1",
