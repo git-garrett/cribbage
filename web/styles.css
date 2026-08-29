@@ -109,20 +109,20 @@ body[data-font-size="large"] {
 }
 
 body[data-font-size="x-large"] {
-  --app-font: 32px;
-  --heading-font: 44px;
-  --subheading-font: 30px;
-  --control-font: 30px;
-  --control-small-font: 26px;
-  --fine-font: 24px;
-  --score-label-font: 26px;
-  --score-value-font: 60px;
-  --score-meta-font: 22px;
-  --score-meta-small-font: 20px;
-  --body-font: 28px;
-  --notice-font: 28px;
-  --row-font: 24px;
-  --menu-font: 26px;
+  --app-font: 40px;
+  --heading-font: 55px;
+  --subheading-font: 38px;
+  --control-font: 38px;
+  --control-small-font: 33px;
+  --fine-font: 30px;
+  --score-label-font: 33px;
+  --score-value-font: 75px;
+  --score-meta-font: 28px;
+  --score-meta-small-font: 25px;
+  --body-font: 35px;
+  --notice-font: 35px;
+  --row-font: 30px;
+  --menu-font: 33px;
 }
 
 .splash-page {
@@ -1849,7 +1849,15 @@ button:disabled {
 }
 
 .played-archive {
-  display: none;
+  display: flex;
+}
+
+.pegging-row.played-archive {
+  min-height: 62px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.18);
+  filter: saturate(0.35);
+  opacity: 0.48;
 }
 
 .played-active {
@@ -2175,11 +2183,11 @@ button:disabled {
 }
 
 .pegging-row .card[data-owner="human"] {
-  transform: translateY(8px);
+  transform: translateY(7px);
 }
 
 .pegging-row .card[data-owner="ai"] {
-  transform: translateY(-4px);
+  transform: translateY(-7px);
 }
 
 .pegging-row .card .corner {
@@ -2433,20 +2441,20 @@ button.card {
   }
 
   body[data-font-size="x-large"] {
-    --app-font: 32px;
-    --heading-font: 36px;
-    --subheading-font: 24px;
-    --control-font: 30px;
-    --control-small-font: 26px;
-    --fine-font: 24px;
-    --score-label-font: 24px;
-    --score-value-font: 54px;
-    --score-meta-font: 22px;
-    --score-meta-small-font: 20px;
-    --body-font: 28px;
-    --notice-font: 28px;
-    --row-font: 24px;
-    --menu-font: 26px;
+    --app-font: 40px;
+    --heading-font: 45px;
+    --subheading-font: 30px;
+    --control-font: 38px;
+    --control-small-font: 33px;
+    --fine-font: 30px;
+    --score-label-font: 30px;
+    --score-value-font: 68px;
+    --score-meta-font: 28px;
+    --score-meta-small-font: 25px;
+    --body-font: 35px;
+    --notice-font: 35px;
+    --row-font: 30px;
+    --menu-font: 33px;
   }
 
   .app {
@@ -2797,6 +2805,47 @@ button.card {
 
   .played-active.pegging-row .card .suit {
     font-size: 15px;
+  }
+
+  /* At Extra Large, legibility wins over preserving a miniature-card shape.
+     Cards become roomy rank/suit tokens and pegging rows can scroll instead of
+     shrinking their text below the selected accessibility size. */
+  body[data-font-size="x-large"] .card:not(.back) {
+    display: inline-flex;
+    justify-content: center;
+    gap: 0.08em;
+    width: auto !important;
+    min-width: 1.65em;
+    height: auto !important;
+    min-height: 1.5em;
+    padding: 0.18em 0.2em;
+  }
+
+  body[data-font-size="x-large"] .card .corner {
+    display: none;
+  }
+
+  body[data-font-size="x-large"] .card .rank,
+  body[data-font-size="x-large"] .card .suit {
+    font-size: var(--app-font) !important;
+    line-height: 1;
+  }
+
+  body[data-font-size="x-large"] .pegging-row {
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+
+  body[data-font-size="x-large"] .pegging-row .card:not(.back) {
+    flex: 0 0 auto;
+    min-width: max-content;
+    margin-left: 3px;
+    border-color: rgba(255, 255, 255, 0.28);
+    box-shadow: none;
+  }
+
+  .pegging-row.played-archive {
+    min-height: 58px;
   }
 
   .actions {

@@ -13,6 +13,8 @@ import type {
 } from "./api-types";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 import { rankLeaderboardWins } from "./leaderboard";
+import { mergedLifetimeResults } from "./my-stats";
+import { peggingDisplaySeries } from "./pegging-display";
 import { resolveRemoteAiBase } from "./runtime-config";
 import { shouldRevealCribOwner, shouldShowStrategicGuides } from "./ui-visibility";
 import { shouldUploadCompletedGame } from "./upload-policy";
@@ -2079,18 +2081,16 @@ function renderCards(container: HTMLElement, cards: GameState["humanHand"], opti
 }
 
 function renderPlayedCards(game: GameState): void {
-  const activeCards = game.plays.length
-    ? game.plays
-    : game.peggingResetPending
-      ? game.completedPlays.at(-1) ?? []
-      : [];
+  const series = peggingDisplaySeries(game);
   els.plays.innerHTML = "";
-  els.plays.hidden = activeCards.length === 0;
-  if (!activeCards.length) return;
-  const active = document.createElement("div");
-  active.className = "cards played-active pegging-row";
-  for (const card of activeCards) active.append(cardElement(card));
-  els.plays.append(active);
+  els.plays.hidden = series.length === 0;
+  for (const group of series) {
+    const row = document.createElement("div");
+    row.className = `cards ${group.current ? "played-active" : "played-archive"} pegging-row`;
+    row.setAttribute("aria-label", group.current ? "Current pegging series" : "Prior pegging series");
+    for (const card of group.cards) row.append(cardElement(card));
+    els.plays.append(row);
+  }
 }
 
 function cutCardText(card: NonNullable<GameState["cutForDeal"]>["human"]): string {
@@ -3367,14 +3367,25 @@ function renderAnalytics(): void {
 
 function renderMyStats(scoreEvents: ScoreEvent[], gameEvents: Extract<AnalyticsEvent, { type: "game" }>[]): void {
   const completedGames = gameEvents.filter((event) => event.action === "end").length;
-  const totals = playerAnalyticsTotals(scoreEvents, gameEvents);
+  const localTotals = playerAnalyticsTotals(scoreEvents, gameEvents);
+  const lifetime = mergedLifetimeResults(
+    playerFirstName,
+    state.leaderboardSummary.playerStats ?? [],
+    localTotals,
+  );
+  const totals = {
+    human: { ...localTotals.human, ...lifetime.human },
+    ai: { ...localTotals.ai, ...lifetime.ai },
+  };
   els.analyticsTitle.textContent = "My Stats";
-  els.analyticsSummary.textContent = completedGames
-    ? `${completedGames} completed game${completedGames === 1 ? "" : "s"} recorded.`
-    : "No completed games yet.";
+  els.analyticsSummary.textContent = lifetime.source === "server"
+    ? `${lifetime.human.games} merged production game${lifetime.human.games === 1 ? "" : "s"}; detailed scoring from ${completedGames} game${completedGames === 1 ? "" : "s"} stored on this device.`
+    : completedGames
+      ? `${completedGames} completed game${completedGames === 1 ? "" : "s"} recorded on this device.`
+      : "Loading merged production history…";
   els.analyticsTotals.innerHTML = "";
-  els.analyticsTotals.append(simpleAnalyticsCard("User", totals.human, "human"));
-  els.analyticsTotals.append(simpleAnalyticsCard("AI", totals.ai, "ai"));
+  els.analyticsTotals.append(simpleAnalyticsCard(lifetime.player, totals.human, "human", completedGames));
+  els.analyticsTotals.append(simpleAnalyticsCard(`AI vs ${lifetime.player}`, totals.ai, "ai", completedGames));
   renderAnalyticsRows(els.analyticsGames, []);
   renderAnalyticsRows(els.analyticsHands, []);
   renderAnalyticsRows(els.analyticsScores, []);
@@ -3505,7 +3516,7 @@ function applyLeaderboardSummary(
   if (!changed) return;
   state.leaderboardRevision += 1;
   state.leaderboardAnimateNext = animate && state.leaderboardOpen;
-  if (state.leaderboardOpen) render(state.game);
+  if (state.leaderboardOpen || (state.analyticsOpen && state.analyticsMode === "my")) render(state.game);
 }
 
 async function loadInitialLeaderboard(): Promise<void> {
@@ -3523,7 +3534,7 @@ async function loadInitialLeaderboard(): Promise<void> {
     console.warn("Initial leaderboard load failed", error);
   } finally {
     state.leaderboardLoading = false;
-    if (state.leaderboardOpen) render(state.game);
+    if (state.leaderboardOpen || (state.analyticsOpen && state.analyticsMode === "my")) render(state.game);
   }
 }
 
@@ -4210,7 +4221,12 @@ function analyticsTotalCard(
   return card;
 }
 
-function simpleAnalyticsCard(label: string, totals: AnalyticsTotals, kind: "human" | "ai"): HTMLElement {
+function simpleAnalyticsCard(
+  label: string,
+  totals: AnalyticsTotals,
+  kind: "human" | "ai",
+  scoringGames = totals.games,
+): HTMLElement {
   const card = document.createElement("div");
   card.className = `analytics-total ${kind}`;
   const title = document.createElement("strong");
@@ -4228,8 +4244,16 @@ function simpleAnalyticsCard(label: string, totals: AnalyticsTotals, kind: "huma
   add(`Games: ${totals.games}`, "analytics-total-wide");
   add(`Wins: ${totals.wins}`);
   add(`Losses: ${totals.losses}`);
+  add(`Skunks: ${totals.skunks}`);
+  add(`Skunked: ${totals.skunked}`);
+  if (scoringGames !== totals.games) {
+    add(
+      `Scoring below: ${scoringGames} on-device game${scoringGames === 1 ? "" : "s"}`,
+      "analytics-total-wide analytics-baseline-note",
+    );
+  }
   add(`Total scoring: ${totalScoring}`, "analytics-total-wide");
-  add(`Avg scoring: ${averageLabel(totalScoring, totals.games)}`);
+  add(`Avg scoring: ${averageLabel(totalScoring, scoringGames)}`);
   add(`Pegging: ${pegging}`);
   add(`Hands: ${hands}`);
   add(`Crib: ${totals.crib}`);
@@ -4763,6 +4787,7 @@ function openAnalytics(mode: "my" | "full"): void {
   els.settingsPanel.hidden = true;
   els.menuToggle.setAttribute("aria-expanded", "false");
   render(state.game);
+  if (mode === "my") void loadInitialLeaderboard();
 }
 
 els.myStatsOpen.addEventListener("click", () => {

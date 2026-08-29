@@ -1133,8 +1133,8 @@ fn game_state_json(session: &Session) -> String {
         game.count,
         turn_card,
         session.turn_card_revealed,
-        cards_json(&game.plays, None),
-        nested_cards_json(&game.completed_plays),
+        cards_with_owners_json(&game.plays, &game.play_owners),
+        nested_cards_with_owners_json(&game.completed_plays, &game.completed_play_owners),
         game.pegging_reset_pending,
         human_hand,
         game.player(AI).hand.len(),
@@ -1258,7 +1258,7 @@ fn snapshot_json(session: &Session) -> String {
         "null".to_string()
     };
     format!(
-        "{{\"version\":1,\"gameId\":\"{}\",\"analyticsCounter\":0,\"analyticsEvents\":{},\"opponent\":\"{}\",\"deal\":{},\"firstDeal\":{},\"handNumber\":{},\"human\":{},\"ai\":{},\"turnCard\":{},\"turnCardRevealed\":{},\"crib\":{},\"plays\":{},\"playOwners\":{},\"completedPlays\":{},\"completedPlayOwners\":[],\"peggingResetPending\":{},\"count\":{},\"turn\":{},\"goPlayer\":{},\"lastPlayer\":{},\"scoringReview\":{},\"phase\":\"{}\",\"message\":\"{}\",\"log\":[],\"result\":{},\"pegPositions\":{{\"human\":[{},{}],\"ai\":[{},{}]}},\"pendingDiscardReviews\":{},\"pendingPeggingReviews\":{}}}",
+        "{{\"version\":1,\"gameId\":\"{}\",\"analyticsCounter\":0,\"analyticsEvents\":{},\"opponent\":\"{}\",\"deal\":{},\"firstDeal\":{},\"handNumber\":{},\"human\":{},\"ai\":{},\"turnCard\":{},\"turnCardRevealed\":{},\"crib\":{},\"plays\":{},\"playOwners\":{},\"completedPlays\":{},\"completedPlayOwners\":{},\"peggingResetPending\":{},\"count\":{},\"turn\":{},\"goPlayer\":{},\"lastPlayer\":{},\"scoringReview\":{},\"phase\":\"{}\",\"message\":\"{}\",\"log\":[],\"result\":{},\"pegPositions\":{{\"human\":[{},{}],\"ai\":[{},{}]}},\"pendingDiscardReviews\":{},\"pendingPeggingReviews\":{}}}",
         json_escape(&session.id),
         analytics_events_json(session),
         session.model.as_str(),
@@ -1273,6 +1273,7 @@ fn snapshot_json(session: &Session) -> String {
         number_array_json(&game.plays.iter().map(|card| card.id).collect::<Vec<_>>()),
         side_array_json(&game.play_owners),
         nested_number_arrays_json(&game.completed_plays),
+        nested_side_arrays_json(&game.completed_play_owners),
         game.pegging_reset_pending,
         game.count,
         if game.current_player() == HUMAN { 0 } else { 1 },
@@ -1618,12 +1619,35 @@ fn cards_json(cards: &[Card], owner: Option<&str>) -> String {
     format!("[{}]", cards.join(","))
 }
 
-fn nested_cards_json(groups: &[Vec<Card>]) -> String {
+fn side_key(side: Side) -> &'static str {
+    if side == HUMAN {
+        "human"
+    } else {
+        "ai"
+    }
+}
+
+fn cards_with_owners_json(cards: &[Card], owners: &[Side]) -> String {
+    let cards = cards
+        .iter()
+        .enumerate()
+        .map(|(index, card)| card_json(*card, owners.get(index).copied().map(side_key)))
+        .collect::<Vec<_>>();
+    format!("[{}]", cards.join(","))
+}
+
+fn nested_cards_with_owners_json(groups: &[Vec<Card>], owner_groups: &[Vec<Side>]) -> String {
     format!(
         "[{}]",
         groups
             .iter()
-            .map(|cards| cards_json(cards, None))
+            .enumerate()
+            .map(|(index, cards)| {
+                cards_with_owners_json(
+                    cards,
+                    owner_groups.get(index).map(Vec::as_slice).unwrap_or(&[]),
+                )
+            })
             .collect::<Vec<_>>()
             .join(",")
     )
@@ -1657,6 +1681,17 @@ fn side_array_json(sides: &[Side]) -> String {
         sides
             .iter()
             .map(|side| json_string_value(if *side == HUMAN { "human" } else { "ai" }))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+fn nested_side_arrays_json(groups: &[Vec<Side>]) -> String {
+    format!(
+        "[{}]",
+        groups
+            .iter()
+            .map(|sides| side_array_json(sides))
             .collect::<Vec<_>>()
             .join(",")
     )
@@ -2377,6 +2412,28 @@ mod tests {
     #[test]
     fn model_metadata_includes_model16() {
         assert!(model_json().contains("schell_table-peg_table-16.0"));
+    }
+
+    #[test]
+    fn public_pegging_cards_preserve_current_and_completed_series_owners() {
+        let mut session = new_session(ModelId::Schell13, None);
+        session.waiting_for_deal_cut = false;
+        session.turn_card_revealed = true;
+        session.game.phase = Phase::Pegging;
+        session.game.plays = vec![Card::new(3).unwrap(), Card::new(4).unwrap()];
+        session.game.play_owners = vec![HUMAN, AI];
+        session.game.completed_plays = vec![vec![Card::new(1).unwrap(), Card::new(2).unwrap()]];
+        session.game.completed_play_owners = vec![vec![AI, HUMAN]];
+
+        let state = serde_json::from_str::<Value>(&game_state_json(&session)).unwrap();
+        assert_eq!(state["plays"][0]["owner"], "human");
+        assert_eq!(state["plays"][1]["owner"], "ai");
+        assert_eq!(state["completedPlays"][0][0]["owner"], "ai");
+        assert_eq!(state["completedPlays"][0][1]["owner"], "human");
+
+        let snapshot = serde_json::from_str::<Value>(&snapshot_json(&session)).unwrap();
+        assert_eq!(snapshot["completedPlayOwners"][0][0], "ai");
+        assert_eq!(snapshot["completedPlayOwners"][0][1], "human");
     }
 
     #[test]
