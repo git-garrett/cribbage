@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cribbage Benchmark Runner"
+  short_description: "Launch and queue deterministic benchmark jobs"
+  default_prompt: "Use $cribbage-benchmark-runner to launch this benchmark reliably and report its status."
