@@ -2807,43 +2807,6 @@ button.card {
     font-size: 15px;
   }
 
-  /* At Extra Large, legibility wins over preserving a miniature-card shape.
-     Cards become roomy rank/suit tokens and pegging rows can scroll instead of
-     shrinking their text below the selected accessibility size. */
-  body[data-font-size="x-large"] .card:not(.back) {
-    display: inline-flex;
-    justify-content: center;
-    gap: 0.08em;
-    width: auto !important;
-    min-width: 1.65em;
-    height: auto !important;
-    min-height: 1.5em;
-    padding: 0.18em 0.2em;
-  }
-
-  body[data-font-size="x-large"] .card .corner {
-    display: none;
-  }
-
-  body[data-font-size="x-large"] .card .rank,
-  body[data-font-size="x-large"] .card .suit {
-    font-size: var(--app-font) !important;
-    line-height: 1;
-  }
-
-  body[data-font-size="x-large"] .pegging-row {
-    overflow-x: auto;
-    overflow-y: visible;
-  }
-
-  body[data-font-size="x-large"] .pegging-row .card:not(.back) {
-    flex: 0 0 auto;
-    min-width: max-content;
-    margin-left: 3px;
-    border-color: rgba(255, 255, 255, 0.28);
-    box-shadow: none;
-  }
-
   .pegging-row.played-archive {
     min-height: 58px;
   }
@@ -3025,4 +2988,139 @@ button.card {
 .inline-continue {
   width: auto;
   margin-top: 8px;
+}
+
+/* Extra Large uses crib-notation tokens instead of miniature playing cards:
+   one full-size rank over one full-size suit, directly on the table felt. */
+body[data-font-size="x-large"] .card:not(.back) {
+  display: inline-grid;
+  grid-template-rows: auto auto;
+  place-items: center;
+  align-content: center;
+  flex: 0 0 auto;
+  gap: 0;
+  width: max-content !important;
+  min-width: 1.2em;
+  height: auto !important;
+  min-height: 1.9em !important;
+  margin-left: 0;
+  padding: 0.04em 0.08em 0.1em;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+body[data-font-size="x-large"] .card .corner {
+  display: none;
+}
+
+body[data-font-size="x-large"] .card .rank,
+body[data-font-size="x-large"] .card .suit {
+  display: block;
+  font-size: var(--app-font) !important;
+  line-height: 0.9;
+}
+
+body[data-font-size="x-large"] .card .rank {
+  font-weight: 760;
+}
+
+body[data-font-size="x-large"] .card .suit {
+  font-weight: 600;
+}
+
+body[data-font-size="x-large"] .table .card.clubs,
+body[data-font-size="x-large"] .table .card.spades {
+  color: rgba(255, 255, 255, 0.96);
+}
+
+body[data-font-size="x-large"] .table .card.hearts,
+body[data-font-size="x-large"] .table .card.diamonds {
+  color: #ff969d;
+}
+
+body[data-font-size="x-large"] .card.selected {
+  outline: 0;
+  filter: drop-shadow(0 0 5px var(--human));
+}
+
+body[data-font-size="x-large"] .card.selected::after {
+  position: absolute;
+  bottom: 0;
+  width: 0.8em;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--human);
+  content: "";
+}
+
+body[data-font-size="x-large"] button.card:focus-visible {
+  outline: 4px solid var(--human);
+  outline-offset: 3px;
+  border-radius: 4px !important;
+}
+
+body[data-font-size="x-large"] .ai-strip .card.back {
+  display: inline-grid;
+  grid-template-rows: auto auto;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 1.2em !important;
+  min-width: 1.2em;
+  height: 1.9em !important;
+  min-height: 1.9em;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: var(--app-font);
+  line-height: 0.9;
+}
+
+body[data-font-size="x-large"] .ai-strip .card.back::before {
+  content: "?";
+  font-weight: 760;
+}
+
+body[data-font-size="x-large"] .ai-strip .card.back::after {
+  content: "·";
+  opacity: 0.5;
+}
+
+.pegging-overflow-marker {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  body[data-font-size="x-large"] #plays.pegging-history-only,
+  body[data-font-size="x-large"] #plays .pegging-row.played-archive,
+  body[data-font-size="x-large"] #plays .pegging-overflow-card {
+    display: none;
+  }
+
+  body[data-font-size="x-large"] #plays .played-active.pegging-row {
+    align-items: flex-start;
+    gap: 0.14em;
+    min-height: calc(var(--app-font) * 2.15);
+    padding: 3px 0 0;
+    overflow: hidden;
+  }
+
+  body[data-font-size="x-large"] #plays .played-active.pegging-row .card:not(.back) {
+    margin-left: 0;
+  }
+
+  body[data-font-size="x-large"] #plays .pegging-overflow-marker {
+    display: grid;
+    place-items: center;
+    align-self: center;
+    flex: 0 0 auto;
+    min-width: 1.4em;
+    color: rgba(255, 255, 255, 0.66);
+    font-size: var(--fine-font);
+    font-weight: 800;
+    line-height: 1;
+  }
 }

@@ -9,6 +9,19 @@ export interface PeggingDisplaySeries<Card> {
   current: boolean;
 }
 
+export interface RecentPeggingCards<Card> {
+  hidden: Card[];
+  visible: Card[];
+}
+
+export function recentPeggingCards<Card>(cards: Card[], visibleLimit: number): RecentPeggingCards<Card> {
+  const cutoff = Math.max(0, cards.length - Math.max(0, visibleLimit));
+  return {
+    hidden: cards.slice(0, cutoff),
+    visible: cards.slice(cutoff),
+  };
+}
+
 export function peggingDisplaySeries<Card>(
   state: PeggingDisplayState<Card>,
 ): PeggingDisplaySeries<Card>[] {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { peggingDisplaySeries } from "./pegging-display";
+import { peggingDisplaySeries, recentPeggingCards } from "./pegging-display";
 
 describe("peggingDisplaySeries", () => {
   const card = (id: number, owner: "human" | "ai") => ({ id, owner });
@@ -23,5 +23,13 @@ describe("peggingDisplaySeries", () => {
       completedPlays: [finished],
       peggingResetPending: true,
     })).toEqual([{ cards: finished, current: true }]);
+  });
+
+  it("keeps only the newest requested cards in the compact pegging window", () => {
+    expect(recentPeggingCards([1, 2, 3, 4, 5, 6, 7], 5)).toEqual({
+      hidden: [1, 2],
+      visible: [3, 4, 5, 6, 7],
+    });
+    expect(recentPeggingCards([1, 2, 3], 5)).toEqual({ hidden: [], visible: [1, 2, 3] });
   });
 });

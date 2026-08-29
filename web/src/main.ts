@@ -14,7 +14,7 @@ import type {
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 import { rankLeaderboardWins } from "./leaderboard";
 import { mergedLifetimeResults } from "./my-stats";
-import { peggingDisplaySeries } from "./pegging-display";
+import { peggingDisplaySeries, recentPeggingCards } from "./pegging-display";
 import { resolveRemoteAiBase } from "./runtime-config";
 import { shouldRevealCribOwner, shouldShowStrategicGuides } from "./ui-visibility";
 import { shouldUploadCompletedGame } from "./upload-policy";
@@ -2023,6 +2023,7 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
 function cardElement(card: GameState["humanHand"][number], options: { clickable?: boolean; disabled?: boolean } = {}): HTMLElement {
   const button = document.createElement(options.clickable ? "button" : "div");
   button.className = `card ${card.suit}`;
+  button.setAttribute("aria-label", `${card.rank} of ${card.suit}`);
   button.dataset.index = String(card.index);
   button.dataset.id = String(card.id);
   if (card.owner) button.dataset.owner = card.owner;
@@ -2046,6 +2047,8 @@ function cardElement(card: GameState["humanHand"][number], options: { clickable?
 function cardBack(): HTMLElement {
   const card = document.createElement("div");
   card.className = "card back";
+  card.setAttribute("aria-label", "Hidden card");
+  card.setAttribute("role", "img");
   return card;
 }
 
@@ -2083,14 +2086,30 @@ function renderCards(container: HTMLElement, cards: GameState["humanHand"], opti
 }
 
 function renderPlayedCards(game: GameState): void {
+  const compactCardLimit = 4;
   const series = peggingDisplaySeries(game);
   els.plays.innerHTML = "";
   els.plays.hidden = series.length === 0;
+  els.plays.classList.toggle("pegging-history-only", series.length > 0 && series.every((group) => !group.current));
   for (const group of series) {
     const row = document.createElement("div");
     row.className = `cards ${group.current ? "played-active" : "played-archive"} pegging-row`;
-    row.setAttribute("aria-label", group.current ? "Current pegging series" : "Prior pegging series");
-    for (const card of group.cards) row.append(cardElement(card));
+    const label = group.current ? "Current pegging series" : "Prior pegging series";
+    row.setAttribute("aria-label", `${label}: ${group.cards.map((card) => `${card.rank}${card.symbol}`).join(", ")}`);
+    const compact = recentPeggingCards(group.cards, compactCardLimit);
+    if (group.current && compact.hidden.length > 0) {
+      const marker = document.createElement("span");
+      marker.className = "pegging-overflow-marker";
+      marker.textContent = `+${compact.hidden.length}`;
+      marker.setAttribute("aria-hidden", "true");
+      row.append(marker);
+    }
+    for (const card of compact.hidden) {
+      const element = cardElement(card);
+      if (group.current) element.classList.add("pegging-overflow-card");
+      row.append(element);
+    }
+    for (const card of compact.visible) row.append(cardElement(card));
     els.plays.append(row);
   }
 }
@@ -4434,6 +4453,7 @@ function render(game: GameState | null): void {
   const playTitle = playAreaTitle(game);
   els.playAreaTitle.textContent = playTitle;
   els.playAreaTitle.hidden = !playTitle;
+  els.plays.classList.remove("pegging-history-only");
   els.userHandTitle.hidden = hideHandsForInterstitial;
   els.userHandTitle.textContent = game.peggingResetPending
     ? "Press OK to continue"
