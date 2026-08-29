@@ -51,6 +51,8 @@ name = "cribbage-policy-trainer"
 version = "0.1.0"
 dependencies = [
  "cribbage-shadow-engine",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

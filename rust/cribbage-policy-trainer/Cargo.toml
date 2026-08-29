@@ -6,3 +6,5 @@ default-run = "cribbage-policy-trainer"
 
 [dependencies]
 cribbage-shadow-engine = { path = "../cribbage-shadow-engine" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
