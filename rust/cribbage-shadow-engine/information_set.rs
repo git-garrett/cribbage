@@ -903,7 +903,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_policy_key_round_trips_and_rejects_trailing_history() {
+    fn full_observation_key_round_trips_and_rejects_trailing_history() {
         let mut game = state([hand(&[(4, 1), (9, 1)]), hand(&[(6, 1), (7, 1)])]);
         game.scores = [119, 118];
         game.count = 13;

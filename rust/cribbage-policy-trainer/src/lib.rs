@@ -13,9 +13,10 @@ use cribbage_shadow_engine::cards::{
     combinations_indices, full_deck, rank_counts, score_hand, Card,
 };
 use cribbage_shadow_engine::information_set::{
-    PegSeat, PolicyInformationSetKey, RankPegAction, RankPegState, PACKED_POLICY_KEY_BYTES,
-    POLICY_ACTION_COUNT,
+    PegInformationSetKey, PegSeat, PolicyInformationSetKey, RankPegAction, RankPegState,
+    EXACT_PEG_POLICY_KEY_BYTES, PACKED_POLICY_KEY_BYTES, POLICY_ACTION_COUNT,
 };
+use cribbage_shadow_engine::model162::{Model162ActionAdvantageEntry, Model162ActionScorer};
 use cribbage_shadow_engine::policy::{
     PolicyArtifact, PolicyArtifactMetadata, QuantizedPolicyEntry, POLICY_WEIGHT_TOTAL,
 };
@@ -369,6 +370,628 @@ pub fn build_policy_artifact(
         },
         entries,
     )
+}
+
+const EXACT_CHECKPOINT_MAGIC: &[u8; 8] = b"C162CFR1";
+const EXACT_CHECKPOINT_VERSION: u32 = 1;
+
+/// Resumable MCCFR checkpoint keyed by the complete legal pegging view used
+/// by Model 16.2.  It deliberately has a distinct format from the compact
+/// Model 16.0 checkpoint so an old table can never be misread as a full-state
+/// policy.
+#[derive(Clone, Debug)]
+pub struct ExactCheckpoint {
+    pub seed: u64,
+    pub iterations: u64,
+    pub nodes: Vec<(PegInformationSetKey, PolicyNode)>,
+    pub pending_fingerprints: Vec<u64>,
+}
+
+impl ExactCheckpoint {
+    pub fn checksum(&self) -> u64 {
+        fnv1a64(&self.to_bytes())
+    }
+
+    pub fn checksum_hex(&self) -> String {
+        format!("{:016x}", self.checksum())
+    }
+
+    pub fn save(&self, path: &Path) -> Result<(), String> {
+        let bytes = self.to_bytes();
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("create {} failed: {}", parent.display(), error))?;
+        let temporary = path.with_extension("tmp");
+        let mut file = fs::File::create(&temporary)
+            .map_err(|error| format!("create {} failed: {}", temporary.display(), error))?;
+        file.write_all(&bytes)
+            .map_err(|error| format!("write {} failed: {}", temporary.display(), error))?;
+        file.sync_all()
+            .map_err(|error| format!("sync {} failed: {}", temporary.display(), error))?;
+        fs::rename(&temporary, path).map_err(|error| {
+            format!(
+                "rename {} to {} failed: {}",
+                temporary.display(),
+                path.display(),
+                error
+            )
+        })
+    }
+
+    pub fn load(path: &Path) -> Result<ExactCheckpoint, String> {
+        let bytes =
+            fs::read(path).map_err(|error| format!("read {} failed: {}", path.display(), error))?;
+        ExactCheckpoint::from_bytes(&bytes)
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut nodes = self.nodes.clone();
+        nodes.sort_by_key(|(key, _)| key.to_packed_bytes());
+        let mut pending_fingerprints = self.pending_fingerprints.clone();
+        pending_fingerprints.sort_unstable();
+        let mut bytes = Vec::with_capacity(
+            40 + nodes.len() * (EXACT_PEG_POLICY_KEY_BYTES + 242) + pending_fingerprints.len() * 8,
+        );
+        bytes.extend_from_slice(EXACT_CHECKPOINT_MAGIC);
+        bytes.extend_from_slice(&EXACT_CHECKPOINT_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&self.seed.to_le_bytes());
+        bytes.extend_from_slice(&self.iterations.to_le_bytes());
+        bytes.extend_from_slice(&(nodes.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(&(pending_fingerprints.len() as u64).to_le_bytes());
+        for (key, node) in nodes {
+            bytes.extend_from_slice(&key.to_packed_bytes());
+            write_policy_node(&mut bytes, &node);
+        }
+        for fingerprint in pending_fingerprints {
+            bytes.extend_from_slice(&fingerprint.to_le_bytes());
+        }
+        bytes
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Result<ExactCheckpoint, String> {
+        let mut cursor = ByteCursor::new(bytes);
+        if cursor.take(8)? != EXACT_CHECKPOINT_MAGIC {
+            return Err("invalid Model 16.2 checkpoint magic".to_string());
+        }
+        if cursor.u32()? != EXACT_CHECKPOINT_VERSION {
+            return Err("unsupported Model 16.2 checkpoint version".to_string());
+        }
+        let seed = cursor.u64()?;
+        let iterations = cursor.u64()?;
+        let node_count = cursor.u64()?;
+        let pending_count = cursor.u64()?;
+        let mut nodes = Vec::with_capacity(node_count.min(usize::MAX as u64) as usize);
+        for _ in 0..node_count {
+            let key =
+                PegInformationSetKey::from_packed_bytes(cursor.take(EXACT_PEG_POLICY_KEY_BYTES)?)?;
+            let node = read_policy_node(&mut cursor)?;
+            if node.legal_mask != key.expected_legal_mask() {
+                return Err(
+                    "Model 16.2 checkpoint policy key has inconsistent legal actions".to_string(),
+                );
+            }
+            nodes.push((key, node));
+        }
+        let mut pending_fingerprints =
+            Vec::with_capacity(pending_count.min(usize::MAX as u64) as usize);
+        for _ in 0..pending_count {
+            pending_fingerprints.push(cursor.u64()?);
+        }
+        pending_fingerprints.sort_unstable();
+        if pending_fingerprints
+            .windows(2)
+            .any(|pair| pair[0] == pair[1])
+        {
+            return Err(
+                "Model 16.2 checkpoint contains a duplicate pending fingerprint".to_string(),
+            );
+        }
+        if cursor.remaining() != 0 {
+            return Err(format!(
+                "Model 16.2 checkpoint has {} unexpected trailing bytes",
+                cursor.remaining()
+            ));
+        }
+        Ok(ExactCheckpoint {
+            seed,
+            iterations,
+            nodes,
+            pending_fingerprints,
+        })
+    }
+}
+
+/// Train the compact Model 16.2 miss scorer from the exact checkpoint's
+/// centered cumulative-regret signal. The target is an action advantage, not
+/// the quantized probability later stored in C161POL1.
+pub fn build_model162_action_scorer(
+    checkpoint: &ExactCheckpoint,
+    feature_slots: usize,
+    minimum_confidence: u32,
+    provenance: String,
+) -> Result<Model162ActionScorer, String> {
+    let mut entries = Vec::with_capacity(checkpoint.nodes.len());
+    for (key, node) in &checkpoint.nodes {
+        if node.legal_mask != key.expected_legal_mask() {
+            return Err("exact checkpoint key legal mask does not match policy node".to_string());
+        }
+        let confidence = node
+            .visits
+            .saturating_add(node.strategy_visits)
+            .min(u64::from(u32::MAX)) as u32;
+        entries.push(Model162ActionAdvantageEntry {
+            key: *key,
+            legal_mask: node.legal_mask,
+            confidence,
+            advantages: normalized_regret_advantages(node),
+        });
+    }
+    Model162ActionScorer::build_from_action_advantages(
+        checkpoint.checksum(),
+        &entries,
+        feature_slots,
+        minimum_confidence,
+        provenance,
+    )
+}
+
+fn normalized_regret_advantages(node: &PolicyNode) -> [i16; ACTION_COUNT] {
+    let mut legal = Vec::new();
+    let mut sum = 0.0;
+    for action in 0..ACTION_COUNT {
+        if node.legal_mask & (1 << action) != 0 {
+            legal.push(action);
+            sum += node.regrets[action];
+        }
+    }
+    if legal.is_empty() {
+        return [0; ACTION_COUNT];
+    }
+    let mean = sum / legal.len() as f64;
+    let scale = legal
+        .iter()
+        .map(|action| (node.regrets[*action] - mean).abs())
+        .fold(0.0_f64, f64::max);
+    if !scale.is_finite() || scale <= f64::EPSILON {
+        return [0; ACTION_COUNT];
+    }
+    std::array::from_fn(|action| {
+        if node.legal_mask & (1 << action) == 0 {
+            return 0;
+        }
+        ((node.regrets[action] - mean) * 4096.0 / scale)
+            .round()
+            .clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16
+    })
+}
+
+fn write_policy_node(bytes: &mut Vec<u8>, node: &PolicyNode) {
+    bytes.extend_from_slice(&node.legal_mask.to_le_bytes());
+    bytes.extend_from_slice(&node.visits.to_le_bytes());
+    bytes.extend_from_slice(&node.strategy_visits.to_le_bytes());
+    for action in 0..ACTION_COUNT {
+        if node.legal_mask & (1 << action) != 0 {
+            bytes.extend_from_slice(&node.regrets[action].to_le_bytes());
+            bytes.extend_from_slice(&node.strategy_sum[action].to_le_bytes());
+        }
+    }
+}
+
+fn read_policy_node(cursor: &mut ByteCursor<'_>) -> Result<PolicyNode, String> {
+    let legal_mask = cursor.u16()?;
+    validate_legal_mask(legal_mask)?;
+    let visits = cursor.u64()?;
+    let strategy_visits = cursor.u64()?;
+    let mut regrets = [0.0; ACTION_COUNT];
+    let mut strategy_sum = [0.0; ACTION_COUNT];
+    for action in 0..ACTION_COUNT {
+        if legal_mask & (1 << action) != 0 {
+            regrets[action] = cursor.f64()?;
+            strategy_sum[action] = cursor.f64()?;
+        }
+    }
+    if regrets
+        .iter()
+        .chain(strategy_sum.iter())
+        .any(|value| !value.is_finite())
+    {
+        return Err("Model 16.2 checkpoint contains a non-finite policy value".to_string());
+    }
+    Ok(PolicyNode {
+        legal_mask,
+        regrets,
+        strategy_sum,
+        visits,
+        strategy_visits,
+    })
+}
+
+#[derive(Default)]
+struct ExactPolicyShard {
+    nodes: HashMap<PegInformationSetKey, PolicyNode>,
+    pending_fingerprints: HashSet<u64>,
+}
+
+/// External-sampling MCCFR trainer over the full, lossless legal state.  It
+/// shares the existing real-deal corpus and ordered count-out utility with the
+/// compact trainer, but never merges different public histories or scores.
+pub struct ExactSharedTrainer {
+    shards: Vec<Mutex<ExactPolicyShard>>,
+    freeze_new_information_sets: AtomicBool,
+    information_set_count: AtomicUsize,
+    information_set_limit: AtomicUsize,
+}
+
+impl ExactSharedTrainer {
+    pub fn new() -> ExactSharedTrainer {
+        ExactSharedTrainer {
+            shards: (0..TABLE_SHARDS)
+                .map(|_| Mutex::new(ExactPolicyShard::default()))
+                .collect(),
+            freeze_new_information_sets: AtomicBool::new(false),
+            information_set_count: AtomicUsize::new(0),
+            information_set_limit: AtomicUsize::new(usize::MAX),
+        }
+    }
+
+    pub fn from_checkpoint(checkpoint: &ExactCheckpoint) -> Result<ExactSharedTrainer, String> {
+        let trainer = ExactSharedTrainer::new();
+        let mut trained_fingerprints = checkpoint
+            .nodes
+            .iter()
+            .map(|(key, _)| exact_policy_key_fingerprint(key))
+            .collect::<Vec<_>>();
+        trained_fingerprints.sort_unstable();
+        for (key, node) in &checkpoint.nodes {
+            validate_legal_mask(node.legal_mask)?;
+            if node.legal_mask != key.expected_legal_mask() {
+                return Err("Model 16.2 checkpoint contains an invalid legal mask".to_string());
+            }
+            let shard = trainer.shard(key);
+            if trainer.shards[shard]
+                .lock()
+                .map_err(|_| "exact policy shard lock poisoned".to_string())?
+                .nodes
+                .insert(*key, node.clone())
+                .is_some()
+            {
+                return Err(
+                    "Model 16.2 checkpoint contains a duplicate information set".to_string()
+                );
+            }
+        }
+        for fingerprint in &checkpoint.pending_fingerprints {
+            if trained_fingerprints.binary_search(fingerprint).is_ok() {
+                return Err("Model 16.2 checkpoint marks a trained key as pending".to_string());
+            }
+            let shard = trainer.shard_for_fingerprint(*fingerprint);
+            if !trainer.shards[shard]
+                .lock()
+                .map_err(|_| "exact policy shard lock poisoned".to_string())?
+                .pending_fingerprints
+                .insert(*fingerprint)
+            {
+                return Err("Model 16.2 checkpoint contains a duplicate pending key".to_string());
+            }
+        }
+        trainer.information_set_count.store(
+            checkpoint.nodes.len() + checkpoint.pending_fingerprints.len(),
+            Ordering::Relaxed,
+        );
+        Ok(trainer)
+    }
+
+    pub fn train_range_with_corpus(
+        &self,
+        seed: u64,
+        start_iteration: u64,
+        end_iteration: u64,
+        workers: usize,
+        corpus: Option<&TrainingCorpus>,
+    ) -> Result<(), String> {
+        if end_iteration < start_iteration {
+            return Err("exact training range ends before it starts".to_string());
+        }
+        if workers == 0 {
+            return Err("exact training workers must be greater than zero".to_string());
+        }
+        let next = AtomicU64::new(start_iteration);
+        let first_error = Mutex::new(None::<String>);
+        thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| {
+                    let board = BoardUtility::new();
+                    loop {
+                        if first_error.lock().unwrap().is_some() {
+                            break;
+                        }
+                        let iteration = next.fetch_add(1, Ordering::Relaxed);
+                        if iteration >= end_iteration {
+                            break;
+                        }
+                        let mut rng = TrainingRng::for_iteration(seed, iteration);
+                        let deal = corpus
+                            .map(|corpus| corpus.sample(&mut rng))
+                            .unwrap_or_else(|| sample_training_deal(&mut rng));
+                        let traverser = if iteration.is_multiple_of(2) {
+                            PegSeat::Zero
+                        } else {
+                            PegSeat::One
+                        };
+                        let mut state = deal.initial_state();
+                        let result = if state.winner.is_some() {
+                            Ok(terminal_utility(&state, &deal, traverser, &board))
+                        } else {
+                            traverse_exact(
+                                self, &mut state, &deal, traverser, 1.0, &mut rng, &board,
+                            )
+                        };
+                        if let Err(error) = result {
+                            *first_error.lock().unwrap() =
+                                Some(format!("exact iteration {} failed: {}", iteration, error));
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+        first_error.into_inner().unwrap().map_or(Ok(()), Err)
+    }
+
+    pub fn checkpoint(&self, seed: u64, iterations: u64) -> Result<ExactCheckpoint, String> {
+        let mut nodes = Vec::new();
+        let mut pending_fingerprints = Vec::new();
+        for shard in &self.shards {
+            let shard = shard
+                .lock()
+                .map_err(|_| "exact policy shard lock poisoned".to_string())?;
+            nodes.extend(shard.nodes.iter().map(|(key, node)| (*key, node.clone())));
+            pending_fingerprints.extend(shard.pending_fingerprints.iter().copied());
+        }
+        nodes.sort_by_key(|(key, _)| key.to_packed_bytes());
+        pending_fingerprints.sort_unstable();
+        Ok(ExactCheckpoint {
+            seed,
+            iterations,
+            nodes,
+            pending_fingerprints,
+        })
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.shards
+            .iter()
+            .map(|shard| shard.lock().unwrap().nodes.len())
+            .sum()
+    }
+
+    pub fn pending_count(&self) -> usize {
+        self.shards
+            .iter()
+            .map(|shard| shard.lock().unwrap().pending_fingerprints.len())
+            .sum()
+    }
+
+    pub fn information_set_count(&self) -> usize {
+        self.information_set_count.load(Ordering::Relaxed)
+    }
+
+    pub fn set_information_set_limit(&self, limit: usize) -> Result<(), String> {
+        if limit == 0 {
+            return Err("exact information-set limit must be greater than zero".to_string());
+        }
+        self.information_set_limit.store(limit, Ordering::Relaxed);
+        if self.information_set_count() >= limit {
+            self.freeze_new_information_sets();
+        }
+        Ok(())
+    }
+
+    pub fn freeze_new_information_sets(&self) {
+        self.freeze_new_information_sets
+            .store(true, Ordering::Relaxed);
+    }
+
+    pub fn information_sets_frozen(&self) -> bool {
+        self.freeze_new_information_sets.load(Ordering::Relaxed)
+    }
+
+    pub fn compact_frozen_support(&self) -> Result<usize, String> {
+        if !self.information_sets_frozen() {
+            return Err(
+                "exact information-set support must be frozen before compaction".to_string(),
+            );
+        }
+        let mut nodes = 0;
+        let mut removed = 0;
+        for shard in &self.shards {
+            let mut shard = shard
+                .lock()
+                .map_err(|_| "exact policy shard lock poisoned".to_string())?;
+            nodes += shard.nodes.len();
+            removed += shard.pending_fingerprints.len();
+            shard.pending_fingerprints.clear();
+        }
+        self.information_set_count.store(nodes, Ordering::Relaxed);
+        Ok(removed)
+    }
+
+    fn shard(&self, key: &PegInformationSetKey) -> usize {
+        self.shard_for_fingerprint(exact_policy_key_fingerprint(key))
+    }
+
+    fn shard_for_fingerprint(&self, fingerprint: u64) -> usize {
+        fingerprint as usize % self.shards.len()
+    }
+
+    fn strategy(
+        &self,
+        key: PegInformationSetKey,
+        legal_mask: u16,
+    ) -> Result<[f64; ACTION_COUNT], String> {
+        let shard = self.shard(&key);
+        let mut shard = self.shards[shard]
+            .lock()
+            .map_err(|_| "exact policy shard lock poisoned".to_string())?;
+        if let Some(node) = shard.nodes.get(&key) {
+            ensure_same_legal_mask(node, legal_mask)?;
+            return Ok(node.current_strategy());
+        }
+        let fingerprint = exact_policy_key_fingerprint(&key);
+        if shard.pending_fingerprints.contains(&fingerprint) {
+            if self.information_sets_frozen() {
+                return Ok(normalized_positive(&[0.0; ACTION_COUNT], legal_mask));
+            }
+            shard.pending_fingerprints.remove(&fingerprint);
+            let node = PolicyNode::new(legal_mask);
+            let strategy = node.current_strategy();
+            shard.nodes.insert(key, node);
+            return Ok(strategy);
+        }
+        if self.information_sets_frozen() {
+            return Ok(normalized_positive(&[0.0; ACTION_COUNT], legal_mask));
+        }
+        let limit = self.information_set_limit.load(Ordering::Relaxed);
+        if self
+            .information_set_count
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                (count < limit).then_some(count + 1)
+            })
+            .is_ok()
+        {
+            // Full legal-information states are intentionally not staged as
+            // singletons. Their exact score/history context makes repeated
+            // visits much rarer than the compact 16.0 abstraction; spending
+            // the bounded cache on pending fingerprints would freeze support
+            // before those states can receive their first regret update.
+            let node = PolicyNode::new(legal_mask);
+            let strategy = node.current_strategy();
+            shard.nodes.insert(key, node);
+            return Ok(strategy);
+        }
+        self.freeze_new_information_sets();
+        Ok(normalized_positive(&[0.0; ACTION_COUNT], legal_mask))
+    }
+
+    fn update_regrets(
+        &self,
+        key: PegInformationSetKey,
+        legal_mask: u16,
+        deltas: &[f64; ACTION_COUNT],
+    ) -> Result<(), String> {
+        let shard = self.shard(&key);
+        let mut shard = self.shards[shard]
+            .lock()
+            .map_err(|_| "exact policy shard lock poisoned".to_string())?;
+        let Some(node) = shard.nodes.get_mut(&key) else {
+            return Ok(());
+        };
+        ensure_same_legal_mask(node, legal_mask)?;
+        for (action, delta) in deltas.iter().enumerate() {
+            if legal_mask & (1 << action) != 0 {
+                node.regrets[action] += *delta;
+            }
+        }
+        node.visits = node.visits.saturating_add(1);
+        Ok(())
+    }
+
+    fn accumulate_average(
+        &self,
+        key: PegInformationSetKey,
+        legal_mask: u16,
+        strategy: &[f64; ACTION_COUNT],
+        reach: f64,
+    ) -> Result<(), String> {
+        let shard = self.shard(&key);
+        let mut shard = self.shards[shard]
+            .lock()
+            .map_err(|_| "exact policy shard lock poisoned".to_string())?;
+        let Some(node) = shard.nodes.get_mut(&key) else {
+            return Ok(());
+        };
+        ensure_same_legal_mask(node, legal_mask)?;
+        for (action, probability) in strategy.iter().enumerate() {
+            if legal_mask & (1 << action) != 0 {
+                node.strategy_sum[action] += reach * *probability;
+            }
+        }
+        node.strategy_visits = node.strategy_visits.saturating_add(1);
+        Ok(())
+    }
+}
+
+impl Default for ExactSharedTrainer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn exact_policy_key_fingerprint(key: &PegInformationSetKey) -> u64 {
+    fnv1a64(&key.to_packed_bytes())
+}
+
+fn traverse_exact(
+    trainer: &ExactSharedTrainer,
+    state: &mut RankPegState,
+    deal: &TrainingDeal,
+    traverser: PegSeat,
+    opponent_reach: f64,
+    rng: &mut TrainingRng,
+    board: &BoardUtility,
+) -> Result<f64, String> {
+    if state.complete || state.winner.is_some() {
+        return Ok(terminal_utility(state, deal, traverser, board));
+    }
+    let actor = state.current;
+    let legal_actions = state.legal_actions();
+    if legal_actions.is_empty() {
+        return Err("exact nonterminal state has no legal actions".to_string());
+    }
+    let legal_mask = action_mask(&legal_actions)?;
+    let key = state.information_set(actor)?;
+    let strategy = trainer.strategy(key, legal_mask)?;
+    if actor == traverser {
+        let mut action_utilities = [0.0; ACTION_COUNT];
+        let mut node_utility = 0.0;
+        for action in legal_actions {
+            let index = action_index(action)?;
+            let mut child = state.clone();
+            child.apply(action)?;
+            let utility = traverse_exact(
+                trainer,
+                &mut child,
+                deal,
+                traverser,
+                opponent_reach,
+                rng,
+                board,
+            )?;
+            action_utilities[index] = utility;
+            node_utility += strategy[index] * utility;
+        }
+        let mut regret_deltas = [0.0; ACTION_COUNT];
+        for action in 0..ACTION_COUNT {
+            if legal_mask & (1 << action) != 0 {
+                regret_deltas[action] = action_utilities[action] - node_utility;
+            }
+        }
+        trainer.update_regrets(key, legal_mask, &regret_deltas)?;
+        Ok(node_utility)
+    } else {
+        trainer.accumulate_average(key, legal_mask, &strategy, opponent_reach)?;
+        let sampled = sample_strategy(&strategy, legal_mask, rng);
+        state.apply(index_action(sampled))?;
+        traverse_exact(
+            trainer,
+            state,
+            deal,
+            traverser,
+            opponent_reach * strategy[sampled],
+            rng,
+            board,
+        )
+    }
 }
 
 fn export_strategy(node: &PolicyNode) -> [f64; ACTION_COUNT] {
@@ -1750,5 +2373,42 @@ mod tests {
         trainer.train_range(0x16c0ffee, 0, 1_000, 1).unwrap();
         assert!(trainer.information_sets_frozen());
         assert_eq!(trainer.information_set_count(), 100);
+    }
+
+    #[test]
+    fn exact_checkpoint_round_trips_and_builds_a_compact_scorer() {
+        let trainer = ExactSharedTrainer::new();
+        trainer.set_information_set_limit(10_000).unwrap();
+        let line = "0\t0\t0\t38\t041A161E0702\t1C1D0B321020\t1A161E02\t1C1D3210\t04070B20";
+        let corpus = TrainingCorpus {
+            deals: vec![parse_training_corpus_line(line, 1).unwrap()],
+            checksum: fnv1a64(line.as_bytes()),
+        };
+        trainer
+            .train_range_with_corpus(0x162c_0ffe, 0, 64, 1, Some(&corpus))
+            .unwrap();
+        let checkpoint = trainer.checkpoint(0x162c_0ffe, 64).unwrap();
+        assert!(!checkpoint.nodes.is_empty());
+        let bytes = checkpoint.to_bytes();
+        let restored = ExactCheckpoint::from_bytes(&bytes).unwrap();
+        assert_eq!(restored.checksum(), checkpoint.checksum());
+        let scorer =
+            build_model162_action_scorer(&restored, 64, 1, "unit-test".to_string()).unwrap();
+        assert!(scorer
+            .action_advantages(&restored.nodes[0].0)
+            .unwrap()
+            .iter()
+            .any(Option::is_some));
+    }
+
+    #[test]
+    fn exact_trainer_records_first_visit_states_instead_of_exhausting_pending_cache() {
+        let trainer = ExactSharedTrainer::new();
+        trainer.set_information_set_limit(10_000).unwrap();
+        trainer
+            .train_range_with_corpus(0x162c_0ffe, 0, 1, 1, None)
+            .unwrap();
+        assert!(trainer.node_count() > 0);
+        assert_eq!(trainer.pending_count(), 0);
     }
 }
