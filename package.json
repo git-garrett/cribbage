@@ -9,6 +9,7 @@
     "dev": "vite --host 0.0.0.0",
     "ios": "npm run cap:sync:ios && cap open ios",
     "analyze:ai-run": "node --no-warnings scripts/analyze-ai-run.cjs",
+    "report:model131": "node --no-warnings scripts/report-model131-full-analysis.cjs",
     "install:git-hooks": "git config core.hooksPath .githooks",
     "promote:artifact": "node scripts/promote-artifact.cjs",
     "prepare": "git config core.hooksPath .githooks || true",
