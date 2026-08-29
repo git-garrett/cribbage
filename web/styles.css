@@ -1117,7 +1117,8 @@ button:disabled {
 }
 
 .decision-review-pending {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   justify-content: space-between;
@@ -1131,6 +1132,7 @@ button:disabled {
 }
 
 .decision-review-analyze {
+  width: auto;
   min-height: 32px;
   padding: 5px 10px;
   font-size: var(--fine-font);
@@ -3032,12 +3034,12 @@ body[data-font-size="x-large"] .card .suit {
 
 body[data-font-size="x-large"] .table .card.clubs,
 body[data-font-size="x-large"] .table .card.spades {
-  color: rgba(255, 255, 255, 0.96);
+  color: var(--card-ink);
 }
 
 body[data-font-size="x-large"] .table .card.hearts,
 body[data-font-size="x-large"] .table .card.diamonds {
-  color: #ff969d;
+  color: var(--card-red);
 }
 
 body[data-font-size="x-large"] .card.selected {

@@ -44,6 +44,7 @@ struct Session {
     updated_at: String,
     completed_at: Option<String>,
     decision_reviews: Vec<SavedDecisionReview>,
+    score_events: Vec<SavedScoreEvent>,
     next_review_id: u32,
     event_sequence: u64,
     pending_final_scoring: Option<FinalScoring>,
@@ -87,6 +88,30 @@ struct FinalScoring {
     stage: FinalScoringStage,
 }
 
+#[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
+enum SavedScoreCategory {
+    Pegging,
+    Hand,
+    Crib,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct SavedScoreEvent {
+    id: String,
+    at: String,
+    hand_number: u32,
+    player: Side,
+    dealer: Side,
+    category: SavedScoreCategory,
+    points: i32,
+    reason: String,
+    total_score: i32,
+    scores: [i32; 2],
+    cards: Vec<Card>,
+    turn_card: Option<Card>,
+    count: Option<u8>,
+}
+
 /// The private, server-owned game session as stored in SQLite.  The browser
 /// snapshot intentionally excludes the AI's cards, so it must never be used
 /// as a recovery source.
@@ -107,6 +132,8 @@ struct PersistedSession {
     updated_at: String,
     completed_at: Option<String>,
     decision_reviews: Vec<SavedDecisionReview>,
+    #[serde(default)]
+    score_events: Vec<SavedScoreEvent>,
     next_review_id: u32,
     event_sequence: u64,
     pending_final_scoring: Option<FinalScoring>,
@@ -474,6 +501,7 @@ fn new_session_from_seed(model: ModelId, tag: Option<String>, seed: u32, counter
         updated_at: isoish_now(),
         completed_at: None,
         decision_reviews: Vec::new(),
+        score_events: Vec::new(),
         next_review_id: 1,
         event_sequence: 0,
         pending_final_scoring: None,
@@ -552,6 +580,7 @@ fn persisted_session(session: &Session) -> PersistedSession {
         updated_at: session.updated_at.clone(),
         completed_at: session.completed_at.clone(),
         decision_reviews: session.decision_reviews.clone(),
+        score_events: session.score_events.clone(),
         next_review_id: session.next_review_id,
         event_sequence: session.event_sequence,
         pending_final_scoring: session.pending_final_scoring.clone(),
@@ -578,6 +607,7 @@ fn restore_persisted_session(stored: PersistedSession) -> Result<Session, String
         updated_at: stored.updated_at,
         completed_at: stored.completed_at,
         decision_reviews: stored.decision_reviews,
+        score_events: stored.score_events,
         next_review_id: stored.next_review_id,
         event_sequence: stored.event_sequence,
         pending_final_scoring: stored.pending_final_scoring,
@@ -848,6 +878,7 @@ fn apply_action(
             if !session.waiting_for_ai_discard {
                 return Ok(());
             }
+            let score_before = score_snapshot(&session.game);
             let supplied = json_number_array(body, "ids");
             let ids = if supplied.len() == 2 {
                 [supplied[0] as u8, supplied[1] as u8]
@@ -861,6 +892,32 @@ fn apply_action(
             };
             session.game.discard(AI, ids)?;
             session.waiting_for_ai_discard = false;
+            let turn_card = session.game.turn_card;
+            ensure_score_opportunity(
+                session,
+                SavedScoreCategory::Pegging,
+                HUMAN,
+                Vec::new(),
+                Some(turn_card),
+                None,
+            );
+            ensure_score_opportunity(
+                session,
+                SavedScoreCategory::Pegging,
+                AI,
+                Vec::new(),
+                Some(turn_card),
+                None,
+            );
+            record_score_changes(
+                session,
+                score_before,
+                SavedScoreCategory::Pegging,
+                "Heels",
+                Vec::new(),
+                Some(turn_card),
+                None,
+            );
             Ok(())
         }
         "reveal-turn-card" => {
@@ -879,25 +936,57 @@ fn apply_action(
             require_phase(session, Phase::Pegging)?;
             let id = json_number(body, "id").ok_or_else(|| "Missing card id.".to_string())? as u8;
             let review_game = session.game.clone();
+            let score_before = score_snapshot(&session.game);
             session.game.play_card(HUMAN, id)?;
+            record_score_changes(
+                session,
+                score_before,
+                SavedScoreCategory::Pegging,
+                "Pegging play",
+                Card::new(id).ok().into_iter().collect(),
+                Some(session.game.turn_card),
+                Some(session.game.count),
+            );
             queue_decision_review(session, ReviewKind::Peg, review_game, vec![id]);
             Ok(())
         }
         "go" | "go-human" => {
             require_phase(session, Phase::Pegging)?;
-            session.game.say_go(HUMAN)
+            let score_before = score_snapshot(&session.game);
+            session.game.say_go(HUMAN)?;
+            record_score_changes(
+                session,
+                score_before,
+                SavedScoreCategory::Pegging,
+                "Go",
+                Vec::new(),
+                Some(session.game.turn_card),
+                Some(session.game.count),
+            );
+            Ok(())
         }
         "advance-pegging" => {
             require_phase(session, Phase::Pegging)?;
             if session.game.pegging_reset_pending || session.game.current_player() != AI {
                 return Ok(());
             }
+            let score_before = score_snapshot(&session.game);
             match recommend_peg_for_side(&session.game, AI, session.model, None, model_root)? {
                 PegDecision::Go => session.game.say_go(AI),
                 PegDecision::Play { card_id, .. } => {
                     session.game.play_card(AI, card_id).map(|_| ())
                 }
-            }
+            }?;
+            record_score_changes(
+                session,
+                score_before,
+                SavedScoreCategory::Pegging,
+                "Pegging play",
+                Vec::new(),
+                Some(session.game.turn_card),
+                Some(session.game.count),
+            );
+            Ok(())
         }
         "acknowledge-pegging-reset" => {
             session.game.acknowledge_pegging_reset();
@@ -912,6 +1001,38 @@ fn apply_action(
                 return Ok(());
             }
             let hand_number = session.game.hand_number;
+            let score_before = score_snapshot(&session.game);
+            let score_stage = match session.game.phase {
+                Phase::PeggingComplete => Some((
+                    SavedScoreCategory::Hand,
+                    session.game.pone,
+                    session.game.player(session.game.pone).table.clone(),
+                    "Hand",
+                )),
+                Phase::ScorePone => Some((
+                    SavedScoreCategory::Hand,
+                    session.game.dealer,
+                    session.game.player(session.game.dealer).table.clone(),
+                    "Hand",
+                )),
+                Phase::ScoreDealer => Some((
+                    SavedScoreCategory::Crib,
+                    session.game.dealer,
+                    session.game.player(session.game.dealer).crib.clone(),
+                    "Crib",
+                )),
+                _ => None,
+            };
+            if let Some((category, player, cards, _)) = &score_stage {
+                ensure_score_opportunity(
+                    session,
+                    *category,
+                    *player,
+                    cards.clone(),
+                    Some(session.game.turn_card),
+                    None,
+                );
+            }
             let final_stage = match session.game.phase {
                 Phase::PeggingComplete => {
                     session.game.start_scoring()?;
@@ -930,6 +1051,17 @@ fn apply_action(
                     None
                 }
             };
+            if let Some((category, _, cards, reason)) = score_stage {
+                record_score_changes(
+                    session,
+                    score_before,
+                    category,
+                    reason,
+                    cards,
+                    Some(session.game.turn_card),
+                    None,
+                );
+            }
             if session.game.phase == Phase::GameOver {
                 session.pending_final_scoring = final_stage.map(|stage| FinalScoring { stage });
             }
@@ -965,6 +1097,86 @@ fn queue_decision_review(
         selected_card_ids,
         completed: None,
     });
+}
+
+fn score_category_label(category: SavedScoreCategory) -> &'static str {
+    match category {
+        SavedScoreCategory::Pegging => "pegging",
+        SavedScoreCategory::Hand => "hand",
+        SavedScoreCategory::Crib => "crib",
+    }
+}
+
+fn score_snapshot(game: &CribbageGame) -> [i32; 2] {
+    [game.player(HUMAN).score, game.player(AI).score]
+}
+
+fn ensure_score_opportunity(
+    session: &mut Session,
+    category: SavedScoreCategory,
+    player: Side,
+    cards: Vec<Card>,
+    turn_card: Option<Card>,
+    count: Option<u8>,
+) {
+    if session.score_events.iter().any(|event| {
+        event.hand_number == session.game.hand_number
+            && event.category == category
+            && event.player == player
+    }) {
+        return;
+    }
+    let scores = score_snapshot(&session.game);
+    let event_number = session.score_events.len() + 1;
+    session.score_events.push(SavedScoreEvent {
+        id: format!("{}-score-{}", session.id, event_number),
+        at: isoish_now(),
+        hand_number: session.game.hand_number,
+        player,
+        dealer: session.game.dealer,
+        category,
+        points: 0,
+        reason: score_category_label(category).to_string(),
+        total_score: session.game.player(player).score,
+        scores,
+        cards,
+        turn_card,
+        count,
+    });
+}
+
+fn record_score_changes(
+    session: &mut Session,
+    before: [i32; 2],
+    category: SavedScoreCategory,
+    reason: &str,
+    cards: Vec<Card>,
+    turn_card: Option<Card>,
+    count: Option<u8>,
+) {
+    let scores = score_snapshot(&session.game);
+    for player in [HUMAN, AI] {
+        let points = scores[player.index()] - before[player.index()];
+        if points <= 0 {
+            continue;
+        }
+        let event_number = session.score_events.len() + 1;
+        session.score_events.push(SavedScoreEvent {
+            id: format!("{}-score-{}", session.id, event_number),
+            at: isoish_now(),
+            hand_number: session.game.hand_number,
+            player,
+            dealer: session.game.dealer,
+            category,
+            points,
+            reason: reason.to_string(),
+            total_score: scores[player.index()],
+            scores,
+            cards: cards.clone(),
+            turn_card,
+            count,
+        });
+    }
 }
 
 fn complete_decision_reviews(
@@ -1401,6 +1613,12 @@ fn analytics_events_json(session: &Session) -> String {
     let mut events = vec![start];
     events.extend(
         session
+            .score_events
+            .iter()
+            .map(|event| saved_score_event_json(session, event)),
+    );
+    events.extend(
+        session
             .decision_reviews
             .iter()
             .map(|review| decision_review_event_json(session, review)),
@@ -1432,6 +1650,35 @@ fn analytics_events_json(session: &Session) -> String {
         ));
     }
     format!("[{}]", events.join(","))
+}
+
+fn saved_score_event_json(session: &Session, event: &SavedScoreEvent) -> String {
+    let turn_card = event
+        .turn_card
+        .map(|card| format!(",\"turnCard\":{}", json_string_value(&card.label())))
+        .unwrap_or_default();
+    let count = event
+        .count
+        .map(|value| format!(",\"count\":{}", value))
+        .unwrap_or_default();
+    format!(
+        "{{\"id\":\"{}\",\"at\":\"{}\",\"type\":\"score\",\"gameId\":\"{}\",\"handNumber\":{},\"player\":\"{}\",\"role\":\"{}\",\"category\":\"{}\",\"points\":{},\"reason\":\"{}\",\"totalScore\":{},\"scores\":{{\"human\":{},\"ai\":{}}},\"cards\":{}{}{}}}",
+        json_escape(&event.id),
+        json_escape(&event.at),
+        json_escape(&session.id),
+        event.hand_number,
+        side_key(event.player),
+        if event.player == event.dealer { "dealer" } else { "pone" },
+        score_category_label(event.category),
+        event.points,
+        json_escape(&event.reason),
+        event.total_score,
+        event.scores[HUMAN.index()],
+        event.scores[AI.index()],
+        card_labels_json(&event.cards),
+        turn_card,
+        count,
+    )
 }
 
 fn pending_reviews_json(session: &Session, kind: ReviewKind) -> String {
@@ -2772,6 +3019,28 @@ mod tests {
 
         apply_action(&mut session, "continue-scoring", "{}", ".").unwrap();
         assert_eq!(session.game.phase, Phase::Discard);
+    }
+
+    #[test]
+    fn analytics_include_score_events_for_completed_scoring_stages() {
+        let mut session = new_session(ModelId::Schell13, None);
+        session.waiting_for_deal_cut = false;
+        session.turn_card_revealed = true;
+        let pone = session.game.pone;
+        session.game.phase = Phase::PeggingComplete;
+        session.game.turn_card = Card::new(8).unwrap();
+        session.game.player_mut(pone).table = vec![
+            Card::new(4).unwrap(),
+            Card::new(5).unwrap(),
+            Card::new(6).unwrap(),
+            Card::new(7).unwrap(),
+        ];
+
+        apply_action(&mut session, "continue-scoring", "{}", ".").unwrap();
+
+        let analytics = analytics_events_json(&session);
+        assert!(analytics.contains("\"type\":\"score\""));
+        assert!(analytics.contains("\"category\":\"hand\""));
     }
 
     #[test]

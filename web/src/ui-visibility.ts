@@ -13,3 +13,14 @@ export function shouldRevealCribOwner(
 ): boolean {
   return phase !== "cut_for_deal" && dealCutRevealStage === null;
 }
+
+export function shouldShowDecisionSnapshotCut(
+  decisionType: "discard" | "pegging",
+  cutCard: string | undefined,
+): boolean {
+  return decisionType === "pegging" && Boolean(cutCard);
+}
+
+export function shouldShowTurnCutPlayTitle(turnCutRevealStage: string | null): boolean {
+  return turnCutRevealStage !== "revealed";
+}

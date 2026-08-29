@@ -16,7 +16,12 @@ import { rankLeaderboardWins } from "./leaderboard";
 import { mergedLifetimeResults } from "./my-stats";
 import { peggingDisplaySeries, recentPeggingCards } from "./pegging-display";
 import { resolveRemoteAiBase } from "./runtime-config";
-import { shouldRevealCribOwner, shouldShowStrategicGuides } from "./ui-visibility";
+import {
+  shouldRevealCribOwner,
+  shouldShowDecisionSnapshotCut,
+  shouldShowStrategicGuides,
+  shouldShowTurnCutPlayTitle,
+} from "./ui-visibility";
 import { shouldUploadCompletedGame } from "./upload-policy";
 
 const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-13.0";
@@ -2534,8 +2539,8 @@ function renderGameReportInto(
   summary.textContent = `${shortDate(end.at)} vs AI. ${playerName(end.winner ?? "human")} won ${finalScores.human}-${finalScores.ai}${result}.`;
   const cards = document.createElement("div");
   cards.className = "single-game-report-cards";
-  cards.append(analyticsTotalCard("User", report.human, "human", { showGames: false }));
-  cards.append(analyticsTotalCard("AI", report.ai, "ai", { showGames: false }));
+  cards.append(singleGameTotalCard("User", report.human, "human"));
+  cards.append(singleGameTotalCard("AI", report.ai, "ai"));
   container.append(title, summary, cards, singleGameDecisionReview(events, end));
 }
 
@@ -3068,6 +3073,7 @@ function snapshotScoreboard(
   const cutValue = event.type === "pegging" ? event.cutCard : undefined;
   if (cutValue) cutCard.append(cardElement(cardFromLabel(cutValue, 900)));
   else cutCard.hidden = true;
+  cut.hidden = !shouldShowDecisionSnapshotCut(event.type, cutValue);
   cut.append(cutLabel, cutCard);
   board.insertBefore(cut, board.children[1] ?? null);
   return board;
@@ -4244,6 +4250,35 @@ function analyticsTotalCard(
   return card;
 }
 
+function singleGameTotalCard(
+  label: string,
+  totals: AnalyticsTotals,
+  kind: "human" | "ai",
+): HTMLElement {
+  const card = document.createElement("div");
+  card.className = `analytics-total ${kind}`;
+  const title = document.createElement("strong");
+  title.textContent = label;
+  card.append(title);
+  const add = (text: string, className = ""): void => {
+    const span = document.createElement("span");
+    if (className) span.className = className;
+    span.textContent = text;
+    card.append(span);
+  };
+  add(totals.wins ? "Win" : "Loss", "analytics-total-wide");
+  add(`Avg peg as dealer: ${averageLabel(totals.peggingDealer, totals.peggingDealerHands)}`);
+  add(`Avg peg as pone: ${averageLabel(totals.peggingPone, totals.peggingPoneHands)}`);
+  add(`Avg hand as dealer: ${averageLabel(totals.handDealer, totals.handDealerHands)}`);
+  add(`Avg hand as pone: ${averageLabel(totals.handPone, totals.handPoneHands)}`);
+  add(`Avg crib: ${averageLabel(totals.crib, totals.cribHands)}`);
+  if (totals.skunks) add("Skunk", "analytics-total-wide");
+  if (totals.skunked) add("Skunked", "analytics-total-wide");
+  if (totals.doubleSkunks) add("Double skunk", "analytics-total-wide");
+  if (totals.doubleSkunked) add("Double skunked", "analytics-total-wide");
+  return card;
+}
+
 function simpleAnalyticsCard(
   label: string,
   totals: AnalyticsTotals,
@@ -4362,6 +4397,7 @@ function shortDate(value: string): string {
 
 function playAreaTitle(game: GameState): string {
   if (state.dealAnimation) return "";
+  if (!shouldShowTurnCutPlayTitle(state.turnCutRevealStage)) return "";
   if (state.dealCutRevealStage === "cutting") return "Cutting the deck";
   if (state.dealCutRevealStage) return "Cut result";
   if (state.turnCutRevealStage === "user-cut") return "Cut the deck for AI";
@@ -4369,7 +4405,6 @@ function playAreaTitle(game: GameState): string {
   if (state.turnCutRevealStage === "ai-cutting") return "AI cuts the deck";
   if (state.turnCutRevealStage === "user-turn") return "Turn the cut card";
   if (state.turnCutRevealStage === "ai-turn") return "AI turns the cut card";
-  if (state.turnCutRevealStage === "revealed") return "Cut card";
   if (game.phase === "cut_for_deal") return game.cutForDeal?.prompt || "Tap the deck to cut for first deal";
   if (game.phase === "discard") {
     return game.cribOwner === "User"
