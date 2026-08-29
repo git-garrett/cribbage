@@ -1,7 +1,7 @@
 # Archived: Six-Card Discard Frontier Handoff
 
 > Historical handoff and calibration record. The active execution plan is
-> [`docs/model-improvement-roadmap.md`](../../model-improvement-roadmap.md).
+> [`docs/model-13.2-strategy-fusion-plan.md`](../../model-13.2-strategy-fusion-plan.md).
 
 ## Current Goal
 

@@ -1,7 +1,7 @@
 # Archived: Six-Card Discard Frontier Plan
 
 > Historical design and calibration record. The active execution plan is
-> [`docs/model-improvement-roadmap.md`](../../model-improvement-roadmap.md).
+> [`docs/model-13.2-strategy-fusion-plan.md`](../../model-13.2-strategy-fusion-plan.md).
 > The full joined-table architecture below is explicitly rejected by the
 > canonical plan; do not treat its checklist as current instructions.
 
