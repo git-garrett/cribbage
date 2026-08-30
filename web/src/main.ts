@@ -12,6 +12,7 @@ import type {
   ScorePhase,
 } from "./api-types";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
+import { maybeLoadAdSense } from "./adsense";
 import { circularTurnCutPresentation, createCircularBoard, updateCircularBoard } from "./circular-board";
 import { endGameAds } from "./end-game-ad";
 import { singleGameReportRows } from "./game-report";
@@ -4622,6 +4623,12 @@ function render(game: GameState | null): void {
   if (SIMPLE_NETWORK_MODE && game.phase === "game_over") state.hasResumableGame = false;
   document.body.dataset.splash = state.splashOpen ? "true" : "false";
   els.splashPage.hidden = !state.splashOpen;
+  maybeLoadAdSense({
+    hostname: window.location.hostname,
+    isNativePlatform: Capacitor.isNativePlatform(),
+    authenticated: authenticatedUser !== null,
+    splashOpen: state.splashOpen,
+  });
   els.splashResumeGame.hidden = !state.hasResumableGame;
   els.splashNewGame.hidden = state.hasResumableGame;
   els.splashNameRow.hidden = Boolean(playerFirstName);
