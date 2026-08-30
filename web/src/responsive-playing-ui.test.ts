@@ -12,7 +12,19 @@ describe("branded responsive playing UI", () => {
 
   it("adapts the playing table at tablet and desktop breakpoints", () => {
     expect(css).toMatch(/@media \(min-width:\s*641px\)[\s\S]*--game-track-size:\s*300px/);
-    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*grid-template-columns:\s*minmax\(380px/);
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*grid-template-columns:\s*minmax\(520px/);
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*> \.table\s*\{[^}]*grid-column:\s*1[^}]*grid-row:\s*2/);
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*> \.scoreboard\s*\{[^}]*grid-column:\s*2[^}]*grid-row:\s*2/);
+  });
+
+  it("uses full hand-size card backs and a stacked AI label on desktop", () => {
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*\.app\[data-view="game"\] \.ai-strip\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*\.app\[data-view="game"\] \.ai-strip \.card,[\s\S]*\.app\[data-view="game"\] \.deal-animation-deck,[\s\S]*\.app\[data-view="game"\] \.pegging-row \.turn-cut-deck[\s\S]*\{[^}]*width:\s*max\(var\(--game-card-width\),\s*82px\)[^}]*height:\s*max\(var\(--game-card-height\),\s*116px\)/s);
+  });
+
+  it("keeps the desktop pegging stack centered when the AI hand disappears", () => {
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*data-phase="pegging"\] > \.table\s*\{[^}]*grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto auto[^}]*align-content:\s*stretch/s);
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*data-phase="pegging"\] \.played\s*\{[^}]*grid-row:\s*2[^}]*align-self:\s*center/s);
   });
 
   it("keeps large cards rectangular and simplified at every width", () => {
