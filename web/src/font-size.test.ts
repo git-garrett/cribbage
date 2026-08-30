@@ -26,7 +26,7 @@ describe("Extra Large accessibility typography", () => {
     expect(css).toMatch(/body\[data-font-size="x-large"\] \.table \.card\.hearts,[^{]*\.table \.card\.diamonds\s*\{[^}]*color:\s*var\(--card-red\)/s);
   });
 
-  it("hides prior rows and overflow cards only in the Extra Large mobile pegging stack", () => {
+  it("hides prior rows and overflow cards in the Extra Large mobile pegging stack", () => {
     expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*body\[data-font-size="x-large"\] #plays \.pegging-row\.played-archive[^{]*\{[^}]*display:\s*none/s);
     expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*body\[data-font-size="x-large"\] #plays \.pegging-overflow-card[^{]*\{[^}]*display:\s*none/s);
   });
@@ -35,8 +35,8 @@ describe("Extra Large accessibility typography", () => {
     expect(css).toMatch(/body\[data-font-size="x-large"\] \.scoreboard \.board,[^{]*body\[data-font-size="x-large"\] \.ai-strip\s*\{[^}]*display:\s*none\s*!important/s);
   });
 
-  it("removes status and notifications from Extra Large hand and crib scoring", () => {
-    expect(css).toMatch(/body\[data-font-size="x-large"\] \.app\[data-phase="score_pone"\] \.status,[^{]*body\[data-font-size="x-large"\] \.app\[data-phase="score_dealer"\] \.status,[^{]*body\[data-font-size="x-large"\] \.app\[data-phase="score_crib"\] \.status,[^{]*body\[data-font-size="x-large"\] \.app\[data-phase="score_pone"\] \.notification-row,[^{]*body\[data-font-size="x-large"\] \.app\[data-phase="score_dealer"\] \.notification-row,[^{]*body\[data-font-size="x-large"\] \.app\[data-phase="score_crib"\] \.notification-row\s*\{[^}]*display:\s*none/s);
+  it("removes redundant status and notifications from hand and crib scoring", () => {
+    expect(css).toMatch(/\.app\[data-phase="score_pone"\] \.status,[^{]*\.app\[data-phase="score_dealer"\] \.status,[^{]*\.app\[data-phase="score_crib"\] \.status,[^{]*\.app\[data-phase="score_pone"\] \.notification-row,[^{]*\.app\[data-phase="score_dealer"\] \.notification-row,[^{]*\.app\[data-phase="score_crib"\] \.notification-row[^{]*\{[^}]*display:\s*none/s);
   });
 
   it("skips shuffle, deal, and cut motion at Extra Large", () => {
@@ -58,6 +58,26 @@ describe("Extra Large accessibility typography", () => {
     expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*body\[data-font-size="large"\] \.card \.corner\s*\{[^}]*display:\s*none/s);
     expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*body\[data-font-size="large"\] \.card \.rank,[^{]*body\[data-font-size="large"\] \.card \.suit\s*\{[^}]*font-size:\s*var\(--app-font\)\s*!important/s);
   });
+
+  it("keeps Large pegging ranks readable instead of overlapping them", () => {
+    expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*body\[data-font-size="large"\] #plays \.pegging-overflow-card\s*\{[^}]*display:\s*none/s);
+    expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*body\[data-font-size="large"\] #plays \.pegging-row \.card:not\(\.back\)\s*\{[^}]*margin-left:\s*0/s);
+    expect(mainSource).toMatch(/if \(compact\.hidden\.length > 0\)[\s\S]*element\.classList\.add\("pegging-overflow-card"\)/s);
+  });
+
+  it("uses one compact row for the Large mobile header", () => {
+    expect(css).toMatch(/body\[data-font-size="large"\] \.topbar\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto auto/s);
+    expect(css).toMatch(/body\[data-font-size="large"\] \.topbar > div:first-child\s*\{[^}]*grid-column:\s*1/s);
+    expect(css).toMatch(/body\[data-font-size="large"\] \.font-size-control\s*\{[^}]*grid-column:\s*2/s);
+    expect(css).toMatch(/body\[data-font-size="large"\] #menu-toggle\s*\{[^}]*grid-column:\s*3/s);
+  });
+
+  it("carries Large typography through startup and aggregate statistics", () => {
+    expect(css).toMatch(/body\[data-font-size="large"\] \.splash-copy p\s*\{[^}]*font-size:\s*var\(--body-font\)/s);
+    expect(css).toMatch(/body\[data-font-size="large"\] \.splash-name-row input\s*\{[^}]*font-size:\s*var\(--body-font\)/s);
+    expect(css).toMatch(/body\[data-font-size="large"\] \.splash-new-game,[^{]*body\[data-font-size="large"\] \.splash-resume-game\s*\{[^}]*font-size:\s*var\(--control-font\)/s);
+    expect(css).toMatch(/body\[data-font-size="large"\] \.analytics-total\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.2fr\) minmax\(0,\s*0\.8fr\)[^}]*font-size:\s*var\(--score-meta-font\)/s);
+  });
 });
 
 describe("Mobile notification layout", () => {
@@ -66,6 +86,29 @@ describe("Mobile notification layout", () => {
     expect(css).toMatch(/\.notice-back\s*\{[^}]*grid-column:\s*1/s);
     expect(css).toMatch(/\.notice-forward\s*\{[^}]*grid-column:\s*3/s);
     expect(css).toMatch(/\.notification-row > \.result\s*\{[^}]*grid-column:\s*1\s*\/\s*-1[^}]*grid-row:\s*2/s);
+  });
+
+  it("keeps persistent controls at least 44 pixels tall", () => {
+    expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*\.font-size-control select\s*\{[^}]*min-height:\s*44px/s);
+    expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*#menu-toggle\s*\{[^}]*width:\s*44px[^}]*min-height:\s*44px/s);
+    expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*\.notification-row\s*\{[^}]*--notice-nav-size:\s*44px/s);
+  });
+});
+
+describe("Phase-specific mobile cleanup", () => {
+  it("removes dead game chrome from reports and empty hands after pegging", () => {
+    expect(css).toMatch(/\.app\[data-phase="game_over"\] \.status,[^{]*\.app\[data-phase="game_over"\] \.played,[^{]*\.app\[data-phase="game_over"\] \.notification-row\s*\{[^}]*display:\s*none/s);
+    expect(css).toMatch(/\.app\[data-phase="pegging_complete"\] \.user-panel-header,[^{]*\.app\[data-phase="pegging_complete"\] #human-hand\s*\{[^}]*display:\s*none/s);
+    expect(mainSource).toMatch(/function aiCardSlots[^]*if \(game\.aiHandCount === 0\) return 0;/s);
+  });
+
+  it("suppresses duplicate cut and discard instructions on mobile", () => {
+    expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*\.app\[data-phase="cut_for_deal"\]:not\(\[data-cut-confirming="true"\]\) \.notification-row,[^{]*\.app\[data-phase="discard"\] \.notification-row\s*\{[^}]*display:\s*none/s);
+  });
+
+  it("gives the discard hand the full table width", () => {
+    expect(css).toMatch(/\.app\[data-phase="discard"\] #plays\s*\{[^}]*gap:\s*4px/s);
+    expect(css).toMatch(/\.app\[data-phase="discard"\] \.played\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
   });
 });
 

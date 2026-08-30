@@ -42,23 +42,25 @@
     </section>
     <main class="app">
       <section class="topbar">
-        <div>
-          <h1>Strong Cribbage</h1>
+        <div class="app-brand">
+          <img class="app-brand-logo" src="/strong-cribbage-dark-lockup.svg" alt="">
+          <h1 class="visually-hidden">Strong Cribbage</h1>
         </div>
-        <label class="font-size-control" for="font-size-select">
-          <span>Text</span>
-          <select id="font-size-select" aria-label="Text size">
-            <option value="normal">Normal</option>
-            <option value="large">Large</option>
-            <option value="x-large">X-large</option>
-          </select>
-        </label>
+        <span id="hand-number" class="hand-number">Hand 1</span>
         <button id="menu-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="settings-panel" aria-label="Menu">
           <span></span>
           <span></span>
           <span></span>
         </button>
         <div id="settings-panel" class="settings-panel" hidden>
+          <label class="font-size-control" for="font-size-select">
+            <span>Text size</span>
+            <select id="font-size-select" aria-label="Text size">
+              <option value="normal">Normal</option>
+              <option value="large">Large</option>
+              <option value="x-large">X-large</option>
+            </select>
+          </label>
           <label>
             AI
             <select id="opponent">
@@ -154,7 +156,10 @@
           </div>
         </div>
         <div class="user-panel">
-          <h2 id="user-hand-title">User hand</h2>
+          <div class="user-panel-header">
+            <h2 id="user-hand-title">User hand</h2>
+            <span id="user-hand-meta" class="user-hand-meta"></span>
+          </div>
           <div class="user-hand-layout">
             <div id="human-hand" class="cards"></div>
             <div id="result-inline" class="result result-inline" aria-live="polite"></div>

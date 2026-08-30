@@ -12,6 +12,7 @@ import type {
   ScorePhase,
 } from "./api-types";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
+import { createCircularBoard, updateCircularBoard } from "./circular-board";
 import { singleGameReportRows } from "./game-report";
 import { rankLeaderboardWins } from "./leaderboard";
 import { mergedLifetimeResults } from "./my-stats";
@@ -319,6 +320,7 @@ const els = {
   splashNameRow: document.querySelector("#splash-name-row") as HTMLElement,
   splashFirstName: document.querySelector("#splash-first-name") as HTMLInputElement,
   board: document.querySelector("#board") as HTMLElement,
+  handNumber: document.querySelector("#hand-number") as HTMLElement,
   fontSizeSelect: document.querySelector("#font-size-select") as HTMLSelectElement,
   menuToggle: document.querySelector("#menu-toggle") as HTMLButtonElement,
   settingsPanel: document.querySelector("#settings-panel") as HTMLElement,
@@ -392,6 +394,8 @@ const els = {
   noticeBack: document.querySelector("#notice-back") as HTMLButtonElement,
   noticeForward: document.querySelector("#notice-forward") as HTMLButtonElement,
   userHandTitle: document.querySelector("#user-hand-title") as HTMLElement,
+  userPanelHeader: document.querySelector(".user-panel-header") as HTMLElement,
+  userHandMeta: document.querySelector("#user-hand-meta") as HTMLElement,
   aiStrip: document.querySelector(".ai-strip") as HTMLElement,
   humanHand: document.querySelector("#human-hand") as HTMLElement,
   aiHand: document.querySelector("#ai-hand") as HTMLElement,
@@ -1106,6 +1110,7 @@ function markAppReady(): void {
 
 function buildBoard(): void {
   els.board.innerHTML = "";
+  els.board.append(createCircularBoard());
   for (const player of ["human", "ai"] as const) {
     const lane = document.createElement("div");
     lane.className = `lane ${player}`;
@@ -1180,13 +1185,8 @@ function fallbackPegPositions(scores: GameState["scores"]): GameState["pegPositi
   };
 }
 
-function renderBoard(
-  scores: GameState["scores"],
-  pegPositions: GameState["pegPositions"] = fallbackPegPositions(scores),
-  firstDealer: string | null = null,
-  phase: GameState["phase"] = "discard",
-  handNumber = 1,
-): void {
+function renderBoard(game: GameState): void {
+  const { scores, pegPositions, firstDealer, phase, handNumber } = game;
   const fallback = fallbackPegPositions(scores);
   const firstDealerPlayer = firstDealer === "User" ? "human" : "ai";
   const completedHands = completedHandCount(phase, handNumber);
@@ -1227,6 +1227,7 @@ function renderBoard(
     if (showParGuides) renderPaceLines(pegPositions, projections, firstDealerPlayer, completedHands);
     else clearPaceLines();
   });
+  updateCircularBoard(els.board, game);
 }
 
 function clearPaceLines(): void {
@@ -2053,6 +2054,7 @@ function cardBack(): HTMLElement {
 }
 
 function aiCardSlots(game: GameState): number {
+  if (game.aiHandCount === 0) return 0;
   const needsStablePeggingSpace = game.phase === "pegging" || game.phase === "pegging_complete" || game.peggingResetPending;
   return needsStablePeggingSpace ? Math.max(4, game.aiHandCount) : game.aiHandCount;
 }
@@ -2097,7 +2099,7 @@ function renderPlayedCards(game: GameState): void {
     const label = group.current ? "Current pegging series" : "Prior pegging series";
     row.setAttribute("aria-label", `${label}: ${group.cards.map((card) => `${card.rank}${card.symbol}`).join(", ")}`);
     const compact = recentPeggingCards(group.cards, compactCardLimit);
-    if (group.current && compact.hidden.length > 0) {
+    if (compact.hidden.length > 0) {
       const marker = document.createElement("span");
       marker.className = "pegging-overflow-marker";
       marker.textContent = `+${compact.hidden.length}`;
@@ -2106,7 +2108,7 @@ function renderPlayedCards(game: GameState): void {
     }
     for (const card of compact.hidden) {
       const element = cardElement(card);
-      if (group.current) element.classList.add("pegging-overflow-card");
+      element.classList.add("pegging-overflow-card");
       row.append(element);
     }
     for (const card of compact.visible) row.append(cardElement(card));
@@ -4426,6 +4428,7 @@ function render(game: GameState | null): void {
   if (state.decisionReviewOpen) renderDecisionReviewPage();
   els.humanScore.textContent = String(game.scores.human);
   els.aiScore.textContent = String(game.scores.ai);
+  els.handNumber.textContent = `Hand ${game.handNumber}`;
   els.currentModel.textContent = engineName(currentSnapshot?.opponent ?? els.opponent.value ?? DEFAULT_OPPONENT);
   renderScorePace(game);
   const revealCribOwner = shouldRevealCribOwner(game.phase, state.dealCutRevealStage);
@@ -4448,7 +4451,7 @@ function render(game: GameState | null): void {
   renderScoring(game.scoring);
   renderResult(game);
   renderGameOver(game);
-  renderBoard(game.scores, game.pegPositions, game.firstDealer, game.phase, game.handNumber);
+  renderBoard(game);
   const hideHandsForInterstitial = Boolean(
     state.dealAnimation ||
     state.dealCutRevealStage ||
@@ -4459,14 +4462,20 @@ function render(game: GameState | null): void {
   els.playAreaTitle.textContent = playTitle;
   els.playAreaTitle.hidden = !playTitle;
   els.plays.classList.remove("pegging-history-only");
-  els.userHandTitle.hidden = hideHandsForInterstitial;
+  els.userPanelHeader.hidden = hideHandsForInterstitial;
+  els.userHandTitle.hidden = false;
   els.userHandTitle.textContent = game.peggingResetPending
     ? "Press OK to continue"
     : game.phase === "cut_for_deal"
       ? "Cut for deal"
       : game.phase === "pegging"
-      ? "Select card to play"
+      ? "Your hand"
       : "User hand";
+  const showHandMeta = !hideHandsForInterstitial && game.phase === "pegging" && !game.peggingResetPending;
+  els.userHandMeta.hidden = !showHandMeta;
+  els.userHandMeta.textContent = showHandMeta
+    ? `Dealer: ${game.dealer} · ${game.aiHandCount} AI ${game.aiHandCount === 1 ? "card" : "cards"}`
+    : "";
   if (state.dealAnimation) {
     renderDealAnimation();
   } else if (state.turnCutRevealStage) {
@@ -4504,6 +4513,7 @@ function render(game: GameState | null): void {
   const turnCut = turnCutPresentation(state.turnCutRevealStage);
   const waitingForTurnCutClick = Boolean(turnCut?.action);
   const waitingForDealCutOk = Boolean(state.dealCutResolve);
+  const selectedPlay = selectedPlayableCard(game);
   els.cutForDeal.hidden = !gameActive || (game.phase !== "cut_for_deal" && !waitingForTurnCutClick && !waitingForDealCutOk);
   els.discard.hidden = !gameActive || Boolean(state.dealAnimation) || waitingForDealCutOk || Boolean(state.turnCutRevealStage) || game.phase !== "discard";
   els.play.hidden = !gameActive || Boolean(state.dealAnimation) || waitingForDealCutOk || Boolean(state.turnCutRevealStage) || game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User");
@@ -4511,7 +4521,8 @@ function render(game: GameState | null): void {
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
   els.cutForDeal.textContent = turnCut?.action?.buttonLabel ?? (waitingForDealCutOk ? "OK" : "Cut deck");
   els.cutForDeal.disabled = game.phase !== "cut_for_deal" && !waitingForTurnCutClick && !waitingForDealCutOk;
-  els.play.disabled = game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User" && selectedPlayableCard(game));
+  els.play.textContent = selectedPlay ? `Play ${selectedPlay.rank}${selectedPlay.symbol}` : "Select a card";
+  els.play.disabled = game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User" && selectedPlay);
   els.go.disabled = !game.canGo;
   els.continueScoring.hidden = game.phase === "game_over";
   els.continueScoring.disabled = game.phase === "game_over" || !game.scoring;
