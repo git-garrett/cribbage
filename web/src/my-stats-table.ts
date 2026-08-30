@@ -3,9 +3,8 @@ import { formatDifference } from "./comparison-difference";
 export interface MyStatsTableTotals {
   games: number;
   wins: number;
-  losses: number;
   skunks: number;
-  skunked: number;
+  doubleSkunks: number;
   peggingDealer: number;
   peggingPone: number;
   handDealer: number;
@@ -25,12 +24,17 @@ export interface MyStatsTableRow {
   difference: string;
 }
 
-function comparisonRow(label: string, player: number, ai: number): MyStatsTableRow {
+function comparisonRow(
+  label: string,
+  player: number,
+  ai: number,
+  showDifference = true,
+): MyStatsTableRow {
   return {
     label,
     player: String(player),
     ai: String(ai),
-    difference: formatDifference(player, ai),
+    difference: showDifference ? formatDifference(player, ai) : "—",
   };
 }
 
@@ -56,11 +60,10 @@ export function myStatsTableRows(
   ai: MyStatsTableTotals,
 ): MyStatsTableRow[] {
   return [
-    comparisonRow("Games", player.games, ai.games),
+    comparisonRow("Games", player.games, ai.games, false),
     comparisonRow("Wins", player.wins, ai.wins),
-    comparisonRow("Losses", player.losses, ai.losses),
     comparisonRow("Skunks", player.skunks, ai.skunks),
-    comparisonRow("Skunked", player.skunked, ai.skunked),
+    comparisonRow("Double skunks", player.doubleSkunks, ai.doubleSkunks),
     averageRow(
       "Avg peg as dealer",
       player.peggingDealer,
