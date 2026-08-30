@@ -12,10 +12,11 @@ import type {
   ScorePhase,
 } from "./api-types";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
-import { createCircularBoard, updateCircularBoard } from "./circular-board";
+import { circularTurnCutPresentation, createCircularBoard, updateCircularBoard } from "./circular-board";
 import { singleGameReportRows } from "./game-report";
 import { rankLeaderboardWins } from "./leaderboard";
 import { mergedLifetimeResults } from "./my-stats";
+import { myStatsTableRows } from "./my-stats-table";
 import { peggingDisplaySeries, recentPeggingCards } from "./pegging-display";
 import { resolveRemoteAiBase } from "./runtime-config";
 import {
@@ -519,7 +520,6 @@ const SIMPLE_NETWORK_MODE = !FULL_APP_MODE;
 const SESSION_TAG = (URL_PARAMS.get("tag") || "").trim();
 const PLAYER_FIRST_NAME_KEY = "strong-cribbage.playerFirstName.v1";
 const SIMPLE_NETWORK_SESSION_KEY = "strong-cribbage.simpleNetworkSession";
-const SIMPLE_NETWORK_OPPONENT_KEY = "strong-cribbage.simpleNetworkOpponent.v1";
 const REMOTE_AI_DISABLED = URL_PARAMS.get("local") === "1";
 const REMOTE_AI_BASE = resolveRemoteAiBase(window.location.search, Capacitor.isNativePlatform());
 const REMOTE_AI_EXPLICIT = URL_PARAMS.has("api");
@@ -672,19 +672,8 @@ function simpleNetworkAllowedOpponents(): Set<string> {
 function isAllowedSimpleNetworkOpponent(opponent: string | undefined): boolean {
   return Boolean(opponent && simpleNetworkAllowedOpponents().has(opponent));
 }
-function simpleNetworkCanSelectOpponent(): boolean {
-  return SIMPLE_NETWORK_LOCAL_AI_MODE;
-}
-function simpleNetworkSelectedOpponent(): Opponent {
-  const engine = normalizeAnalyticsEngine(safeLocalStorageGet(SIMPLE_NETWORK_OPPONENT_KEY) ?? undefined);
-  return isAllowedSimpleNetworkOpponent(engine) ? engine : SIMPLE_NETWORK_OPPONENT;
-}
-function selectedMenuOpponent(): Opponent | null {
-  if (SIMPLE_NETWORK_MODE && !simpleNetworkCanSelectOpponent()) return null;
-  const engine = normalizeAnalyticsEngine(els.opponent.value);
-  return SIMPLE_NETWORK_MODE && !isAllowedSimpleNetworkOpponent(engine)
-    ? SIMPLE_NETWORK_OPPONENT
-    : engine;
+function selectedMenuOpponent(): Opponent {
+  return SIMPLE_NETWORK_MODE ? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT;
 }
 const savedGame = loadSavedGame();
 if (savedGame) {
@@ -723,7 +712,9 @@ els.appVersion.textContent = displayAppVersion(__APP_VERSION__);
 buildBoard();
 
 function applyFullModeOpponentAvailability(): void {
-  if (!LOCAL_NETWORK_MODE) els.opponent.value = DEFAULT_OPPONENT;
+  els.opponent.value = DEFAULT_OPPONENT;
+  els.opponent.disabled = true;
+  els.opponent.closest("label")?.setAttribute("hidden", "");
 }
 
 function applySimpleNetworkMode(): void {
@@ -738,13 +729,9 @@ function applySimpleNetworkMode(): void {
     option.hidden = !allowed;
     option.disabled = !allowed;
   }
-  els.opponent.value = simpleNetworkSelectedOpponent();
-  els.opponent.disabled = !simpleNetworkCanSelectOpponent();
-  if (simpleNetworkCanSelectOpponent()) {
-    els.opponent.closest("label")?.removeAttribute("hidden");
-  } else {
-    els.opponent.closest("label")?.setAttribute("hidden", "");
-  }
+  els.opponent.value = SIMPLE_NETWORK_OPPONENT;
+  els.opponent.disabled = true;
+  els.opponent.closest("label")?.setAttribute("hidden", "");
   els.gameLogOpen.hidden = true;
   els.leaderboardOpen.hidden = false;
   els.modelInfoOpen.hidden = true;
@@ -1227,7 +1214,7 @@ function renderBoard(game: GameState): void {
     if (showParGuides) renderPaceLines(pegPositions, projections, firstDealerPlayer, completedHands);
     else clearPaceLines();
   });
-  updateCircularBoard(els.board, game);
+  updateCircularBoard(els.board, game, circularTurnCutPresentation(state.turnCutRevealStage));
 }
 
 function clearPaceLines(): void {
@@ -1761,10 +1748,6 @@ function cumulativeForecastParThroughHand(
   return par;
 }
 
-async function ensureOpponentResources(opponent: Opponent): Promise<void> {
-  void opponent;
-}
-
 interface ServerGameActionResponse {
   state: GameState;
   snapshot: GameSnapshot;
@@ -1956,16 +1939,10 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
   try {
     if (path === "/api/state") {
       if (state.game) return state.game;
-      const opponent = SIMPLE_NETWORK_MODE
-        ? selectedMenuOpponent()
-        : DEFAULT_OPPONENT;
-      return serverGameAction("new", opponent ? { opponent } : {});
+      return serverGameAction("new", { opponent: selectedMenuOpponent() });
     }
     if (path === "/api/new") {
-      const opponent = SIMPLE_NETWORK_MODE
-        ? selectedMenuOpponent()
-        : (body?.opponent as Opponent) || DEFAULT_OPPONENT;
-      return serverGameAction("new", opponent ? { opponent } : {});
+      return serverGameAction("new", { opponent: selectedMenuOpponent() });
     }
     if (path === "/api/cut-for-deal") {
       return serverGameAction("cut-for-deal");
@@ -3385,8 +3362,8 @@ function renderMyStats(scoreEvents: ScoreEvent[], gameEvents: Extract<AnalyticsE
       ? `${completedGames} completed game${completedGames === 1 ? "" : "s"} recorded on this device.`
       : "Loading merged production history…";
   els.analyticsTotals.innerHTML = "";
-  els.analyticsTotals.append(simpleAnalyticsCard(lifetime.player, totals.human, "human", completedGames));
-  els.analyticsTotals.append(simpleAnalyticsCard(`AI vs ${lifetime.player}`, totals.ai, "ai", completedGames));
+  els.analyticsTotals.classList.add("my-stats-comparison");
+  els.analyticsTotals.append(myStatsComparisonTable(lifetime.player, totals, completedGames));
   renderAnalyticsRows(els.analyticsGames, []);
   renderAnalyticsRows(els.analyticsHands, []);
   renderAnalyticsRows(els.analyticsScores, []);
@@ -4001,6 +3978,7 @@ function renderAnalyticsTotals(
   for (const totals of aiHumanByModel.values()) applyOpportunityCounts(totals, ensureOpportunities(totals));
   addAiBaselineTotals(aiAllTotals, aiByModel);
   els.analyticsTotals.innerHTML = "";
+  els.analyticsTotals.classList.remove("my-stats-comparison");
   els.analyticsTotals.append(analyticsTotalCard("User", humanTotals, "human"));
   const games = gameLogRecords(events);
   els.analyticsTotals.append(decisionErrorAveragesCard(
@@ -4256,43 +4234,51 @@ function singleGameReportTable(report: { human: AnalyticsTotals; ai: AnalyticsTo
   return table;
 }
 
-function simpleAnalyticsCard(
-  label: string,
-  totals: AnalyticsTotals,
-  kind: "human" | "ai",
-  scoringGames = totals.games,
+function myStatsComparisonTable(
+  playerLabel: string,
+  totals: { human: AnalyticsTotals; ai: AnalyticsTotals },
+  scoringGames: number,
 ): HTMLElement {
-  const card = document.createElement("div");
-  card.className = `analytics-total ${kind}`;
-  const title = document.createElement("strong");
-  title.textContent = label;
-  card.append(title);
-  const add = (text: string, className = ""): void => {
-    const span = document.createElement("span");
-    if (className) span.className = className;
-    span.textContent = text;
-    card.append(span);
-  };
-  const pegging = totals.peggingDealer + totals.peggingPone;
-  const hands = totals.handDealer + totals.handPone;
-  const totalScoring = pegging + hands + totals.crib;
-  add(`Games: ${totals.games}`, "analytics-total-wide");
-  add(`Wins: ${totals.wins}`);
-  add(`Losses: ${totals.losses}`);
-  add(`Skunks: ${totals.skunks}`);
-  add(`Skunked: ${totals.skunked}`);
-  if (scoringGames !== totals.games) {
-    add(
-      `Scoring below: ${scoringGames} on-device game${scoringGames === 1 ? "" : "s"}`,
-      "analytics-total-wide analytics-baseline-note",
-    );
+  const section = document.createElement("div");
+  section.className = "my-stats-table-wrap";
+
+  const table = document.createElement("table");
+  table.className = "my-stats-table";
+  table.setAttribute("aria-label", `${playerLabel} and AI statistics comparison`);
+
+  const head = table.createTHead();
+  const header = head.insertRow();
+  for (const [label, className] of [["Metric", ""], [playerLabel, "human"], ["AI", "ai"]]) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    if (className) cell.className = className;
+    cell.textContent = label;
+    header.append(cell);
   }
-  add(`Total scoring: ${totalScoring}`, "analytics-total-wide");
-  add(`Avg scoring: ${averageLabel(totalScoring, scoringGames)}`);
-  add(`Pegging: ${pegging}`);
-  add(`Hands: ${hands}`);
-  add(`Crib: ${totals.crib}`);
-  return card;
+
+  const body = table.createTBody();
+  for (const row of myStatsTableRows(totals.human, totals.ai, scoringGames)) {
+    const tableRow = body.insertRow();
+    const label = document.createElement("th");
+    label.scope = "row";
+    label.textContent = row.label;
+    const player = tableRow.insertCell();
+    player.className = "human";
+    player.textContent = row.player;
+    const ai = tableRow.insertCell();
+    ai.className = "ai";
+    ai.textContent = row.ai;
+    tableRow.prepend(label);
+  }
+  section.append(table);
+
+  if (scoringGames !== totals.human.games) {
+    const note = document.createElement("p");
+    note.className = "my-stats-scoring-note";
+    note.textContent = `Scoring totals use ${scoringGames} detailed game${scoringGames === 1 ? "" : "s"} stored on this device.`;
+    section.append(note);
+  }
+  return section;
 }
 
 function benchmarkLabel(source: string | undefined, games: number | undefined): string {
@@ -4935,23 +4921,9 @@ els.noticeForward.addEventListener("click", () => {
   renderNoticeText(state.noticeHistory[state.noticeHistoryIndex] ?? "");
 });
 
-els.opponent.addEventListener("change", async () => {
-  if (state.pending) return;
-  if (SIMPLE_NETWORK_MODE) {
-    const opponent = selectedMenuOpponent();
-    if (opponent) {
-      els.opponent.value = opponent;
-      safeLocalStorageSet(SIMPLE_NETWORK_OPPONENT_KEY, opponent);
-    }
-    render(state.game);
-    return;
-  }
-  if (usesRemoteAi()) return;
-  try {
-    await ensureOpponentResources(normalizeAnalyticsEngine(els.opponent.value));
-  } catch (error) {
-    els.result.textContent = error instanceof Error ? error.message : "Model load failed";
-  }
+els.opponent.addEventListener("change", () => {
+  els.opponent.value = selectedMenuOpponent();
+  render(state.game);
 });
 
 els.gameOverClose.addEventListener("click", () => {

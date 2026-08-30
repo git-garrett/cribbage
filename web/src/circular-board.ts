@@ -1,12 +1,17 @@
 import type { GameState, PlayerKey } from "./api-types";
+import type { TurnCutRevealStage } from "./ui-visibility";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const TRACK_CENTER = 130;
 const TRACK_GROUP_GAP = 0.8;
 const TRACK_TOTAL_UNITS = 120 + (24 * TRACK_GROUP_GAP);
+const TRACK_SCORE_START_ANGLE = -79;
+const TRACK_SWEEP_DEGREES = 336;
+const TRACK_FINISH_ANGLE = -99;
+const TRACK_START_ANGLES = { "start-back": -88, "start-front": -82.5 } as const;
 const TRACK_RADIUS: Record<PlayerKey, number> = { human: 114, ai: 101 };
 
-type CircularBoardPresentation = {
+export type CircularBoardPresentation = {
   eyebrow: string;
   value: string;
   detail: string;
@@ -22,14 +27,14 @@ export function circularTrackPoint(position: number | string, radius: number): C
   const numericPosition = Number(position);
   let angleDegrees: number;
   if (numericPosition === 121) {
-    angleDegrees = -90;
+    angleDegrees = TRACK_FINISH_ANGLE;
+  } else if (position === "start-back" || position === "start-front") {
+    angleDegrees = TRACK_START_ANGLES[position];
   } else {
-    const hole = Number.isFinite(numericPosition)
-      ? Math.max(0, Math.min(119, numericPosition - 1))
-      : position === "start-back" ? -2.1 : -1.2;
-    const groupOffset = hole >= 0 ? Math.floor(hole / 5) * TRACK_GROUP_GAP : 0;
+    const hole = Number.isFinite(numericPosition) ? Math.max(0, Math.min(119, numericPosition - 1)) : 0;
+    const groupOffset = Math.floor(hole / 5) * TRACK_GROUP_GAP;
     const units = hole + groupOffset + 0.45;
-    angleDegrees = -90 + (units / TRACK_TOTAL_UNITS * 360);
+    angleDegrees = TRACK_SCORE_START_ANGLE + (units / TRACK_TOTAL_UNITS * TRACK_SWEEP_DEGREES);
   }
   const angle = angleDegrees * Math.PI / 180;
   return {
@@ -53,11 +58,11 @@ export function circularBoardPresentation(game: GameState): CircularBoardPresent
     return {
       eyebrow: "Hand",
       value: String(game.handNumber),
-      detail: game.phase === "ai_discarding" ? "AI choosing" : `${game.cribOwner} crib`,
+      detail: game.phase === "ai_discarding" ? "AI choosing" : `Choose 2 · ${game.cribOwner} crib`,
     };
   }
   if (game.phase === "cut_for_deal") {
-    return { eyebrow: "First deal", value: "CUT", detail: "Tap the deck" };
+    return { eyebrow: "First deal", value: "CUT", detail: "Tap deck" };
   }
   if (game.phase === "pegging_complete") {
     return { eyebrow: "Pegging", value: "DONE", detail: "Count hands" };
@@ -70,6 +75,25 @@ export function circularBoardPresentation(game: GameState): CircularBoardPresent
     };
   }
   return { eyebrow: "Final", value: "121", detail: game.message || "Game over" };
+}
+
+export function circularTurnCutPresentation(stage: TurnCutRevealStage): CircularBoardPresentation | null {
+  switch (stage) {
+    case "user-cut":
+      return { eyebrow: "Cut", value: "DECK", detail: "For AI" };
+    case "user-cutting":
+      return { eyebrow: "Cut", value: "DECK", detail: "Cutting" };
+    case "ai-cutting":
+      return { eyebrow: "Cut", value: "DECK", detail: "AI" };
+    case "user-turn":
+      return { eyebrow: "Turn", value: "CARD", detail: "Tap deck" };
+    case "ai-turn":
+      return { eyebrow: "Turn", value: "CARD", detail: "AI" };
+    case "revealed":
+      return { eyebrow: "Cut", value: "READY", detail: "Press OK" };
+    default:
+      return null;
+  }
 }
 
 export function createCircularBoard(): HTMLElement {
@@ -111,10 +135,21 @@ export function createCircularBoard(): HTMLElement {
     finishHole.setAttribute("r", "2.65");
     svg.append(finishHole);
   }
+  const skunkPoint = circularTrackPoint(90, (TRACK_RADIUS.human + TRACK_RADIUS.ai) / 2);
+  const skunkLabel = document.createElementNS(SVG_NS, "text");
+  skunkLabel.classList.add("circular-track-skunk-label");
+  skunkLabel.setAttribute("x", skunkPoint.x.toFixed(2));
+  skunkLabel.setAttribute("y", skunkPoint.y.toFixed(2));
+  skunkLabel.setAttribute("text-anchor", "middle");
+  skunkLabel.setAttribute("dominant-baseline", "central");
+  skunkLabel.textContent = "S";
+  svg.append(skunkLabel);
+
+  const finishLabelPoint = circularTrackPoint(121, 91);
   const finishLabel = document.createElementNS(SVG_NS, "text");
   finishLabel.classList.add("circular-track-finish-label");
-  finishLabel.setAttribute("x", "130");
-  finishLabel.setAttribute("y", "37");
+  finishLabel.setAttribute("x", finishLabelPoint.x.toFixed(2));
+  finishLabel.setAttribute("y", finishLabelPoint.y.toFixed(2));
   finishLabel.setAttribute("text-anchor", "middle");
   finishLabel.textContent = "121";
   svg.append(finishLabel);
@@ -131,7 +166,11 @@ export function createCircularBoard(): HTMLElement {
   return board;
 }
 
-export function updateCircularBoard(container: HTMLElement, game: GameState): void {
+export function updateCircularBoard(
+  container: HTMLElement,
+  game: GameState,
+  override?: CircularBoardPresentation | null,
+): void {
   const board = container.querySelector<HTMLElement>(".circular-board");
   const svg = board?.querySelector<SVGSVGElement>(".circular-track-svg");
   const eyebrow = board?.querySelector<HTMLElement>(".circular-board-eyebrow");
@@ -147,7 +186,7 @@ export function updateCircularBoard(container: HTMLElement, game: GameState): vo
     });
   }
 
-  const presentation = circularBoardPresentation(game);
+  const presentation = override || circularBoardPresentation(game);
   eyebrow.textContent = presentation.eyebrow;
   value.textContent = presentation.value;
   value.dataset.compact = presentation.value.length > 2 ? "true" : "false";

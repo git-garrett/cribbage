@@ -8,9 +8,10 @@ const mainSource = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 
 describe("Extra Large accessibility typography", () => {
   it("is 25 percent larger than the previous 32px base size", () => {
-    const blocks = [...css.matchAll(/body\[data-font-size="x-large"\]\s*\{([^}]*)\}/g)].map((match) => match[1]);
-    expect(blocks.length).toBeGreaterThanOrEqual(2);
-    expect(blocks.every((block) => /--app-font:\s*40px\s*;/.test(block))).toBe(true);
+    const values = [...css.matchAll(/body\[data-font-size="x-large"\]\s*\{[^}]*--app-font:\s*(\d+)px\s*;/g)]
+      .map((match) => Number(match[1]));
+    expect(values.length).toBeGreaterThanOrEqual(2);
+    expect(values.every((value) => value === 40)).toBe(true);
   });
 
   it("renders rank-over-suit tokens at the Extra Large copy size without a card chassis", () => {
