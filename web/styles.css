@@ -1100,21 +1100,29 @@ button:disabled {
   vertical-align: middle;
 }
 
+.my-stats-table tr > * + * {
+  border-left: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+}
+
 .my-stats-table thead th {
   background: color-mix(in srgb, var(--surface-soft) 72%, var(--felt) 28%);
   font-weight: 850;
 }
 
 .my-stats-table th:first-child {
-  width: 42%;
+  width: 40%;
   text-align: left;
 }
 
 .my-stats-table th:nth-child(2) {
-  width: 38%;
+  width: 20%;
 }
 
 .my-stats-table th:nth-child(3) {
+  width: 20%;
+}
+
+.my-stats-table th:nth-child(4) {
   width: 20%;
 }
 
@@ -1139,6 +1147,12 @@ button:disabled {
 
 .my-stats-table .ai {
   color: var(--ai);
+}
+
+.my-stats-table .difference {
+  border-left: 1px solid color-mix(in srgb, var(--line) 68%, var(--board) 32%);
+  background: color-mix(in srgb, var(--surface-soft) 84%, var(--board) 16%);
+  color: var(--ink);
 }
 
 .my-stats-table tbody tr:last-child th,
@@ -1235,14 +1249,24 @@ button:disabled {
   vertical-align: top;
 }
 
+.single-game-report-table tr > * + * {
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 .single-game-report-table thead th {
   background: rgba(0, 0, 0, 0.16);
   font-weight: 850;
 }
 
 .single-game-report-table th:first-child {
-  width: 48%;
+  width: 40%;
   text-align: left;
+}
+
+.single-game-report-table th:nth-child(2),
+.single-game-report-table th:nth-child(3),
+.single-game-report-table th:nth-child(4) {
+  width: 20%;
 }
 
 .single-game-report-table th:not(:first-child),
@@ -1268,6 +1292,12 @@ button:disabled {
   color: #ff938c;
 }
 
+.single-game-report-table .difference {
+  border-left: 1px solid rgba(232, 197, 117, 0.32);
+  background: rgba(232, 197, 117, 0.08);
+  color: #f0d38e;
+}
+
 .single-game-report-table tbody tr:last-child th,
 .single-game-report-table tbody tr:last-child td {
   border-bottom: 0;
@@ -1279,6 +1309,44 @@ body[data-font-size="x-large"] .single-game-report-table {
 
 body[data-font-size="x-large"] .single-game-report-table th:first-child {
   width: 40%;
+}
+
+@media (max-width: 480px) {
+  :is(.single-game-report-table, .my-stats-table) thead th:not(:first-child) {
+    overflow-wrap: anywhere;
+  }
+
+  body[data-font-size="large"] :is(.single-game-report-table, .my-stats-table),
+  body[data-font-size="x-large"] :is(.single-game-report-table, .my-stats-table) {
+    font-size: clamp(18px, 5.3vw, 22px);
+  }
+
+  body[data-font-size="large"] :is(.single-game-report-table, .my-stats-table) th,
+  body[data-font-size="large"] :is(.single-game-report-table, .my-stats-table) td,
+  body[data-font-size="x-large"] :is(.single-game-report-table, .my-stats-table) th,
+  body[data-font-size="x-large"] :is(.single-game-report-table, .my-stats-table) td {
+    padding: 8px clamp(2px, 1vw, 5px);
+  }
+
+  body[data-font-size="large"] :is(.single-game-report-table, .my-stats-table) th:first-child,
+  body[data-font-size="x-large"] :is(.single-game-report-table, .my-stats-table) th:first-child {
+    width: 34%;
+  }
+
+  body[data-font-size="large"] :is(.single-game-report-table, .my-stats-table) th:nth-child(2),
+  body[data-font-size="large"] :is(.single-game-report-table, .my-stats-table) th:nth-child(3),
+  body[data-font-size="large"] :is(.single-game-report-table, .my-stats-table) th:nth-child(4),
+  body[data-font-size="x-large"] :is(.single-game-report-table, .my-stats-table) th:nth-child(2),
+  body[data-font-size="x-large"] :is(.single-game-report-table, .my-stats-table) th:nth-child(3),
+  body[data-font-size="x-large"] :is(.single-game-report-table, .my-stats-table) th:nth-child(4) {
+    width: 22%;
+  }
+
+  body[data-font-size="large"] :is(.single-game-report-table, .my-stats-table) thead th:not(:first-child),
+  body[data-font-size="x-large"] :is(.single-game-report-table, .my-stats-table) thead th:not(:first-child) {
+    overflow-wrap: anywhere;
+    font-size: clamp(15px, 4.5vw, 18px);
+  }
 }
 
 .decision-review {
@@ -4811,6 +4879,7 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   }
 
   .app[data-view="game"] > .table {
+    position: relative;
     grid-column: 1;
     grid-row: 2;
     align-self: stretch;
@@ -4881,6 +4950,75 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
     overflow: visible;
   }
 
+  /* The turn-cut ceremony and the persistent cut card are separate DOM
+     paths. Anchor both to the same desktop location so the deck, cut motion,
+     reveal, and settled card read as one continuous action. */
+  .app[data-view="game"][data-phase="pegging"] #plays .played-active.pegging-row {
+    padding-right: 160px;
+  }
+
+  .app[data-view="game"] .played > .score-cut,
+  .app[data-view="game"] .turn-cut-row .cut-slot-human,
+  .app[data-view="game"] .turn-cut-row .cut-slot-ai,
+  .app[data-view="game"] .turn-cut-row .turn-cut-deck {
+    position: absolute;
+    top: 50%;
+    right: 120px;
+    min-width: 0;
+    transform: translate(50%, -50%);
+  }
+
+  .app[data-view="game"] .played > .score-cut {
+    width: var(--game-played-card-width);
+    height: var(--game-played-card-height);
+  }
+
+  .app[data-view="game"] .played > .score-cut #turn-card {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  .app[data-view="game"] .turn-cut-row .cut-slot-human,
+  .app[data-view="game"] .turn-cut-row .cut-slot-ai,
+  .app[data-view="game"] .turn-cut-row .turn-cut-deck {
+    width: max(var(--game-card-width), 82px);
+    height: max(var(--game-card-height), 116px);
+  }
+
+  .app[data-view="game"] .turn-cut-row .cut-slot-human,
+  .app[data-view="game"] .turn-cut-row .cut-slot-ai {
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+  }
+
+  .app[data-view="game"] .turn-cut-row .turn-cut-deck {
+    z-index: 1;
+  }
+
+  .app[data-view="game"] .turn-cut-row .turn-card-reveal[role="button"] {
+    pointer-events: auto;
+  }
+
+  .app[data-view="game"] .score-cut > span:first-child,
+  .app[data-view="game"] .turn-cut-row .cut-result > span:first-child {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .app[data-view="game"] .turn-cut-row .cut-result {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+  }
+
   .app[data-view="game"] .ai-strip .card,
   .app[data-view="game"] .deal-animation-deck,
   .app[data-view="game"] .deal-animation-card.card,
@@ -4920,5 +5058,13 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 
   .app[data-view="game"] .deal-animation-hand > span + .deal-animation-card.card {
     margin-left: 7px;
+  }
+}
+
+@media (min-width: 960px) and (max-width: 1100px) {
+  body[data-font-size="x-large"] .app[data-view="game"] .notification-row > .result {
+    justify-self: start;
+    width: fit-content;
+    max-width: calc(100% - 160px);
   }
 }

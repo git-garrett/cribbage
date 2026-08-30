@@ -27,6 +27,16 @@ describe("branded responsive playing UI", () => {
     expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*data-phase="pegging"\] \.played\s*\{[^}]*grid-row:\s*2[^}]*align-self:\s*center/s);
   });
 
+  it("uses one fixed right-center anchor for every desktop turn-cut state", () => {
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*\.app\[data-view="game"\] > \.table\s*\{[^}]*position:\s*relative/s);
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*data-phase="pegging"\] #plays \.played-active\.pegging-row\s*\{[^}]*padding-right:\s*160px/s);
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*\.played > \.score-cut,[\s\S]*\.turn-cut-row \.cut-slot-human,[\s\S]*\.turn-cut-row \.cut-slot-ai,[\s\S]*\.turn-cut-row \.turn-cut-deck\s*\{[^}]*position:\s*absolute[^}]*top:\s*50%[^}]*right:\s*120px[^}]*transform:\s*translate\(50%,\s*-50%\)/s);
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*\.played > \.score-cut\s*\{[^}]*width:\s*var\(--game-played-card-width\)[^}]*height:\s*var\(--game-played-card-height\)/s);
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*\.played > \.score-cut #turn-card\s*\{[^}]*position:\s*absolute[^}]*top:\s*50%[^}]*left:\s*50%[^}]*transform:\s*translate\(-50%,\s*-50%\)/s);
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*\.app\[data-view="game"\] \.pegging-row \.turn-cut-deck[\s\S]*\{[^}]*width:\s*max\(var\(--game-card-width\),\s*82px\)[^}]*height:\s*max\(var\(--game-card-height\),\s*116px\)/s);
+    expect(css).toMatch(/@media \(min-width:\s*960px\) and \(max-width:\s*1100px\)[\s\S]*body\[data-font-size="x-large"\][^{]*\.notification-row > \.result\s*\{[^}]*justify-self:\s*start[^}]*max-width:\s*calc\(100% - 160px\)/s);
+  });
+
   it("keeps large cards rectangular and simplified at every width", () => {
     expect(css).toMatch(/body\[data-font-size="large"\] \.app\[data-view="game"\] \.card:not\(\.back\)/);
     expect(css).toMatch(/body\[data-font-size="large"\] \.app\[data-view="game"\] \.card \.corner\s*\{\s*display:\s*none/);

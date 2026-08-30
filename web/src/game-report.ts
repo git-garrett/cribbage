@@ -1,3 +1,5 @@
+import { formatDifference } from "./comparison-difference";
+
 export interface SingleGameReportTotals {
   wins: number;
   losses: number;
@@ -21,10 +23,28 @@ export interface SingleGameReportRow {
   label: string;
   player: string;
   ai: string;
+  difference: string;
 }
 
-function average(points: number, opportunities: number): string {
-  return opportunities ? (points / opportunities).toFixed(2) : "-";
+function average(points: number, opportunities: number): number | null {
+  return opportunities ? points / opportunities : null;
+}
+
+function averageRow(
+  label: string,
+  playerPoints: number,
+  playerOpportunities: number,
+  aiPoints: number,
+  aiOpportunities: number,
+): SingleGameReportRow {
+  const player = average(playerPoints, playerOpportunities);
+  const ai = average(aiPoints, aiOpportunities);
+  return {
+    label,
+    player: player === null ? "-" : player.toFixed(2),
+    ai: ai === null ? "-" : ai.toFixed(2),
+    difference: formatDifference(player, ai, 2),
+  };
 }
 
 function specialResult(won: number, lost: number): string {
@@ -38,32 +58,17 @@ export function singleGameReportRows(
   ai: SingleGameReportTotals,
 ): SingleGameReportRow[] {
   const rows: SingleGameReportRow[] = [
-    { label: "Result", player: player.wins ? "Win" : "Loss", ai: ai.wins ? "Win" : "Loss" },
     {
-      label: "Avg peg as dealer",
-      player: average(player.peggingDealer, player.peggingDealerHands),
-      ai: average(ai.peggingDealer, ai.peggingDealerHands),
+      label: "Result",
+      player: player.wins ? "Win" : "Loss",
+      ai: ai.wins ? "Win" : "Loss",
+      difference: "—",
     },
-    {
-      label: "Avg peg as pone",
-      player: average(player.peggingPone, player.peggingPoneHands),
-      ai: average(ai.peggingPone, ai.peggingPoneHands),
-    },
-    {
-      label: "Avg hand as dealer",
-      player: average(player.handDealer, player.handDealerHands),
-      ai: average(ai.handDealer, ai.handDealerHands),
-    },
-    {
-      label: "Avg hand as pone",
-      player: average(player.handPone, player.handPoneHands),
-      ai: average(ai.handPone, ai.handPoneHands),
-    },
-    {
-      label: "Avg crib",
-      player: average(player.crib, player.cribHands),
-      ai: average(ai.crib, ai.cribHands),
-    },
+    averageRow("Avg peg as dealer", player.peggingDealer, player.peggingDealerHands, ai.peggingDealer, ai.peggingDealerHands),
+    averageRow("Avg peg as pone", player.peggingPone, player.peggingPoneHands, ai.peggingPone, ai.peggingPoneHands),
+    averageRow("Avg hand as dealer", player.handDealer, player.handDealerHands, ai.handDealer, ai.handDealerHands),
+    averageRow("Avg hand as pone", player.handPone, player.handPoneHands, ai.handPone, ai.handPoneHands),
+    averageRow("Avg crib", player.crib, player.cribHands, ai.crib, ai.cribHands),
   ];
 
   if (player.skunks || player.skunked || ai.skunks || ai.skunked) {
@@ -71,6 +76,7 @@ export function singleGameReportRows(
       label: "Skunk",
       player: specialResult(player.skunks, player.skunked),
       ai: specialResult(ai.skunks, ai.skunked),
+      difference: "—",
     });
   }
   if (player.doubleSkunks || player.doubleSkunked || ai.doubleSkunks || ai.doubleSkunked) {
@@ -78,6 +84,7 @@ export function singleGameReportRows(
       label: "Double skunk",
       player: specialResult(player.doubleSkunks, player.doubleSkunked),
       ai: specialResult(ai.doubleSkunks, ai.doubleSkunked),
+      difference: "—",
     });
   }
   return rows;

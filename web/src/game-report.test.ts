@@ -29,9 +29,9 @@ describe("singleGameReportRows", () => {
       totals({ peggingDealer: 5, peggingDealerHands: 1, crib: 0, cribHands: 0 }),
     );
 
-    expect(rows).toContainEqual({ label: "Result", player: "Win", ai: "Loss" });
-    expect(rows).toContainEqual({ label: "Avg peg as dealer", player: "6.00", ai: "5.00" });
-    expect(rows).toContainEqual({ label: "Avg crib", player: "7.00", ai: "-" });
+    expect(rows).toContainEqual({ label: "Result", player: "Win", ai: "Loss", difference: "—" });
+    expect(rows).toContainEqual({ label: "Avg peg as dealer", player: "6.00", ai: "5.00", difference: "+1.00" });
+    expect(rows).toContainEqual({ label: "Avg crib", player: "7.00", ai: "-", difference: "—" });
     expect(rows.every((row) => !row.player.includes("(") && !row.ai.includes("("))).toBe(true);
     expect(rows.some((row) => row.label === "Skunk")).toBe(false);
   });
@@ -42,7 +42,7 @@ describe("singleGameReportRows", () => {
       totals({ skunked: 1, doubleSkunked: 1 }),
     );
 
-    expect(rows).toContainEqual({ label: "Skunk", player: "Won", ai: "Lost" });
-    expect(rows).toContainEqual({ label: "Double skunk", player: "Won", ai: "Lost" });
+    expect(rows).toContainEqual({ label: "Skunk", player: "Won", ai: "Lost", difference: "—" });
+    expect(rows).toContainEqual({ label: "Double skunk", player: "Won", ai: "Lost", difference: "—" });
   });
 });

@@ -1,3 +1,5 @@
+import { formatDifference } from "./comparison-difference";
+
 export interface MyStatsTableTotals {
   games: number;
   wins: number;
@@ -15,14 +17,31 @@ export interface MyStatsTableRow {
   label: string;
   player: string;
   ai: string;
+  difference: string;
 }
 
 function scoringTotal(totals: MyStatsTableTotals): number {
   return totals.peggingDealer + totals.peggingPone + totals.handDealer + totals.handPone + totals.crib;
 }
 
-function average(total: number, games: number): string {
-  return games > 0 ? (total / games).toFixed(2) : "-";
+function comparisonRow(label: string, player: number, ai: number): MyStatsTableRow {
+  return {
+    label,
+    player: String(player),
+    ai: String(ai),
+    difference: formatDifference(player, ai),
+  };
+}
+
+function averageRow(label: string, playerTotal: number, aiTotal: number, games: number): MyStatsTableRow {
+  const player = games > 0 ? playerTotal / games : null;
+  const ai = games > 0 ? aiTotal / games : null;
+  return {
+    label,
+    player: player === null ? "-" : player.toFixed(2),
+    ai: ai === null ? "-" : ai.toFixed(2),
+    difference: formatDifference(player, ai, 2),
+  };
 }
 
 export function myStatsTableRows(
@@ -38,15 +57,15 @@ export function myStatsTableRows(
   const aiScoring = scoringTotal(ai);
 
   return [
-    { label: "Games", player: String(player.games), ai: String(ai.games) },
-    { label: "Wins", player: String(player.wins), ai: String(ai.wins) },
-    { label: "Losses", player: String(player.losses), ai: String(ai.losses) },
-    { label: "Skunks", player: String(player.skunks), ai: String(ai.skunks) },
-    { label: "Skunked", player: String(player.skunked), ai: String(ai.skunked) },
-    { label: "Total scoring", player: String(playerScoring), ai: String(aiScoring) },
-    { label: "Avg scoring", player: average(playerScoring, scoringGames), ai: average(aiScoring, scoringGames) },
-    { label: "Pegging", player: String(playerPegging), ai: String(aiPegging) },
-    { label: "Hands", player: String(playerHands), ai: String(aiHands) },
-    { label: "Crib", player: String(player.crib), ai: String(ai.crib) },
+    comparisonRow("Games", player.games, ai.games),
+    comparisonRow("Wins", player.wins, ai.wins),
+    comparisonRow("Losses", player.losses, ai.losses),
+    comparisonRow("Skunks", player.skunks, ai.skunks),
+    comparisonRow("Skunked", player.skunked, ai.skunked),
+    comparisonRow("Total scoring", playerScoring, aiScoring),
+    averageRow("Avg scoring", playerScoring, aiScoring, scoringGames),
+    comparisonRow("Pegging", playerPegging, aiPegging),
+    comparisonRow("Hands", playerHands, aiHands),
+    comparisonRow("Crib", player.crib, ai.crib),
   ];
 }

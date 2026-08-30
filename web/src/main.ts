@@ -4205,14 +4205,15 @@ function analyticsTotalCard(
 function singleGameReportTable(report: { human: AnalyticsTotals; ai: AnalyticsTotals }): HTMLTableElement {
   const table = document.createElement("table");
   table.className = "single-game-report-table";
-  table.setAttribute("aria-label", "Player and AI game comparison");
+  table.setAttribute("aria-label", "Player and AI game comparison; difference is Player minus AI");
 
   const head = table.createTHead();
   const header = head.insertRow();
-  for (const [label, className] of [["Metric", ""], ["Player", "human"], ["AI", "ai"]]) {
+  for (const [label, className] of [["Metric", ""], ["Player", "human"], ["AI", "ai"], ["Diff.", "difference"]]) {
     const cell = document.createElement("th");
     cell.scope = "col";
     if (className) cell.className = className;
+    if (className === "difference") cell.title = "Player minus AI";
     cell.textContent = label;
     header.append(cell);
   }
@@ -4229,6 +4230,9 @@ function singleGameReportTable(report: { human: AnalyticsTotals; ai: AnalyticsTo
     const ai = tableRow.insertCell();
     ai.className = "ai";
     ai.textContent = row.ai;
+    const difference = tableRow.insertCell();
+    difference.className = "difference";
+    difference.textContent = row.difference;
     tableRow.prepend(label);
   }
   return table;
@@ -4244,14 +4248,15 @@ function myStatsComparisonTable(
 
   const table = document.createElement("table");
   table.className = "my-stats-table";
-  table.setAttribute("aria-label", `${playerLabel} and AI statistics comparison`);
+  table.setAttribute("aria-label", `${playerLabel} and AI statistics comparison; difference is ${playerLabel} minus AI`);
 
   const head = table.createTHead();
   const header = head.insertRow();
-  for (const [label, className] of [["Metric", ""], [playerLabel, "human"], ["AI", "ai"]]) {
+  for (const [label, className] of [["Metric", ""], [playerLabel, "human"], ["AI", "ai"], ["Diff.", "difference"]]) {
     const cell = document.createElement("th");
     cell.scope = "col";
     if (className) cell.className = className;
+    if (className === "difference") cell.title = `${playerLabel} minus AI`;
     cell.textContent = label;
     header.append(cell);
   }
@@ -4268,6 +4273,9 @@ function myStatsComparisonTable(
     const ai = tableRow.insertCell();
     ai.className = "ai";
     ai.textContent = row.ai;
+    const difference = tableRow.insertCell();
+    difference.className = "difference";
+    difference.textContent = row.difference;
     tableRow.prepend(label);
   }
   section.append(table);
