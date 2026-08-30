@@ -11,6 +11,11 @@ export interface MyStatsTableTotals {
   handDealer: number;
   handPone: number;
   crib: number;
+  peggingDealerHands: number;
+  peggingPoneHands: number;
+  handDealerHands: number;
+  handPoneHands: number;
+  cribHands: number;
 }
 
 export interface MyStatsTableRow {
@@ -18,10 +23,6 @@ export interface MyStatsTableRow {
   player: string;
   ai: string;
   difference: string;
-}
-
-function scoringTotal(totals: MyStatsTableTotals): number {
-  return totals.peggingDealer + totals.peggingPone + totals.handDealer + totals.handPone + totals.crib;
 }
 
 function comparisonRow(label: string, player: number, ai: number): MyStatsTableRow {
@@ -33,9 +34,15 @@ function comparisonRow(label: string, player: number, ai: number): MyStatsTableR
   };
 }
 
-function averageRow(label: string, playerTotal: number, aiTotal: number, games: number): MyStatsTableRow {
-  const player = games > 0 ? playerTotal / games : null;
-  const ai = games > 0 ? aiTotal / games : null;
+function averageRow(
+  label: string,
+  playerTotal: number,
+  playerHands: number,
+  aiTotal: number,
+  aiHands: number,
+): MyStatsTableRow {
+  const player = playerHands > 0 ? playerTotal / playerHands : null;
+  const ai = aiHands > 0 ? aiTotal / aiHands : null;
   return {
     label,
     player: player === null ? "-" : player.toFixed(2),
@@ -47,25 +54,41 @@ function averageRow(label: string, playerTotal: number, aiTotal: number, games: 
 export function myStatsTableRows(
   player: MyStatsTableTotals,
   ai: MyStatsTableTotals,
-  scoringGames: number,
 ): MyStatsTableRow[] {
-  const playerPegging = player.peggingDealer + player.peggingPone;
-  const aiPegging = ai.peggingDealer + ai.peggingPone;
-  const playerHands = player.handDealer + player.handPone;
-  const aiHands = ai.handDealer + ai.handPone;
-  const playerScoring = scoringTotal(player);
-  const aiScoring = scoringTotal(ai);
-
   return [
     comparisonRow("Games", player.games, ai.games),
     comparisonRow("Wins", player.wins, ai.wins),
     comparisonRow("Losses", player.losses, ai.losses),
     comparisonRow("Skunks", player.skunks, ai.skunks),
     comparisonRow("Skunked", player.skunked, ai.skunked),
-    comparisonRow("Total scoring", playerScoring, aiScoring),
-    averageRow("Avg scoring", playerScoring, aiScoring, scoringGames),
-    comparisonRow("Pegging", playerPegging, aiPegging),
-    comparisonRow("Hands", playerHands, aiHands),
-    comparisonRow("Crib", player.crib, ai.crib),
+    averageRow(
+      "Avg peg as dealer",
+      player.peggingDealer,
+      player.peggingDealerHands,
+      ai.peggingDealer,
+      ai.peggingDealerHands,
+    ),
+    averageRow(
+      "Avg peg as pone",
+      player.peggingPone,
+      player.peggingPoneHands,
+      ai.peggingPone,
+      ai.peggingPoneHands,
+    ),
+    averageRow(
+      "Avg hand as dealer",
+      player.handDealer,
+      player.handDealerHands,
+      ai.handDealer,
+      ai.handDealerHands,
+    ),
+    averageRow(
+      "Avg hand as pone",
+      player.handPone,
+      player.handPoneHands,
+      ai.handPone,
+      ai.handPoneHands,
+    ),
+    averageRow("Avg crib", player.crib, player.cribHands, ai.crib, ai.cribHands),
   ];
 }

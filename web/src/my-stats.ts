@@ -5,6 +5,22 @@ export interface LifetimePlayerStats {
   losses: number;
   skunks?: number;
   skunked?: number;
+  scoringGames?: number;
+  humanScoring?: LifetimeScoringStats;
+  aiScoring?: LifetimeScoringStats;
+}
+
+export interface LifetimeScoringStats {
+  peggingDealer: number;
+  peggingPone: number;
+  handDealer: number;
+  handPone: number;
+  crib: number;
+  peggingDealerHands: number;
+  peggingPoneHands: number;
+  handDealerHands: number;
+  handPoneHands: number;
+  cribHands: number;
 }
 
 export interface ResultTotals {
@@ -17,9 +33,10 @@ export interface ResultTotals {
 
 export interface MergedLifetimeResults {
   player: string;
-  human: Required<ResultTotals>;
-  ai: Required<ResultTotals>;
+  human: Required<ResultTotals> & Partial<LifetimeScoringStats>;
+  ai: Required<ResultTotals> & Partial<LifetimeScoringStats>;
   source: "server" | "local";
+  scoringGames?: number;
 }
 
 function normalizedPlayerName(value: string): string {
@@ -61,14 +78,16 @@ export function mergedLifetimeResults(
   const human = completeResults(server);
   return {
     player: server.player,
-    human,
+    human: { ...human, ...server.humanScoring },
     ai: {
       games: human.games,
       wins: human.losses,
       losses: human.wins,
       skunks: human.skunked,
       skunked: human.skunks,
+      ...server.aiScoring,
     },
     source: "server",
+    scoringGames: server.scoringGames,
   };
 }

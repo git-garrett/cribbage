@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fmt::Write as _;
 use std::io::{Read, Write};
@@ -149,6 +149,46 @@ struct UploadedGame {
     ai_score: i32,
     model: String,
     ended_at: String,
+    human_scoring: ScoringTotals,
+    ai_scoring: ScoringTotals,
+}
+
+#[derive(Clone, Default)]
+struct ScoringTotals {
+    pegging_dealer: i32,
+    pegging_pone: i32,
+    hand_dealer: i32,
+    hand_pone: i32,
+    crib: i32,
+    pegging_dealer_hands: i32,
+    pegging_pone_hands: i32,
+    hand_dealer_hands: i32,
+    hand_pone_hands: i32,
+    crib_hands: i32,
+}
+
+impl ScoringTotals {
+    fn add(&mut self, other: &Self) {
+        self.pegging_dealer += other.pegging_dealer;
+        self.pegging_pone += other.pegging_pone;
+        self.hand_dealer += other.hand_dealer;
+        self.hand_pone += other.hand_pone;
+        self.crib += other.crib;
+        self.pegging_dealer_hands += other.pegging_dealer_hands;
+        self.pegging_pone_hands += other.pegging_pone_hands;
+        self.hand_dealer_hands += other.hand_dealer_hands;
+        self.hand_pone_hands += other.hand_pone_hands;
+        self.crib_hands += other.crib_hands;
+    }
+
+    fn has_opportunities(&self) -> bool {
+        self.pegging_dealer_hands
+            + self.pegging_pone_hands
+            + self.hand_dealer_hands
+            + self.hand_pone_hands
+            + self.crib_hands
+            > 0
+    }
 }
 
 #[derive(Default)]
@@ -793,6 +833,117 @@ fn persist_completed_game_upload(data_dir: &Path, game_id: &str, body: &str) -> 
             params![game_id, isoish_now(), body],
         )
         .map_err(|error| format!("save completed game upload: {}", error))?;
+    Ok(())
+}
+
+fn scoring_totals_from_upload(body: &str) -> (ScoringTotals, ScoringTotals) {
+    let Ok(payload) = serde_json::from_str::<Value>(body) else {
+        return (ScoringTotals::default(), ScoringTotals::default());
+    };
+    let Some(events) = payload.get("events").and_then(Value::as_array) else {
+        return (ScoringTotals::default(), ScoringTotals::default());
+    };
+    let mut human = ScoringTotals::default();
+    let mut ai = ScoringTotals::default();
+    let mut human_opportunities = HashSet::new();
+    let mut ai_opportunities = HashSet::new();
+    for event in events {
+        if event.get("type").and_then(Value::as_str) != Some("score") {
+            continue;
+        }
+        let Some(player) = event.get("player").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(category) = event.get("category").and_then(Value::as_str) else {
+            continue;
+        };
+        let role = event.get("role").and_then(Value::as_str).unwrap_or("");
+        let Some(key) = scoring_key(category, role) else {
+            continue;
+        };
+        let hand_number = event.get("handNumber").and_then(Value::as_u64).unwrap_or(0);
+        let points = event
+            .get("points")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+        match player {
+            "human" => {
+                add_scoring_points(&mut human, key, points);
+                human_opportunities.insert((hand_number, key));
+            }
+            "ai" => {
+                add_scoring_points(&mut ai, key, points);
+                ai_opportunities.insert((hand_number, key));
+            }
+            _ => {}
+        }
+    }
+    apply_scoring_opportunities(&mut human, &human_opportunities);
+    apply_scoring_opportunities(&mut ai, &ai_opportunities);
+    (human, ai)
+}
+
+fn scoring_key(category: &str, role: &str) -> Option<u8> {
+    match (category, role) {
+        ("pegging", "dealer") => Some(0),
+        ("pegging", "pone") => Some(1),
+        ("hand", "dealer") => Some(2),
+        ("hand", "pone") => Some(3),
+        ("crib", _) => Some(4),
+        _ => None,
+    }
+}
+
+fn add_scoring_points(totals: &mut ScoringTotals, key: u8, points: i32) {
+    match key {
+        0 => totals.pegging_dealer += points,
+        1 => totals.pegging_pone += points,
+        2 => totals.hand_dealer += points,
+        3 => totals.hand_pone += points,
+        4 => totals.crib += points,
+        _ => {}
+    }
+}
+
+fn apply_scoring_opportunities(totals: &mut ScoringTotals, seen: &HashSet<(u64, u8)>) {
+    let count = |key| {
+        seen.iter()
+            .filter(|(_, candidate)| *candidate == key)
+            .count() as i32
+    };
+    totals.pegging_dealer_hands = count(0);
+    totals.pegging_pone_hands = count(1);
+    totals.hand_dealer_hands = count(2);
+    totals.hand_pone_hands = count(3);
+    totals.crib_hands = count(4);
+}
+
+fn hydrate_upload_scoring(
+    data_dir: &Path,
+    uploads: &mut HashMap<String, UploadedGame>,
+) -> Result<(), String> {
+    if uploads.is_empty() {
+        return Ok(());
+    }
+    let connection = open_game_database(data_dir)?;
+    let mut statement = connection
+        .prepare("SELECT game_id, payload_json FROM cribbage_completed_game_uploads")
+        .map_err(|error| format!("read completed game scoring: {}", error))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|error| format!("read completed game scoring rows: {}", error))?;
+    for row in rows {
+        let (game_id, payload) =
+            row.map_err(|error| format!("read completed game scoring: {}", error))?;
+        if let Some(upload) = uploads.get_mut(&game_id) {
+            let (human, ai) = scoring_totals_from_upload(&payload);
+            upload.human_scoring = human;
+            upload.ai_scoring = ai;
+        }
+    }
     Ok(())
 }
 
@@ -2072,6 +2223,7 @@ fn upload_game(server: &Server, body: &str) -> Response {
         let ended_at = completed_game_timestamp(body)
             .or_else(|| game_start_timestamp(&game_id))
             .unwrap_or_else(isoish_now);
+        let (human_scoring, ai_scoring) = scoring_totals_from_upload(body);
         let upload = UploadedGame {
             game_id: game_id.clone(),
             player,
@@ -2081,6 +2233,8 @@ fn upload_game(server: &Server, body: &str) -> Response {
             ai_score,
             model,
             ended_at,
+            human_scoring,
+            ai_scoring,
         };
         let mut app = server
             .state
@@ -2184,6 +2338,8 @@ fn load_uploads(data_dir: &Path) -> Result<HashMap<String, UploadedGame>, String
                 ai_score,
                 model: decode_field(fields[6])?,
                 ended_at: decode_field(fields[7])?,
+                human_scoring: ScoringTotals::default(),
+                ai_scoring: ScoringTotals::default(),
             },
         );
         if fields[8] != "v1" {
@@ -2194,6 +2350,7 @@ fn load_uploads(data_dir: &Path) -> Result<HashMap<String, UploadedGame>, String
             ));
         }
     }
+    hydrate_upload_scoring(data_dir, &mut uploads)?;
     Ok(uploads)
 }
 
@@ -2269,6 +2426,9 @@ struct PlayerTotals {
     skunked: i32,
     points: i32,
     margin_total: i32,
+    scoring_games: i32,
+    human_scoring: ScoringTotals,
+    ai_scoring: ScoringTotals,
 }
 
 struct LeaderboardWin {
@@ -2295,6 +2455,11 @@ fn leaderboard_summary_json(uploads: &HashMap<String, UploadedGame>) -> String {
     for upload in uploads.values() {
         let total = totals.entry(upload.player.clone()).or_default();
         total.games += 1;
+        total.human_scoring.add(&upload.human_scoring);
+        total.ai_scoring.add(&upload.ai_scoring);
+        if upload.human_scoring.has_opportunities() || upload.ai_scoring.has_opportunities() {
+            total.scoring_games += 1;
+        }
         let won = upload.winner.as_deref() == Some("human");
         let margin = upload.human_score - upload.ai_score;
         total.margin_total += margin;
@@ -2406,7 +2571,7 @@ where
             let (player, total) = row.borrow();
             let games = total.games.max(1) as f64;
             format!(
-                "{{\"player\":\"{}\",\"games\":{},\"wins\":{},\"losses\":{},\"skunks\":{},\"skunked\":{},\"leaderboardPoints\":{},\"leaderboardPointsPerGame\":{:.3},\"winRate\":{:.3},\"avgMargin\":{:.3}}}",
+                "{{\"player\":\"{}\",\"games\":{},\"wins\":{},\"losses\":{},\"skunks\":{},\"skunked\":{},\"leaderboardPoints\":{},\"leaderboardPointsPerGame\":{:.3},\"winRate\":{:.3},\"avgMargin\":{:.3},\"scoringGames\":{},\"humanScoring\":{},\"aiScoring\":{}}}",
                 json_escape(player),
                 total.games,
                 total.wins,
@@ -2417,10 +2582,29 @@ where
                 total.points as f64 / games,
                 total.wins as f64 / games,
                 total.margin_total as f64 / games,
+                total.scoring_games,
+                scoring_totals_json(&total.human_scoring),
+                scoring_totals_json(&total.ai_scoring),
             )
         })
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn scoring_totals_json(totals: &ScoringTotals) -> String {
+    format!(
+        "{{\"peggingDealer\":{},\"peggingPone\":{},\"handDealer\":{},\"handPone\":{},\"crib\":{},\"peggingDealerHands\":{},\"peggingPoneHands\":{},\"handDealerHands\":{},\"handPoneHands\":{},\"cribHands\":{}}}",
+        totals.pegging_dealer,
+        totals.pegging_pone,
+        totals.hand_dealer,
+        totals.hand_pone,
+        totals.crib,
+        totals.pegging_dealer_hands,
+        totals.pegging_pone_hands,
+        totals.hand_dealer_hands,
+        totals.hand_pone_hands,
+        totals.crib_hands,
+    )
 }
 
 fn json_string(input: &str, key: &str) -> Option<String> {
@@ -2700,6 +2884,8 @@ mod tests {
                     ai_score: 90,
                     model: "schell_table-peg_table-15.2".to_string(),
                     ended_at: "2026-07-01T00:00:00Z".to_string(),
+                    human_scoring: ScoringTotals::default(),
+                    ai_scoring: ScoringTotals::default(),
                 },
             ),
             (
@@ -2713,6 +2899,8 @@ mod tests {
                     ai_score: 121,
                     model: "schell_table-peg_table-13.0".to_string(),
                     ended_at: "2026-07-02T00:00:00Z".to_string(),
+                    human_scoring: ScoringTotals::default(),
+                    ai_scoring: ScoringTotals::default(),
                 },
             ),
         ]);
@@ -2724,6 +2912,73 @@ mod tests {
         assert!(summary.contains("\"player\":\"Kurtis\""));
         assert!(summary.contains("\"bestWins\":[{\"player\":\"Garrett\""));
         assert!(summary.contains("\"mostSkunks\":[{\"player\":\"Garrett\""));
+    }
+
+    #[test]
+    fn leaderboard_scoring_uses_all_persisted_score_events_and_hand_counts() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-scoring-stats-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let server = Server {
+            state: Mutex::new(AppState {
+                sessions: HashMap::new(),
+                uploads: HashMap::new(),
+                leaderboard_summary: leaderboard_summary_json(&HashMap::new()),
+            }),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+        let game = r#"{
+          "gameId":"scored-game",
+          "tag":"Garrett",
+          "winner":"human",
+          "result":"regular",
+          "model":"schell_table-peg_table-13.0",
+          "human":121,
+          "ai":110,
+          "events":[
+            {"type":"score","player":"human","category":"pegging","role":"dealer","handNumber":1,"points":2},
+            {"type":"score","player":"human","category":"pegging","role":"dealer","handNumber":1,"points":3},
+            {"type":"score","player":"human","category":"hand","role":"dealer","handNumber":1,"points":10},
+            {"type":"score","player":"human","category":"crib","role":"dealer","handNumber":1,"points":6},
+            {"type":"score","player":"ai","category":"pegging","role":"pone","handNumber":1,"points":4},
+            {"type":"score","player":"ai","category":"hand","role":"pone","handNumber":1,"points":8}
+          ]
+        }"#;
+
+        upload_game(&server, game);
+        let second_game = r#"{
+          "gameId":"second-scored-game",
+          "tag":"Garrett",
+          "winner":"ai",
+          "result":"regular",
+          "model":"schell_table-peg_table-13.0",
+          "human":115,
+          "ai":121,
+          "events":[
+            {"type":"score","player":"human","category":"pegging","role":"dealer","handNumber":1,"points":4},
+            {"type":"score","player":"ai","category":"pegging","role":"pone","handNumber":1,"points":3}
+          ]
+        }"#;
+        let response = upload_game(&server, second_game);
+        let response_json = serde_json::from_str::<Value>(&response.body).unwrap();
+        let row = &response_json["leaderboard"]["playerStats"][0];
+        assert_eq!(row["scoringGames"], 2);
+        assert_eq!(row["humanScoring"]["peggingDealer"], 9);
+        assert_eq!(row["humanScoring"]["peggingDealerHands"], 2);
+        assert_eq!(row["humanScoring"]["crib"], 6);
+        assert_eq!(row["aiScoring"]["handPone"], 8);
+
+        let reloaded = load_uploads(&data_dir).unwrap();
+        let reloaded_summary =
+            serde_json::from_str::<Value>(&leaderboard_summary_json(&reloaded)).unwrap();
+        let reloaded_row = &reloaded_summary["playerStats"][0];
+        assert_eq!(reloaded_row["humanScoring"]["peggingDealer"], 9);
+        assert_eq!(reloaded_row["humanScoring"]["peggingDealerHands"], 2);
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[test]

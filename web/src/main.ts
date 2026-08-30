@@ -15,7 +15,7 @@ import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 import { circularTurnCutPresentation, createCircularBoard, updateCircularBoard } from "./circular-board";
 import { singleGameReportRows } from "./game-report";
 import { rankLeaderboardWins } from "./leaderboard";
-import { mergedLifetimeResults } from "./my-stats";
+import { mergedLifetimeResults, type LifetimeScoringStats } from "./my-stats";
 import { myStatsTableRows } from "./my-stats-table";
 import { peggingDisplaySeries, recentPeggingCards } from "./pegging-display";
 import { resolveRemoteAiBase } from "./runtime-config";
@@ -79,6 +79,9 @@ interface LeaderboardPlayer {
   leaderboardPointsPerGame?: number;
   winRate: number;
   avgMargin: number;
+  scoringGames?: number;
+  humanScoring?: LifetimeScoringStats;
+  aiScoring?: LifetimeScoringStats;
 }
 
 interface LeaderboardWin {
@@ -3351,19 +3354,30 @@ function renderMyStats(scoreEvents: ScoreEvent[], gameEvents: Extract<AnalyticsE
     state.leaderboardSummary.playerStats ?? [],
     localTotals,
   );
+  const serverScoringAvailable = lifetime.source === "server" && lifetime.scoringGames !== undefined;
   const totals = {
-    human: { ...localTotals.human, ...lifetime.human },
-    ai: { ...localTotals.ai, ...lifetime.ai },
+    human: { ...(serverScoringAvailable ? emptyAnalyticsTotals() : localTotals.human), ...lifetime.human },
+    ai: { ...(serverScoringAvailable ? emptyAnalyticsTotals() : localTotals.ai), ...lifetime.ai },
   };
   els.analyticsTitle.textContent = "My Stats";
-  els.analyticsSummary.textContent = lifetime.source === "server"
-    ? `${lifetime.human.games} merged production game${lifetime.human.games === 1 ? "" : "s"}; detailed scoring from ${completedGames} game${completedGames === 1 ? "" : "s"} stored on this device.`
+  els.analyticsSummary.textContent = serverScoringAvailable
+    ? lifetime.scoringGames === lifetime.human.games
+      ? `Scoring averages use every recorded hand across all ${lifetime.human.games} production game${lifetime.human.games === 1 ? "" : "s"}.`
+      : `${lifetime.human.games} production game${lifetime.human.games === 1 ? "" : "s"}; scoring averages use every recorded hand from ${lifetime.scoringGames} game${lifetime.scoringGames === 1 ? "" : "s"} with detailed scoring.`
+    : lifetime.source === "server"
+      ? "Loading production scoring history…"
     : completedGames
       ? `${completedGames} completed game${completedGames === 1 ? "" : "s"} recorded on this device.`
       : "Loading merged production history…";
   els.analyticsTotals.innerHTML = "";
   els.analyticsTotals.classList.add("my-stats-comparison");
-  els.analyticsTotals.append(myStatsComparisonTable(lifetime.player, totals, completedGames));
+  els.analyticsTotals.append(myStatsComparisonTable(
+    lifetime.player,
+    totals,
+    serverScoringAvailable ? lifetime.scoringGames ?? 0 : completedGames,
+    lifetime.human.games,
+    serverScoringAvailable,
+  ));
   renderAnalyticsRows(els.analyticsGames, []);
   renderAnalyticsRows(els.analyticsHands, []);
   renderAnalyticsRows(els.analyticsScores, []);
@@ -4242,6 +4256,8 @@ function myStatsComparisonTable(
   playerLabel: string,
   totals: { human: AnalyticsTotals; ai: AnalyticsTotals },
   scoringGames: number,
+  lifetimeGames: number,
+  serverScoring: boolean,
 ): HTMLElement {
   const section = document.createElement("div");
   section.className = "my-stats-table-wrap";
@@ -4262,7 +4278,7 @@ function myStatsComparisonTable(
   }
 
   const body = table.createTBody();
-  for (const row of myStatsTableRows(totals.human, totals.ai, scoringGames)) {
+  for (const row of myStatsTableRows(totals.human, totals.ai)) {
     const tableRow = body.insertRow();
     const label = document.createElement("th");
     label.scope = "row";
@@ -4280,10 +4296,10 @@ function myStatsComparisonTable(
   }
   section.append(table);
 
-  if (scoringGames !== totals.human.games) {
+  if (serverScoring && scoringGames !== lifetimeGames) {
     const note = document.createElement("p");
     note.className = "my-stats-scoring-note";
-    note.textContent = `Scoring totals use ${scoringGames} detailed game${scoringGames === 1 ? "" : "s"} stored on this device.`;
+    note.textContent = `${lifetimeGames - scoringGames} older game${lifetimeGames - scoringGames === 1 ? " does" : "s do"} not contain detailed scoring events and ${lifetimeGames - scoringGames === 1 ? "is" : "are"} excluded from scoring averages.`;
     section.append(note);
   }
   return section;
