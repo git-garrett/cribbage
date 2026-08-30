@@ -90,7 +90,7 @@ Environment=CRIBBAGE_DATA_DIR=${REMOTE_DATA_DIR}
 Environment=CRIBBAGE_REQUIRE_AUTH=true
 Environment=CRIBBAGE_PUBLIC_ORIGIN=https://${GAME_DOMAIN}
 Environment=CRIBBAGE_MAIL_FROM=hello@strongcribbage.com
-Environment=CRIBBAGE_MAIL_FROM_NAME=Strong Cribbage
+Environment="CRIBBAGE_MAIL_FROM_NAME=Strong Cribbage"
 Environment=CRIBBAGE_MAIL_REPLY_TO=founder@evenvision.com
 EnvironmentFile=-/etc/cribbage/cribbage.env
 ExecStart=${REMOTE_APP_DIR}/rust/target/release/cribbage-api

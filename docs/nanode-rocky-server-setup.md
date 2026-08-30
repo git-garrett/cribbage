@@ -103,7 +103,7 @@ Environment=CRIBBAGE_DATA_DIR=/var/lib/cribbage
 Environment=CRIBBAGE_REQUIRE_AUTH=true
 Environment=CRIBBAGE_PUBLIC_ORIGIN=https://cribbage.strongcribbage.com
 Environment=CRIBBAGE_MAIL_FROM=hello@strongcribbage.com
-Environment=CRIBBAGE_MAIL_FROM_NAME=Strong Cribbage
+Environment="CRIBBAGE_MAIL_FROM_NAME=Strong Cribbage"
 Environment=CRIBBAGE_MAIL_REPLY_TO=founder@evenvision.com
 EnvironmentFile=-/etc/cribbage/cribbage.env
 ExecStart=/opt/cribbage/rust/target/release/cribbage-api
