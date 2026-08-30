@@ -13,6 +13,7 @@ import type {
 } from "./api-types";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 import { circularTurnCutPresentation, createCircularBoard, updateCircularBoard } from "./circular-board";
+import { endGameAds } from "./end-game-ad";
 import { singleGameReportRows } from "./game-report";
 import { rankLeaderboardWins } from "./leaderboard";
 import { mergedLifetimeResults, type LifetimeScoringStats } from "./my-stats";
@@ -202,6 +203,7 @@ const state: {
   selectedLogGameId: string | null;
   snapshotEventId: string | null;
   dismissedGameOverId: string | null;
+  gameOverAdPending: boolean;
   aiThinking: boolean;
   modelLoading: boolean;
   completingReviews: boolean;
@@ -249,6 +251,7 @@ const state: {
   selectedLogGameId: null,
   snapshotEventId: null,
   dismissedGameOverId: safeLocalStorageGet(DISMISSED_GAME_OVER_STORAGE_KEY),
+  gameOverAdPending: false,
   aiThinking: false,
   modelLoading: false,
   completingReviews: false,
@@ -284,6 +287,7 @@ function resetTransientGameUi(): void {
   state.resultOverride = null;
   state.serverBusy = null;
   state.dismissedGameOverId = null;
+  state.gameOverAdPending = false;
   safeLocalStorageRemove(DISMISSED_GAME_OVER_STORAGE_KEY);
   state.aiThinking = false;
   state.modelLoading = false;
@@ -2628,6 +2632,8 @@ function renderGameOver(game: GameState): void {
   const dismissed = Boolean(gameId && state.dismissedGameOverId === gameId);
   els.gameOverAlert.hidden = game.phase !== "game_over" || dismissed;
   els.singleGameReport.hidden = game.phase !== "game_over" || !dismissed;
+  els.gameOverClose.disabled = state.gameOverAdPending;
+  els.gameOverClose.textContent = state.gameOverAdPending ? "Opening report…" : "View report";
   if (game.phase !== "game_over") {
     els.singleGameReport.innerHTML = "";
     return;
@@ -2638,6 +2644,7 @@ function renderGameOver(game: GameState): void {
     return;
   }
   els.gameOverTitle.textContent = `${playerName(end.winner ?? "human")} won!`;
+  if (!dismissed) endGameAds.prepare(end.gameId);
   renderSingleGameReport(game, end);
 }
 
@@ -5160,15 +5167,36 @@ els.opponent.addEventListener("change", () => {
 });
 
 els.gameOverClose.addEventListener("click", () => {
+  void openGameReportFromWinner();
+});
+
+async function openGameReportFromWinner(): Promise<void> {
+  if (state.gameOverAdPending) return;
   const end = state.game ? latestGameEnd(state.game) : null;
-  state.dismissedGameOverId = end?.gameId ?? null;
+  const gameId = end?.gameId ?? null;
+  if (!gameId) return;
+
+  state.gameOverAdPending = true;
+  render(state.game);
+  try {
+    await endGameAds.showBeforeReport(gameId);
+  } finally {
+    state.gameOverAdPending = false;
+  }
+
+  const currentEnd = state.game ? latestGameEnd(state.game) : null;
+  if (currentEnd?.gameId !== gameId) {
+    render(state.game);
+    return;
+  }
+  state.dismissedGameOverId = gameId;
   if (state.dismissedGameOverId) {
     safeLocalStorageSet(DISMISSED_GAME_OVER_STORAGE_KEY, state.dismissedGameOverId);
   } else {
     safeLocalStorageRemove(DISMISSED_GAME_OVER_STORAGE_KEY);
   }
   render(state.game);
-});
+}
 
 async function cutForDeal(): Promise<void> {
   if (state.pending) return;
