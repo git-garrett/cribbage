@@ -16,6 +16,8 @@ describe("mergedLifetimeResults", () => {
       skunks: 7,
       skunked: 10,
       scoringGames: 123,
+      analyzedGames: 12,
+      errors: 18,
       humanScoring: {
         peggingDealer: 240,
         peggingPone: 225,
@@ -54,6 +56,8 @@ describe("mergedLifetimeResults", () => {
         peggingDealerHands: 60,
         crib: 390,
         cribHands: 60,
+        analyzedGames: 12,
+        errors: 18,
       },
       ai: {
         games: 137,

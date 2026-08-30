@@ -80,6 +80,8 @@ interface LeaderboardPlayer {
   winRate: number;
   avgMargin: number;
   scoringGames?: number;
+  analyzedGames?: number;
+  errors?: number;
   humanScoring?: LifetimeScoringStats;
   aiScoring?: LifetimeScoringStats;
 }
@@ -607,6 +609,8 @@ interface AnalyticsTotals {
   skunked: number;
   doubleSkunks: number;
   doubleSkunked: number;
+  analyzedGames: number;
+  errors: number;
   peggingDealer: number;
   peggingPone: number;
   handDealer: number;
@@ -2661,6 +2665,9 @@ function renderGameReportInto(
     (event): event is ScoreEvent => event.type === "score" && event.gameId === end.gameId,
   );
   const report = singleGameTotals(scoreEvents, end);
+  const analysis = decisionAnalysisForGame(events, end.gameId);
+  report.human.analyzedGames = analysis.analyzed ? 1 : 0;
+  report.human.errors = analysis.errors;
   const title = document.createElement("h2");
   title.textContent = titleText;
   const summary = document.createElement("p");
@@ -2804,6 +2811,22 @@ function decisionMistakes(events: AnalyticsEvent[], gameId: string): DecisionRev
     return !sameCards(reviewedEvent.review.selected, reviewedEvent.review.recommended) &&
       decisionMistakeMagnitude(reviewedEvent) >= decisionMistakeThreshold(reviewedEvent);
   });
+}
+
+function reviewedUserDecisions(events: AnalyticsEvent[], gameId: string): DecisionReviewEvent[] {
+  return events.filter((event): event is DecisionReviewEvent =>
+    event.gameId === gameId &&
+    ((event.type === "discard" && event.player === "human") ||
+      (event.type === "pegging" && event.action === "play" && event.player === "human")) &&
+    Boolean(event.review)
+  );
+}
+
+function decisionAnalysisForGame(events: AnalyticsEvent[], gameId: string): { analyzed: boolean; errors: number } {
+  return {
+    analyzed: reviewedUserDecisions(events, gameId).length > 0,
+    errors: decisionMistakes(events, gameId).length,
+  };
 }
 
 function sortedDecisionMistakes(events: AnalyticsEvent[], gameId: string): DecisionReviewEvent[] {
@@ -3471,7 +3494,7 @@ function renderAnalytics(): void {
   );
 
   if (state.analyticsMode === "my") {
-    renderMyStats(scoreEvents, gameEvents);
+    renderMyStats(events, scoreEvents, gameEvents);
     return;
   }
 
@@ -3519,9 +3542,13 @@ function renderAnalytics(): void {
   );
 }
 
-function renderMyStats(scoreEvents: ScoreEvent[], gameEvents: Extract<AnalyticsEvent, { type: "game" }>[]): void {
+function renderMyStats(
+  events: AnalyticsEvent[],
+  scoreEvents: ScoreEvent[],
+  gameEvents: Extract<AnalyticsEvent, { type: "game" }>[],
+): void {
   const completedGames = gameEvents.filter((event) => event.action === "end").length;
-  const localTotals = playerAnalyticsTotals(scoreEvents, gameEvents);
+  const localTotals = playerAnalyticsTotals(events, scoreEvents, gameEvents);
   const lifetime = mergedLifetimeResults(
     playerFirstName,
     state.leaderboardSummary.playerStats ?? [],
@@ -3558,6 +3585,7 @@ function renderMyStats(scoreEvents: ScoreEvent[], gameEvents: Extract<AnalyticsE
 }
 
 function playerAnalyticsTotals(
+  events: AnalyticsEvent[],
   scoreEvents: ScoreEvent[],
   gameEvents: Extract<AnalyticsEvent, { type: "game" }>[],
 ): { human: AnalyticsTotals; ai: AnalyticsTotals } {
@@ -3585,6 +3613,12 @@ function playerAnalyticsTotals(
       ai.wins += 1;
       human.losses += 1;
     }
+  }
+  for (const game of gameEvents) {
+    if (game.action !== "end") continue;
+    const analysis = decisionAnalysisForGame(events, game.gameId);
+    if (analysis.analyzed) human.analyzedGames += 1;
+    human.errors += analysis.errors;
   }
   applyOpportunityCounts(human, opportunities.human);
   applyOpportunityCounts(ai, opportunities.ai);
@@ -4238,6 +4272,8 @@ function emptyAnalyticsTotals(): AnalyticsTotals {
     skunked: 0,
     doubleSkunks: 0,
     doubleSkunked: 0,
+    analyzedGames: 0,
+    errors: 0,
     peggingDealer: 0,
     peggingPone: 0,
     handDealer: 0,

@@ -8,6 +8,8 @@ function totals(overrides: Partial<MyStatsTableTotals> = {}): MyStatsTableTotals
     wins: 7,
     skunks: 2,
     doubleSkunks: 1,
+    analyzedGames: 0,
+    errors: 0,
     peggingDealer: 16,
     peggingPone: 14,
     handDealer: 42,
@@ -55,6 +57,7 @@ describe("myStatsTableRows", () => {
     expect(rows).toContainEqual({ label: "Avg hand as dealer", player: "10.50", ai: "8.40", difference: "+2.10" });
     expect(rows).toContainEqual({ label: "Avg hand as pone", player: "9.50", ai: "7.60", difference: "+1.90" });
     expect(rows).toContainEqual({ label: "Avg crib", player: "5.00", ai: "5.00", difference: "0.00" });
+    expect(rows).toContainEqual({ label: "Avg full cycle", player: "31.33", ai: "33.33", difference: "−2.00" });
   });
 
   it("shows a dash when no scoring opportunities are available", () => {
@@ -69,5 +72,12 @@ describe("myStatsTableRows", () => {
     const row = myStatsTableRows(empty, empty).find((candidate) => candidate.label === "Avg crib");
 
     expect(row).toEqual({ label: "Avg crib", player: "-", ai: "-", difference: "—" });
+  });
+
+  it("shows error counts only after analyzed games", () => {
+    const rows = myStatsTableRows(totals({ analyzedGames: 2, errors: 3 }), totals());
+
+    expect(rows).toContainEqual({ label: "Errors, total", player: "3", ai: "—", difference: "—" });
+    expect(rows).toContainEqual({ label: "Errors / analyzed game", player: "1.50", ai: "—", difference: "—" });
   });
 });

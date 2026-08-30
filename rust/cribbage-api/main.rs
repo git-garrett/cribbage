@@ -154,9 +154,11 @@ struct UploadedGame {
     ended_at: String,
     human_scoring: ScoringTotals,
     ai_scoring: ScoringTotals,
+    analyzed: bool,
+    errors: i32,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Eq, PartialEq)]
 struct ScoringTotals {
     pegging_dealer: i32,
     pegging_pone: i32,
@@ -886,7 +888,9 @@ fn persist_completed_game_upload(data_dir: &Path, game_id: &str, body: &str) -> 
         .execute(
             "INSERT INTO cribbage_completed_game_uploads (game_id, received_at, payload_json)
              VALUES (?1, ?2, ?3)
-             ON CONFLICT(game_id) DO NOTHING",
+             ON CONFLICT(game_id) DO UPDATE SET
+               received_at = excluded.received_at,
+               payload_json = excluded.payload_json",
             params![game_id, isoish_now(), body],
         )
         .map_err(|error| format!("save completed game upload: {}", error))?;
@@ -939,6 +943,55 @@ fn scoring_totals_from_upload(body: &str) -> (ScoringTotals, ScoringTotals) {
     apply_scoring_opportunities(&mut human, &human_opportunities);
     apply_scoring_opportunities(&mut ai, &ai_opportunities);
     (human, ai)
+}
+
+fn decision_errors_from_upload(body: &str) -> (bool, i32) {
+    let Ok(payload) = serde_json::from_str::<Value>(body) else {
+        return (false, 0);
+    };
+    let Some(events) = payload.get("events").and_then(Value::as_array) else {
+        return (false, 0);
+    };
+    let mut analyzed = false;
+    let mut errors = 0;
+    for event in events {
+        let Some(review) = event.get("review") else {
+            continue;
+        };
+        let user_decision = event.get("player").and_then(Value::as_str) == Some("human")
+            && (event.get("type").and_then(Value::as_str) == Some("discard")
+                || (event.get("type").and_then(Value::as_str) == Some("pegging")
+                    && event.get("action").and_then(Value::as_str) == Some("play")));
+        if !user_decision {
+            continue;
+        }
+        analyzed = true;
+        let selected = review.get("selected").and_then(Value::as_array);
+        let recommended = review.get("recommended").and_then(Value::as_array);
+        let same_choice = selected
+            .zip(recommended)
+            .is_some_and(|(selected, recommended)| {
+                let mut selected = selected
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>();
+                let mut recommended = recommended
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>();
+                selected.sort_unstable();
+                recommended.sort_unstable();
+                selected == recommended
+            });
+        let impact = review
+            .get("winProbabilityDelta")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        if !same_choice && impact >= 0.0025 {
+            errors += 1;
+        }
+    }
+    (analyzed, errors)
 }
 
 fn scoring_key(category: &str, role: &str) -> Option<u8> {
@@ -999,6 +1052,9 @@ fn hydrate_upload_scoring(
             let (human, ai) = scoring_totals_from_upload(&payload);
             upload.human_scoring = human;
             upload.ai_scoring = ai;
+            let (analyzed, errors) = decision_errors_from_upload(&payload);
+            upload.analyzed = analyzed;
+            upload.errors = errors;
         }
     }
     Ok(())
@@ -2281,6 +2337,7 @@ fn upload_game(server: &Server, body: &str) -> Response {
             .or_else(|| game_start_timestamp(&game_id))
             .unwrap_or_else(isoish_now);
         let (human_scoring, ai_scoring) = scoring_totals_from_upload(body);
+        let (analyzed, errors) = decision_errors_from_upload(body);
         let upload = UploadedGame {
             game_id: game_id.clone(),
             player,
@@ -2292,28 +2349,51 @@ fn upload_game(server: &Server, body: &str) -> Response {
             ended_at,
             human_scoring,
             ai_scoring,
+            analyzed,
+            errors,
         };
         let mut app = server
             .state
             .lock()
             .map_err(|_| "server state lock poisoned".to_string())?;
-        if app.uploads.contains_key(&game_id) {
-            return Ok((false, app.leaderboard_summary.clone()));
+        if let Some(existing) = app.uploads.get(&game_id) {
+            if existing.player == upload.player
+                && existing.winner == upload.winner
+                && existing.result == upload.result
+                && existing.human_score == upload.human_score
+                && existing.ai_score == upload.ai_score
+                && existing.model == upload.model
+                && existing.human_scoring == upload.human_scoring
+                && existing.ai_scoring == upload.ai_scoring
+                && existing.analyzed == upload.analyzed
+                && existing.errors == upload.errors
+            {
+                return Ok((false, app.leaderboard_summary.clone()));
+            }
         }
-        app.uploads.insert(game_id.clone(), upload);
+        let is_new = !app.uploads.contains_key(&game_id);
+        let previous = app.uploads.insert(game_id.clone(), upload);
         if let Err(error) = persist_uploads(&server.data_dir, &app.uploads) {
-            app.uploads.remove(&game_id);
+            if let Some(previous) = previous {
+                app.uploads.insert(game_id.clone(), previous);
+            } else {
+                app.uploads.remove(&game_id);
+            }
             return Err(error);
         }
         if let Err(error) = persist_completed_game_upload(&server.data_dir, &game_id, body) {
-            app.uploads.remove(&game_id);
+            if let Some(previous) = previous {
+                app.uploads.insert(game_id.clone(), previous);
+            } else {
+                app.uploads.remove(&game_id);
+            }
             // Keep the TSV and in-memory leaderboard transactionally aligned
             // with the permanent payload log when a database write fails.
             let _ = persist_uploads(&server.data_dir, &app.uploads);
             return Err(error);
         }
         app.leaderboard_summary = leaderboard_summary_json(&app.uploads);
-        Ok((true, app.leaderboard_summary.clone()))
+        Ok((is_new, app.leaderboard_summary.clone()))
     })();
     match result {
         Ok((updated, leaderboard)) => Response::json(
@@ -2397,6 +2477,8 @@ fn load_uploads(data_dir: &Path) -> Result<HashMap<String, UploadedGame>, String
                 ended_at: decode_field(fields[7])?,
                 human_scoring: ScoringTotals::default(),
                 ai_scoring: ScoringTotals::default(),
+                analyzed: false,
+                errors: 0,
             },
         );
         if fields[8] != "v1" {
@@ -2486,6 +2568,8 @@ struct PlayerTotals {
     scoring_games: i32,
     human_scoring: ScoringTotals,
     ai_scoring: ScoringTotals,
+    analyzed_games: i32,
+    errors: i32,
 }
 
 struct LeaderboardWin {
@@ -2517,6 +2601,10 @@ fn leaderboard_summary_json(uploads: &HashMap<String, UploadedGame>) -> String {
         if upload.human_scoring.has_opportunities() || upload.ai_scoring.has_opportunities() {
             total.scoring_games += 1;
         }
+        if upload.analyzed {
+            total.analyzed_games += 1;
+        }
+        total.errors += upload.errors;
         let won = upload.winner.as_deref() == Some("human");
         let margin = upload.human_score - upload.ai_score;
         total.margin_total += margin;
@@ -2628,7 +2716,7 @@ where
             let (player, total) = row.borrow();
             let games = total.games.max(1) as f64;
             format!(
-                "{{\"player\":\"{}\",\"games\":{},\"wins\":{},\"losses\":{},\"skunks\":{},\"skunked\":{},\"leaderboardPoints\":{},\"leaderboardPointsPerGame\":{:.3},\"winRate\":{:.3},\"avgMargin\":{:.3},\"scoringGames\":{},\"humanScoring\":{},\"aiScoring\":{}}}",
+                "{{\"player\":\"{}\",\"games\":{},\"wins\":{},\"losses\":{},\"skunks\":{},\"skunked\":{},\"leaderboardPoints\":{},\"leaderboardPointsPerGame\":{:.3},\"winRate\":{:.3},\"avgMargin\":{:.3},\"scoringGames\":{},\"analyzedGames\":{},\"errors\":{},\"humanScoring\":{},\"aiScoring\":{}}}",
                 json_escape(player),
                 total.games,
                 total.wins,
@@ -2640,6 +2728,8 @@ where
                 total.wins as f64 / games,
                 total.margin_total as f64 / games,
                 total.scoring_games,
+                total.analyzed_games,
+                total.errors,
                 scoring_totals_json(&total.human_scoring),
                 scoring_totals_json(&total.ai_scoring),
             )
@@ -2943,6 +3033,8 @@ mod tests {
                     ended_at: "2026-07-01T00:00:00Z".to_string(),
                     human_scoring: ScoringTotals::default(),
                     ai_scoring: ScoringTotals::default(),
+                    analyzed: false,
+                    errors: 0,
                 },
             ),
             (
@@ -2958,6 +3050,8 @@ mod tests {
                     ended_at: "2026-07-02T00:00:00Z".to_string(),
                     human_scoring: ScoringTotals::default(),
                     ai_scoring: ScoringTotals::default(),
+                    analyzed: false,
+                    errors: 0,
                 },
             ),
         ]);
@@ -3035,6 +3129,56 @@ mod tests {
         let reloaded_row = &reloaded_summary["playerStats"][0];
         assert_eq!(reloaded_row["humanScoring"]["peggingDealer"], 9);
         assert_eq!(reloaded_row["humanScoring"]["peggingDealerHands"], 2);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn analyzed_uploads_count_reviewed_human_decision_errors() {
+        let payload = r#"{
+          "events":[
+            {"type":"discard","player":"human","review":{"selected":["5C","6D"],"recommended":["6D","7H"],"winProbabilityDelta":0.01}},
+            {"type":"pegging","action":"play","player":"human","review":{"selected":["8S"],"recommended":["8S"],"winProbabilityDelta":0.05}},
+            {"type":"discard","player":"ai","review":{"selected":["AC","2D"],"recommended":["3H","4S"],"winProbabilityDelta":0.05}}
+          ]
+        }"#;
+
+        assert_eq!(decision_errors_from_upload(payload), (true, 1));
+    }
+
+    #[test]
+    fn reuploading_analyzed_game_refreshes_lifetime_error_totals() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-analysis-upload-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let server = Server {
+            state: Mutex::new(AppState {
+                sessions: HashMap::new(),
+                uploads: HashMap::new(),
+                leaderboard_summary: leaderboard_summary_json(&HashMap::new()),
+            }),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+        let game = r#"{"gameId":"analyzed-game","tag":"Garrett","winner":"human","result":"regular","model":"schell_table-peg_table-13.0","human":121,"ai":100,"events":[]}"#;
+        let analyzed_game = r#"{"gameId":"analyzed-game","tag":"Garrett","winner":"human","result":"regular","model":"schell_table-peg_table-13.0","human":121,"ai":100,"events":[{"type":"discard","player":"human","review":{"selected":["5C","6D"],"recommended":["6D","7H"],"winProbabilityDelta":0.01}}]}"#;
+
+        upload_game(&server, game);
+        let refreshed = upload_game(&server, analyzed_game);
+        let refreshed_json = serde_json::from_str::<Value>(&refreshed.body).unwrap();
+        let row = &refreshed_json["leaderboard"]["playerStats"][0];
+        assert!(refreshed.body.contains("\"updated\":false"));
+        assert_eq!(row["analyzedGames"], 1);
+        assert_eq!(row["errors"], 1);
+
+        let reloaded = load_uploads(&data_dir).unwrap();
+        let reloaded_summary =
+            serde_json::from_str::<Value>(&leaderboard_summary_json(&reloaded)).unwrap();
+        let reloaded_row = &reloaded_summary["playerStats"][0];
+        assert_eq!(reloaded_row["analyzedGames"], 1);
+        assert_eq!(reloaded_row["errors"], 1);
         std::fs::remove_dir_all(data_dir).unwrap();
     }
 

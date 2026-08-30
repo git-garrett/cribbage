@@ -5,6 +5,8 @@ export interface MyStatsTableTotals {
   wins: number;
   skunks: number;
   doubleSkunks: number;
+  analyzedGames: number;
+  errors: number;
   peggingDealer: number;
   peggingPone: number;
   handDealer: number;
@@ -55,6 +57,42 @@ function averageRow(
   };
 }
 
+function fullCycleAverage(totals: MyStatsTableTotals): number | null {
+  const phases = [
+    [totals.peggingDealer, totals.peggingDealerHands],
+    [totals.handDealer, totals.handDealerHands],
+    [totals.crib, totals.cribHands],
+    [totals.peggingPone, totals.peggingPoneHands],
+    [totals.handPone, totals.handPoneHands],
+  ] as const;
+  if (phases.some(([, hands]) => hands <= 0)) return null;
+  return phases.reduce((sum, [points, hands]) => sum + points / hands, 0);
+}
+
+function fullCycleRow(player: MyStatsTableTotals, ai: MyStatsTableTotals): MyStatsTableRow {
+  const playerCycle = fullCycleAverage(player);
+  const aiCycle = fullCycleAverage(ai);
+  return {
+    label: "Avg full cycle",
+    player: playerCycle === null ? "-" : playerCycle.toFixed(2),
+    ai: aiCycle === null ? "-" : aiCycle.toFixed(2),
+    difference: formatDifference(playerCycle, aiCycle, 2),
+  };
+}
+
+function analysisRows(player: MyStatsTableTotals): MyStatsTableRow[] {
+  if (!player.analyzedGames) return [];
+  return [
+    { label: "Errors, total", player: String(player.errors), ai: "—", difference: "—" },
+    {
+      label: "Errors / analyzed game",
+      player: (player.errors / player.analyzedGames).toFixed(2),
+      ai: "—",
+      difference: "—",
+    },
+  ];
+}
+
 export function myStatsTableRows(
   player: MyStatsTableTotals,
   ai: MyStatsTableTotals,
@@ -64,6 +102,7 @@ export function myStatsTableRows(
     comparisonRow("Wins", player.wins, ai.wins),
     comparisonRow("Skunks", player.skunks, ai.skunks),
     comparisonRow("Double skunks", player.doubleSkunks, ai.doubleSkunks),
+    ...analysisRows(player),
     averageRow(
       "Avg peg as dealer",
       player.peggingDealer,
@@ -93,5 +132,6 @@ export function myStatsTableRows(
       ai.handPoneHands,
     ),
     averageRow("Avg crib", player.crib, player.cribHands, ai.crib, ai.cribHands),
+    fullCycleRow(player, ai),
   ];
 }

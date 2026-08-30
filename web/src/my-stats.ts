@@ -6,6 +6,8 @@ export interface LifetimePlayerStats {
   skunks?: number;
   skunked?: number;
   scoringGames?: number;
+  analyzedGames?: number;
+  errors?: number;
   humanScoring?: LifetimeScoringStats;
   aiScoring?: LifetimeScoringStats;
 }
@@ -33,10 +35,15 @@ export interface ResultTotals {
 
 export interface MergedLifetimeResults {
   player: string;
-  human: Required<ResultTotals> & Partial<LifetimeScoringStats>;
+  human: Required<ResultTotals> & Partial<LifetimeScoringStats & LifetimeAnalysisStats>;
   ai: Required<ResultTotals> & Partial<LifetimeScoringStats>;
   source: "server" | "local";
   scoringGames?: number;
+}
+
+export interface LifetimeAnalysisStats {
+  analyzedGames: number;
+  errors: number;
 }
 
 function normalizedPlayerName(value: string): string {
@@ -76,9 +83,12 @@ export function mergedLifetimeResults(
     };
   }
   const human = completeResults(server);
+  const analysis = typeof server.analyzedGames === "number" && typeof server.errors === "number"
+    ? { analyzedGames: server.analyzedGames, errors: server.errors }
+    : {};
   return {
     player: server.player,
-    human: { ...human, ...server.humanScoring },
+    human: { ...human, ...server.humanScoring, ...analysis },
     ai: {
       games: human.games,
       wins: human.losses,

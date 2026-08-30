@@ -7,6 +7,8 @@ export interface SingleGameReportTotals {
   skunked: number;
   doubleSkunks: number;
   doubleSkunked: number;
+  analyzedGames: number;
+  errors: number;
   peggingDealer: number;
   peggingPone: number;
   handDealer: number;
@@ -53,6 +55,29 @@ function specialResult(won: number, lost: number): string {
   return "—";
 }
 
+function fullCycleAverage(totals: SingleGameReportTotals): number | null {
+  const phases = [
+    [totals.peggingDealer, totals.peggingDealerHands],
+    [totals.handDealer, totals.handDealerHands],
+    [totals.crib, totals.cribHands],
+    [totals.peggingPone, totals.peggingPoneHands],
+    [totals.handPone, totals.handPoneHands],
+  ] as const;
+  if (phases.some(([, hands]) => hands <= 0)) return null;
+  return phases.reduce((sum, [points, hands]) => sum + points / hands, 0);
+}
+
+function fullCycleRow(player: SingleGameReportTotals, ai: SingleGameReportTotals): SingleGameReportRow {
+  const playerCycle = fullCycleAverage(player);
+  const aiCycle = fullCycleAverage(ai);
+  return {
+    label: "Avg full cycle",
+    player: playerCycle === null ? "-" : playerCycle.toFixed(2),
+    ai: aiCycle === null ? "-" : aiCycle.toFixed(2),
+    difference: formatDifference(playerCycle, aiCycle, 2),
+  };
+}
+
 export function singleGameReportRows(
   player: SingleGameReportTotals,
   ai: SingleGameReportTotals,
@@ -64,11 +89,18 @@ export function singleGameReportRows(
       ai: ai.wins ? "Win" : "Loss",
       difference: "—",
     },
+    ...(player.analyzedGames
+      ? [
+        { label: "Errors, total", player: String(player.errors), ai: "—", difference: "—" },
+        { label: "Errors / game", player: (player.errors / player.analyzedGames).toFixed(2), ai: "—", difference: "—" },
+      ]
+      : []),
     averageRow("Avg peg as dealer", player.peggingDealer, player.peggingDealerHands, ai.peggingDealer, ai.peggingDealerHands),
     averageRow("Avg peg as pone", player.peggingPone, player.peggingPoneHands, ai.peggingPone, ai.peggingPoneHands),
     averageRow("Avg hand as dealer", player.handDealer, player.handDealerHands, ai.handDealer, ai.handDealerHands),
     averageRow("Avg hand as pone", player.handPone, player.handPoneHands, ai.handPone, ai.handPoneHands),
     averageRow("Avg crib", player.crib, player.cribHands, ai.crib, ai.cribHands),
+    fullCycleRow(player, ai),
   ];
 
   if (player.skunks || player.skunked || ai.skunks || ai.skunked) {
