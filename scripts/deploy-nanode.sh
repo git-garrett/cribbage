@@ -64,7 +64,8 @@ deploy() {
 
   echo "Installing app files on $REMOTE..."
   remote_exec "id cribbage >/dev/null 2>&1 || useradd --system --home-dir '$REMOTE_DATA_DIR' --shell /usr/sbin/nologin cribbage && \
-    mkdir -p '$REMOTE_APP_DIR' '$REMOTE_DATA_DIR' && \
+    mkdir -p '$REMOTE_APP_DIR' '$REMOTE_DATA_DIR' /etc/cribbage && \
+    chmod 700 /etc/cribbage && \
     rm -rf '$REMOTE_APP_DIR/dist' '$REMOTE_APP_DIR/server-dist' '$REMOTE_APP_DIR/package.json' '$REMOTE_APP_DIR/docs' '$REMOTE_APP_DIR/rust' && \
     tar -xzf '/tmp/$(basename "$ARCHIVE")' -C '$REMOTE_APP_DIR' && \
     cd '$REMOTE_APP_DIR/rust' && cargo build --locked --release --manifest-path cribbage-api/Cargo.toml && \
@@ -86,6 +87,12 @@ Environment=HOST=${REMOTE_BIND_HOST}
 Environment=PORT=${REMOTE_PORT_APP}
 Environment=CRIBBAGE_MODEL_ROOT=${REMOTE_APP_DIR}
 Environment=CRIBBAGE_DATA_DIR=${REMOTE_DATA_DIR}
+Environment=CRIBBAGE_REQUIRE_AUTH=true
+Environment=CRIBBAGE_PUBLIC_ORIGIN=https://${GAME_DOMAIN}
+Environment=CRIBBAGE_MAIL_FROM=hello@strongcribbage.com
+Environment=CRIBBAGE_MAIL_FROM_NAME=Strong Cribbage
+Environment=CRIBBAGE_MAIL_REPLY_TO=founder@evenvision.com
+EnvironmentFile=-/etc/cribbage/cribbage.env
 ExecStart=${REMOTE_APP_DIR}/rust/target/release/cribbage-api
 Restart=always
 RestartSec=3

@@ -100,6 +100,12 @@ Environment=HOST=127.0.0.1
 Environment=PORT=8787
 Environment=CRIBBAGE_MODEL_ROOT=/opt/cribbage
 Environment=CRIBBAGE_DATA_DIR=/var/lib/cribbage
+Environment=CRIBBAGE_REQUIRE_AUTH=true
+Environment=CRIBBAGE_PUBLIC_ORIGIN=https://cribbage.strongcribbage.com
+Environment=CRIBBAGE_MAIL_FROM=hello@strongcribbage.com
+Environment=CRIBBAGE_MAIL_FROM_NAME=Strong Cribbage
+Environment=CRIBBAGE_MAIL_REPLY_TO=founder@evenvision.com
+EnvironmentFile=-/etc/cribbage/cribbage.env
 ExecStart=/opt/cribbage/rust/target/release/cribbage-api
 Restart=always
 RestartSec=3
@@ -132,6 +138,24 @@ SystemCallArchitectures=native
 [Install]
 WantedBy=multi-user.target
 ```
+
+Create `/etc/cribbage/cribbage.env` before starting the service. Keep it owned
+by root and outside the deployment archive:
+
+```dotenv
+SENDGRID_API_KEY=SG_REPLACE_ME
+CRIBBAGE_AUTH_PEPPER=REPLACE_WITH_AT_LEAST_32_RANDOM_BYTES
+CRIBBAGE_AUTH_ADMIN_KEY=REPLACE_WITH_AT_LEAST_32_RANDOM_BYTES
+```
+
+```bash
+sudo chown root:root /etc/cribbage/cribbage.env
+sudo chmod 600 /etc/cribbage/cribbage.env
+```
+
+The API refuses to start in required-authentication mode without the SendGrid
+key and authentication pepper. The admin key protects invitation issuance and
+is never sent to the browser.
 
 Then start it:
 

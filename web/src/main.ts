@@ -318,6 +318,24 @@ function setAiThinking(active: boolean): void {
 
 const els = {
   app: document.querySelector(".app") as HTMLElement,
+  authPage: document.querySelector("#auth-page") as HTMLElement,
+  authTitle: document.querySelector("#auth-title") as HTMLElement,
+  authIntro: document.querySelector("#auth-intro") as HTMLElement,
+  authLoginForm: document.querySelector("#auth-login-form") as HTMLFormElement,
+  authOtpForm: document.querySelector("#auth-otp-form") as HTMLFormElement,
+  authPasswordForm: document.querySelector("#auth-password-form") as HTMLFormElement,
+  authEmail: document.querySelector("#auth-email") as HTMLInputElement,
+  authPassword: document.querySelector("#auth-password") as HTMLInputElement,
+  authOtp: document.querySelector("#auth-otp") as HTMLInputElement,
+  authNewPassword: document.querySelector("#auth-new-password") as HTMLInputElement,
+  authCodeRequest: document.querySelector("#auth-code-request") as HTMLButtonElement,
+  authForgotPassword: document.querySelector("#auth-forgot-password") as HTMLButtonElement,
+  authOtpBack: document.querySelector("#auth-otp-back") as HTMLButtonElement,
+  authPasswordAction: document.querySelector("#auth-password-action") as HTMLButtonElement,
+  authStatus: document.querySelector("#auth-status") as HTMLElement,
+  authAccountRow: document.querySelector("#auth-account-row") as HTMLElement,
+  authAccountName: document.querySelector("#auth-account-name") as HTMLElement,
+  authLogout: document.querySelector("#auth-logout") as HTMLButtonElement,
   splashPage: document.querySelector("#splash-page") as HTMLElement,
   splashNewGame: document.querySelector("#splash-new-game") as HTMLButtonElement,
   splashResumeGame: document.querySelector("#splash-resume-game") as HTMLButtonElement,
@@ -528,6 +546,7 @@ const REMOTE_AI_BASE = resolveRemoteAiBase(window.location.search, Capacitor.isN
 const REMOTE_AI_EXPLICIT = URL_PARAMS.has("api");
 const IS_VITE_DEV = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV);
 const LOCAL_NETWORK_MODE = isLocalNetworkHostname(window.location.hostname);
+const AUTHENTICATION_ENABLED = !LOCAL_NETWORK_MODE || URL_PARAMS.get("auth") === "1" || REMOTE_AI_EXPLICIT;
 const SIMPLE_NETWORK_LOCAL_AI_MODE = SIMPLE_NETWORK_MODE &&
   LOCAL_NETWORK_MODE &&
   (REMOTE_AI_DISABLED || (IS_VITE_DEV && !REMOTE_AI_EXPLICIT));
@@ -535,6 +554,25 @@ const SERVER_UPLOAD_KEY = "strong-cribbage.serverUploadedGames.v1";
 const ADMIN_HASH = "#strong-admin-13";
 
 let playerFirstName = (safeLocalStorageGet(PLAYER_FIRST_NAME_KEY) || "").trim();
+
+interface AuthUser {
+  username: string;
+  displayName: string;
+  email: string;
+}
+
+interface AuthSessionResponse {
+  authenticated: boolean;
+  user?: AuthUser;
+}
+
+interface AuthMessageResponse {
+  ok: boolean;
+  message?: string;
+}
+
+let authenticatedUser: AuthUser | null = null;
+let pendingAuthEmail = "";
 
 els.parGuidesToggle.checked = state.parGuides;
 
@@ -918,6 +956,7 @@ async function serverJson<T>(path: string, body: Record<string, unknown>): Promi
     const response = await fetch(`${REMOTE_AI_BASE}${path}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
+      credentials: "include",
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -949,6 +988,7 @@ async function serverGetJson<T>(path: string): Promise<T> {
     const response = await fetch(`${REMOTE_AI_BASE}${path}`, {
       method: "GET",
       headers: { "accept": "application/json" },
+      credentials: "include",
       signal: controller.signal,
     });
     const contentType = response.headers.get("content-type") || "";
@@ -962,6 +1002,139 @@ async function serverGetJson<T>(path: string): Promise<T> {
   } finally {
     window.clearTimeout(timeout);
   }
+}
+
+async function authJson<T>(path: string, body?: Record<string, unknown>): Promise<T> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await fetch(`${REMOTE_AI_BASE}${path}`, {
+      method: body ? "POST" : "GET",
+      headers: body
+        ? { "accept": "application/json", "content-type": "application/json" }
+        : { "accept": "application/json" },
+      credentials: "include",
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => ({})) as { error?: string };
+    if (!response.ok) {
+      throw new Error(payload.error || "Account service is temporarily unavailable.");
+    }
+    return payload as T;
+  } catch (error) {
+    if (error instanceof Error && error.name !== "AbortError") throw error;
+    throw new Error("Account service is temporarily unavailable.");
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+type AuthView = "login" | "otp" | "reset" | "invite";
+
+function showAuthView(view: AuthView, message = "", error = false): void {
+  document.body.dataset.auth = "signed-out";
+  els.authPage.hidden = false;
+  els.splashPage.hidden = true;
+  els.authLoginForm.hidden = view !== "login";
+  els.authOtpForm.hidden = view !== "otp";
+  els.authPasswordForm.hidden = view !== "reset" && view !== "invite";
+  els.authStatus.textContent = message;
+  els.authStatus.dataset.error = error ? "true" : "false";
+  if (view === "reset") {
+    els.authTitle.textContent = "Choose a new password.";
+    els.authIntro.textContent = "Secure your Strong Cribbage account with a memorable passphrase.";
+    els.authPasswordAction.textContent = "Save new password";
+  } else if (view === "invite") {
+    els.authTitle.textContent = "Welcome to the table.";
+    els.authIntro.textContent = "Finish setting up your Strong Cribbage account.";
+    els.authPasswordAction.textContent = "Set up account";
+  } else if (view === "otp") {
+    els.authTitle.textContent = "Check your email.";
+    els.authIntro.textContent = `Enter the six-digit code sent to ${pendingAuthEmail}.`;
+  } else {
+    els.authTitle.textContent = "Your seat is waiting.";
+    els.authIntro.textContent = "Sign in to continue your games and keep your results with your account.";
+  }
+  markAppReady();
+}
+
+function setAuthBusy(form: HTMLFormElement, busy: boolean): void {
+  for (const control of form.querySelectorAll("button, input")) {
+    (control as HTMLButtonElement | HTMLInputElement).disabled = busy;
+  }
+}
+
+function authEmail(): string | null {
+  const email = els.authEmail.value.trim();
+  if (!email || !els.authEmail.checkValidity()) {
+    els.authEmail.reportValidity();
+    return null;
+  }
+  pendingAuthEmail = email;
+  return email;
+}
+
+function finishAuthentication(user: AuthUser): void {
+  const previousPlayer = playerFirstName;
+  authenticatedUser = user;
+  playerFirstName = user.displayName;
+  if (previousPlayer && previousPlayer !== playerFirstName) {
+    currentSnapshot = null;
+    state.game = null;
+    gameStateGeneration += 1;
+    safeLocalStorageRemove(SAVE_KEY);
+  }
+  safeLocalStorageSet(PLAYER_FIRST_NAME_KEY, playerFirstName);
+  document.body.dataset.auth = "signed-in";
+  els.authPage.hidden = true;
+  els.authAccountRow.hidden = false;
+  els.authAccountName.textContent = user.displayName;
+  const cleanUrl = new URL(window.location.href);
+  cleanUrl.searchParams.delete("reset");
+  cleanUrl.searchParams.delete("invite");
+  window.history.replaceState({}, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+}
+
+async function initializeAuthentication(): Promise<boolean> {
+  if (!AUTHENTICATION_ENABLED) {
+    document.body.dataset.auth = "disabled";
+    els.authAccountRow.hidden = true;
+    return true;
+  }
+  const resetToken = URL_PARAMS.get("reset");
+  const inviteToken = URL_PARAMS.get("invite");
+  if (resetToken) {
+    showAuthView("reset");
+    window.setTimeout(() => els.authNewPassword.focus(), 0);
+    return false;
+  }
+  if (inviteToken) {
+    showAuthView("invite");
+    window.setTimeout(() => els.authNewPassword.focus(), 0);
+    return false;
+  }
+  try {
+    const session = await authJson<AuthSessionResponse>("/api/auth/session");
+    if (session.authenticated && session.user) {
+      finishAuthentication(session.user);
+      return true;
+    }
+    showAuthView("login");
+    window.setTimeout(() => els.authEmail.focus(), 0);
+    return false;
+  } catch (error) {
+    showAuthView("login", error instanceof Error ? error.message : "Account service is temporarily unavailable.", true);
+    return false;
+  }
+}
+
+async function completeAuthenticationAndStart(response: AuthSessionResponse): Promise<void> {
+  if (!response.authenticated || !response.user) {
+    throw new Error("The account response was incomplete.");
+  }
+  finishAuthentication(response.user);
+  await initializeGameState();
 }
 
 function uploadedGameIds(): Set<string> {
@@ -5243,6 +5416,115 @@ async function resumeGameFromSplash(): Promise<void> {
   }
 }
 
+els.authLoginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const email = authEmail();
+  if (!email || !els.authLoginForm.reportValidity()) return;
+  setAuthBusy(els.authLoginForm, true);
+  showAuthView("login", "Signing in…");
+  try {
+    const response = await authJson<AuthSessionResponse>("/api/auth/login", {
+      email,
+      password: els.authPassword.value,
+    });
+    await completeAuthenticationAndStart(response);
+  } catch (error) {
+    showAuthView("login", error instanceof Error ? error.message : "Sign-in failed.", true);
+  } finally {
+    setAuthBusy(els.authLoginForm, false);
+  }
+});
+
+els.authCodeRequest.addEventListener("click", async () => {
+  const email = authEmail();
+  if (!email) return;
+  setAuthBusy(els.authLoginForm, true);
+  showAuthView("login", "Sending a secure code…");
+  try {
+    const response = await authJson<AuthMessageResponse>("/api/auth/otp/request", { email });
+    showAuthView("otp", response.message || "If that email belongs to an account, a sign-in code is on its way.");
+    window.setTimeout(() => els.authOtp.focus(), 0);
+  } catch (error) {
+    showAuthView("login", error instanceof Error ? error.message : "The code could not be requested.", true);
+  } finally {
+    setAuthBusy(els.authLoginForm, false);
+  }
+});
+
+els.authForgotPassword.addEventListener("click", async () => {
+  const email = authEmail();
+  if (!email) return;
+  setAuthBusy(els.authLoginForm, true);
+  showAuthView("login", "Requesting a private reset link…");
+  try {
+    const response = await authJson<AuthMessageResponse>("/api/auth/password/request", { email });
+    showAuthView("login", response.message || "If that email belongs to an account, a reset link is on its way.");
+  } catch (error) {
+    showAuthView("login", error instanceof Error ? error.message : "The reset link could not be requested.", true);
+  } finally {
+    setAuthBusy(els.authLoginForm, false);
+  }
+});
+
+els.authOtpForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!els.authOtpForm.reportValidity()) return;
+  setAuthBusy(els.authOtpForm, true);
+  showAuthView("otp", "Verifying code…");
+  try {
+    const response = await authJson<AuthSessionResponse>("/api/auth/otp/verify", {
+      email: pendingAuthEmail,
+      code: els.authOtp.value.trim(),
+    });
+    await completeAuthenticationAndStart(response);
+  } catch (error) {
+    showAuthView("otp", error instanceof Error ? error.message : "The code could not be verified.", true);
+  } finally {
+    setAuthBusy(els.authOtpForm, false);
+  }
+});
+
+els.authOtpBack.addEventListener("click", () => {
+  els.authOtp.value = "";
+  showAuthView("login");
+});
+
+els.authPasswordForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!els.authPasswordForm.reportValidity()) return;
+  const inviteToken = URL_PARAMS.get("invite");
+  const resetToken = URL_PARAMS.get("reset");
+  const token = inviteToken || resetToken;
+  const view: AuthView = inviteToken ? "invite" : "reset";
+  if (!token) {
+    showAuthView(view, "That private link is incomplete.", true);
+    return;
+  }
+  setAuthBusy(els.authPasswordForm, true);
+  showAuthView(view, "Securing your account…");
+  try {
+    const response = await authJson<AuthSessionResponse>(
+      inviteToken ? "/api/auth/invite/accept" : "/api/auth/password/reset",
+      { token, password: els.authNewPassword.value },
+    );
+    await completeAuthenticationAndStart(response);
+  } catch (error) {
+    showAuthView(view, error instanceof Error ? error.message : "The password could not be saved.", true);
+  } finally {
+    setAuthBusy(els.authPasswordForm, false);
+  }
+});
+
+els.authLogout.addEventListener("click", async () => {
+  els.authLogout.disabled = true;
+  try {
+    await authJson<AuthMessageResponse>("/api/auth/logout", {});
+  } finally {
+    safeLocalStorageRemove(PLAYER_FIRST_NAME_KEY);
+    window.location.reload();
+  }
+});
+
 els.splashFirstName.addEventListener("input", () => {
   els.splashFirstName.setCustomValidity("");
 });
@@ -5373,4 +5655,10 @@ async function initializeGameState(): Promise<void> {
   }
 }
 
-void initializeGameState();
+async function initializeApplication(): Promise<void> {
+  if (await initializeAuthentication()) {
+    await initializeGameState();
+  }
+}
+
+void initializeApplication();

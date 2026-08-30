@@ -24,6 +24,48 @@
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
+    <section id="auth-page" class="auth-page" aria-labelledby="auth-title" hidden>
+      <div class="auth-shell">
+        <img class="auth-logo" src="/strong-cribbage-dark-lockup.svg" alt="Strong Cribbage">
+        <div class="auth-peg-track" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+        <div class="auth-heading">
+          <p class="auth-eyebrow">Invitation only · AI 13.0</p>
+          <h1 id="auth-title">Your seat is waiting.</h1>
+          <p id="auth-intro">Sign in to continue your games and keep your results with your account.</p>
+        </div>
+        <form id="auth-login-form" class="auth-form">
+          <label>
+            <span>Email</span>
+            <input id="auth-email" type="email" inputmode="email" autocomplete="email" required placeholder="you@example.com">
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="auth-password" type="password" autocomplete="current-password" required>
+          </label>
+          <button id="auth-password-submit" class="auth-primary" type="submit">Sign in</button>
+          <button id="auth-code-request" class="auth-secondary" type="button">Email me a sign-in code</button>
+          <button id="auth-forgot-password" class="auth-link" type="button">Forgot password?</button>
+        </form>
+        <form id="auth-otp-form" class="auth-form" hidden>
+          <label>
+            <span>Six-digit code</span>
+            <input id="auth-otp" class="auth-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="000000">
+          </label>
+          <button class="auth-primary" type="submit">Verify and sign in</button>
+          <button id="auth-otp-back" class="auth-link" type="button">Back to password</button>
+        </form>
+        <form id="auth-password-form" class="auth-form" hidden>
+          <label>
+            <span>New password</span>
+            <input id="auth-new-password" type="password" autocomplete="new-password" minlength="15" maxlength="128" required>
+          </label>
+          <p class="auth-field-note">Use a memorable passphrase of at least 15 characters.</p>
+          <button id="auth-password-action" class="auth-primary" type="submit">Save password</button>
+        </form>
+        <p id="auth-status" class="auth-status" role="status" aria-live="polite"></p>
+        <p class="auth-help">Need help with your account? <a href="mailto:founder@evenvision.com">Contact Strong Cribbage</a>.</p>
+      </div>
+    </section>
     <section id="splash-page" class="splash-page" aria-label="Strong Cribbage" hidden>
       <div class="splash-shell">
         <img class="splash-logo" src="/strong-cribbage-dark-lockup.svg" alt="">
@@ -99,6 +141,10 @@
           </details>
           <button id="new-game" type="button">New game</button>
           <button id="my-stats-open" type="button">My Stats</button>
+          <div id="auth-account-row" class="account-menu-row" hidden>
+            <span id="auth-account-name"></span>
+            <button id="auth-logout" type="button">Sign out</button>
+          </div>
           <div class="app-version">Version <span id="app-version">-</span></div>
         </div>
       </section>

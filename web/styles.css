@@ -154,6 +154,223 @@ body[data-font-size="x-large"] {
   color: var(--splash-cream);
 }
 
+.auth-page {
+  --auth-green: #0b5b43;
+  --auth-deep-green: #073c30;
+  --auth-navy: #071f38;
+  --auth-ivory: #fbf8f0;
+  --auth-gold: #e8c575;
+  min-height: 100vh;
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: max(20px, env(safe-area-inset-top)) 18px max(20px, env(safe-area-inset-bottom));
+  background:
+    linear-gradient(rgba(7, 60, 48, 0.25) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(7, 60, 48, 0.25) 1px, transparent 1px),
+    #0b5b43;
+  background-size: 36px 36px;
+  color: #17231f;
+}
+
+.auth-page[hidden] {
+  display: none;
+}
+
+.auth-shell {
+  display: grid;
+  gap: 20px;
+  width: min(100%, 500px);
+  padding: clamp(24px, 6vw, 40px);
+  border: 1px solid rgba(232, 197, 117, 0.96);
+  border-radius: 24px;
+  background: var(--auth-ivory);
+  box-shadow: 0 24px 54px rgba(2, 28, 21, 0.4);
+}
+
+.auth-logo {
+  width: min(100%, 330px);
+  height: auto;
+  justify-self: center;
+}
+
+.auth-peg-track {
+  display: grid;
+  grid-template-columns: 1fr repeat(4, 10px) 1fr;
+  align-items: center;
+  gap: 9px;
+  color: #c59b3d;
+}
+
+.auth-peg-track::before,
+.auth-peg-track::after {
+  content: "";
+  height: 1px;
+  background: #d7cba9;
+}
+
+.auth-peg-track i {
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+}
+
+.auth-heading {
+  display: grid;
+  gap: 7px;
+}
+
+.auth-heading h1 {
+  margin: 0;
+  overflow: visible;
+  color: var(--auth-deep-green);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(30px, 8vw, 42px);
+  line-height: 1.05;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.auth-heading p {
+  margin: 0;
+  color: #52615b;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.auth-heading .auth-eyebrow {
+  color: #8b6724;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.auth-form {
+  display: grid;
+  gap: 13px;
+}
+
+.auth-form[hidden] {
+  display: none;
+}
+
+.auth-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--auth-navy);
+  font-size: 14px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.auth-form input {
+  width: 100%;
+  min-height: 50px;
+  padding: 10px 13px;
+  border: 1px solid #a9b3ae;
+  border-radius: 10px;
+  background: #fffefb;
+  color: #17231f;
+  font: 17px/1.2 Arial, Helvetica, sans-serif;
+}
+
+.auth-form input:focus {
+  outline: 3px solid rgba(29, 127, 209, 0.2);
+  border-color: #1d7fd1;
+}
+
+.auth-form .auth-code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 25px;
+  font-weight: 750;
+  letter-spacing: 0.28em;
+  text-align: center;
+}
+
+.auth-primary,
+.auth-secondary {
+  min-height: 52px;
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: 850;
+}
+
+.auth-primary {
+  border: 2px solid #d7b65e;
+  background: var(--auth-green);
+  color: #fff;
+}
+
+.auth-secondary {
+  border: 1px solid #87a69a;
+  background: transparent;
+  color: var(--auth-deep-green);
+}
+
+.auth-link {
+  justify-self: center;
+  padding: 5px;
+  border: 0;
+  background: transparent;
+  color: #0a654b;
+  font-size: 14px;
+  font-weight: 750;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.auth-field-note,
+.auth-status,
+.auth-help {
+  margin: 0;
+  color: #52615b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.auth-status:not(:empty) {
+  padding: 11px 13px;
+  border-left: 4px solid #c59b3d;
+  background: #f3eddf;
+}
+
+.auth-status[data-error="true"] {
+  border-left-color: #a83a35;
+  color: #7c2824;
+}
+
+.auth-help {
+  padding-top: 2px;
+  text-align: center;
+}
+
+.auth-help a {
+  color: #0a654b;
+}
+
+body[data-auth="signed-out"] .app,
+body[data-auth="signed-out"] .splash-page {
+  display: none !important;
+}
+
+.account-menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 9px;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.account-menu-row span {
+  overflow: hidden;
+  color: #cfe8de;
+  font-size: 0.8em;
+  text-overflow: ellipsis;
+}
+
 .splash-page[hidden] {
   display: none;
 }

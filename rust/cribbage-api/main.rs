@@ -22,6 +22,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+mod auth;
+mod email;
+
 const HUMAN: Side = Side::Left;
 const AI: Side = Side::Right;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -224,6 +227,10 @@ fn main() {
             error
         )
     });
+    auth::initialize(&data_dir)
+        .unwrap_or_else(|error| panic!("could not initialize authentication storage: {}", error));
+    auth::validate_configuration()
+        .unwrap_or_else(|error| panic!("invalid authentication configuration: {}", error));
     let uploads = load_uploads(&data_dir).unwrap_or_else(|error| {
         eprintln!("Rust API leaderboard history was not loaded: {}", error);
         HashMap::new()
@@ -259,16 +266,31 @@ fn main() {
 
 fn handle_connection(mut stream: TcpStream, server: &Server) -> Result<(), String> {
     let request = read_request(&mut stream)?;
+    if let Some(response) = auth::handle(server, &request) {
+        return write_response(&mut stream, response);
+    }
+    let authenticated_user = auth::authenticated_user(server, &request)
+        .map_err(|error| format!("authenticate request: {}", error))?;
+    if auth::auth_required() && auth::protects(&request.path) && authenticated_user.is_none() {
+        return write_response(
+            &mut stream,
+            Response::json(401, "{\"error\":\"Sign in to continue.\"}".to_string()),
+        );
+    }
+    let request_body = authenticated_user
+        .as_ref()
+        .map(|user| auth::body_for_user(&request.body, user))
+        .unwrap_or_else(|| request.body.clone());
     let response = match (request.method.as_str(), request.path.as_str()) {
         ("OPTIONS", _) => Response::empty(204),
         ("GET", "/health") => Response::json(200, health_json()),
         ("GET", "/api/model") => Response::json(200, model_json()),
         ("GET", "/api/leaderboard") => Response::json(200, leaderboard_json(server)?),
-        ("POST", "/api/game/action") => game_action(server, &request.body),
-        ("POST", "/api/game/session/save") => save_session(server, &request.body),
-        ("POST", "/api/game/session/load") => load_session(server, &request.body),
+        ("POST", "/api/game/action") => game_action(server, &request_body),
+        ("POST", "/api/game/session/save") => save_session(server, &request_body),
+        ("POST", "/api/game/session/load") => load_session(server, &request_body),
         ("POST", "/api/game/session/complete") => Response::json(200, "{\"ok\":true}".to_string()),
-        ("POST", "/api/games") => upload_game(server, &request.body),
+        ("POST", "/api/games") => upload_game(server, &request_body),
         ("POST", "/api/ai/discard") | ("POST", "/api/ai/peg") => Response::json(
             410,
             "{\"error\":\"Direct decision endpoints were retired; use /api/game/action.\"}"
@@ -282,6 +304,7 @@ fn handle_connection(mut stream: TcpStream, server: &Server) -> Result<(), Strin
 struct Request {
     method: String,
     path: String,
+    headers: HashMap<String, String>,
     body: String,
 }
 
@@ -303,8 +326,9 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
             return Err("request headers are too large".to_string());
         }
     }
-    let headers = std::str::from_utf8(&bytes[..header_end]).map_err(|error| error.to_string())?;
-    let request_line = headers
+    let header_text =
+        std::str::from_utf8(&bytes[..header_end]).map_err(|error| error.to_string())?;
+    let request_line = header_text
         .lines()
         .next()
         .ok_or_else(|| "missing request line".to_string())?;
@@ -317,7 +341,15 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
         .next()
         .ok_or_else(|| "missing request path".to_string())?;
     let path = raw_path.split('?').next().unwrap_or(raw_path).to_string();
-    let content_length = headers
+    let headers = header_text
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            line.split_once(':')
+                .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.trim().to_string()))
+        })
+        .collect::<HashMap<_, _>>();
+    let content_length = header_text
         .lines()
         .find_map(|line| {
             line.split_once(':').and_then(|(name, value)| {
@@ -339,7 +371,12 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
     }
     let body = String::from_utf8(bytes[header_end..header_end + content_length].to_vec())
         .map_err(|error| error.to_string())?;
-    Ok(Request { method, path, body })
+    Ok(Request {
+        method,
+        path,
+        headers,
+        body,
+    })
 }
 
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -351,38 +388,58 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 struct Response {
     status: u16,
     body: String,
+    headers: Vec<(String, String)>,
 }
 
 impl Response {
     fn json(status: u16, body: String) -> Response {
-        Response { status, body }
+        Response {
+            status,
+            body,
+            headers: Vec::new(),
+        }
     }
 
     fn empty(status: u16) -> Response {
         Response {
             status,
             body: String::new(),
+            headers: Vec::new(),
         }
+    }
+
+    fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Response {
+        self.headers.push((name.into(), value.into()));
+        self
     }
 }
 
 fn write_response(stream: &mut TcpStream, response: Response) -> Result<(), String> {
     let reason = match response.status {
         200 => "OK",
+        201 => "Created",
         204 => "No Content",
         400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        409 => "Conflict",
         410 => "Gone",
+        429 => "Too Many Requests",
         500 => "Internal Server Error",
         _ => "Error",
     };
-    let header = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: content-type\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nConnection: close\r\n\r\n",
+    let mut header = format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: content-type, x-cribbage-admin-key\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nConnection: close\r\n",
         response.status,
         reason,
         response.body.len(),
     );
+    for (name, value) in &response.headers {
+        write!(&mut header, "{}: {}\r\n", name, value).map_err(|error| error.to_string())?;
+    }
+    header.push_str("\r\n");
     stream
         .write_all(header.as_bytes())
         .map_err(|error| error.to_string())?;
