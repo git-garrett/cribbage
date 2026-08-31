@@ -5,13 +5,15 @@ import { describe, expect, it } from "vitest";
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const source = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 
-describe("opponent selection lock", () => {
+describe("curated opponent selection", () => {
   it("keeps the AI selector unavailable in both browser and mobile markup", () => {
     expect(html).toMatch(/class="opponent-control" hidden[\s\S]*<select id="opponent" disabled>/);
   });
 
-  it("pins new games to the configured client default instead of submitted UI state", () => {
-    expect(source).toMatch(/function selectedMenuOpponent\(\): Opponent \{\s*return SIMPLE_NETWORK_MODE \? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT;/);
+  it("maps only the available pathway tiers to server opponents", () => {
+    expect(source).toMatch(/const PATHWAY_OPPONENTS = \{\s*easy: "myrmidon-5",\s*tough: "schell_table-peg_table-9\.1",\s*master: DEFAULT_OPPONENT/);
+    expect(source).toMatch(/function selectedMenuOpponent\(\): Opponent \{\s*return SIMPLE_NETWORK_MODE \? selectedPathwayOpponent \?\? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT;/);
+    expect(source).toMatch(/pathwayDestinationButtons[\s\S]*pathwayOpponent\(button\.dataset\.pathwayDestination\)[\s\S]*launchPathwayOpponent\(opponent\)/);
     expect(source).toMatch(/if \(path === "\/api\/new"\) \{\s*return serverGameAction\("new", \{ opponent: selectedMenuOpponent\(\) \}\);/);
     expect(source).not.toMatch(/body\?\.opponent as Opponent/);
   });

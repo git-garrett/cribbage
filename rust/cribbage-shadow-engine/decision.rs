@@ -195,8 +195,20 @@ fn decision_input(
         peg_lead,
         model16_policy_mode: Model16PolicyMode::Argmax,
         model16_policy_sample: 0,
-        decision_seed: 0,
+        decision_seed: server_decision_seed(game, side, kind),
     }
+}
+
+fn server_decision_seed(game: &CribbageGame, side: Side, kind: DecisionKind) -> u64 {
+    let side_tag = match side {
+        Side::Left => 0x4c45_4654_u64,
+        Side::Right => 0x5249_4748_u64,
+    };
+    let kind_tag = match kind {
+        DecisionKind::Discard => 0x4449_5343_u64,
+        DecisionKind::Peg => 0x5045_4721_u64,
+    };
+    (u64::from(game.rng_state) << 32) ^ u64::from(game.hand_number) ^ side_tag ^ kind_tag
 }
 
 fn role_for_side(game: &CribbageGame, side: Side) -> Role {
@@ -221,6 +233,30 @@ fn mapped_player(player: Option<Side>, perspective: Side) -> Option<PlayerKey> {
 mod tests {
     use super::*;
     use crate::model_id::ModelId;
+
+    #[test]
+    fn server_stochastic_seed_is_repeatable_and_deal_local() {
+        let first_game = CribbageGame::new_with_seed(0x1234_5678, Side::Left);
+        let second_game = CribbageGame::new_with_seed(0x8765_4321, Side::Left);
+        let first = server_decision_seed(&first_game, Side::Right, DecisionKind::Discard);
+
+        assert_eq!(
+            first,
+            server_decision_seed(&first_game, Side::Right, DecisionKind::Discard)
+        );
+        assert_ne!(
+            first,
+            server_decision_seed(&second_game, Side::Right, DecisionKind::Discard)
+        );
+        assert_ne!(
+            first,
+            server_decision_seed(&first_game, Side::Left, DecisionKind::Discard)
+        );
+        assert_ne!(
+            first,
+            server_decision_seed(&first_game, Side::Right, DecisionKind::Peg)
+        );
+    }
 
     #[test]
     fn model13x_discard_decisions_defer_the_executable_lead() {

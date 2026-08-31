@@ -17,7 +17,7 @@ use cribbage_shadow_engine::decision::{
     review_peg_for_side, DecisionReview as EngineDecisionReview, PegDecision,
 };
 use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
-use cribbage_shadow_engine::model_id::{ModelId, MODEL_13_0};
+use cribbage_shadow_engine::model_id::{ModelId, MODEL_13_0, MODEL_9_1, MYRMIDON_5};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -460,8 +460,8 @@ fn health_json() -> String {
 
 fn model_json() -> String {
     format!(
-        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\"]}}",
-        APP_VERSION, MODEL_13_0
+        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"{}\",\"{}\",\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\"]}}",
+        APP_VERSION, MODEL_13_0, MYRMIDON_5, MODEL_9_1
     )
 }
 
@@ -2988,11 +2988,48 @@ mod tests {
     use super::*;
 
     #[test]
-    fn model_metadata_includes_experimental_models() {
+    fn model_metadata_includes_pathway_and_experimental_models() {
+        assert!(model_json().contains(MYRMIDON_5));
+        assert!(model_json().contains(MODEL_9_1));
         assert!(model_json().contains("schell_table-peg_table-13.1"));
         assert!(model_json().contains("schell_table-peg_table-16.0"));
         assert!(model_json().contains("schell_table-peg_table-16.1"));
         assert!(model_json().contains("schell_table-peg_table-16.3"));
+    }
+
+    #[test]
+    fn pathway_models_are_preserved_in_new_server_sessions() {
+        for model in [ModelId::Myrmidon5, ModelId::Schell91, ModelId::Schell13] {
+            let session = new_session_from_seed(model, Some("Player".to_string()), 0x1234_5678, 1);
+            assert_eq!(session.model, model);
+            assert!(
+                snapshot_json(&session).contains(&format!("\"opponent\":\"{}\"", model.as_str()))
+            );
+        }
+    }
+
+    #[test]
+    fn pathway_models_complete_server_authoritative_ai_discards() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        for model in [ModelId::Myrmidon5, ModelId::Schell91, ModelId::Schell13] {
+            let mut session = new_session_from_seed(model, None, 0x1234_5678, 1);
+            session.waiting_for_deal_cut = false;
+            let human_discards = [
+                session.game.player(HUMAN).hand[0].id,
+                session.game.player(HUMAN).hand[1].id,
+            ];
+            session.game.discard(HUMAN, human_discards).unwrap();
+            session.waiting_for_ai_discard = true;
+
+            apply_action(&mut session, "finish-discard", "{}", root.to_str().unwrap()).unwrap();
+
+            assert!(!session.waiting_for_ai_discard);
+            assert_eq!(session.game.player(AI).hand.len(), 4);
+            assert_eq!(session.game.crib.len(), 4);
+        }
     }
 
     #[test]

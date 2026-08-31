@@ -86,16 +86,7 @@
               <p>Choose the kind of game you want to play.</p>
             </header>
             <div class="pathway-choice-grid pathway-choice-grid-play" tabindex="0" role="group" aria-label="Play options">
-              <button class="pathway-choice pathway-choice-human" type="button" data-pathway-destination="human">
-                <span>Human match</span>
-                <strong>Find a Human Opponent</strong>
-              </button>
-              <button class="pathway-choice pathway-choice-dynamic" type="button" data-pathway-destination="dynamic">
-                <span>Adaptive opponent</span>
-                <strong>Dynamic</strong>
-                <small>Adapts to your play and plays back at your skill.</small>
-              </button>
-              <button class="pathway-choice" type="button" data-pathway-destination="easy">
+              <button class="pathway-choice pathway-choice-featured" type="button" data-pathway-destination="easy">
                 <span>AI opponent</span>
                 <strong>Easy</strong>
                 <small>Good for Learners</small>
@@ -110,10 +101,22 @@
                 <strong>Master</strong>
                 <small>Challenges the Best Players</small>
               </button>
-              <button class="pathway-choice" type="button" data-pathway-destination="grandmaster">
+              <button class="pathway-choice pathway-choice-human" type="button" data-pathway-destination="human" disabled>
+                <span>Human match</span>
+                <strong>Find a Human Opponent</strong>
+                <em class="pathway-coming-soon">Coming soon</em>
+              </button>
+              <button class="pathway-choice pathway-choice-dynamic" type="button" data-pathway-destination="dynamic" disabled>
+                <span>Adaptive opponent</span>
+                <strong>Dynamic</strong>
+                <small>Adapts to your play and plays back at your skill.</small>
+                <em class="pathway-coming-soon">Coming soon</em>
+              </button>
+              <button class="pathway-choice" type="button" data-pathway-destination="grandmaster" disabled>
                 <span>AI opponent</span>
                 <strong>Grandmaster</strong>
                 <small>Better than Most Humans</small>
+                <em class="pathway-coming-soon">Coming soon</em>
               </button>
             </div>
           </section>
@@ -219,9 +222,9 @@
           <img src="/brand/strong-cribbage-lockup-light.svg" alt="">
         </picture>
         <div class="splash-copy">
-          <p class="splash-eyebrow">Strong Cribbage · AI 13.0</p>
+          <p id="splash-eyebrow" class="splash-eyebrow">Strong Cribbage · Master</p>
           <h1 class="visually-hidden">Strong Cribbage</h1>
-          <p>Play one-on-one against the current Strong Cribbage engine.</p>
+          <p id="splash-description">Play one-on-one against the Master opponent.</p>
         </div>
         <label id="splash-name-row" class="splash-name-row">
           <span>First name</span>
@@ -265,6 +268,8 @@
               <option value="schell_table-peg_table-14.8">AI 14.8</option>
               <option value="schell_table-peg_table-14.3">AI 14.3</option>
               <option value="schell_table-peg_table-13.0" selected>AI 13.0</option>
+              <option value="schell_table-peg_table-9.1">AI 9.1</option>
+              <option value="myrmidon-5">Myrmidon 5</option>
             </select>
           </label>
           <div id="model-loading" class="menu-loading" role="status" aria-live="polite" hidden>

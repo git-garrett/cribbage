@@ -1,5 +1,6 @@
-//! Benchmark-only implementation of Richard Moulton and AJ Marasco's
-//! Myrmidon agent.
+//! Server-native implementation of Richard Moulton and AJ Marasco's Myrmidon
+//! agent, exposed as Strong Cribbage's Easy opponent and retained for paired
+//! benchmark comparisons.
 //!
 //! The decision contract follows the published `Myrmidon.py` behavior with
 //! five sampled starter cards.  It deliberately preserves the reference
@@ -37,8 +38,8 @@ impl SplitMix64 {
 
 /// Select two crib cards using Myrmidon's five-sample discard heuristic.
 ///
-/// The random seed is supplied by the benchmark runner and does not advance
-/// the deal RNG, preserving paired deals across model orientations.
+/// The random seed is supplied by the benchmark runner or derived from the
+/// server's immutable decision state. It never advances the deal RNG.
 pub fn recommend_discard(hand: &[Card], role: Role, seed: u64) -> Result<[u8; 2], String> {
     if hand.len() != 6 {
         return Err(format!(

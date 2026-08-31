@@ -49,12 +49,18 @@ describe("local pathway navigation", () => {
     expect(css).not.toContain(".pathway-footer");
     expect(css).not.toContain(".pathway-rail i.active");
 
+    const easy = html.indexOf('data-pathway-destination="easy"');
+    const tough = html.indexOf('data-pathway-destination="tough"');
+    const master = html.indexOf('data-pathway-destination="master"');
     const human = html.indexOf('data-pathway-destination="human"');
     const dynamic = html.indexOf('data-pathway-destination="dynamic"');
-    const easy = html.indexOf('data-pathway-destination="easy"');
-    expect(human).toBeGreaterThan(-1);
+    const grandmaster = html.indexOf('data-pathway-destination="grandmaster"');
+    expect(easy).toBeGreaterThan(-1);
+    expect(tough).toBeGreaterThan(easy);
+    expect(master).toBeGreaterThan(tough);
+    expect(human).toBeGreaterThan(master);
     expect(dynamic).toBeGreaterThan(human);
-    expect(easy).toBeGreaterThan(dynamic);
+    expect(grandmaster).toBeGreaterThan(dynamic);
   });
 
   it("keeps the pathway entry local and connects Statistics to My Stats", () => {
@@ -86,6 +92,17 @@ describe("local pathway navigation", () => {
     expect(css).toMatch(/@media \(min-width: 600px\) and \(max-width: 849px\)[\s\S]*grid-auto-columns: min\(39vw, 300px\)/);
     expect(css).toMatch(/@media \(min-width: 850px\)[\s\S]*grid-auto-columns: clamp\(245px, 27%, 305px\)/);
     expect(source).toMatch(/pathwayView\.dataset\.pathwayView === view[\s\S]*\.pathway-choice-grid[\s\S]*scrollTo\(\{ left: 0 \}\)/);
+  });
+
+  it("leads with playable opponents and marks future modes as unavailable", () => {
+    for (const destination of ["human", "dynamic", "grandmaster"]) {
+      expect(html).toMatch(new RegExp(`data-pathway-destination="${destination}" disabled[\\s\\S]*?Coming soon`));
+    }
+    for (const destination of ["easy", "tough", "master"]) {
+      expect(html).not.toMatch(new RegExp(`data-pathway-destination="${destination}" disabled`));
+    }
+    expect(css).toMatch(/\.pathway-choice:disabled\s*{[\s\S]*background: color-mix[\s\S]*cursor: not-allowed/);
+    expect(css).toContain(".pathway-coming-soon");
   });
 
   it("uses a restrained staggered deal with an explicit reduced-motion fallback", () => {

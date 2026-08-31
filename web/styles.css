@@ -5749,13 +5749,13 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 
 @media (hover: hover) {
   .pathway-card:not(:disabled):hover,
-  .pathway-choice:hover {
+  .pathway-choice:not(:disabled):hover {
     border-color: var(--pathway-gold-deep);
     box-shadow: var(--entry-card-shadow-raised);
     transform: translateY(-2px);
   }
 
-  .pathway-choice:hover::after {
+  .pathway-choice:not(:disabled):hover::after {
     background: var(--pathway-gold);
     box-shadow: 0 0 0 6px var(--pathway-hole-halo);
   }
@@ -6020,7 +6020,7 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 }
 
 .pathway-card-featured,
-.pathway-choice-human {
+.pathway-choice-featured {
   z-index: 2;
   border-color: var(--pathway-featured-border);
   background:
@@ -6030,17 +6030,57 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 }
 
 .pathway-card-featured::before,
-.pathway-choice-human::before {
+.pathway-choice-featured::before {
   background: var(--pathway-gold);
 }
 
 .pathway-card-featured::after,
-.pathway-choice-human::after {
+.pathway-choice-featured::after {
   color: rgba(232, 197, 117, 0.35);
+}
+
+.pathway-choice-featured > span {
+  color: var(--pathway-gold);
+}
+
+.pathway-choice-featured small {
+  color: var(--entry-featured-muted);
 }
 
 .pathway-choice-dynamic {
   background: var(--entry-panel-alt);
+}
+
+.pathway-choice:disabled {
+  border-color: color-mix(in srgb, var(--entry-border) 76%, transparent);
+  background: color-mix(in srgb, var(--entry-panel-soft) 82%, var(--pathway-muted));
+  box-shadow: 0 -2px 0 color-mix(in srgb, var(--pathway-muted) 28%, transparent);
+  color: var(--pathway-muted);
+  cursor: not-allowed;
+}
+
+.pathway-choice:disabled::before {
+  background: color-mix(in srgb, var(--pathway-muted) 48%, transparent);
+}
+
+.pathway-choice:disabled::after,
+.pathway-choice:disabled > span,
+.pathway-choice:disabled small {
+  color: color-mix(in srgb, var(--pathway-muted) 72%, transparent);
+}
+
+.pathway-coming-soon {
+  width: fit-content;
+  margin-top: 6px;
+  padding: 4px 8px 3px;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: 999px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 850;
+  letter-spacing: 0.11em;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .pathway-card b {
@@ -6120,7 +6160,7 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 
 @media (hover: hover) {
   .pathway-card:not(:disabled):hover,
-  .pathway-choice:hover {
+  .pathway-choice:not(:disabled):hover {
     z-index: 5;
     border-color: var(--entry-accent);
     box-shadow: 0 18px 34px color-mix(in srgb, var(--entry-accent) 18%, transparent);
@@ -6128,7 +6168,7 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   }
 
   .pathway-card-featured:not(:disabled):hover,
-  .pathway-choice-human:hover {
+  .pathway-choice-featured:hover {
     background:
       radial-gradient(circle at 100% 0, rgba(232, 197, 117, 0.16), transparent 54%),
       color-mix(in srgb, var(--pathway-featured) 90%, var(--entry-link));

@@ -101,8 +101,9 @@ pub struct DecisionInput {
     /// A reproducible draw in 0..65,535 supplied by the game runner. It is
     /// independent of the deal RNG so policy experiments preserve paired deals.
     pub model16_policy_sample: u16,
-    /// Independent runner-supplied randomness for stochastic benchmark-only
-    /// opponents. It never advances or changes the deal RNG.
+    /// Decision-local randomness for stochastic opponents. The benchmark
+    /// runner supplies it directly; the server derives it from game state.
+    /// It never advances or changes the deal RNG.
     pub decision_seed: u64,
 }
 

@@ -32,6 +32,11 @@ import {
 import { shouldUploadCompletedGame } from "./upload-policy";
 
 const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-13.0";
+const PATHWAY_OPPONENTS = {
+  easy: "myrmidon-5",
+  tough: "schell_table-peg_table-9.1",
+  master: DEFAULT_OPPONENT,
+} as const satisfies Record<string, Opponent>;
 
 type BaselineScoreTotals = Pick<
   AnalyticsTotals,
@@ -332,6 +337,7 @@ const els = {
   pathwayViews: [...document.querySelectorAll<HTMLElement>("[data-pathway-view]")],
   pathwayTargetButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-target]")],
   pathwayBackButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-back]")],
+  pathwayDestinationButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-destination]")],
   pathwayStatistics: document.querySelector("#pathway-statistics") as HTMLButtonElement,
   authPage: document.querySelector("#auth-page") as HTMLElement,
   authTitle: document.querySelector("#auth-title") as HTMLElement,
@@ -352,6 +358,8 @@ const els = {
   authAccountName: document.querySelector("#auth-account-name") as HTMLElement,
   authLogout: document.querySelector("#auth-logout") as HTMLButtonElement,
   splashPage: document.querySelector("#splash-page") as HTMLElement,
+  splashEyebrow: document.querySelector("#splash-eyebrow") as HTMLElement,
+  splashDescription: document.querySelector("#splash-description") as HTMLElement,
   splashNewGame: document.querySelector("#splash-new-game") as HTMLButtonElement,
   splashResumeGame: document.querySelector("#splash-resume-game") as HTMLButtonElement,
   splashNameRow: document.querySelector("#splash-name-row") as HTMLElement,
@@ -535,6 +543,8 @@ const PHONE_GAME_DB_VERSION = 1;
 const NOTICE_MIN_MS = 600;
 const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-13.0";
 const SIMPLE_NETWORK_PUBLIC_OPPONENTS = new Set<string>([
+  "myrmidon-5",
+  "schell_table-peg_table-9.1",
   "schell_table-peg_table-13.0",
 ]);
 const SIMPLE_NETWORK_LOCAL_OPPONENTS = new Set<string>([
@@ -592,6 +602,7 @@ interface AuthMessageResponse {
 let authenticatedUser: AuthUser | null = null;
 let pendingAuthEmail = "";
 let pathwayStatsReturn = false;
+let selectedPathwayOpponent: Opponent | null = null;
 
 els.parGuidesToggle.checked = state.parGuides;
 
@@ -734,14 +745,26 @@ function simpleNetworkAllowedOpponents(): Set<string> {
 function isAllowedSimpleNetworkOpponent(opponent: string | undefined): boolean {
   return Boolean(opponent && simpleNetworkAllowedOpponents().has(opponent));
 }
+function pathwayOpponent(destination: string | undefined): Opponent | null {
+  if (!destination || !Object.prototype.hasOwnProperty.call(PATHWAY_OPPONENTS, destination)) return null;
+  return PATHWAY_OPPONENTS[destination as keyof typeof PATHWAY_OPPONENTS];
+}
+function isPathwayOpponent(opponent: string | undefined): opponent is Opponent {
+  return Boolean(
+    opponent && (Object.values(PATHWAY_OPPONENTS) as readonly Opponent[]).includes(opponent as Opponent),
+  );
+}
 function selectedMenuOpponent(): Opponent {
-  return SIMPLE_NETWORK_MODE ? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT;
+  return SIMPLE_NETWORK_MODE ? selectedPathwayOpponent ?? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT;
 }
 const savedGame = loadSavedGame();
 if (savedGame) {
   currentSnapshot = savedGame.snapshot;
   state.game = savedGame.state;
   gameStateGeneration = 1;
+  if (isPathwayOpponent(savedGame.snapshot.opponent)) {
+    selectedPathwayOpponent = savedGame.snapshot.opponent;
+  }
 }
 const simpleLoadedState = state.game;
 state.splashOpen = SIMPLE_NETWORK_MODE && !playerFirstName;
@@ -791,7 +814,8 @@ function applySimpleNetworkMode(): void {
     option.hidden = !allowed;
     option.disabled = !allowed;
   }
-  els.opponent.value = SIMPLE_NETWORK_OPPONENT;
+  els.opponent.value = selectedMenuOpponent();
+  syncPathwayOpponentPresentation(selectedMenuOpponent());
   els.opponent.disabled = true;
   els.opponent.closest("label")?.setAttribute("hidden", "");
   els.gameLogOpen.hidden = true;
@@ -1307,6 +1331,47 @@ function showPathwayView(view: PathwayView): void {
     }
   }
   els.pathwayPage.scrollTo({ top: 0, left: 0 });
+}
+
+function pathwayOpponentLabel(opponent: Opponent): "Easy" | "Tough" | "Master" {
+  if (opponent === PATHWAY_OPPONENTS.easy) return "Easy";
+  if (opponent === PATHWAY_OPPONENTS.tough) return "Tough";
+  return "Master";
+}
+
+function syncPathwayOpponentPresentation(opponent: Opponent): void {
+  const label = pathwayOpponentLabel(opponent);
+  els.splashEyebrow.textContent = `Strong Cribbage · ${label}`;
+  els.splashDescription.textContent = `Play one-on-one against the ${label} opponent.`;
+}
+
+function launchPathwayOpponent(opponent: Opponent): void {
+  selectedPathwayOpponent = opponent;
+  els.opponent.value = opponent;
+  syncPathwayOpponentPresentation(opponent);
+  els.pathwayPage.hidden = true;
+  state.hasResumableGame = false;
+
+  if (AUTHENTICATION_ENABLED && !authenticatedUser) {
+    els.authPage.hidden = false;
+    return;
+  }
+
+  if (!playerFirstName) {
+    state.splashOpen = true;
+    document.body.dataset.splash = "true";
+    els.splashPage.hidden = false;
+    els.splashResumeGame.hidden = true;
+    els.splashNewGame.hidden = false;
+    els.splashNameRow.hidden = false;
+    window.setTimeout(() => els.splashFirstName.focus(), 0);
+    return;
+  }
+
+  state.splashOpen = false;
+  document.body.dataset.splash = "false";
+  els.splashPage.hidden = true;
+  void startNewGameFromUi({ forceNew: true });
 }
 
 function pathwayRouteFromLocation(): PathwayRoute {
@@ -4317,6 +4382,8 @@ function sortedAnalyticsEngines(
 
 function analyticsEngineSortKey(engine: Opponent): number {
   return [
+    "myrmidon-5",
+    "schell_table-peg_table-9.1",
     "schell_table-peg_table-13.0",
     "schell_table-peg_table-16.3",
     "schell_table-peg_table-16.1",
@@ -4659,6 +4726,7 @@ function playerName(player: PlayerKey | undefined): string {
 
 function engineName(engine: string | undefined): string {
   if (!engine) return "-";
+  if (engine === PATHWAY_OPPONENTS.easy) return "Easy";
   const version = engine.match(/(\d+(?:\.\d+)*)$/)?.[1];
   return version ? `AI ${version}` : "AI";
 }
@@ -5124,6 +5192,12 @@ for (const button of els.pathwayTargetButtons) {
 
 for (const button of els.pathwayBackButtons) {
   button.addEventListener("click", () => navigatePathway("home"));
+}
+
+for (const button of els.pathwayDestinationButtons) {
+  const opponent = pathwayOpponent(button.dataset.pathwayDestination);
+  if (!opponent) continue;
+  button.addEventListener("click", () => launchPathwayOpponent(opponent));
 }
 
 els.pathwayStatistics.addEventListener("click", () => {
@@ -5719,7 +5793,7 @@ els.splashFirstName.addEventListener("input", () => {
 });
 
 els.splashNewGame.addEventListener("click", () => {
-  void startNewGameFromUi();
+  void startNewGameFromUi({ forceNew: selectedPathwayOpponent !== null });
 });
 
 els.splashResumeGame.addEventListener("click", () => {

@@ -25,8 +25,8 @@ pub const MODEL_16_1: &str = "schell_table-peg_table-16.1";
 /// Model 16.3 is the compact public-information scorer, with frozen Model 13
 /// as its final fallback. It deliberately has no exact-policy lookup table.
 pub const MODEL_16_3: &str = "schell_table-peg_table-16.3";
-/// Benchmark-only five-sample Myrmidon agent from the Moulton cribbage RL
-/// framework. It is not a production-selectable Strong Cribbage model.
+/// Five-sample Myrmidon agent from the Moulton cribbage RL framework. Strong
+/// Cribbage exposes it as the Easy opponent and also retains it for benchmarks.
 pub const MYRMIDON_5: &str = "myrmidon-5";
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

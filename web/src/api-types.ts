@@ -4,6 +4,8 @@
  */
 export type PlayerKey = "human" | "ai";
 export type Opponent =
+  | "myrmidon-5"
+  | "schell_table-peg_table-9.1"
   | "schell_table-peg_table-13.0"
   | "schell_table-peg_table-14.3"
   | "schell_table-peg_table-14.8"
