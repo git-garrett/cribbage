@@ -62,6 +62,7 @@ if [[ ! -f "$OUT_DIR/manifest.txt" ]]; then
     printf 'model130AssetSha256=%s\n' "$(shasum -a 256 "$MODEL130_ASSET" | awk '{print $1}')"
     printf 'model132AssetSha256=%s\n' "$(shasum -a 256 "$MODEL132_ASSET" | awk '{print $1}')"
     printf 'runnerSha256=%s\n' "$(shasum -a 256 "$RUNNER" | awk '{print $1}')"
+    printf 'pairedReporterSha256=%s\n' "$(shasum -a 256 "$MODEL_ROOT/scripts/report_paired_benchmark.py" | awk '{print $1}')"
   } > "$OUT_DIR/manifest.txt"
 fi
 
