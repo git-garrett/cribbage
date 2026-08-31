@@ -17,7 +17,9 @@ function pngDimensions(relativeUrl: string): [number, number] {
 describe("Counted Monogram asset system", () => {
   it("routes every HTML logo placement to the production brand family", () => {
     expect(appHtml.match(/\/brand\/strong-cribbage-lockup-dark\.svg/g)).toHaveLength(4);
+    expect(appHtml.match(/\/brand\/strong-cribbage-lockup-light\.svg/g)).toHaveLength(3);
     expect(homepageHtml).toContain('/brand/strong-cribbage-lockup-dark.svg');
+    expect(homepageHtml).toContain('/brand/strong-cribbage-lockup-light.svg');
     expect(`${appHtml}\n${homepageHtml}`).not.toContain('/strong-cribbage-dark-lockup.svg');
   });
 

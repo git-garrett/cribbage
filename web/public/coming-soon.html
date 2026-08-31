@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Strong Cribbage - Coming Soon</title>
     <meta name="description" content="Strong Cribbage is building a sharper cribbage training engine. The public site is coming soon.">
+    <meta name="theme-color" content="#e8eee9" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#063d30" media="(prefers-color-scheme: dark)">
     <meta property="og:title" content="Strong Cribbage">
     <meta property="og:description" content="A sharper cribbage training engine is coming soon.">
     <meta property="og:type" content="website">
@@ -26,14 +28,35 @@
     <link rel="manifest" href="/site.webmanifest">
     <style>
       :root {
-        color-scheme: dark;
+        color-scheme: light;
         --green: #0b5b43;
-        --green-light: #258460;
-        --green-dark: #074535;
         --navy: #071f38;
         --cream: #fbf8f0;
-        --muted: #cfe8de;
-        --gold: #e8c575;
+        --canvas: #e8eee9;
+        --canvas-glow: rgba(24, 123, 91, 0.2);
+        --grid: rgba(7, 31, 56, 0.055);
+        --panel: #fbf8f0;
+        --text: #071f38;
+        --muted: #52615b;
+        --gold: #8f6720;
+        --border: #c5a85d;
+        --shadow: 0 26px 58px rgba(20, 35, 30, 0.16);
+        --button-text: #fbf8f0;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          color-scheme: dark;
+          --canvas: #042d22;
+          --canvas-glow: rgba(37, 132, 96, 0.42);
+          --grid: rgba(232, 197, 117, 0.055);
+          --panel: #071f38;
+          --text: #fbf8f0;
+          --muted: #cfe8de;
+          --gold: #e8c575;
+          --border: rgba(232, 197, 117, 0.72);
+          --shadow: 0 26px 58px rgba(2, 28, 21, 0.38);
+        }
       }
 
       * {
@@ -47,8 +70,13 @@
         display: grid;
         place-items: center;
         padding: 18px;
-        background: radial-gradient(circle at 50% 18%, var(--green-light) 0, var(--green) 42%, var(--green-dark) 100%);
-        color: var(--cream);
+        background:
+          radial-gradient(circle at 50% 18%, var(--canvas-glow), transparent 34rem),
+          linear-gradient(var(--grid) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+          var(--canvas);
+        background-size: auto, 42px 42px, 42px 42px, auto;
+        color: var(--text);
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
 
@@ -58,15 +86,21 @@
         justify-items: center;
         gap: 20px;
         padding: clamp(28px, 7vw, 58px);
-        border: 1px solid rgba(232, 197, 117, 0.72);
+        border: 1px solid var(--border);
         border-radius: 28px;
-        background: rgba(7, 31, 56, 0.94);
-        box-shadow: 0 26px 58px rgba(2, 28, 21, 0.38);
+        background: var(--panel);
+        box-shadow: var(--shadow);
         text-align: center;
       }
 
-      img {
+      .homepage-logo {
+        display: block;
         width: min(100%, 510px);
+      }
+
+      .homepage-logo img {
+        display: block;
+        width: 100%;
         height: auto;
       }
 
@@ -109,7 +143,7 @@
         border: 2px solid var(--gold);
         border-radius: 999px;
         background: var(--green);
-        color: var(--cream);
+        color: var(--button-text);
         font-weight: 900;
         text-decoration: none;
       }
@@ -117,7 +151,10 @@
   </head>
   <body>
     <main>
-      <img src="/brand/strong-cribbage-lockup-dark.svg" alt="">
+      <picture class="homepage-logo">
+        <source media="(prefers-color-scheme: dark)" srcset="/brand/strong-cribbage-lockup-dark.svg">
+        <img src="/brand/strong-cribbage-lockup-light.svg" alt="">
+      </picture>
       <h1 class="visually-hidden">Strong Cribbage</h1>
       <p class="eyebrow">Coming soon</p>
       <p>Strong cribbage is going to be the strongest cribbage playing app in the App Store. Version 13.0 is already very good. It’s going to get better. Soon we’ll add training and teaching features. For now you can play the preview.</p>

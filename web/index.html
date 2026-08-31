@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Strong Cribbage</title>
     <meta name="description" content="Play one-on-one cribbage against the current Strong Cribbage server engine.">
-    <meta name="theme-color" content="#17654b">
+    <meta name="theme-color" content="#e8eee9" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#063d30" media="(prefers-color-scheme: dark)">
     <meta property="og:title" content="Strong Cribbage">
     <meta property="og:description" content="Play one-on-one cribbage against the current Strong Cribbage server engine.">
     <meta property="og:type" content="website">
@@ -31,7 +32,10 @@
     <section id="pathway-page" class="pathway-page" aria-labelledby="pathway-title" hidden>
       <div class="pathway-shell">
         <header class="pathway-brandbar">
-          <img class="pathway-logo" src="/brand/strong-cribbage-lockup-dark.svg" alt="Strong Cribbage">
+          <picture class="pathway-logo">
+            <source media="(prefers-color-scheme: dark)" srcset="/brand/strong-cribbage-lockup-dark.svg">
+            <img src="/brand/strong-cribbage-lockup-light.svg" alt="Strong Cribbage">
+          </picture>
         </header>
         <div class="pathway-rail" aria-hidden="true">
           <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
@@ -165,7 +169,10 @@
     </section>
     <section id="auth-page" class="auth-page" aria-labelledby="auth-title" hidden>
       <div class="auth-shell">
-        <img class="auth-logo" src="/brand/strong-cribbage-lockup-dark.svg" alt="Strong Cribbage">
+        <picture class="auth-logo">
+          <source media="(prefers-color-scheme: dark)" srcset="/brand/strong-cribbage-lockup-dark.svg">
+          <img src="/brand/strong-cribbage-lockup-light.svg" alt="Strong Cribbage">
+        </picture>
         <div class="auth-peg-track" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
         <div class="auth-heading">
           <p class="auth-eyebrow">Invitation only · AI 13.0</p>
@@ -207,7 +214,10 @@
     </section>
     <section id="splash-page" class="splash-page" aria-label="Strong Cribbage" hidden>
       <div class="splash-shell">
-        <img class="splash-logo" src="/brand/strong-cribbage-lockup-dark.svg" alt="">
+        <picture class="splash-logo">
+          <source media="(prefers-color-scheme: dark)" srcset="/brand/strong-cribbage-lockup-dark.svg">
+          <img src="/brand/strong-cribbage-lockup-light.svg" alt="">
+        </picture>
         <div class="splash-copy">
           <p class="splash-eyebrow">Strong Cribbage · AI 13.0</p>
           <h1 class="visually-hidden">Strong Cribbage</h1>

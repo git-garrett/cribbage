@@ -7,14 +7,16 @@ const homepageHtml = readFileSync(new URL("../public/coming-soon.html", import.m
 const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
 describe("branded entry surfaces", () => {
-  it("uses the dark-background lockup on both the homepage and first-name screen", () => {
-    expect(appHtml).toMatch(/class="splash-logo" src="\/brand\/strong-cribbage-lockup-dark\.svg"/);
-    expect(homepageHtml).toMatch(/src="\/brand\/strong-cribbage-lockup-dark\.svg"/);
+  it("uses mode-appropriate lockups on both the homepage and first-name screen", () => {
+    expect(appHtml).toMatch(/<picture class="splash-logo">[\s\S]*?prefers-color-scheme: dark[\s\S]*?lockup-dark\.svg[\s\S]*?lockup-light\.svg[\s\S]*?<\/picture>/);
+    expect(homepageHtml).toMatch(/<picture class="homepage-logo">[\s\S]*?prefers-color-scheme: dark[\s\S]*?lockup-dark\.svg[\s\S]*?lockup-light\.svg[\s\S]*?<\/picture>/);
     expect(homepageHtml).not.toMatch(/src="\/icon-512\.png"/);
   });
 
   it("carries the green, navy, cream, and gold game palette into the first-name screen", () => {
     expect(css).toMatch(/\.splash-page\s*\{[^}]*--splash-green:\s*#0b5b43[^}]*--splash-navy:\s*#071f38[^}]*--splash-cream:\s*#fbf8f0[^}]*--splash-gold:\s*#e8c575/s);
-    expect(css).toMatch(/\.splash-shell\s*\{[^}]*background:\s*rgba\(7,\s*31,\s*56,\s*0\.94\)/s);
+    expect(css).toMatch(/\.splash-shell\s*\{[^}]*background:\s*var\(--entry-panel\)/s);
+    expect(css).toContain("--entry-featured: #071f38");
+    expect(css).toContain("--entry-featured: #0b5b43");
   });
 });
