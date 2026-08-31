@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Strong Cribbage monochrome mark</title>
+  <desc id="desc">One-color Strong Cribbage SC monogram and five-hole scoring line.</desc>
+  <defs>
+    <mask id="scoring-line">
+      <rect width="1024" height="1024" fill="#FFFFFF"/>
+      <circle cx="314" cy="756" r="15" fill="#000000"/>
+      <circle cx="413" cy="756" r="15" fill="#000000"/>
+      <circle cx="512" cy="756" r="15" fill="#000000"/>
+      <circle cx="611" cy="756" r="15" fill="#000000"/>
+      <circle cx="710" cy="756" r="15" fill="#000000"/>
+    </mask>
+  </defs>
+  <g fill="#FFFFFF" aria-hidden="true">
+    <text x="326" y="636" font-family="Georgia, 'Times New Roman', serif" font-size="500" font-weight="700" text-anchor="middle">S</text>
+    <text x="698" y="636" font-family="Georgia, 'Times New Roman', serif" font-size="500" font-weight="700" text-anchor="middle">C</text>
+    <rect x="242" y="746" width="540" height="20" rx="10" mask="url(#scoring-line)"/>
+  </g>
+</svg>

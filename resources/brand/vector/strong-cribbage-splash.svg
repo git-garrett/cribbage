@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2732 2732" role="img" aria-labelledby="title desc">
+  <title id="title">Strong Cribbage launch screen</title>
+  <desc id="desc">Centered Strong Cribbage Counted Monogram and wordmark on navy.</desc>
+  <rect width="2732" height="2732" fill="#071F38"/>
+  <g aria-hidden="true">
+    <rect x="986" y="725" width="760" height="760" rx="168" fill="#0B5B43"/>
+    <text x="1208" y="1191" fill="#FBF8F0" font-family="Georgia, 'Times New Roman', serif" font-size="398" font-weight="700" text-anchor="middle">S</text>
+    <text x="1524" y="1191" fill="#E8C575" font-family="Georgia, 'Times New Roman', serif" font-size="398" font-weight="700" text-anchor="middle">C</text>
+    <path d="M1121 1310H1611" fill="none" stroke="#E8C575" stroke-width="19" stroke-linecap="round"/>
+    <g fill="#071F38" stroke="#FBF8F0" stroke-width="7">
+      <circle cx="1210" cy="1310" r="18"/>
+      <circle cx="1288" cy="1310" r="18"/>
+      <circle cx="1366" cy="1310" r="18"/>
+      <circle cx="1444" cy="1310" r="18"/>
+      <circle cx="1522" cy="1310" r="18"/>
+    </g>
+    <text x="1366" y="1765" fill="#FBF8F0" font-family="Georgia, 'Times New Roman', serif" font-size="214" font-weight="700" text-anchor="middle">Strong</text>
+    <text x="1374" y="1922" fill="#E8C575" font-family="'Avenir Next', Avenir, Arial, sans-serif" font-size="79" font-weight="800" letter-spacing="22" text-anchor="middle">CRIBBAGE</text>
+  </g>
+</svg>

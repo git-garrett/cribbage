@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Strong Cribbage compact mark</title>
+  <desc id="desc">Ivory S and brass C on a rounded deep green tile.</desc>
+  <rect width="64" height="64" rx="14" fill="#0B5B43"/>
+  <text x="20" y="43" fill="#FBF8F0" font-family="Georgia, 'Times New Roman', serif" font-size="34" font-weight="700" text-anchor="middle" aria-hidden="true">S</text>
+  <text x="45" y="43" fill="#E8C575" font-family="Georgia, 'Times New Roman', serif" font-size="34" font-weight="700" text-anchor="middle" aria-hidden="true">C</text>
+</svg>

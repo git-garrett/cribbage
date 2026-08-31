@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Strong Cribbage</title>
+  <desc id="desc">Strong Cribbage social sharing image with the Counted Monogram and the words Play, learn, master the game.</desc>
+  <rect width="1200" height="630" fill="#071F38"/>
+  <rect width="426" height="630" fill="#063D30"/>
+  <rect x="42" y="42" width="1116" height="546" rx="28" fill="none" stroke="#E8C575" stroke-width="2" opacity="0.7"/>
+  <g aria-hidden="true">
+    <rect x="91" y="111" width="244" height="244" rx="54" fill="#0B5B43"/>
+    <text x="162" y="260" fill="#FBF8F0" font-family="Georgia, 'Times New Roman', serif" font-size="128" font-weight="700" text-anchor="middle">S</text>
+    <text x="264" y="260" fill="#E8C575" font-family="Georgia, 'Times New Roman', serif" font-size="128" font-weight="700" text-anchor="middle">C</text>
+    <path d="M136 303H290" fill="none" stroke="#E8C575" stroke-width="8" stroke-linecap="round"/>
+    <g fill="#071F38" stroke="#FBF8F0" stroke-width="3">
+      <circle cx="164" cy="303" r="7"/>
+      <circle cx="188" cy="303" r="7"/>
+      <circle cx="213" cy="303" r="7"/>
+      <circle cx="238" cy="303" r="7"/>
+      <circle cx="262" cy="303" r="7"/>
+    </g>
+    <path d="M91 436H335" fill="none" stroke="#E8C575" stroke-width="5" stroke-linecap="round"/>
+    <g fill="#063D30" stroke="#CFE8DE" stroke-width="3">
+      <circle cx="130" cy="436" r="9"/>
+      <circle cx="172" cy="436" r="9"/>
+      <circle cx="213" cy="436" r="9"/>
+      <circle cx="254" cy="436" r="9"/>
+      <circle cx="296" cy="436" r="9"/>
+    </g>
+    <text x="488" y="245" fill="#FBF8F0" font-family="Georgia, 'Times New Roman', serif" font-size="94" font-weight="700">Strong</text>
+    <text x="493" y="311" fill="#E8C575" font-family="'Avenir Next', Avenir, Arial, sans-serif" font-size="36" font-weight="800" letter-spacing="10">CRIBBAGE</text>
+    <text x="492" y="408" fill="#CFE8DE" font-family="'Avenir Next', Avenir, Arial, sans-serif" font-size="31" font-weight="500">Play. Learn. Master the game.</text>
+    <text x="493" y="475" fill="#E8C575" font-family="'Avenir Next', Avenir, Arial, sans-serif" font-size="18" font-weight="800" letter-spacing="4">STRONGCRIBBAGE.COM</text>
+  </g>
+</svg>

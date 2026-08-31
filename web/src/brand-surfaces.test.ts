@@ -8,8 +8,8 @@ const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
 describe("branded entry surfaces", () => {
   it("uses the dark-background lockup on both the homepage and first-name screen", () => {
-    expect(appHtml).toMatch(/class="splash-logo" src="\/strong-cribbage-dark-lockup\.svg"/);
-    expect(homepageHtml).toMatch(/src="\/strong-cribbage-dark-lockup\.svg"/);
+    expect(appHtml).toMatch(/class="splash-logo" src="\/brand\/strong-cribbage-lockup-dark\.svg"/);
+    expect(homepageHtml).toMatch(/src="\/brand\/strong-cribbage-lockup-dark\.svg"/);
     expect(homepageHtml).not.toMatch(/src="\/icon-512\.png"/);
   });
 

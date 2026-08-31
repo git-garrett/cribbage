@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Strong Cribbage app icon</title>
+  <desc id="desc">Ivory S and brass C above a five-hole cribbage scoring line on a deep green field.</desc>
+  <rect width="1024" height="1024" fill="#0B5B43"/>
+  <g aria-hidden="true">
+    <text x="326" y="636" fill="#FBF8F0" font-family="Georgia, 'Times New Roman', serif" font-size="500" font-weight="700" text-anchor="middle">S</text>
+    <text x="698" y="636" fill="#E8C575" font-family="Georgia, 'Times New Roman', serif" font-size="500" font-weight="700" text-anchor="middle">C</text>
+    <path d="M242 756H782" fill="none" stroke="#E8C575" stroke-width="20" stroke-linecap="round"/>
+    <g fill="#071F38" stroke="#FBF8F0" stroke-width="7">
+      <circle cx="314" cy="756" r="18"/>
+      <circle cx="413" cy="756" r="18"/>
+      <circle cx="512" cy="756" r="18"/>
+      <circle cx="611" cy="756" r="18"/>
+      <circle cx="710" cy="756" r="18"/>
+    </g>
+  </g>
+</svg>

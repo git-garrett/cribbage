@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" role="img" aria-labelledby="title desc">
+  <title id="title">Strong Cribbage</title>
+  <desc id="desc">Strong Cribbage horizontal logo for dark backgrounds.</desc>
+  <g aria-hidden="true">
+    <rect x="10" y="10" width="180" height="180" rx="40" fill="#0B5B43"/>
+    <text x="62" y="119" fill="#FBF8F0" font-family="Georgia, 'Times New Roman', serif" font-size="94" font-weight="700" text-anchor="middle">S</text>
+    <text x="138" y="119" fill="#E8C575" font-family="Georgia, 'Times New Roman', serif" font-size="94" font-weight="700" text-anchor="middle">C</text>
+    <path d="M44 151H156" fill="none" stroke="#E8C575" stroke-width="6" stroke-linecap="round"/>
+    <g fill="#071F38" stroke="#FBF8F0" stroke-width="2.2">
+      <circle cx="64" cy="151" r="5"/>
+      <circle cx="82" cy="151" r="5"/>
+      <circle cx="100" cy="151" r="5"/>
+      <circle cx="118" cy="151" r="5"/>
+      <circle cx="136" cy="151" r="5"/>
+    </g>
+    <text x="232" y="91" fill="#FBF8F0" font-family="Georgia, 'Times New Roman', serif" font-size="76" font-weight="700">Strong</text>
+    <text x="236" y="148" fill="#E8C575" font-family="'Avenir Next', Avenir, Arial, sans-serif" font-size="30" font-weight="800" letter-spacing="8">CRIBBAGE</text>
+  </g>
+</svg>

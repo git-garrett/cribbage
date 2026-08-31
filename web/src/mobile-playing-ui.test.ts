@@ -8,8 +8,8 @@ const mainSource = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 
 describe("Concept B mobile playing UI", () => {
   it("uses the scalable dark lockup and live hand number in the header", () => {
-    expect(html).toMatch(/class="app-brand-logo" src="\/strong-cribbage-dark-lockup\.svg"/);
-    expect(html).toMatch(/class="splash-logo" src="\/strong-cribbage-dark-lockup\.svg"/);
+    expect(html).toMatch(/class="app-brand-logo" src="\/brand\/strong-cribbage-lockup-dark\.svg"/);
+    expect(html).toMatch(/class="splash-logo" src="\/brand\/strong-cribbage-lockup-dark\.svg"/);
     expect(html).toMatch(/id="hand-number" class="hand-number"/);
     expect(mainSource).toMatch(/els\.handNumber\.textContent = `Hand \$\{game\.handNumber\}`/);
   });
