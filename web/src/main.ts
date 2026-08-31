@@ -125,6 +125,7 @@ const EMPTY_LEADERBOARD_SUMMARY: LeaderboardSummarySource = {
 type ServerBusyRetry = () => void | Promise<void>;
 type AppFontSize = "normal" | "large" | "x-large";
 type PathwayView = "home" | "play" | "tutorial" | "settings";
+type PathwayRoute = PathwayView | "statistics";
 
 const FONT_SIZE_STORAGE_KEY = "strong-cribbage.fontSize";
 const DISMISSED_GAME_OVER_STORAGE_KEY = "strong-cribbage.dismissedGameOverId";
@@ -561,6 +562,8 @@ const REMOTE_AI_EXPLICIT = URL_PARAMS.has("api");
 const IS_VITE_DEV = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV);
 const LOCAL_NETWORK_MODE = isLocalNetworkHostname(window.location.hostname);
 const PATHWAY_NAV_ENABLED = LOCAL_NETWORK_MODE && URL_PARAMS.get("pathway") !== "0";
+const PATHWAY_VIEW_PARAM = "pathwayView";
+const PATHWAY_HISTORY_STATE_KEY = "strongCribbagePathway";
 const AUTHENTICATION_ENABLED = !LOCAL_NETWORK_MODE || URL_PARAMS.get("auth") === "1" || REMOTE_AI_EXPLICIT;
 const SIMPLE_NETWORK_LOCAL_AI_MODE = SIMPLE_NETWORK_MODE &&
   LOCAL_NETWORK_MODE &&
@@ -815,6 +818,9 @@ applyAdminVisibility();
 applyFontSizePreference();
 applyPathwayNavigation();
 window.addEventListener("hashchange", applyAdminVisibility);
+window.addEventListener("popstate", () => {
+  if (PATHWAY_NAV_ENABLED) applyPathwayRoute(pathwayRouteFromLocation());
+});
 try {
   if (state.game) render(state.game);
 } catch (error) {
@@ -1300,9 +1306,55 @@ function showPathwayView(view: PathwayView): void {
   els.pathwayPage.scrollTo({ top: 0, left: 0 });
 }
 
+function pathwayRouteFromLocation(): PathwayRoute {
+  const route = new URL(window.location.href).searchParams.get(PATHWAY_VIEW_PARAM);
+  if (route === "play" || route === "tutorial" || route === "settings" || route === "statistics") return route;
+  return "home";
+}
+
+function pathwayHistoryState(route: PathwayRoute): Record<string, unknown> {
+  const existing = window.history.state;
+  const state = existing && typeof existing === "object" ? existing as Record<string, unknown> : {};
+  return { ...state, [PATHWAY_HISTORY_STATE_KEY]: route };
+}
+
+function pathwayUrl(route: PathwayRoute): string {
+  const url = new URL(window.location.href);
+  if (route === "home") url.searchParams.delete(PATHWAY_VIEW_PARAM);
+  else url.searchParams.set(PATHWAY_VIEW_PARAM, route);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+function applyPathwayRoute(route: PathwayRoute): void {
+  if (route === "statistics") {
+    pathwayStatsReturn = true;
+    els.pathwayPage.hidden = true;
+    state.splashOpen = false;
+    document.body.dataset.splash = "false";
+    openAnalytics("my");
+    return;
+  }
+
+  pathwayStatsReturn = false;
+  if (state.analyticsOpen) {
+    state.analyticsOpen = false;
+    render(state.game);
+  }
+  showPathwayView(route);
+}
+
+function navigatePathway(route: PathwayRoute): void {
+  if (!PATHWAY_NAV_ENABLED) return;
+  window.history.pushState(pathwayHistoryState(route), "", pathwayUrl(route));
+  applyPathwayRoute(route);
+}
+
 function applyPathwayNavigation(): void {
   els.pathwayPage.hidden = !PATHWAY_NAV_ENABLED;
-  if (PATHWAY_NAV_ENABLED) showPathwayView("home");
+  if (!PATHWAY_NAV_ENABLED) return;
+  const route = pathwayRouteFromLocation();
+  window.history.replaceState(pathwayHistoryState(route), "", pathwayUrl(route));
+  applyPathwayRoute(route);
 }
 
 function buildBoard(): void {
@@ -5063,26 +5115,22 @@ els.menuToggle.addEventListener("click", () => {
 for (const button of els.pathwayTargetButtons) {
   button.addEventListener("click", () => {
     const target = button.dataset.pathwayTarget as PathwayView | undefined;
-    if (target) showPathwayView(target);
+    if (target) navigatePathway(target);
   });
 }
 
 for (const button of els.pathwayBackButtons) {
-  button.addEventListener("click", () => showPathwayView("home"));
+  button.addEventListener("click", () => navigatePathway("home"));
 }
 
 els.pathwayStatistics.addEventListener("click", () => {
   if (els.pathwayStatistics.disabled || !state.game) return;
-  pathwayStatsReturn = true;
-  els.pathwayPage.hidden = true;
-  state.splashOpen = false;
-  document.body.dataset.splash = "false";
-  openAnalytics("my");
+  navigatePathway("statistics");
 });
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape" || els.pathwayPage.hidden) return;
-  if (els.pathwayPage.dataset.view !== "home") showPathwayView("home");
+  if (els.pathwayPage.dataset.view !== "home") navigatePathway("home");
 });
 
 document.addEventListener("pointerdown", (event) => {
@@ -5117,6 +5165,10 @@ els.analyticsOpen.addEventListener("click", () => {
 });
 
 els.analyticsClose.addEventListener("click", () => {
+  if (pathwayStatsReturn && pathwayRouteFromLocation() === "statistics") {
+    window.history.back();
+    return;
+  }
   state.analyticsOpen = false;
   render(state.game);
   if (pathwayStatsReturn) {

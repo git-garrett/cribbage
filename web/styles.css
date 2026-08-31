@@ -5656,17 +5656,6 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   border-color: #99bead;
 }
 
-.pathway-footer {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  color: rgba(251, 248, 240, 0.67);
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 0.06em;
-}
-
 .pathway-card:focus-visible,
 .pathway-choice:focus-visible,
 .pathway-back:focus-visible {

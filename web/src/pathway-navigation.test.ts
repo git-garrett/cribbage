@@ -41,10 +41,12 @@ describe("local pathway navigation", () => {
   it("uses the pathway language and grouping requested for the revised lobby", () => {
     expect(html).toContain("Play, learn, review your progress, or adjust settings.");
     expect(html).toContain("<strong>Training</strong>");
-    expect(html).toContain("Learning modules from beginner to strategies for mastering the game.");
+    expect(html).toContain("Whether you're a beginner or want strategies for mastering the game.");
     expect(html).toContain('<span class="pathway-card-kicker">Track your game</span>');
     expect(html).not.toContain("The clubhouse");
     expect(html).not.toContain('<i class="active"></i>');
+    expect(html).not.toContain("Play thoughtfully.");
+    expect(css).not.toContain(".pathway-footer");
     expect(css).not.toContain(".pathway-rail i.active");
 
     const human = html.indexOf('data-pathway-destination="human"');
@@ -59,6 +61,13 @@ describe("local pathway navigation", () => {
     expect(source).toContain('const PATHWAY_NAV_ENABLED = LOCAL_NETWORK_MODE');
     expect(source).toMatch(/pathwayStatistics\.addEventListener\("click"[\s\S]*openAnalytics\("my"\)/);
     expect(source).toMatch(/analyticsClose\.addEventListener\("click"[\s\S]*showPathwayView\("home"\)/);
+  });
+
+  it("keeps pathway navigation in browser history", () => {
+    expect(source).toContain('const PATHWAY_VIEW_PARAM = "pathwayView"');
+    expect(source).toContain("window.history.pushState(pathwayHistoryState(route), \"\", pathwayUrl(route))");
+    expect(source).toMatch(/window\.addEventListener\("popstate"[\s\S]*applyPathwayRoute\(pathwayRouteFromLocation\(\)\)/);
+    expect(source).toMatch(/pathwayStatsReturn[\s\S]*window\.history\.back\(\)/);
   });
 
   it("provides responsive, keyboard-visible, reduced-motion-aware styling", () => {
