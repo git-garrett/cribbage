@@ -74,10 +74,10 @@ describe("myStatsTableRows", () => {
     expect(row).toEqual({ label: "Avg crib", player: "-", ai: "-", difference: "—" });
   });
 
-  it("shows error counts only after analyzed games", () => {
+  it("omits error counts from the comparison", () => {
     const rows = myStatsTableRows(totals({ analyzedGames: 2, errors: 3 }), totals());
 
-    expect(rows).toContainEqual({ label: "Errors, total", player: "3", ai: "—", difference: "—" });
-    expect(rows).toContainEqual({ label: "Errors / analyzed game", player: "1.50", ai: "—", difference: "—" });
+    expect(rows.map((row) => row.label)).not.toContain("Errors, total");
+    expect(rows.map((row) => row.label)).not.toContain("Errors / analyzed game");
   });
 });

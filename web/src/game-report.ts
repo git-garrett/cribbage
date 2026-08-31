@@ -1,4 +1,4 @@
-import { formatDifference } from "./comparison-difference";
+import { formatDifference, type ComparisonTone } from "./comparison-difference";
 
 export interface SingleGameReportTotals {
   wins: number;
@@ -26,6 +26,8 @@ export interface SingleGameReportRow {
   player: string;
   ai: string;
   difference: string;
+  playerTone?: ComparisonTone;
+  aiTone?: ComparisonTone;
 }
 
 function average(points: number, opportunities: number): number | null {
@@ -49,10 +51,10 @@ function averageRow(
   };
 }
 
-function specialResult(won: number, lost: number): string {
-  if (won) return "Won";
-  if (lost) return "Lost";
-  return "—";
+function specialResult(won: number, lost: number): { value: string; tone?: ComparisonTone } {
+  if (won) return { value: "1", tone: "good" };
+  if (lost) return { value: "1", tone: "bad" };
+  return { value: "—" };
 }
 
 function fullCycleAverage(totals: SingleGameReportTotals): number | null {
@@ -89,12 +91,6 @@ export function singleGameReportRows(
       ai: ai.wins ? "Win" : "Loss",
       difference: "—",
     },
-    ...(player.analyzedGames
-      ? [
-        { label: "Errors, total", player: String(player.errors), ai: "—", difference: "—" },
-        { label: "Errors / game", player: (player.errors / player.analyzedGames).toFixed(2), ai: "—", difference: "—" },
-      ]
-      : []),
     averageRow("Avg peg as dealer", player.peggingDealer, player.peggingDealerHands, ai.peggingDealer, ai.peggingDealerHands),
     averageRow("Avg peg as pone", player.peggingPone, player.peggingPoneHands, ai.peggingPone, ai.peggingPoneHands),
     averageRow("Avg hand as dealer", player.handDealer, player.handDealerHands, ai.handDealer, ai.handDealerHands),
@@ -104,19 +100,27 @@ export function singleGameReportRows(
   ];
 
   if (player.skunks || player.skunked || ai.skunks || ai.skunked) {
+    const playerResult = specialResult(player.skunks, player.skunked);
+    const aiResult = specialResult(ai.skunks, ai.skunked);
     rows.push({
       label: "Skunk",
-      player: specialResult(player.skunks, player.skunked),
-      ai: specialResult(ai.skunks, ai.skunked),
+      player: playerResult.value,
+      ai: aiResult.value,
       difference: "—",
+      playerTone: playerResult.tone,
+      aiTone: aiResult.tone,
     });
   }
   if (player.doubleSkunks || player.doubleSkunked || ai.doubleSkunks || ai.doubleSkunked) {
+    const playerResult = specialResult(player.doubleSkunks, player.doubleSkunked);
+    const aiResult = specialResult(ai.doubleSkunks, ai.doubleSkunked);
     rows.push({
       label: "Double skunk",
-      player: specialResult(player.doubleSkunks, player.doubleSkunked),
-      ai: specialResult(ai.doubleSkunks, ai.doubleSkunked),
+      player: playerResult.value,
+      ai: aiResult.value,
       difference: "—",
+      playerTone: playerResult.tone,
+      aiTone: aiResult.tone,
     });
   }
   return rows;

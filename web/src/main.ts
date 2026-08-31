@@ -14,6 +14,7 @@ import type {
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 import { maybeLoadAdSense } from "./adsense";
 import { circularTurnCutPresentation, createCircularBoard, updateCircularBoard } from "./circular-board";
+import { comparisonTone, type ComparisonTone } from "./comparison-difference";
 import { endGameAds } from "./end-game-ad";
 import { singleGameReportRows } from "./game-report";
 import { rankLeaderboardWins } from "./leaderboard";
@@ -4458,12 +4459,15 @@ function singleGameReportTable(report: { human: AnalyticsTotals; ai: AnalyticsTo
     const player = tableRow.insertCell();
     player.className = "human";
     player.textContent = row.player;
+    applyComparisonTone(player, row.playerTone);
     const ai = tableRow.insertCell();
     ai.className = "ai";
     ai.textContent = row.ai;
+    applyComparisonTone(ai, row.aiTone);
     const difference = tableRow.insertCell();
     difference.className = "difference";
     difference.textContent = row.difference;
+    applyComparisonTone(difference, comparisonTone(row.difference));
     tableRow.prepend(label);
   }
   return table;
@@ -4509,6 +4513,7 @@ function myStatsComparisonTable(
     const difference = tableRow.insertCell();
     difference.className = "difference";
     difference.textContent = row.difference;
+    applyComparisonTone(difference, comparisonTone(row.difference));
     tableRow.prepend(label);
   }
   section.append(table);
@@ -4520,6 +4525,10 @@ function myStatsComparisonTable(
     section.append(note);
   }
   return section;
+}
+
+function applyComparisonTone(cell: HTMLTableCellElement, tone: ComparisonTone | undefined): void {
+  if (tone) cell.classList.add(`comparison-${tone}`);
 }
 
 function benchmarkLabel(source: string | undefined, games: number | undefined): string {

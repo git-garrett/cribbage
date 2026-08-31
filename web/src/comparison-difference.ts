@@ -1,3 +1,5 @@
+export type ComparisonTone = "good" | "bad";
+
 export function formatDifference(
   player: number | null,
   ai: number | null,
@@ -9,4 +11,10 @@ export function formatDifference(
   if (rounded > 0) return `+${magnitude}`;
   if (rounded < 0) return `−${magnitude}`;
   return magnitude;
+}
+
+export function comparisonTone(value: string): ComparisonTone | undefined {
+  if (value.startsWith("+")) return "good";
+  if (value.startsWith("−")) return "bad";
+  return undefined;
 }

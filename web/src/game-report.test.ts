@@ -44,11 +44,25 @@ describe("singleGameReportRows", () => {
       totals({ skunked: 1, doubleSkunked: 1 }),
     );
 
-    expect(rows).toContainEqual({ label: "Skunk", player: "Won", ai: "Lost", difference: "—" });
-    expect(rows).toContainEqual({ label: "Double skunk", player: "Won", ai: "Lost", difference: "—" });
+    expect(rows).toContainEqual({
+      label: "Skunk",
+      player: "1",
+      ai: "1",
+      difference: "—",
+      playerTone: "good",
+      aiTone: "bad",
+    });
+    expect(rows).toContainEqual({
+      label: "Double skunk",
+      player: "1",
+      ai: "1",
+      difference: "—",
+      playerTone: "good",
+      aiTone: "bad",
+    });
   });
 
-  it("shows analysis errors and a complete scoring cycle when available", () => {
+  it("omits analysis errors while retaining a complete scoring cycle", () => {
     const rows = singleGameReportRows(
       totals({
         wins: 1,
@@ -80,8 +94,8 @@ describe("singleGameReportRows", () => {
       }),
     );
 
-    expect(rows).toContainEqual({ label: "Errors, total", player: "2", ai: "—", difference: "—" });
-    expect(rows).toContainEqual({ label: "Errors / game", player: "2.00", ai: "—", difference: "—" });
+    expect(rows.map((row) => row.label)).not.toContain("Errors, total");
+    expect(rows.map((row) => row.label)).not.toContain("Errors / game");
     expect(rows).toContainEqual({ label: "Avg full cycle", player: "27.00", ai: "23.00", difference: "+4.00" });
   });
 });

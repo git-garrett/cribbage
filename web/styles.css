@@ -26,6 +26,8 @@
   --actions-bg: rgba(20, 87, 61, 0.96);
   --human: #1d7fd1;
   --ai: #c43d36;
+  --comparison-good: #12813c;
+  --comparison-bad: #b42318;
   --app-font: 16px;
   --heading-font: 22px;
   --subheading-font: 15px;
@@ -71,6 +73,8 @@
     --actions-bg: rgba(10, 52, 41, 0.97);
     --human: #58a6ff;
     --ai: #ff6b62;
+    --comparison-good: #75d5aa;
+    --comparison-bad: #ff777d;
   }
 
   .splash-eyebrow {
@@ -1372,6 +1376,14 @@ button:disabled {
   color: var(--ink);
 }
 
+.my-stats-table .comparison-good {
+  color: var(--comparison-good);
+}
+
+.my-stats-table .comparison-bad {
+  color: var(--comparison-bad);
+}
+
 .my-stats-table tbody tr:last-child th,
 .my-stats-table tbody tr:last-child td {
   border-bottom: 0;
@@ -1513,6 +1525,14 @@ button:disabled {
   border-left: 1px solid rgba(232, 197, 117, 0.32);
   background: rgba(232, 197, 117, 0.08);
   color: #f0d38e;
+}
+
+.single-game-report-table .comparison-good {
+  color: #75d5aa;
+}
+
+.single-game-report-table .comparison-bad {
+  color: #ff938c;
 }
 
 .single-game-report-table tbody tr:last-child th,

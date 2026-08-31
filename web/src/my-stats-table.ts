@@ -80,19 +80,6 @@ function fullCycleRow(player: MyStatsTableTotals, ai: MyStatsTableTotals): MySta
   };
 }
 
-function analysisRows(player: MyStatsTableTotals): MyStatsTableRow[] {
-  if (!player.analyzedGames) return [];
-  return [
-    { label: "Errors, total", player: String(player.errors), ai: "—", difference: "—" },
-    {
-      label: "Errors / analyzed game",
-      player: (player.errors / player.analyzedGames).toFixed(2),
-      ai: "—",
-      difference: "—",
-    },
-  ];
-}
-
 export function myStatsTableRows(
   player: MyStatsTableTotals,
   ai: MyStatsTableTotals,
@@ -102,7 +89,6 @@ export function myStatsTableRows(
     comparisonRow("Wins", player.wins, ai.wins),
     comparisonRow("Skunks", player.skunks, ai.skunks),
     comparisonRow("Double skunks", player.doubleSkunks, ai.doubleSkunks),
-    ...analysisRows(player),
     averageRow(
       "Avg peg as dealer",
       player.peggingDealer,
