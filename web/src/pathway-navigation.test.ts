@@ -57,7 +57,7 @@ describe("local pathway navigation", () => {
     expect(easy).toBeGreaterThan(dynamic);
   });
 
-  it("keeps the prototype local and connects Statistics to My Stats", () => {
+  it("keeps the pathway entry local and connects Statistics to My Stats", () => {
     expect(source).toContain('const PATHWAY_NAV_ENABLED = LOCAL_NETWORK_MODE');
     expect(source).toMatch(/pathwayStatistics\.addEventListener\("click"[\s\S]*openAnalytics\("my"\)/);
     expect(source).toMatch(/analyticsClose\.addEventListener\("click"[\s\S]*showPathwayView\("home"\)/);
@@ -76,5 +76,28 @@ describe("local pathway navigation", () => {
     expect(css).toMatch(/\.pathway-card:focus-visible/);
     expect(css).toMatch(/@media \(min-width: 960px\)[\s\S]*\.pathway-home/);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)/);
+  });
+
+  it("keeps the dense Play hand swipeable while sparse hands remain fully visible", () => {
+    expect(html).toContain('class="pathway-choice-grid pathway-choice-grid-play" tabindex="0" role="group" aria-label="Play options"');
+    expect(css).toMatch(/\.pathway-choice-grid:not\(\.pathway-choice-grid-play\)\s*{[\s\S]*flex-direction: column/);
+    expect(css).toMatch(/\.pathway-choice-grid-play\s*{[\s\S]*grid-auto-flow: column;[\s\S]*overflow-x: auto;[\s\S]*scroll-snap-type: inline mandatory/);
+    expect(css).toMatch(/\.pathway-choice-grid-play \.pathway-choice\s*{[\s\S]*scroll-snap-align: start/);
+    expect(css).toMatch(/@media \(min-width: 600px\) and \(max-width: 849px\)[\s\S]*grid-auto-columns: min\(39vw, 300px\)/);
+    expect(css).toMatch(/@media \(min-width: 850px\)[\s\S]*grid-auto-columns: clamp\(245px, 27%, 305px\)/);
+    expect(source).toMatch(/pathwayView\.dataset\.pathwayView === view[\s\S]*\.pathway-choice-grid[\s\S]*scrollTo\(\{ left: 0 \}\)/);
+  });
+
+  it("uses a restrained staggered deal with an explicit reduced-motion fallback", () => {
+    expect(css).toMatch(/@keyframes pathway-card-deal[\s\S]*translate: 0 34px;[\s\S]*translate: 0 0/);
+    expect(css).toMatch(/nth-child\(6\)[\s\S]*animation-delay: 220ms/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*animation-duration: 0\.01ms !important/);
+    expect(css).not.toContain("pathway-card-slide-in");
+  });
+
+  it("has no development-only pathway variant switcher in the production entry", () => {
+    expect(html).not.toContain("pathway-prototype");
+    expect(css).not.toContain("pathway-prototype");
+    expect(source).not.toContain("pathway-prototype");
   });
 });

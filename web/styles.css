@@ -5376,8 +5376,8 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   }
 }
 
-/* Local pathway prototype: a mobile-first clubhouse lobby built from the
-   same felt, navy, ivory, and brass materials as the playing table. */
+/* Local pathway navigation built from the same felt, navy, ivory, and brass
+   materials as the playing table. */
 .pathway-page {
   --pathway-green: #0b5b43;
   --pathway-green-bright: #187b5b;
@@ -5859,5 +5859,449 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* Dealt-hand pathway system. Sparse hands remain fully visible; the denser
+   Play hand becomes a snap-scrolling tray with the next card left in view. */
+.pathway-page {
+  --pathway-view-inline: clamp(18px, 6vw, 56px);
+  --pathway-suit-dark: color-mix(in srgb, var(--entry-accent) 44%, transparent);
+  --pathway-suit-red: color-mix(in srgb, var(--ai) 54%, transparent);
+}
+
+.pathway-shell {
+  gap: 12px;
+}
+
+.pathway-brandbar {
+  justify-content: center;
+}
+
+.pathway-logo {
+  width: min(64vw, 270px);
+}
+
+.pathway-rail {
+  display: none;
+}
+
+.pathway-stage {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--entry-accent) 54%, var(--entry-border));
+  border-radius: 30px;
+  background:
+    radial-gradient(circle at 50% 108%, color-mix(in srgb, var(--pathway-green) 22%, transparent), transparent 48%),
+    var(--entry-panel);
+}
+
+.pathway-view {
+  padding: 26px var(--pathway-view-inline) 30px;
+}
+
+.pathway-view:not([hidden]) {
+  animation: none;
+}
+
+.pathway-home,
+.pathway-subview {
+  align-content: start;
+  gap: 24px;
+}
+
+.pathway-intro,
+.pathway-subhead {
+  justify-items: center;
+  text-align: center;
+}
+
+.pathway-intro h1,
+.pathway-subhead h2 {
+  max-width: 16ch;
+  font-family: Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  letter-spacing: -0.05em;
+}
+
+.pathway-intro > p:last-child,
+.pathway-subhead > p:last-child {
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.pathway-back {
+  margin-bottom: 2px;
+}
+
+.pathway-primary-grid,
+.pathway-choice-grid:not(.pathway-choice-grid-play) {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 8px 2px 12px;
+  perspective: 1200px;
+}
+
+.pathway-card,
+.pathway-choice {
+  position: relative;
+  align-content: center;
+  min-height: 126px;
+  margin-top: -10px;
+  padding: 24px 64px 22px 23px;
+  overflow: hidden;
+  border: 1px solid var(--entry-border-strong);
+  border-radius: 22px 22px 12px 12px;
+  background: var(--entry-panel-soft);
+  box-shadow:
+    0 -2px 0 color-mix(in srgb, var(--entry-accent) 34%, transparent),
+    var(--entry-card-shadow-raised);
+  transform-origin: 50% 120%;
+  transition:
+    translate 180ms cubic-bezier(0.2, 0.76, 0.28, 1),
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.pathway-card:first-child,
+.pathway-choice:first-child {
+  margin-top: 0;
+}
+
+.pathway-card::before,
+.pathway-choice::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: auto;
+  left: 0;
+  width: auto;
+  height: 5px;
+  background: var(--entry-accent);
+  content: "";
+}
+
+.pathway-card::after,
+.pathway-choice::after {
+  position: absolute;
+  top: 50%;
+  right: 19px;
+  display: block;
+  width: auto;
+  height: auto;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--pathway-suit-dark);
+  font: 700 54px/1 Georgia, serif;
+  content: "";
+  transform: translateY(-50%);
+}
+
+.pathway-card:nth-child(4n + 1)::after,
+.pathway-choice:nth-child(4n + 1)::after {
+  content: "♣";
+}
+
+.pathway-card:nth-child(4n + 2)::after,
+.pathway-choice:nth-child(4n + 2)::after {
+  color: var(--pathway-suit-red);
+  content: "♥";
+}
+
+.pathway-card:nth-child(4n + 3)::after,
+.pathway-choice:nth-child(4n + 3)::after {
+  content: "♠";
+}
+
+.pathway-card:nth-child(4n)::after,
+.pathway-choice:nth-child(4n)::after {
+  color: var(--pathway-suit-red);
+  content: "♦";
+}
+
+.pathway-card-featured,
+.pathway-choice-human {
+  z-index: 2;
+  border-color: var(--pathway-featured-border);
+  background:
+    radial-gradient(circle at 100% 0, rgba(232, 197, 117, 0.12), transparent 54%),
+    var(--pathway-featured);
+  color: var(--pathway-ivory);
+}
+
+.pathway-card-featured::before,
+.pathway-choice-human::before {
+  background: var(--pathway-gold);
+}
+
+.pathway-card-featured::after,
+.pathway-choice-human::after {
+  color: rgba(232, 197, 117, 0.35);
+}
+
+.pathway-choice-dynamic {
+  background: var(--entry-panel-alt);
+}
+
+.pathway-card b {
+  z-index: 2;
+  border: 0;
+}
+
+.pathway-card strong,
+.pathway-choice strong {
+  font-family: Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-weight: 700;
+}
+
+.pathway-choice-grid-play {
+  display: grid;
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: min(78vw, 300px);
+  gap: 14px;
+  margin-right: calc(-1 * var(--pathway-view-inline));
+  margin-left: calc(-1 * var(--pathway-view-inline));
+  padding: 12px var(--pathway-view-inline) 18px;
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-x: contain;
+  scroll-padding-inline: var(--pathway-view-inline);
+  scroll-snap-type: inline mandatory;
+  scrollbar-color: color-mix(in srgb, var(--entry-accent) 72%, transparent) transparent;
+  scrollbar-width: thin;
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pathway-choice-grid-play::-webkit-scrollbar {
+  height: 6px;
+}
+
+.pathway-choice-grid-play::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pathway-choice-grid-play::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--entry-accent) 72%, transparent);
+}
+
+.pathway-choice-grid-play:focus-visible {
+  outline: 3px solid var(--entry-focus);
+  outline-offset: 3px;
+  border-radius: 18px;
+}
+
+.pathway-choice-grid-play .pathway-choice {
+  align-content: end;
+  min-height: clamp(286px, 43vh, 340px);
+  margin-top: 0;
+  padding: 32px 24px 34px;
+  border-radius: 22px;
+  scroll-snap-align: start;
+  scroll-snap-stop: normal;
+}
+
+.pathway-choice-grid-play .pathway-choice::after {
+  top: 28%;
+  right: 24px;
+  font-size: 68px;
+}
+
+.pathway-choice-grid-play .pathway-choice strong {
+  font-size: clamp(25px, 7vw, 34px);
+}
+
+.pathway-choice-grid-play .pathway-choice small {
+  max-width: 23ch;
+  font-size: 13px;
+}
+
+@media (hover: hover) {
+  .pathway-card:not(:disabled):hover,
+  .pathway-choice:hover {
+    z-index: 5;
+    border-color: var(--entry-accent);
+    box-shadow: 0 18px 34px color-mix(in srgb, var(--entry-accent) 18%, transparent);
+    translate: 0 -7px;
+  }
+
+  .pathway-card-featured:not(:disabled):hover,
+  .pathway-choice-human:hover {
+    background:
+      radial-gradient(circle at 100% 0, rgba(232, 197, 117, 0.16), transparent 54%),
+      color-mix(in srgb, var(--pathway-featured) 90%, var(--entry-link));
+  }
+}
+
+@media (min-width: 600px) and (max-width: 849px) {
+  .pathway-choice-grid-play {
+    grid-auto-columns: min(39vw, 300px);
+  }
+}
+
+@media (min-width: 850px) {
+  .pathway-home,
+  .pathway-subview {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 650px;
+    padding: 50px 48px 28px;
+  }
+
+  .pathway-intro,
+  .pathway-subhead {
+    gap: 8px;
+  }
+
+  .pathway-intro h1,
+  .pathway-subhead h2 {
+    font-size: clamp(44px, 5vw, 64px);
+  }
+
+  .pathway-primary-grid,
+  .pathway-choice-grid:not(.pathway-choice-grid-play) {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: center;
+    min-height: 390px;
+    padding: 30px 30px 0;
+  }
+
+  .pathway-primary-grid .pathway-card,
+  .pathway-choice-grid:not(.pathway-choice-grid-play) .pathway-choice {
+    flex: 1 1 0;
+    align-content: end;
+    min-width: 0;
+    min-height: 330px;
+    margin: 0 -8px;
+    padding: 34px 26px 40px;
+    border-radius: 22px;
+  }
+
+  .pathway-primary-grid > :nth-child(1),
+  .pathway-choice-grid:not(.pathway-choice-grid-play) > :nth-child(1) {
+    transform: rotate(-5deg) translateY(19px);
+  }
+
+  .pathway-primary-grid > :nth-child(2),
+  .pathway-choice-grid:not(.pathway-choice-grid-play) > :nth-child(2) {
+    transform: rotate(-1.8deg) translateY(3px);
+  }
+
+  .pathway-primary-grid > :nth-child(3),
+  .pathway-choice-grid:not(.pathway-choice-grid-play) > :nth-child(3) {
+    transform: rotate(1.8deg) translateY(3px);
+  }
+
+  .pathway-primary-grid > :nth-child(4),
+  .pathway-choice-grid:not(.pathway-choice-grid-play) > :nth-child(4) {
+    transform: rotate(5deg) translateY(19px);
+  }
+
+  .pathway-choice-grid-settings .pathway-choice {
+    flex-grow: 0;
+    flex-basis: min(34vw, 360px);
+  }
+
+  .pathway-choice-grid-play {
+    grid-auto-columns: clamp(245px, 27%, 305px);
+    min-height: 365px;
+    padding-top: 24px;
+    padding-bottom: 28px;
+  }
+
+  .pathway-choice-grid-play .pathway-choice {
+    min-height: 330px;
+  }
+}
+
+@media (max-width: 430px) {
+  .pathway-view {
+    padding-top: 22px;
+    padding-bottom: 26px;
+  }
+
+  .pathway-card,
+  .pathway-choice {
+    padding-right: 58px;
+    padding-left: 20px;
+  }
+
+  .pathway-choice-grid-play {
+    scrollbar-width: none;
+  }
+
+  .pathway-choice-grid-play::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pathway-view:not([hidden]) .pathway-intro,
+  .pathway-view:not([hidden]) .pathway-subhead {
+    animation: pathway-heading-settle 300ms cubic-bezier(0.2, 0.76, 0.28, 1) both;
+  }
+
+  .pathway-view:not([hidden]) .pathway-card,
+  .pathway-view:not([hidden]) .pathway-choice {
+    animation: pathway-card-deal 390ms cubic-bezier(0.2, 0.76, 0.28, 1) both;
+  }
+
+  .pathway-view:not([hidden]) :is(.pathway-card, .pathway-choice):nth-child(1) {
+    animation-delay: 45ms;
+  }
+
+  .pathway-view:not([hidden]) :is(.pathway-card, .pathway-choice):nth-child(2) {
+    animation-delay: 80ms;
+  }
+
+  .pathway-view:not([hidden]) :is(.pathway-card, .pathway-choice):nth-child(3) {
+    animation-delay: 115ms;
+  }
+
+  .pathway-view:not([hidden]) :is(.pathway-card, .pathway-choice):nth-child(4) {
+    animation-delay: 150ms;
+  }
+
+  .pathway-view:not([hidden]) :is(.pathway-card, .pathway-choice):nth-child(5) {
+    animation-delay: 185ms;
+  }
+
+  .pathway-view:not([hidden]) :is(.pathway-card, .pathway-choice):nth-child(6) {
+    animation-delay: 220ms;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pathway-view *,
+  .pathway-view *::before,
+  .pathway-view *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes pathway-heading-settle {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes pathway-card-deal {
+  from {
+    opacity: 0;
+    translate: 0 34px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
   }
 }

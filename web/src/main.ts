@@ -1302,6 +1302,9 @@ function showPathwayView(view: PathwayView): void {
   els.pathwayPage.dataset.view = view;
   for (const pathwayView of els.pathwayViews) {
     pathwayView.hidden = pathwayView.dataset.pathwayView !== view;
+    if (pathwayView.dataset.pathwayView === view) {
+      pathwayView.querySelector<HTMLElement>(".pathway-choice-grid")?.scrollTo({ left: 0 });
+    }
   }
   els.pathwayPage.scrollTo({ top: 0, left: 0 });
 }
