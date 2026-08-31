@@ -24,13 +24,14 @@ use crate::information_set::{
     InfoActor, PegInformationSetKey, PegObservation, PegSeat, PolicyInformationSetKey,
     PolicyRankObservation, PublicPegEvent, RankPegAction, RankPegEvent, RankPegState,
 };
+use crate::model132::Model132KeepPairTable;
 use crate::model162::Model162ActionScorer;
 use crate::model90::Model90DiscardTable;
 use crate::model91::{Model91Actor, Model91EmpiricalBeliefs, Model91Observation, Model91Policy};
 use crate::model91_discard::model91_schell_crib_ev;
 use crate::model_id::{
-    MODEL_13_0, MODEL_13_1, MODEL_14_3, MODEL_14_8, MODEL_14_8_1, MODEL_15_0, MODEL_15_1,
-    MODEL_15_2, MODEL_16_0, MODEL_16_1, MODEL_16_3, MODEL_9_0, MODEL_9_1, MYRMIDON_5,
+    MODEL_13_0, MODEL_13_1, MODEL_13_2, MODEL_14_3, MODEL_14_8, MODEL_14_8_1, MODEL_15_0,
+    MODEL_15_1, MODEL_15_2, MODEL_16_0, MODEL_16_1, MODEL_16_3, MODEL_9_0, MODEL_9_1, MYRMIDON_5,
 };
 use crate::policy::PolicyArtifact;
 
@@ -221,6 +222,7 @@ struct RuntimeTables {
     discard90: OnceLock<Model90DiscardTable>,
     discard91: OnceLock<Model91DiscardEvTable>,
     discard_hist131: OnceLock<Model131DiscardHistogramTable>,
+    discard_pairs132: OnceLock<Model132KeepPairTable>,
     beliefs91: OnceLock<Model91EmpiricalBeliefs>,
     empirical: OnceLock<EmpiricalDiscardKeepTable>,
     pairwise: OnceLock<PairwiseTable>,
@@ -464,6 +466,7 @@ fn is_supported_rust_model(model: &str) -> bool {
         || model == MODEL_9_1
         || model == MODEL_13_0
         || model == MODEL_13_1
+        || model == MODEL_13_2
         || model == MODEL_14_3
         || model == MODEL_14_8
         || model == MODEL_14_8_1
@@ -576,6 +579,9 @@ fn recommend_discard(input: &DecisionInput, root: &str) -> Result<Decision, Stri
     }
     if input.model == MODEL_13_1 {
         return recommend_discard_model131(input, root);
+    }
+    if input.model == MODEL_13_2 {
+        return recommend_discard_model132(input, root);
     }
     if input.model == MODEL_9_0 {
         return recommend_discard_model90(input, root);
@@ -747,7 +753,7 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
     if input.model == MODEL_16_3 {
         return recommend_peg_model163(input, &legal, tables.scorer163()?, tables);
     }
-    if input.model == MODEL_13_0 || input.model == MODEL_13_1 {
+    if input.model == MODEL_13_0 || input.model == MODEL_13_1 || input.model == MODEL_13_2 {
         return recommend_peg_model13(input, tables);
     }
     let hold = tables.hold()?;
@@ -1593,6 +1599,78 @@ fn recommend_discard_model131(input: &DecisionInput, root: &str) -> Result<Decis
     })
 }
 
+/// Model 13.2 is the clean keep-pair-asset comparison against frozen 13.0.
+/// The only decision change is the discard-time pegging distribution below;
+/// hand/crib scoring, board evaluation, tie-breaking, and live pegging all
+/// continue through the exact Model 13.0 implementation.
+fn recommend_discard_model132(input: &DecisionInput, root: &str) -> Result<Decision, String> {
+    let tables = runtime_tables(root)?;
+    let crib_rank = tables.crib_rank()?;
+    let keep_pairs = tables.discard_pairs132()?;
+    if !keep_pairs.is_exhaustive() {
+        return Err("Model 13.2 requires an exhaustive keep-pair asset".to_string());
+    }
+    let mut seen_cards = [false; 52];
+    for card in &input.ai_hand {
+        seen_cards[card.id as usize] = true;
+    }
+    let deck = full_deck()
+        .into_iter()
+        .filter(|card| !seen_cards[card.id as usize])
+        .collect::<Vec<_>>();
+    let role = input.role;
+    let mut board = BoardModel::new();
+    let crib_flush_bonus_by_suit = crib_flush_bonuses_by_suit(&input.ai_hand);
+    let mut recommended: Option<(Vec<Card>, CandidateEvaluation)> = None;
+
+    for discard_indices in crate::cards::combinations_indices(input.ai_hand.len(), 2) {
+        let discard = discard_indices
+            .iter()
+            .map(|index| input.ai_hand[*index])
+            .collect::<Vec<_>>();
+        let keep = input
+            .ai_hand
+            .iter()
+            .enumerate()
+            .filter_map(|(index, card)| (!discard_indices.contains(&index)).then_some(*card))
+            .collect::<Vec<_>>();
+        let evaluation = evaluate_discard_candidate_model132(
+            &input.ai_hand,
+            &keep,
+            &discard,
+            &deck,
+            role,
+            input.ai_score,
+            input.human_score,
+            &crib_flush_bonus_by_suit,
+            crib_rank,
+            keep_pairs,
+            &mut board,
+        )?;
+        let should_replace = match &recommended {
+            None => true,
+            Some((_, current)) => {
+                evaluation.win_probability > current.win_probability
+                    || (evaluation.win_probability == current.win_probability
+                        && evaluation.total_ev > current.total_ev)
+            }
+        };
+        if should_replace {
+            recommended = Some((discard, evaluation));
+        }
+    }
+
+    let Some((discard, evaluation)) = recommended else {
+        return Err("no 13.2 discard candidate evaluated".to_string());
+    };
+    Ok(Decision::Discard {
+        card_ids: discard.iter().map(|card| card.id).collect(),
+        best_lead: None,
+        ev: Some(evaluation.total_ev),
+        win_probability: Some(evaluation.win_probability),
+    })
+}
+
 fn review_discard_model13(
     input: &DecisionInput,
     selected_card_ids: &[u8],
@@ -1777,6 +1855,54 @@ fn evaluate_discard_candidate_model131(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
+fn evaluate_discard_candidate_model132(
+    full_hand: &[Card],
+    keep: &[Card],
+    discard: &[Card],
+    deck: &[Card],
+    role: Role,
+    player_score: i32,
+    opponent_score: i32,
+    crib_flush_bonus_by_suit: &[f64; 4],
+    crib_rank: &CribRankDiscardTables,
+    keep_pairs: &Model132KeepPairTable,
+    board: &mut BoardModel,
+) -> Result<CandidateEvaluation, String> {
+    let (hand_score, crib_score) = model13_rank_cut_discard_scores(
+        keep,
+        discard,
+        deck,
+        role,
+        crib_flush_bonus_by_suit,
+        crib_rank,
+    );
+    let pegging = model132_pegging_discard_option(keep, discard, role, keep_pairs)?;
+    let net_pegging = pegging.my_ev - pegging.opponent_ev;
+    let total_ev = (if role == Role::Dealer {
+        hand_score + crib_score
+    } else {
+        hand_score - crib_score
+    }) + net_pegging;
+    let win_probability = model13_discard_candidate_win_probability(
+        full_hand,
+        keep,
+        discard,
+        deck,
+        role,
+        &pegging,
+        player_score,
+        opponent_score,
+        crib_rank,
+        board,
+    );
+    Ok(CandidateEvaluation {
+        win_probability,
+        total_ev,
+        best_lead: pegging.best_lead,
+    })
+}
+
 fn model131_pegging_discard_option(
     full_hand: &[Card],
     discard: &[Card],
@@ -1808,6 +1934,31 @@ fn model131_pegging_discard_option(
         best_lead: -1,
         hist,
         total_weight,
+    })
+}
+
+fn model132_pegging_discard_option(
+    keep: &[Card],
+    discard: &[Card],
+    role: Role,
+    keep_pairs: &Model132KeepPairTable,
+) -> Result<Model13PeggingOption, String> {
+    let summary =
+        keep_pairs.aggregate_discard_forecast(&rank_counts(keep), &rank_counts(discard), role)?;
+    let mut hist = WeightedPairI32::default();
+    for bin in summary.histogram {
+        add_weight_pair_i32(
+            &mut hist,
+            (i32::from(bin.my_points), i32::from(bin.opponent_points)),
+            bin.weight as f64,
+        );
+    }
+    Ok(Model13PeggingOption {
+        my_ev: summary.my_ev,
+        opponent_ev: summary.opponent_ev,
+        best_lead: -1,
+        hist,
+        total_weight: summary.total_weight as f64,
     })
 }
 
@@ -4831,6 +4982,7 @@ impl RuntimeTables {
             discard90: OnceLock::new(),
             discard91: OnceLock::new(),
             discard_hist131: OnceLock::new(),
+            discard_pairs132: OnceLock::new(),
             beliefs91: OnceLock::new(),
             empirical: OnceLock::new(),
             pairwise: OnceLock::new(),
@@ -4858,6 +5010,12 @@ impl RuntimeTables {
     fn discard_hist131(&self) -> Result<&Model131DiscardHistogramTable, String> {
         load_cached(&self.discard_hist131, "discard_hist131", || {
             Model131DiscardHistogramTable::load(self.asset_path("model131-discard-histograms.bin"))
+        })
+    }
+
+    fn discard_pairs132(&self) -> Result<&Model132KeepPairTable, String> {
+        load_cached(&self.discard_pairs132, "discard_pairs132", || {
+            Model132KeepPairTable::load(self.asset_path("model132-keep-pairs.bin"))
         })
     }
 

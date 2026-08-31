@@ -229,12 +229,40 @@ mod tests {
             .join("../..")
             .canonicalize()
             .unwrap();
+        // Model 13.2 is exercised after its exhaustive asset is installed;
+        // unlike the frozen baselines it must fail closed while that asset is absent.
         for model in [ModelId::Schell13, ModelId::Schell131] {
             let decision =
                 recommend_discard_for_side(&game, Side::Left, model, root.to_str().unwrap())
                     .unwrap();
             assert_eq!(decision.best_lead, None);
         }
+    }
+
+    #[test]
+    fn model132_live_pegging_is_frozen_model13() {
+        let mut game = CribbageGame::new_with_seed(0x9e3779b9, Side::Left);
+        game.discard(Side::Left, [29, 11]).unwrap();
+        game.discard(Side::Right, [51, 15]).unwrap();
+        let pone = game.pone;
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+
+        let model13 =
+            recommend_peg_for_side(&game, pone, ModelId::Schell13, None, root.to_str().unwrap())
+                .unwrap();
+        let model132 = recommend_peg_for_side(
+            &game,
+            pone,
+            ModelId::Schell132,
+            None,
+            root.to_str().unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(model132, model13);
     }
 
     #[test]

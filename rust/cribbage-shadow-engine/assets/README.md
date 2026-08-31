@@ -75,3 +75,12 @@ instead of replaying that forecast.
 `model90-discard-ev.bin` (`M90EV001`) is a lossless packed transcription of
 the historical Model 9.0 table. It is used only to provide an immutable native
 9.0 baseline for controlled Model 9.1 evaluation.
+
+Model 13.2 uses `model132-keep-pairs.bin` (`M132P001`), an exhaustive dense
+1,820 by 1,820 matrix of terminal dealer/pone pegging outcomes plus frozen
+role-specific empirical keep priors. At discard time the runtime removes the
+actor's four kept cards and two candidate crib discards from physical
+opponent-hand availability, reweights compatible opponent keeps, and passes
+the resulting score distribution into Model 13.0's unchanged board objective.
+The initial Model 13.2 comparison deliberately retains Model 13.0 live pegging
+and all non-asset discard logic.

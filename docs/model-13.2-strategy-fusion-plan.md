@@ -81,3 +81,16 @@ shard builders execute the same policy through the acting player's legal
 observation and store only terminal paired scores. Runtime creates the local histogram by
 reweighting opponent keeps after removing the actor's four-card keep and two
 candidate crib discards.
+
+## Controlled Model 13.0 comparison
+
+The first selectable Model 13.2 evaluation is intentionally narrower than the
+full live-policy design above. It substitutes only the exhaustive keep-pair
+asset and its discard-time dead-card reweighting adapter. Hand scoring, crib
+scoring, board evaluation, discard tie-breaking, executable opening leads, and
+every live pegging decision call the frozen Model 13.0 implementation.
+
+The reciprocal, paired-seed 10,000-game benchmark against Model 13.0 therefore
+measures the new asset and the minimal logic required to consume it. Enabling a
+new Model 13.2 live pegging policy remains a separate experiment and must not be
+folded into this asset ablation.

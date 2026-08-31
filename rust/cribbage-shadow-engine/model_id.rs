@@ -8,6 +8,10 @@ pub const MODEL_13_0: &str = "schell_table-peg_table-13.0";
 /// selection, and live pegging while substituting the Model 13.1 histogram
 /// only for the discard-time pegging distribution.
 pub const MODEL_13_1: &str = "schell_table-peg_table-13.1";
+/// Model 13.2 is a controlled Model 13.0 discard-forecast ablation. It keeps
+/// every live decision path frozen at 13.0 and substitutes only the reusable
+/// keep-pair pegging asset used while evaluating discards.
+pub const MODEL_13_2: &str = "schell_table-peg_table-13.2";
 pub const MODEL_14_3: &str = "schell_table-peg_table-14.3";
 pub const MODEL_14_8: &str = "schell_table-peg_table-14.8";
 pub const MODEL_14_8_1: &str = "schell_table-peg_table-14.8.1";
@@ -31,6 +35,7 @@ pub enum ModelId {
     Schell91,
     Schell13,
     Schell131,
+    Schell132,
     Schell143,
     Schell148,
     Schell1481,
@@ -50,6 +55,7 @@ impl ModelId {
             ModelId::Schell91 => MODEL_9_1,
             ModelId::Schell13 => MODEL_13_0,
             ModelId::Schell131 => MODEL_13_1,
+            ModelId::Schell132 => MODEL_13_2,
             ModelId::Schell143 => MODEL_14_3,
             ModelId::Schell148 => MODEL_14_8,
             ModelId::Schell1481 => MODEL_14_8_1,
@@ -69,6 +75,7 @@ impl ModelId {
             ModelId::Schell91 => "Schell Table + Peg Table 9.1",
             ModelId::Schell13 => "Schell Table + Peg Table 13.0",
             ModelId::Schell131 => "Schell Table + Peg Table 13.1",
+            ModelId::Schell132 => "Schell Table + Peg Table 13.2",
             ModelId::Schell143 => "Schell Table + Peg Table 14.3",
             ModelId::Schell148 => "Schell Table + Peg Table 14.8",
             ModelId::Schell1481 => "Schell Table + Peg Table 14.8.1",
@@ -89,6 +96,7 @@ impl ModelId {
                 | ModelId::Schell91
                 | ModelId::Schell13
                 | ModelId::Schell131
+                | ModelId::Schell132
                 | ModelId::Schell143
                 | ModelId::Schell148
                 | ModelId::Schell1481
@@ -130,6 +138,7 @@ impl FromStr for ModelId {
             MODEL_9_1 => Ok(ModelId::Schell91),
             MODEL_13_0 => Ok(ModelId::Schell13),
             MODEL_13_1 => Ok(ModelId::Schell131),
+            MODEL_13_2 => Ok(ModelId::Schell132),
             MODEL_14_3 => Ok(ModelId::Schell143),
             MODEL_14_8 => Ok(ModelId::Schell148),
             MODEL_14_8_1 => Ok(ModelId::Schell1481),
@@ -160,6 +169,9 @@ mod tests {
         assert_eq!(MODEL_13_0.parse::<ModelId>().unwrap(), ModelId::Schell13);
         assert_eq!(MODEL_13_1.parse::<ModelId>().unwrap(), ModelId::Schell131);
         assert!(ModelId::Schell131.has_native_rust_decisions());
+        assert_eq!(MODEL_13_2.parse::<ModelId>().unwrap(), ModelId::Schell132);
+        assert!(ModelId::Schell132.has_native_rust_decisions());
+        assert!(!ModelId::Schell132.is_strength_model());
         assert_eq!(MODEL_14_3.parse::<ModelId>().unwrap(), ModelId::Schell143);
         assert_eq!(
             MODEL_14_8_1.parse::<ModelId>().unwrap().as_str(),
