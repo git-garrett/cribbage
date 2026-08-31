@@ -24,6 +24,146 @@
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
+    <section id="pathway-page" class="pathway-page" aria-labelledby="pathway-title" hidden>
+      <div class="pathway-shell">
+        <header class="pathway-brandbar">
+          <img class="pathway-logo" src="/strong-cribbage-dark-lockup.svg" alt="Strong Cribbage">
+        </header>
+        <div class="pathway-rail" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+
+        <div class="pathway-stage">
+          <section class="pathway-view pathway-home" data-pathway-view="home" aria-labelledby="pathway-title">
+            <div class="pathway-intro">
+              <p class="pathway-eyebrow">Welcome to Strong Cribbage</p>
+              <h1 id="pathway-title">Choose your path to the table.</h1>
+              <p>Play, learn, review your progress, or adjust settings.</p>
+            </div>
+            <nav class="pathway-primary-grid" aria-label="Strong Cribbage sections">
+              <button class="pathway-card pathway-card-featured" type="button" data-pathway-target="play">
+                <span class="pathway-card-kicker">Take a seat</span>
+                <strong>Play Now</strong>
+                <span>Choose a human or AI opponent.</span>
+                <b aria-hidden="true">→</b>
+              </button>
+              <button class="pathway-card" type="button" data-pathway-target="tutorial">
+                <span class="pathway-card-kicker">Build your game</span>
+                <strong>Training</strong>
+                <span>Learning modules from beginner to strategies for mastering the game.</span>
+                <b aria-hidden="true">→</b>
+              </button>
+              <button id="pathway-statistics" class="pathway-card" type="button" disabled>
+                <span class="pathway-card-kicker">Track your game</span>
+                <strong>Statistics</strong>
+                <span>See your results and scoring profile.</span>
+                <b aria-hidden="true">→</b>
+              </button>
+              <button class="pathway-card" type="button" data-pathway-target="settings">
+                <span class="pathway-card-kicker">Make it yours</span>
+                <strong>Settings</strong>
+                <span>Adjust the game for your screen and space.</span>
+                <b aria-hidden="true">→</b>
+              </button>
+            </nav>
+          </section>
+
+          <section class="pathway-view pathway-subview" data-pathway-view="play" aria-labelledby="pathway-play-title" hidden>
+            <header class="pathway-subhead">
+              <button class="pathway-back" type="button" data-pathway-back>
+                <span aria-hidden="true">←</span> Home
+              </button>
+              <p class="pathway-eyebrow">Play Now</p>
+              <h2 id="pathway-play-title">Who’s across the board?</h2>
+              <p>Choose the kind of game you want to play.</p>
+            </header>
+            <div class="pathway-choice-grid pathway-choice-grid-play">
+              <button class="pathway-choice pathway-choice-human" type="button" data-pathway-destination="human">
+                <span>Human match</span>
+                <strong>Find a Human Opponent</strong>
+              </button>
+              <button class="pathway-choice pathway-choice-dynamic" type="button" data-pathway-destination="dynamic">
+                <span>Adaptive opponent</span>
+                <strong>Dynamic</strong>
+                <small>Adapts to your play and plays back at your skill.</small>
+              </button>
+              <button class="pathway-choice" type="button" data-pathway-destination="easy">
+                <span>AI opponent</span>
+                <strong>Easy</strong>
+                <small>Good for Learners</small>
+              </button>
+              <button class="pathway-choice" type="button" data-pathway-destination="tough">
+                <span>AI opponent</span>
+                <strong>Tough</strong>
+                <small>Challenges Most Players</small>
+              </button>
+              <button class="pathway-choice" type="button" data-pathway-destination="master">
+                <span>AI opponent</span>
+                <strong>Master</strong>
+                <small>Challenges the Best Players</small>
+              </button>
+              <button class="pathway-choice" type="button" data-pathway-destination="grandmaster">
+                <span>AI opponent</span>
+                <strong>Grandmaster</strong>
+                <small>Better than Most Humans</small>
+              </button>
+            </div>
+          </section>
+
+          <section class="pathway-view pathway-subview" data-pathway-view="tutorial" aria-labelledby="pathway-tutorial-title" hidden>
+            <header class="pathway-subhead">
+              <button class="pathway-back" type="button" data-pathway-back>
+                <span aria-hidden="true">←</span> Home
+              </button>
+              <p class="pathway-eyebrow">Training</p>
+              <h2 id="pathway-tutorial-title">Learn one layer at a time.</h2>
+              <p>Learning modules from beginner to strategies for mastering the game.</p>
+            </header>
+            <div class="pathway-choice-grid pathway-choice-grid-tutorial">
+              <button class="pathway-choice" type="button" data-pathway-destination="tutorial-beginner">
+                <span>Learn to Play</span>
+                <strong>Beginner</strong>
+              </button>
+              <button class="pathway-choice" type="button" data-pathway-destination="tutorial-intermediate">
+                <span>Learn to Score Points</span>
+                <strong>Intermediate</strong>
+              </button>
+              <button class="pathway-choice" type="button" data-pathway-destination="tutorial-expert">
+                <span>Learn Cribbage Strategy</span>
+                <strong>Expert Strategies</strong>
+              </button>
+            </div>
+          </section>
+
+          <section class="pathway-view pathway-subview" data-pathway-view="settings" aria-labelledby="pathway-settings-title" hidden>
+            <header class="pathway-subhead">
+              <button class="pathway-back" type="button" data-pathway-back>
+                <span aria-hidden="true">←</span> Home
+              </button>
+              <p class="pathway-eyebrow">Settings</p>
+              <h2 id="pathway-settings-title">Set up your table.</h2>
+              <p>Choose what you want to adjust.</p>
+            </header>
+            <div class="pathway-choice-grid pathway-choice-grid-settings">
+              <button class="pathway-choice" type="button" data-pathway-destination="size">
+                <span>Display</span>
+                <strong>Size</strong>
+              </button>
+              <button class="pathway-choice" type="button" data-pathway-destination="sounds">
+                <span>Audio</span>
+                <strong>Sounds</strong>
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <footer class="pathway-footer">
+          <span>Play thoughtfully.</span>
+          <span aria-hidden="true">•</span>
+          <span>Count carefully.</span>
+        </footer>
+      </div>
+    </section>
     <section id="auth-page" class="auth-page" aria-labelledby="auth-title" hidden>
       <div class="auth-shell">
         <img class="auth-logo" src="/strong-cribbage-dark-lockup.svg" alt="Strong Cribbage">

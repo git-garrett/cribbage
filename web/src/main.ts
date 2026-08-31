@@ -124,6 +124,7 @@ const EMPTY_LEADERBOARD_SUMMARY: LeaderboardSummarySource = {
 
 type ServerBusyRetry = () => void | Promise<void>;
 type AppFontSize = "normal" | "large" | "x-large";
+type PathwayView = "home" | "play" | "tutorial" | "settings";
 
 const FONT_SIZE_STORAGE_KEY = "strong-cribbage.fontSize";
 const DISMISSED_GAME_OVER_STORAGE_KEY = "strong-cribbage.dismissedGameOverId";
@@ -326,6 +327,11 @@ function setAiThinking(active: boolean): void {
 
 const els = {
   app: document.querySelector(".app") as HTMLElement,
+  pathwayPage: document.querySelector("#pathway-page") as HTMLElement,
+  pathwayViews: [...document.querySelectorAll<HTMLElement>("[data-pathway-view]")],
+  pathwayTargetButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-target]")],
+  pathwayBackButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-back]")],
+  pathwayStatistics: document.querySelector("#pathway-statistics") as HTMLButtonElement,
   authPage: document.querySelector("#auth-page") as HTMLElement,
   authTitle: document.querySelector("#auth-title") as HTMLElement,
   authIntro: document.querySelector("#auth-intro") as HTMLElement,
@@ -554,6 +560,7 @@ const REMOTE_AI_BASE = resolveRemoteAiBase(window.location.search, Capacitor.isN
 const REMOTE_AI_EXPLICIT = URL_PARAMS.has("api");
 const IS_VITE_DEV = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV);
 const LOCAL_NETWORK_MODE = isLocalNetworkHostname(window.location.hostname);
+const PATHWAY_NAV_ENABLED = LOCAL_NETWORK_MODE && URL_PARAMS.get("pathway") !== "0";
 const AUTHENTICATION_ENABLED = !LOCAL_NETWORK_MODE || URL_PARAMS.get("auth") === "1" || REMOTE_AI_EXPLICIT;
 const SIMPLE_NETWORK_LOCAL_AI_MODE = SIMPLE_NETWORK_MODE &&
   LOCAL_NETWORK_MODE &&
@@ -581,6 +588,7 @@ interface AuthMessageResponse {
 
 let authenticatedUser: AuthUser | null = null;
 let pendingAuthEmail = "";
+let pathwayStatsReturn = false;
 
 els.parGuidesToggle.checked = state.parGuides;
 
@@ -805,6 +813,7 @@ function applyFontSizePreference(): void {
 applySimpleNetworkMode();
 applyAdminVisibility();
 applyFontSizePreference();
+applyPathwayNavigation();
 window.addEventListener("hashchange", applyAdminVisibility);
 try {
   if (state.game) render(state.game);
@@ -1279,6 +1288,21 @@ function syncAnalytics(events: AnalyticsEvent[]): void {
 
 function markAppReady(): void {
   document.body.dataset.ready = "true";
+}
+
+function showPathwayView(view: PathwayView): void {
+  if (!PATHWAY_NAV_ENABLED) return;
+  els.pathwayPage.hidden = false;
+  els.pathwayPage.dataset.view = view;
+  for (const pathwayView of els.pathwayViews) {
+    pathwayView.hidden = pathwayView.dataset.pathwayView !== view;
+  }
+  els.pathwayPage.scrollTo({ top: 0, left: 0 });
+}
+
+function applyPathwayNavigation(): void {
+  els.pathwayPage.hidden = !PATHWAY_NAV_ENABLED;
+  if (PATHWAY_NAV_ENABLED) showPathwayView("home");
 }
 
 function buildBoard(): void {
@@ -4627,6 +4651,7 @@ function playAreaTitle(game: GameState): string {
 
 function render(game: GameState | null): void {
   if (!game) return;
+  els.pathwayStatistics.disabled = false;
   syncAnalytics(game.analyticsEvents);
   state.game = game;
   if (SIMPLE_NETWORK_MODE && game.phase === "game_over") state.hasResumableGame = false;
@@ -5035,6 +5060,31 @@ els.menuToggle.addEventListener("click", () => {
   els.menuToggle.setAttribute("aria-expanded", String(open));
 });
 
+for (const button of els.pathwayTargetButtons) {
+  button.addEventListener("click", () => {
+    const target = button.dataset.pathwayTarget as PathwayView | undefined;
+    if (target) showPathwayView(target);
+  });
+}
+
+for (const button of els.pathwayBackButtons) {
+  button.addEventListener("click", () => showPathwayView("home"));
+}
+
+els.pathwayStatistics.addEventListener("click", () => {
+  if (els.pathwayStatistics.disabled || !state.game) return;
+  pathwayStatsReturn = true;
+  els.pathwayPage.hidden = true;
+  state.splashOpen = false;
+  document.body.dataset.splash = "false";
+  openAnalytics("my");
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || els.pathwayPage.hidden) return;
+  if (els.pathwayPage.dataset.view !== "home") showPathwayView("home");
+});
+
 document.addEventListener("pointerdown", (event) => {
   if (els.settingsPanel.hidden) return;
   const target = event.target;
@@ -5069,6 +5119,10 @@ els.analyticsOpen.addEventListener("click", () => {
 els.analyticsClose.addEventListener("click", () => {
   state.analyticsOpen = false;
   render(state.game);
+  if (pathwayStatsReturn) {
+    pathwayStatsReturn = false;
+    showPathwayView("home");
+  }
 });
 
 els.gameLogOpen.addEventListener("click", () => {
