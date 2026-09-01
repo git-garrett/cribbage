@@ -36,8 +36,8 @@ describe("Extra Large accessibility typography", () => {
     expect(css).toMatch(/body\[data-font-size="x-large"\] \.scoreboard \.board,[^{]*body\[data-font-size="x-large"\] \.ai-strip\s*\{[^}]*display:\s*none\s*!important/s);
   });
 
-  it("removes redundant status and notifications from hand and crib scoring", () => {
-    expect(css).toMatch(/\.app\[data-phase="score_pone"\] \.status,[^{]*\.app\[data-phase="score_dealer"\] \.status,[^{]*\.app\[data-phase="score_crib"\] \.status,[^{]*\.app\[data-phase="score_pone"\] \.notification-row,[^{]*\.app\[data-phase="score_dealer"\] \.notification-row,[^{]*\.app\[data-phase="score_crib"\] \.notification-row[^{]*\{[^}]*display:\s*none/s);
+  it("removes redundant status from hand and crib scoring", () => {
+    expect(css).toMatch(/\.app\[data-phase="score_pone"\] \.status,[^{]*\.app\[data-phase="score_dealer"\] \.status,[^{]*\.app\[data-phase="score_crib"\] \.status[^{]*\{[^}]*display:\s*none/s);
   });
 
   it("skips shuffle, deal, and cut motion at Extra Large", () => {
@@ -81,30 +81,29 @@ describe("Extra Large accessibility typography", () => {
   });
 });
 
-describe("Mobile notification layout", () => {
-  it("places navigation at opposite edges above a full-width message", () => {
-    expect(css).toMatch(/\.notification-row\s*\{[^}]*grid-template-columns:\s*var\(--notice-nav-size\) minmax\(0,\s*1fr\) var\(--notice-nav-size\)/s);
-    expect(css).toMatch(/\.notice-back\s*\{[^}]*grid-column:\s*1/s);
-    expect(css).toMatch(/\.notice-forward\s*\{[^}]*grid-column:\s*3/s);
-    expect(css).toMatch(/\.notification-row > \.result\s*\{[^}]*grid-column:\s*1\s*\/\s*-1[^}]*grid-row:\s*2/s);
+describe("Mobile notification bubbles", () => {
+  it("floats notifications over the action without taking layout space", () => {
+    expect(css).toMatch(/\.game-notifications\s*\{[^}]*position:\s*absolute[^}]*inset:\s*0[^}]*pointer-events:\s*none/s);
+    expect(css).toMatch(/@keyframes game-score-notification[\s\S]*scale\(0\.68\)[\s\S]*calc\(-55% - 30px\)/s);
+    expect(css).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*animation-name:\s*game-notification-fade/s);
   });
 
   it("keeps persistent controls at least 44 pixels tall", () => {
     expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*\.font-size-control select\s*\{[^}]*min-height:\s*44px/s);
     expect(css).toMatch(/\.app\[data-view="game"\] \.app-back\s*\{[^}]*min-height:\s*var\(--game-menu-size\)/s);
-    expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*\.notification-row\s*\{[^}]*--notice-nav-size:\s*44px/s);
   });
 });
 
 describe("Phase-specific mobile cleanup", () => {
   it("removes dead game chrome from reports and empty hands after pegging", () => {
-    expect(css).toMatch(/\.app\[data-phase="game_over"\] \.status,[^{]*\.app\[data-phase="game_over"\] \.played,[^{]*\.app\[data-phase="game_over"\] \.notification-row\s*\{[^}]*display:\s*none/s);
+    expect(css).toMatch(/\.app\[data-phase="game_over"\] \.status,[^{]*\.app\[data-phase="game_over"\] \.played\s*\{[^}]*display:\s*none/s);
     expect(css).toMatch(/\.app\[data-phase="pegging_complete"\] \.user-panel-header,[^{]*\.app\[data-phase="pegging_complete"\] #human-hand\s*\{[^}]*display:\s*none/s);
     expect(mainSource).toMatch(/function aiCardSlots[^]*if \(game\.aiHandCount === 0\) return 0;/s);
   });
 
-  it("suppresses duplicate cut and discard instructions on mobile", () => {
-    expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*\.app\[data-phase="cut_for_deal"\]:not\(\[data-cut-confirming="true"\]\) \.notification-row,[^{]*\.app\[data-phase="discard"\] \.notification-row\s*\{[^}]*display:\s*none/s);
+  it("does not restore the retired dedicated notification area", () => {
+    expect(css).not.toContain(".notification-row");
+    expect(mainSource).not.toContain("noticeBack");
   });
 
   it("gives the discard hand the full table width", () => {

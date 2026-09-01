@@ -1183,19 +1183,19 @@ fn apply_action(
         "prepare-ai-discard" => Ok(()),
         "master-hint" => {
             if session.model == ModelId::Schell13 {
-                return Err("Master is already your opponent.".to_string());
+                return Err("Ace is already your opponent.".to_string());
             }
             match session.game.phase {
                 Phase::Discard if !session.waiting_for_deal_cut && !session.waiting_for_ai_discard => Ok(()),
                 Phase::Pegging
                     if !session.game.pegging_reset_pending
                         && session.game.current_player() == HUMAN => Ok(()),
-                _ => Err("Master advice is not available for this decision.".to_string()),
+                _ => Err("Ace advice is not available for this decision.".to_string()),
             }
         }
         "forfeit" => {
             if session.model != ModelId::Schell13 {
-                return Err("Only a Master game can be forfeited here.".to_string());
+                return Err("Only an Ace game can be forfeited here.".to_string());
             }
             session.forfeited = true;
             session.completed_at = Some(isoish_now());
@@ -1641,10 +1641,10 @@ fn response_with_master_hint(
             PegDecision::Play { card_id, .. } => ("play", vec![card_id]),
             PegDecision::Go => ("go", Vec::new()),
         },
-        _ => return Err("Master advice is not available for this decision.".to_string()),
+        _ => return Err("Ace advice is not available for this decision.".to_string()),
     };
     let Some(body) = response.strip_suffix('}').map(str::to_string) else {
-        return Err("could not append Master hint".to_string());
+        return Err("could not append Ace hint".to_string());
     };
     response = body;
     write!(

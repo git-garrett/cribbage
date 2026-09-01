@@ -122,14 +122,14 @@ describe("local pathway navigation", () => {
     expect(css).toContain(".pathway-coming-soon");
   });
 
-  it("requires an account for Statistics, human games, and Master", () => {
+  it("requires an account for Statistics, human games, and Ace", () => {
     expect(html.match(/Sign in required/g)).toHaveLength(3);
     expect(source).toMatch(/opponent === DEFAULT_OPPONENT && !authenticatedUser[\s\S]*kind: "master"/);
     expect(source).toMatch(/destination === "human"[\s\S]*kind: "human"/);
     expect(source).toMatch(/pathwayStatistics\.addEventListener\("click"[\s\S]*kind: "statistics"/);
   });
 
-  it("protects a saved Master game before switching to a lower opponent", () => {
+  it("protects a saved Ace game before switching to a lower opponent", () => {
     expect(html).toContain('id="master-session-dialog"');
     expect(html).toContain('id="master-session-save"');
     expect(html).toContain('id="master-session-forfeit"');

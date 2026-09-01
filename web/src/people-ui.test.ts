@@ -50,11 +50,11 @@ describe("human clubhouse UI", () => {
     expect(source).toContain('if (engine === PATHWAY_OPPONENTS.tough) return "Tough"');
   });
 
-  it("offers Master advice only as a lower-level gameplay aid", () => {
+  it("offers Ace advice only as a lower-level gameplay aid", () => {
     expect(html).toContain('id="ask-master"');
     expect(html).toContain('id="master-hint-dialog"');
     expect(html).toContain('id="master-hint-apply"');
-    expect(html).toContain("Play Master’s Pick");
+    expect(html).toContain("Play Ace’s Pick");
     expect(source).toContain("function canAskMaster");
     expect(source).toContain('action: "master-hint"');
     expect(source).toContain("function requestMasterHint");

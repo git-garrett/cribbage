@@ -116,6 +116,23 @@ interface LeaderboardSummarySource {
   mostSkunks: LeaderboardPlayer[];
 }
 
+type GameNotice =
+  | {
+      key: string;
+      kind: "status";
+      text: string;
+      anchor: "play" | "center";
+    }
+  | {
+      key: string;
+      kind: "score";
+      text: string;
+      label: string;
+      points: number;
+      player: PlayerKey;
+      anchor: "play" | "cut" | "scoring";
+    };
+
 const EMPTY_LEADERBOARD_SUMMARY: LeaderboardSummarySource = {
   generatedAt: "",
   source: "server-game-uploads",
@@ -135,11 +152,11 @@ type MyStatsOpponent = "master" | "human" | "easy" | "tough" | "grandmaster" | "
 type StatsView = "stats" | "leaderboard" | "game-log";
 
 const MY_STATS_OPPONENT_LABEL: Record<MyStatsOpponent, string> = {
-  master: "Master",
+  master: "Ace",
   human: "Human opponents",
   easy: "Easy",
   tough: "Tough",
-  grandmaster: "Grandmaster",
+  grandmaster: "Legend",
   dynamic: "Dynamic",
 };
 
@@ -229,13 +246,12 @@ const state: {
   modelLoading: boolean;
   completingReviews: boolean;
   reviewProgress: { total: number; remaining: number } | null;
-  noticeText: string;
-  noticeHistory: string[];
-  noticeHistoryIndex: number | null;
-  noticeQueue: string[];
+  noticeQueue: GameNotice[];
   noticeResultLines: string[];
-  noticeUpdatedAt: number;
   noticeTimer: number | null;
+  activeNoticeKind: GameNotice["kind"] | null;
+  scoreNoticesInitialized: boolean;
+  seenScoreNoticeIds: Set<string>;
   dealCutRevealStage: "cutting" | "human" | "ai" | null;
   dealCutResolve: (() => void) | null;
   dealAnimation: { key: string; dealer: string; pone: string } | null;
@@ -281,13 +297,12 @@ const state: {
   modelLoading: false,
   completingReviews: false,
   reviewProgress: null,
-  noticeText: "",
-  noticeHistory: [],
-  noticeHistoryIndex: null,
   noticeQueue: [],
   noticeResultLines: [],
-  noticeUpdatedAt: 0,
   noticeTimer: null,
+  activeNoticeKind: null,
+  scoreNoticesInitialized: false,
+  seenScoreNoticeIds: new Set(),
   dealCutRevealStage: null,
   dealCutResolve: null,
   dealAnimation: null,
@@ -321,12 +336,10 @@ function resetTransientGameUi(): void {
   state.modelLoading = false;
   state.completingReviews = false;
   state.reviewProgress = null;
-  state.noticeText = "";
-  state.noticeHistory = [];
-  state.noticeHistoryIndex = null;
   state.noticeResultLines = [];
+  state.scoreNoticesInitialized = false;
+  state.seenScoreNoticeIds = new Set();
   clearNoticeQueue();
-  renderNoticeText("");
   state.dealCutRevealStage = null;
   if (state.dealCutResolve) state.dealCutResolve();
   state.dealCutResolve = null;
@@ -517,8 +530,6 @@ const els = {
   turnCard: document.querySelector("#turn-card") as HTMLElement,
   playAreaTitle: document.querySelector("#play-area-title") as HTMLElement,
   plays: document.querySelector("#plays") as HTMLElement,
-  noticeBack: document.querySelector("#notice-back") as HTMLButtonElement,
-  noticeForward: document.querySelector("#notice-forward") as HTMLButtonElement,
   userHandTitle: document.querySelector("#user-hand-title") as HTMLElement,
   userPanelHeader: document.querySelector(".user-panel-header") as HTMLElement,
   userHandMeta: document.querySelector("#user-hand-meta") as HTMLElement,
@@ -631,7 +642,7 @@ const SAVE_KEY = "strong-cribbage.game.v1";
 const ANALYTICS_KEY = "strong-cribbage.analytics.v1";
 const PHONE_GAME_DB_NAME = "cribbage-game-log";
 const PHONE_GAME_DB_VERSION = 1;
-const NOTICE_MIN_MS = 600;
+const NOTICE_VISIBLE_MS = 2_200;
 const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-13.0";
 const SIMPLE_NETWORK_PUBLIC_OPPONENTS = new Set<string>([
   "myrmidon-5",
@@ -1042,7 +1053,8 @@ try {
   state.splashOpen = SIMPLE_NETWORK_MODE && !playerFirstName;
   document.body.dataset.splash = state.splashOpen ? "true" : "false";
   els.splashPage.hidden = !state.splashOpen;
-  els.result.textContent = error instanceof Error ? error.message : "Startup failed";
+  const text = error instanceof Error ? error.message : "Startup failed";
+  enqueueNotices([{ key: `startup:${text}`, kind: "status", text, anchor: "center" }]);
 }
 
 function loadAnalytics(): AnalyticsStore {
@@ -2030,10 +2042,10 @@ function showPathwayView(view: PathwayView): void {
   if (authenticatedUser) void refreshPeople({ heartbeat: true });
 }
 
-function pathwayOpponentLabel(opponent: Opponent): "Easy" | "Tough" | "Master" {
+function pathwayOpponentLabel(opponent: Opponent): "Easy" | "Tough" | "Ace" {
   if (opponent === PATHWAY_OPPONENTS.easy) return "Easy";
   if (opponent === PATHWAY_OPPONENTS.tough) return "Tough";
-  return "Master";
+  return "Ace";
 }
 
 function syncPathwayOpponentPresentation(opponent: Opponent): void {
@@ -2047,7 +2059,7 @@ function beginPathwayOpponent(opponent: Opponent): void {
   state.pendingMasterGameId = null;
   els.masterSessionDialog.hidden = true;
   if (opponent === DEFAULT_OPPONENT && !authenticatedUser) {
-    requestAuthentication({ kind: "master" }, "Sign in to play the Master opponent.");
+    requestAuthentication({ kind: "master" }, "Sign in to play Ace.");
     return;
   }
   selectedPathwayOpponent = opponent;
@@ -2111,7 +2123,7 @@ async function forfeitSavedMasterGame(): Promise<void> {
   els.masterSessionForfeit.disabled = true;
   els.masterSessionSave.disabled = true;
   els.masterSessionCancel.disabled = true;
-  els.masterSessionStatus.textContent = "Forfeiting Master game…";
+  els.masterSessionStatus.textContent = "Forfeiting Ace game…";
   try {
     await serverJson<ServerGameActionResponse>("/api/game/action", {
       action: "forfeit",
@@ -2121,7 +2133,7 @@ async function forfeitSavedMasterGame(): Promise<void> {
     });
     beginPathwayOpponent(nextOpponent);
   } catch (error) {
-    els.masterSessionStatus.textContent = error instanceof Error ? error.message : "The Master game could not be forfeited.";
+    els.masterSessionStatus.textContent = error instanceof Error ? error.message : "The Ace game could not be forfeited.";
   } finally {
     els.masterSessionForfeit.disabled = false;
     els.masterSessionSave.disabled = false;
@@ -2974,10 +2986,10 @@ function renderMasterHint(game: GameState): void {
     .map((id) => game.humanHand.find((card) => card.id === id))
     .filter((card): card is GameState["humanHand"][number] => Boolean(card));
   const recommendation = hint.kind === "go"
-    ? "Master recommends Go."
+    ? "Ace recommends Go."
     : cards.length
-      ? `Master recommends ${hint.kind === "discard" ? "discarding" : "playing"} ${cards.map((card) => `${card.rank}${card.symbol}`).join(" and ")}.`
-      : "Master’s recommendation is no longer available.";
+      ? `Ace recommends ${hint.kind === "discard" ? "discarding" : "playing"} ${cards.map((card) => `${card.rank}${card.symbol}`).join(" and ")}.`
+      : "Ace’s recommendation is no longer available.";
   els.masterHintCopy.textContent = recommendation;
   els.masterHintApply.disabled = !cards.length && hint.kind !== "go";
   els.masterHintDialog.hidden = false;
@@ -3508,19 +3520,61 @@ function renderResult(game: GameState): void {
   if (game.phase === "game_over") {
     state.noticeResultLines = [];
     clearNoticeQueue();
-    applyNotice("");
     els.resultInline.innerHTML = "";
     return;
   }
+  enqueueNotices(newScoreNotices(game));
   const lines = (state.resultOverride ?? (game.result.length ? game.result : [game.message])).filter(
     (line) => line !== "User turn.",
   ).map(presentGameText);
   const commonPrefix = matchingPrefixLength(state.noticeResultLines, lines);
   const newLines = lines.slice(commonPrefix).filter(Boolean);
   state.noticeResultLines = [...lines];
-  enqueueNotices(newLines);
+  enqueueNotices(newLines.map((text, index) => ({
+    key: `status:${game.handNumber}:${game.phase}:${index}:${text}`,
+    kind: "status" as const,
+    text,
+    anchor: game.phase === "pegging" || game.phase === "pegging_complete" ? "play" as const : "center" as const,
+  })));
   els.resultInline.innerHTML = "";
   if (!game.scoring) els.scoringResult.innerHTML = "";
+}
+
+function newScoreNotices(game: GameState): GameNotice[] {
+  const events = game.analyticsEvents.filter((event): event is ScoreEvent => event.type === "score");
+  if (!state.scoreNoticesInitialized) {
+    for (const event of events) state.seenScoreNoticeIds.add(event.id);
+    state.scoreNoticesInitialized = true;
+    return [];
+  }
+  const notices: GameNotice[] = [];
+  for (const event of events) {
+    if (state.seenScoreNoticeIds.has(event.id)) continue;
+    state.seenScoreNoticeIds.add(event.id);
+    const label = scoreNoticeLabel(event);
+    const player = event.player === "human" ? playerDisplayName() : playerName("ai");
+    const pointLabel = event.points === 1 ? "point" : "points";
+    notices.push({
+      key: `score:${event.id}`,
+      kind: "score",
+      text: `${label}. ${player} scores ${event.points} ${pointLabel}.`,
+      label,
+      points: event.points,
+      player: event.player,
+      anchor: event.reason === "Heels" ? "cut" : event.category === "pegging" ? "play" : "scoring",
+    });
+  }
+  return notices;
+}
+
+function scoreNoticeLabel(event: ScoreEvent): string {
+  if (event.reason === "Heels") return "His heels";
+  if (event.reason === "Go") return "Go point";
+  if (event.category === "hand") return "Hand";
+  if (event.category === "crib") return "Crib";
+  if (event.count === 15) return "Fifteen";
+  if (event.count === 31) return "Thirty-one";
+  return "Pegging";
 }
 
 function matchingPrefixLength(left: string[], right: string[]): number {
@@ -3535,71 +3589,83 @@ function clearNoticeQueue(): void {
     window.clearTimeout(state.noticeTimer);
     state.noticeTimer = null;
   }
+  state.activeNoticeKind = null;
+  els.result.innerHTML = "";
 }
 
-function enqueueNotices(lines: string[]): void {
-  if (!lines.length) {
-    renderNoticeText(state.noticeHistoryIndex === null ? state.noticeText : state.noticeHistory[state.noticeHistoryIndex] ?? "");
-    return;
+function enqueueNotices(notices: GameNotice[]): void {
+  if (!notices.length) return;
+  const hasScore = notices.some((notice) => notice.kind === "score");
+  if (hasScore) {
+    state.noticeQueue.unshift(...notices);
+    if (state.activeNoticeKind === "status" && state.noticeTimer !== null) {
+      window.clearTimeout(state.noticeTimer);
+      state.noticeTimer = null;
+      state.activeNoticeKind = null;
+      els.result.innerHTML = "";
+    }
+  } else {
+    state.noticeQueue.push(...notices);
   }
-  if (state.noticeHistoryIndex !== null) {
-    state.noticeHistoryIndex = null;
-  }
-  state.noticeQueue.push(...lines);
   drainNoticeQueue();
 }
 
 function drainNoticeQueue(): void {
   if (state.noticeTimer !== null) return;
-  const nextText = state.noticeQueue.shift();
-  if (nextText === undefined) {
-    renderNoticeText(state.noticeText);
-    return;
-  }
-  if (nextText === state.noticeText) {
-    renderNoticeText(state.noticeText);
-    drainNoticeQueue();
-    return;
-  }
-  const elapsed = performance.now() - state.noticeUpdatedAt;
-  const apply = (): void => {
+  const notice = state.noticeQueue.shift();
+  if (!notice) return;
+  showNoticeBubble(notice);
+  state.activeNoticeKind = notice.kind;
+  state.noticeTimer = window.setTimeout(() => {
     state.noticeTimer = null;
-    applyNotice(nextText);
-    if (state.noticeQueue.length) {
-      state.noticeTimer = window.setTimeout(() => {
-        state.noticeTimer = null;
-        drainNoticeQueue();
-      }, NOTICE_MIN_MS);
-    }
-  };
-  if (!state.noticeText || elapsed >= NOTICE_MIN_MS) apply();
-  else {
-    state.noticeTimer = window.setTimeout(() => {
-      state.noticeTimer = null;
-      apply();
-    }, NOTICE_MIN_MS - elapsed);
-  }
+    state.activeNoticeKind = null;
+    els.result.innerHTML = "";
+    drainNoticeQueue();
+  }, NOTICE_VISIBLE_MS);
 }
 
-function applyNotice(nextText: string): void {
-  if (state.noticeText && state.noticeText !== nextText) {
-    state.noticeHistory.push(state.noticeText);
-    if (state.noticeHistory.length > 40) state.noticeHistory.shift();
-  }
-  state.noticeText = nextText;
-  state.noticeUpdatedAt = performance.now();
-  renderNoticeText(state.noticeText);
-}
-
-function renderNoticeText(text: string): void {
+function showNoticeBubble(notice: GameNotice): void {
   els.result.innerHTML = "";
-  if (text) {
-    const item = document.createElement("div");
-    item.textContent = text;
-    els.result.append(item);
+  const bubble = document.createElement("div");
+  bubble.className = `game-notification game-notification-${notice.kind}`;
+  bubble.dataset.noticeKey = notice.key;
+  bubble.setAttribute("aria-label", notice.text);
+  if (notice.kind === "score") {
+    bubble.dataset.player = notice.player;
+    const label = document.createElement("span");
+    label.className = "game-notification-label";
+    label.textContent = notice.label;
+    const points = document.createElement("strong");
+    points.className = "game-notification-points";
+    points.textContent = `+${notice.points}`;
+    const player = document.createElement("span");
+    player.className = "game-notification-player";
+    player.textContent = notice.player === "human" ? "You" : playerName("ai");
+    label.setAttribute("aria-hidden", "true");
+    points.setAttribute("aria-hidden", "true");
+    player.setAttribute("aria-hidden", "true");
+    bubble.append(label, points, player);
+  } else {
+    bubble.textContent = notice.text;
   }
-  els.noticeBack.disabled = state.noticeHistory.length === 0 || state.noticeHistoryIndex === 0;
-  els.noticeForward.disabled = state.noticeHistoryIndex === null;
+  els.result.append(bubble);
+  positionNoticeBubble(bubble, notice);
+}
+
+function positionNoticeBubble(bubble: HTMLElement, notice: GameNotice): void {
+  const layerRect = els.result.getBoundingClientRect();
+  let anchor: Element | null = null;
+  if (notice.anchor === "scoring") anchor = els.scoringCards.querySelector(".card:last-child");
+  else if (notice.anchor === "cut") anchor = els.turnCard.querySelector(".card");
+  else if (notice.anchor === "play") anchor = els.plays.querySelector(".played-active .card:last-child");
+  const anchorRect = anchor?.getBoundingClientRect();
+  const edgeInset = notice.kind === "score" ? Math.min(74, layerRect.width * 0.24) : Math.min(56, layerRect.width * 0.18);
+  const rawX = anchorRect ? anchorRect.left - layerRect.left + (anchorRect.width / 2) : layerRect.width / 2;
+  const rawY = anchorRect ? anchorRect.top - layerRect.top + (anchorRect.height * 0.36) : layerRect.height * 0.46;
+  const x = Math.max(edgeInset, Math.min(layerRect.width - edgeInset, rawX));
+  const y = Math.max(64, Math.min(layerRect.height - 72, rawY));
+  bubble.style.setProperty("--notice-x", `${x}px`);
+  bubble.style.setProperty("--notice-y", `${y}px`);
 }
 
 function shouldInlineResult(game: GameState): boolean {
@@ -4633,7 +4699,7 @@ function renderEmptyMyStatsOpponent(): void {
   els.analyticsTitle.textContent = "My Stats";
   els.analyticsSummary.textContent = human
     ? "Track your completed head-to-head games separately from your AI matches."
-    : `Track your completed games against ${MY_STATS_OPPONENT_LABEL[opponent]} separately from Master.`;
+    : `Track your completed games against ${MY_STATS_OPPONENT_LABEL[opponent]} separately from Ace.`;
   els.analyticsTotals.innerHTML = "";
   els.analyticsTotals.classList.add("my-stats-comparison");
   els.analyticsTotals.append(emptyMyStatsComparisonTable(
@@ -5695,12 +5761,12 @@ function playerName(player: PlayerKey | undefined, opponent?: string): string {
 }
 
 function engineName(engine: string | undefined): string {
-  if (!engine) return "Master";
+  if (!engine) return "Ace";
   if (engine === PATHWAY_OPPONENTS.easy) return "Easy";
   if (engine === PATHWAY_OPPONENTS.tough) return "Tough";
-  if (engine.toLowerCase().includes("grandmaster")) return "Grandmaster";
+  if (engine.toLowerCase().includes("grandmaster")) return "Legend";
   if (engine.toLowerCase().includes("dynamic")) return "Dynamic";
-  return "Master";
+  return "Ace";
 }
 
 function playerDisplayName(): string {
@@ -5836,7 +5902,6 @@ function render(game: GameState | null): void {
   renderServerBusy();
   renderCutCard(state.turnCutRevealStage || !game.turnCardRevealed ? null : game.turnCard);
   renderScoring(game.scoring);
-  renderResult(game);
   renderGameOver(game);
   renderBoard(game);
   const hideHandsForInterstitial = Boolean(
@@ -5879,6 +5944,7 @@ function render(game: GameState | null): void {
   } else {
     renderPlayedCards(game);
   }
+  renderResult(game);
   renderCards(els.humanHand, hideHandsForInterstitial ? [] : game.humanHand, {
     clickable: !hideHandsForInterstitial && game.phase !== "discard" && game.phase === "pegging" && game.turn === "User",
   });
@@ -6480,7 +6546,8 @@ els.exportGameLog.addEventListener("click", async () => {
     els.settingsPanel.hidden = true;
     els.menuToggle.setAttribute("aria-expanded", "false");
   } catch (error) {
-    els.result.textContent = error instanceof Error ? error.message : "Export failed";
+    const text = error instanceof Error ? error.message : "Export failed";
+    enqueueNotices([{ key: `export:${text}`, kind: "status", text, anchor: "center" }]);
   } finally {
     els.exportGameLog.disabled = false;
   }
@@ -6518,24 +6585,6 @@ els.parGuidesToggle.addEventListener("change", () => {
   state.parGuides = els.parGuidesToggle.checked;
   safeLocalStorageSet("strong-cribbage.admin.parGuides", state.parGuides ? "1" : "0");
   render(state.game);
-});
-
-els.noticeBack.addEventListener("click", () => {
-  if (!state.noticeHistory.length) return;
-  if (state.noticeHistoryIndex === null) state.noticeHistoryIndex = state.noticeHistory.length - 1;
-  else state.noticeHistoryIndex = Math.max(0, state.noticeHistoryIndex - 1);
-  renderNoticeText(state.noticeHistory[state.noticeHistoryIndex] ?? "");
-});
-
-els.noticeForward.addEventListener("click", () => {
-  if (state.noticeHistoryIndex === null) return;
-  if (state.noticeHistoryIndex >= state.noticeHistory.length - 1) {
-    state.noticeHistoryIndex = null;
-    renderNoticeText(state.noticeText);
-    return;
-  }
-  state.noticeHistoryIndex += 1;
-  renderNoticeText(state.noticeHistory[state.noticeHistoryIndex] ?? "");
 });
 
 els.opponent.addEventListener("change", () => {

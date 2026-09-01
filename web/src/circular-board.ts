@@ -172,7 +172,7 @@ export function updateCircularBoard(
   container: HTMLElement,
   game: GameState,
   override?: CircularBoardPresentation | null,
-  players: CircularBoardPlayers = { human: "Player", ai: "Master" },
+  players: CircularBoardPlayers = { human: "Player", ai: "Ace" },
 ): void {
   const board = container.querySelector<HTMLElement>(".circular-board");
   const svg = board?.querySelector<SVGSVGElement>(".circular-track-svg");

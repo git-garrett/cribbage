@@ -23,7 +23,7 @@ describe("branded responsive playing UI", () => {
   });
 
   it("keeps the desktop pegging stack centered when the AI hand disappears", () => {
-    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*data-phase="pegging"\] > \.table\s*\{[^}]*grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto auto[^}]*align-content:\s*stretch/s);
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*data-phase="pegging"\] > \.table\s*\{[^}]*grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto[^}]*align-content:\s*stretch/s);
     expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*data-phase="pegging"\] \.played\s*\{[^}]*grid-row:\s*2[^}]*align-self:\s*center/s);
   });
 
@@ -34,7 +34,7 @@ describe("branded responsive playing UI", () => {
     expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*\.played > \.score-cut\s*\{[^}]*width:\s*var\(--game-played-card-width\)[^}]*height:\s*var\(--game-played-card-height\)/s);
     expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*\.played > \.score-cut #turn-card\s*\{[^}]*position:\s*absolute[^}]*top:\s*50%[^}]*left:\s*50%[^}]*transform:\s*translate\(-50%,\s*-50%\)/s);
     expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*\.app\[data-view="game"\] \.pegging-row \.turn-cut-deck[\s\S]*\{[^}]*width:\s*max\(var\(--game-card-width\),\s*82px\)[^}]*height:\s*max\(var\(--game-card-height\),\s*116px\)/s);
-    expect(css).toMatch(/@media \(min-width:\s*960px\) and \(max-width:\s*1100px\)[\s\S]*body\[data-font-size="x-large"\][^{]*\.notification-row > \.result\s*\{[^}]*justify-self:\s*start[^}]*max-width:\s*calc\(100% - 160px\)/s);
+    expect(css).toMatch(/\.game-notifications\s*\{[^}]*position:\s*absolute[^}]*inset:\s*0[^}]*pointer-events:\s*none/s);
   });
 
   it("keeps large cards rectangular and simplified at every width", () => {
@@ -47,9 +47,9 @@ describe("branded responsive playing UI", () => {
     expect(css).toMatch(/data-phase="score_crib"[\s\S]*> \.scoreboard > \.board\s*\{\s*display:\s*none\s*!important/);
   });
 
-  it("uses one central phase directive instead of repeating setup instructions", () => {
+  it("uses one central phase directive without reserving a notification row", () => {
     expect(css).toMatch(/\.app\[data-view="game"\] \.played > h2\s*\{\s*display:\s*none/);
     expect(css).toMatch(/\.app\[data-view="game"\] \.turn-cut-label\s*\{\s*display:\s*none/);
-    expect(css).toMatch(/data-phase="cut_for_deal"[^,]*\.notification-row,[\s\S]*data-phase="ai_discarding"[^\{]*\{\s*display:\s*none/);
+    expect(css).not.toContain(".notification-row");
   });
 });
