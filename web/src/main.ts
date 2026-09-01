@@ -22,6 +22,12 @@ import { mergedLifetimeResults, type LifetimeScoringStats } from "./my-stats";
 import { myStatsTableRows } from "./my-stats-table";
 import { peggingDisplaySeries, recentPeggingCards } from "./pegging-display";
 import { resolveRemoteAiBase } from "./runtime-config";
+import { scoringEmphasisCardIds } from "./scoring-card-emphasis";
+import {
+  handScoreNoticeParts,
+  peggingScoreNoticeParts,
+  shouldAnnounceScoreEvent,
+} from "./score-notice-policy";
 import {
   type TurnCutRevealStage,
   shouldRevealCribOwner,
@@ -116,22 +122,24 @@ interface LeaderboardSummarySource {
   mostSkunks: LeaderboardPlayer[];
 }
 
-type GameNotice =
-  | {
-      key: string;
-      kind: "status";
-      text: string;
-      anchor: "play" | "center";
-    }
-  | {
-      key: string;
-      kind: "score";
-      text: string;
-      label: string;
-      points: number;
-      player: PlayerKey;
-      anchor: "play" | "cut" | "scoring";
-    };
+type GameNotice = {
+  key: string;
+  kind: "score";
+  text: string;
+  label: string;
+  points: number;
+  player: PlayerKey;
+  anchor: "play" | "cut" | "scoring";
+  emphasizedCardIds: number[];
+};
+
+interface ScoreSummary {
+  key: string;
+  category: "hand" | "crib";
+  title: string;
+  points: number;
+  items: Array<{ label: string; points: number }>;
+}
 
 const EMPTY_LEADERBOARD_SUMMARY: LeaderboardSummarySource = {
   generatedAt: "",
@@ -249,13 +257,18 @@ const state: {
   noticeQueue: GameNotice[];
   noticeResultLines: string[];
   noticeTimer: number | null;
-  activeNoticeKind: GameNotice["kind"] | null;
+  activeNotice: GameNotice | null;
   scoreNoticesInitialized: boolean;
   seenScoreNoticeIds: Set<string>;
   dealCutRevealStage: "cutting" | "human" | "ai" | null;
+  dealCutIndex: number | null;
+  dealAiCutIndex: number | null;
   dealCutResolve: (() => void) | null;
+  scoreSummaryQueue: ScoreSummary[];
+  activeScoreSummary: ScoreSummary | null;
   dealAnimation: { key: string; dealer: string; pone: string } | null;
   animatedDealKeys: Set<string>;
+  animatedDiscardKeys: Set<string>;
   animatedTurnCutCardKeys: Set<string>;
   turnCutRevealStage: TurnCutRevealStage;
   turnCutResolve: (() => void) | null;
@@ -300,13 +313,18 @@ const state: {
   noticeQueue: [],
   noticeResultLines: [],
   noticeTimer: null,
-  activeNoticeKind: null,
+  activeNotice: null,
   scoreNoticesInitialized: false,
   seenScoreNoticeIds: new Set(),
   dealCutRevealStage: null,
+  dealCutIndex: null,
+  dealAiCutIndex: null,
   dealCutResolve: null,
+  scoreSummaryQueue: [],
+  activeScoreSummary: null,
   dealAnimation: null,
   animatedDealKeys: new Set(),
+  animatedDiscardKeys: new Set(),
   animatedTurnCutCardKeys: new Set(),
   turnCutRevealStage: null,
   turnCutResolve: null,
@@ -341,10 +359,15 @@ function resetTransientGameUi(): void {
   state.seenScoreNoticeIds = new Set();
   clearNoticeQueue();
   state.dealCutRevealStage = null;
+  state.dealCutIndex = null;
+  state.dealAiCutIndex = null;
   if (state.dealCutResolve) state.dealCutResolve();
   state.dealCutResolve = null;
+  state.scoreSummaryQueue = [];
+  state.activeScoreSummary = null;
   state.dealAnimation = null;
   state.animatedDealKeys = new Set();
+  state.animatedDiscardKeys = new Set();
   state.animatedTurnCutCardKeys = new Set();
   state.turnCutRevealStage = null;
   if (state.turnCutResolve) state.turnCutResolve();
@@ -368,6 +391,7 @@ function setAiThinking(active: boolean): void {
 
 const els = {
   app: document.querySelector(".app") as HTMLElement,
+  table: document.querySelector(".table") as HTMLElement,
   pathwayPage: document.querySelector("#pathway-page") as HTMLElement,
   pathwayViews: [...document.querySelectorAll<HTMLElement>("[data-pathway-view]")],
   pathwayTargetButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-target]")],
@@ -547,6 +571,10 @@ const els = {
   scoringTitle: document.querySelector("#scoring-title") as HTMLElement,
   scoringCards: document.querySelector("#scoring-cards") as HTMLElement,
   scoringPoints: document.querySelector("#scoring-points") as HTMLElement,
+  scoreSummaryDialog: document.querySelector("#score-summary-dialog") as HTMLElement,
+  scoreSummaryEyebrow: document.querySelector("#score-summary-eyebrow") as HTMLElement,
+  scoreSummaryTitle: document.querySelector("#score-summary-title") as HTMLElement,
+  scoreSummaryItems: document.querySelector("#score-summary-items") as HTMLElement,
   continueScoring: document.querySelector("#continue-scoring") as HTMLButtonElement,
   acknowledgePeggingReset: document.querySelector("#acknowledge-pegging-reset") as HTMLButtonElement,
   continuePegging: document.querySelector("#continue-pegging") as HTMLButtonElement,
@@ -1053,8 +1081,7 @@ try {
   state.splashOpen = SIMPLE_NETWORK_MODE && !playerFirstName;
   document.body.dataset.splash = state.splashOpen ? "true" : "false";
   els.splashPage.hidden = !state.splashOpen;
-  const text = error instanceof Error ? error.message : "Startup failed";
-  enqueueNotices([{ key: `startup:${text}`, kind: "status", text, anchor: "center" }]);
+  showServerBusy(error, null);
 }
 
 function loadAnalytics(): AnalyticsStore {
@@ -2319,7 +2346,18 @@ function renderBoard(game: GameState): void {
     if (showParGuides) renderPaceLines(pegPositions, projections, firstDealerPlayer, completedHands);
     else clearPaceLines();
   });
-  updateCircularBoard(els.board, game, circularTurnCutPresentation(state.turnCutRevealStage), {
+  const dealCutPresentation = state.dealCutRevealStage
+    ? {
+        eyebrow: "First deal",
+        value: state.dealCutRevealStage === "ai" ? "LOW" : "CUT",
+        detail: state.dealCutRevealStage === "cutting"
+          ? "Choosing card"
+          : state.dealCutRevealStage === "human"
+            ? "Your card"
+            : "Low card deals",
+      }
+    : null;
+  updateCircularBoard(els.board, game, circularTurnCutPresentation(state.turnCutRevealStage) ?? dealCutPresentation, {
     human: playerDisplayName(),
     ai: engineName(currentSnapshot?.opponent ?? els.opponent.value),
   });
@@ -2938,7 +2976,7 @@ function lowerLevelOpponent(opponent: string | undefined): boolean {
 function canAskMaster(game: GameState): boolean {
   const opponent = currentSnapshot?.opponent ?? selectedMenuOpponent();
   if (!lowerLevelOpponent(opponent)) return false;
-  if (game.phase === "discard") return !state.dealAnimation && !state.turnCutRevealStage;
+  if (game.phase === "discard") return !state.dealAnimation && !state.dealCutRevealStage && !state.turnCutRevealStage;
   return game.phase === "pegging" && game.turn === "User" && !game.peggingResetPending && game.legalCardIds.length > 0;
 }
 
@@ -3276,75 +3314,72 @@ function renderPlayedCards(game: GameState): void {
   }
 }
 
-function cutCardText(card: NonNullable<GameState["cutForDeal"]>["human"]): string {
-  return card ? `${card.rank}${card.symbol}` : "";
+const DEAL_CUT_CARD_COUNT = 9;
+
+function cutCardText(card: NonNullable<GameState["turnCard"]>): string {
+  return `${card.rank}${card.symbol}`;
 }
 
-function appendCutDealerBadge(label: HTMLElement, game: GameState, player: "User" | "AI", showAiCut: boolean): void {
-  if (
-    !showAiCut ||
-    !shouldRevealCribOwner(game.phase, state.dealCutRevealStage) ||
-    game.dealer !== player
-  ) return;
-  const badge = document.createElement("span");
-  badge.className = "dealer-button cut-dealer-badge";
-  badge.textContent = "Crib";
-  label.append(badge);
+function dealCutOutcomeLabel(game: GameState): string {
+  const winner = game.dealer === "User" ? playerDisplayName() : playerName("ai");
+  return `${winner} cut the low card. ${winner} gets the first crib.`;
+}
+
+function dealCutReveal(
+  card: NonNullable<NonNullable<GameState["cutForDeal"]>["human"]>,
+  player: PlayerKey,
+  animate: boolean,
+): HTMLElement {
+  const result = document.createElement("div");
+  result.className = `deal-cut-reveal deal-cut-reveal-${player}${animate ? " cut-card-reveal" : " deal-cut-reveal-settled"}`;
+  const label = document.createElement("span");
+  label.textContent = player === "human" ? "You" : playerName("ai");
+  result.append(label, cardElement(card));
+  return result;
 }
 
 function renderDealCut(game: GameState, revealStage: "cutting" | "human" | "ai" | null = null): void {
   els.plays.innerHTML = "";
   els.plays.hidden = false;
   const row = document.createElement("div");
-  row.className = "cards played-active pegging-row deal-cut-row";
-  const showHumanCut = Boolean(game.cutForDeal?.human && (!revealStage || revealStage === "human" || revealStage === "ai"));
-  const showAiCut = Boolean(game.cutForDeal?.ai && (!revealStage || revealStage === "ai"));
-  const deck = cardBack();
-  deck.classList.add("cut-deck");
-  if (revealStage === "cutting") deck.classList.add("cut-deck-cutting");
-  else if (revealStage === "human" || revealStage === "ai") deck.classList.add("cut-deck-cut");
-  deck.setAttribute("role", "button");
-  deck.setAttribute("aria-label", state.dealCutResolve ? "Continue to deal" : "Cut deck for deal");
-  deck.tabIndex = state.pending ? -1 : 0;
-  deck.addEventListener("click", () => {
-    if (state.dealCutResolve) {
-      completeDealCutReveal();
-      return;
+  row.className = "deal-cut-spread";
+  const humanIndex = state.dealCutIndex ?? Math.floor(DEAL_CUT_CARD_COUNT / 2);
+  const aiIndex = state.dealAiCutIndex ?? Math.max(0, humanIndex - 3);
+  const showHumanCut = Boolean(game.cutForDeal?.human && (revealStage === "human" || revealStage === "ai"));
+  const showAiCut = Boolean(game.cutForDeal?.ai && revealStage === "ai");
+
+  for (let index = 0; index < DEAL_CUT_CARD_COUNT; index += 1) {
+    const slot = document.createElement("div");
+    slot.className = "deal-cut-choice";
+    if (index === state.dealCutIndex) slot.classList.add("deal-cut-choice-selected");
+    slot.setAttribute("role", "button");
+    slot.setAttribute("aria-label", `Cut at card ${index + 1} of ${DEAL_CUT_CARD_COUNT}`);
+    slot.tabIndex = state.pending ? -1 : 0;
+    const deckCard = cardBack();
+    deckCard.classList.add("deal-cut-card");
+    deckCard.setAttribute("aria-hidden", "true");
+    if (revealStage === "cutting" && index === humanIndex) deckCard.classList.add("deal-cut-card-lift");
+    const choose = (): void => {
+      if (state.pending || revealStage) return;
+      void cutForDeal(index);
+    };
+    slot.addEventListener("click", choose);
+    slot.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      choose();
+    });
+    slot.append(deckCard);
+    if (showHumanCut && index === humanIndex && game.cutForDeal?.human) {
+      slot.classList.add("deal-cut-choice-revealed");
+      slot.append(dealCutReveal(game.cutForDeal.human, "human", revealStage === "human"));
     }
-    void cutForDeal();
-  });
-  deck.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    if (state.dealCutResolve) {
-      completeDealCutReveal();
-      return;
+    if (showAiCut && index === aiIndex && game.cutForDeal?.ai) {
+      slot.classList.add("deal-cut-choice-revealed");
+      slot.append(dealCutReveal(game.cutForDeal.ai, "ai", true));
     }
-    void cutForDeal();
-  });
-  const humanSlot = document.createElement("div");
-  humanSlot.className = "cut-slot cut-slot-human";
-  if (showHumanCut && game.cutForDeal?.human) {
-    const human = document.createElement("div");
-    human.className = "cut-result cut-result-human cut-card-reveal";
-    const label = document.createElement("span");
-    label.textContent = game.dealer === "User" && showAiCut ? playerPossessive("human") : playerDisplayName();
-    appendCutDealerBadge(label, game, "User", showAiCut);
-    human.append(label, cardElement(game.cutForDeal.human));
-    humanSlot.append(human);
+    row.append(slot);
   }
-  const aiSlot = document.createElement("div");
-  aiSlot.className = "cut-slot cut-slot-ai";
-  if (showAiCut && game.cutForDeal?.ai) {
-    const ai = document.createElement("div");
-    ai.className = "cut-result cut-result-ai cut-card-reveal";
-    const label = document.createElement("span");
-    label.textContent = game.dealer === "AI" && showAiCut ? playerPossessive("ai") : playerName("ai");
-    appendCutDealerBadge(label, game, "AI", showAiCut);
-    ai.append(label, cardElement(game.cutForDeal.ai));
-    aiSlot.append(ai);
-  }
-  row.append(humanSlot, deck, aiSlot);
   els.plays.append(row);
 }
 
@@ -3439,6 +3474,33 @@ function renderTurnCut(game: GameState): void {
   els.plays.append(label, row);
 }
 
+const DEAL_CARD_INTERVAL_MS = 125;
+const DEAL_CARD_DURATION_MS = 500;
+
+function tableMotionDisabled(): boolean {
+  return state.fontSize === "x-large" || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function prepareDealAnimation(shell: HTMLElement, deck: HTMLElement): void {
+  if (!shell.isConnected) return;
+  const deckRect = deck.getBoundingClientRect();
+  const deckX = deckRect.left + (deckRect.width / 2);
+  const deckY = deckRect.top + (deckRect.height / 2);
+  for (const card of shell.querySelectorAll<HTMLElement>(".deal-animation-card")) {
+    const cardRect = card.getBoundingClientRect();
+    const fromX = deckX - (cardRect.left + (cardRect.width / 2));
+    const fromY = deckY - (cardRect.top + (cardRect.height / 2));
+    const direction = card.closest(".deal-animation-pone") ? -1 : 1;
+    card.style.setProperty("--deal-from-x", `${fromX}px`);
+    card.style.setProperty("--deal-from-y", `${fromY}px`);
+    card.style.setProperty("--deal-mid-x", `${fromX * 0.46}px`);
+    card.style.setProperty("--deal-mid-y", `${(fromY * 0.46) - 18}px`);
+    card.style.setProperty("--deal-start-rotation", `${direction * 7}deg`);
+    card.style.setProperty("--deal-mid-rotation", `${direction * -2}deg`);
+  }
+  shell.classList.add("deal-animation-ready");
+}
+
 function renderDealAnimation(): void {
   if (!state.dealAnimation) return;
   els.plays.innerHTML = "";
@@ -3459,17 +3521,167 @@ function renderDealAnimation(): void {
   pone.append(poneLabel);
   dealer.append(dealerLabel);
   for (let index = 0; index < 6; index += 1) {
+    const poneOrder = index * 2;
     const poneCard = cardBack();
     poneCard.classList.add("deal-animation-card");
-    poneCard.style.animationDelay = `${index * 235}ms`;
+    poneCard.dataset.dealOrder = String(poneOrder);
+    poneCard.style.animationDelay = `${poneOrder * DEAL_CARD_INTERVAL_MS}ms`;
     pone.append(poneCard);
+    const dealerOrder = poneOrder + 1;
     const dealerCard = cardBack();
     dealerCard.classList.add("deal-animation-card");
-    dealerCard.style.animationDelay = `${(index * 235) + 115}ms`;
+    dealerCard.dataset.dealOrder = String(dealerOrder);
+    dealerCard.style.animationDelay = `${dealerOrder * DEAL_CARD_INTERVAL_MS}ms`;
     dealer.append(dealerCard);
   }
   shell.append(pone, dealer);
   els.plays.append(shell);
+  window.requestAnimationFrame(() => prepareDealAnimation(shell, deck));
+}
+
+interface DiscardFlightSource {
+  element: HTMLElement | null;
+  rect: { left: number; top: number; width: number; height: number };
+  card: HTMLElement;
+}
+
+function discardAnimationKey(game: GameState, player: PlayerKey): string {
+  const gameId = currentSnapshot?.gameId ?? "game";
+  return `${gameId}:${game.handNumber}:discard:${player}`;
+}
+
+function discardFlightCard(source: HTMLElement | null): HTMLElement {
+  const card = source ? source.cloneNode(true) as HTMLElement : cardBack();
+  card.classList.remove("selected", "placeholder", "discard-card-departing");
+  card.classList.add("discard-flying-card");
+  card.setAttribute("aria-hidden", "true");
+  card.removeAttribute("id");
+  card.removeAttribute("tabindex");
+  if (card instanceof HTMLButtonElement) card.disabled = true;
+  return card;
+}
+
+function discardFlightSources(player: PlayerKey, cardIds: readonly number[]): DiscardFlightSource[] {
+  if (player === "human") {
+    return cardIds.flatMap((id) => {
+      const element = els.plays.querySelector<HTMLElement>(`.card[data-id="${id}"]`)
+        ?? els.humanHand.querySelector<HTMLElement>(`.card[data-id="${id}"]`);
+      if (!element) return [];
+      const rect = element.getBoundingClientRect();
+      return rect.width && rect.height ? [{ element, rect, card: discardFlightCard(element) }] : [];
+    });
+  }
+
+  const visibleCards = [...els.aiHand.querySelectorAll<HTMLElement>(".card:not(.placeholder)")]
+    .filter((card) => {
+      const rect = card.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    })
+    .slice(-2);
+  if (visibleCards.length === 2) {
+    return visibleCards.map((element) => ({
+      element,
+      rect: element.getBoundingClientRect(),
+      card: discardFlightCard(element),
+    }));
+  }
+
+  const sample = els.humanHand.querySelector<HTMLElement>(".card")
+    ?? els.plays.querySelector<HTMLElement>(".card");
+  const sampleRect = sample?.getBoundingClientRect();
+  const width = sampleRect?.width || 76;
+  const height = sampleRect?.height || 108;
+  const anchor = els.aiName.getBoundingClientRect();
+  return [0, 1].map((index) => ({
+    element: null,
+    rect: {
+      left: anchor.left + (anchor.width / 2) - (width / 2) + (index * 10) - 5,
+      top: anchor.bottom + 8 + (index * 3),
+      width,
+      height,
+    },
+    card: discardFlightCard(null),
+  }));
+}
+
+function cribFlightDestination(): { x: number; y: number } {
+  const core = els.board.querySelector<HTMLElement>(".circular-board-core");
+  const coreRect = core?.getBoundingClientRect();
+  if (coreRect && coreRect.width > 0 && coreRect.height > 0) {
+    return {
+      x: coreRect.left + (coreRect.width / 2),
+      y: coreRect.top + (coreRect.height * 0.58),
+    };
+  }
+  const tableRect = els.table.getBoundingClientRect();
+  return {
+    x: tableRect.left + (tableRect.width / 2),
+    y: tableRect.top + (tableRect.height * 0.38),
+  };
+}
+
+async function playDiscardToCribAnimation(
+  game: GameState | null,
+  player: PlayerKey,
+  cardIds: readonly number[] = [],
+): Promise<void> {
+  if (!game) return;
+  const key = discardAnimationKey(game, player);
+  if (state.animatedDiscardKeys.has(key)) return;
+  state.animatedDiscardKeys.add(key);
+  if (tableMotionDisabled()) return;
+  const sources = discardFlightSources(player, cardIds);
+  if (sources.length !== 2) return;
+
+  const destination = cribFlightDestination();
+  const layer = document.createElement("div");
+  layer.className = "discard-flight-layer";
+  layer.dataset.player = player;
+  layer.setAttribute("aria-hidden", "true");
+  const target = document.createElement("div");
+  target.className = "discard-crib-target";
+  target.style.left = `${destination.x}px`;
+  target.style.top = `${destination.y}px`;
+  const targetLabel = document.createElement("span");
+  targetLabel.textContent = `${gameParticipantName(game.cribOwner)} crib`;
+  const targetStack = document.createElement("span");
+  targetStack.className = "discard-crib-stack";
+  target.append(targetLabel, targetStack);
+  layer.append(target);
+
+  for (const source of sources) {
+    source.element?.classList.add("discard-card-departing");
+    source.card.style.left = `${source.rect.left}px`;
+    source.card.style.top = `${source.rect.top}px`;
+    source.card.style.width = `${source.rect.width}px`;
+    source.card.style.height = `${source.rect.height}px`;
+    layer.append(source.card);
+  }
+  document.body.append(layer);
+
+  const flights = sources.map((source, index) => {
+    const startX = source.rect.left + (source.rect.width / 2);
+    const startY = source.rect.top + (source.rect.height / 2);
+    const dx = destination.x - startX + (index * 7) - 3.5;
+    const dy = destination.y - startY + (index * 4);
+    const midX = dx * 0.46;
+    const midY = (dy * 0.46) - 34;
+    return source.card.animate([
+      { opacity: 1, transform: "translate3d(0, 0, 0) scale(1) rotate(0deg)" },
+      { offset: 0.5, opacity: 1, transform: `translate3d(${midX}px, ${midY}px, 0) scale(0.82) rotate(${index ? 5 : -5}deg)` },
+      { opacity: 0.96, transform: `translate3d(${dx}px, ${dy}px, 0) scale(0.46) rotate(${index ? 8 : -7}deg)` },
+    ], {
+      duration: 720,
+      delay: index * 130,
+      easing: "cubic-bezier(0.22, 0.72, 0.24, 1)",
+      fill: "forwards",
+    }).finished.catch(() => undefined);
+  });
+
+  await Promise.all(flights);
+  await waitMs(100);
+  layer.remove();
+  for (const source of sources) source.element?.classList.remove("discard-card-departing");
 }
 
 function renderCutCard(card: GameState["turnCard"]): void {
@@ -3492,10 +3704,8 @@ function renderScoring(scoring: GameState["scoring"]): void {
     return;
   }
   els.scoringTitle.textContent = presentGameText(scoring.title);
-  els.scoringPoints.textContent = `${scoring.points} point${scoring.points === 1 ? "" : "s"}`;
-  els.continueScoring.textContent = scoring.nextLabel;
   renderCards(els.scoringCards, scoring.cards);
-  els.scoringResult.textContent = scoringBreakdownText(scoring);
+  els.scoringResult.textContent = "";
 }
 
 function scoringBreakdownText(scoring: NonNullable<GameState["scoring"]>): string {
@@ -3524,20 +3734,24 @@ function renderResult(game: GameState): void {
     return;
   }
   enqueueNotices(newScoreNotices(game));
-  const lines = (state.resultOverride ?? (game.result.length ? game.result : [game.message])).filter(
-    (line) => line !== "User turn.",
-  ).map(presentGameText);
-  const commonPrefix = matchingPrefixLength(state.noticeResultLines, lines);
-  const newLines = lines.slice(commonPrefix).filter(Boolean);
-  state.noticeResultLines = [...lines];
-  enqueueNotices(newLines.map((text, index) => ({
-    key: `status:${game.handNumber}:${game.phase}:${index}:${text}`,
-    kind: "status" as const,
-    text,
-    anchor: game.phase === "pegging" || game.phase === "pegging_complete" ? "play" as const : "center" as const,
-  })));
+  state.noticeResultLines = [];
   els.resultInline.innerHTML = "";
   if (!game.scoring) els.scoringResult.innerHTML = "";
+}
+
+function scoreSummaryForEvent(event: ScoreEvent): ScoreSummary | null {
+  if (event.category !== "hand" && event.category !== "crib") return null;
+  const player = event.player === "human" ? "human" : "ai";
+  const items = handScoreNoticeParts(event) ?? (event.points === 0
+    ? [{ label: "No scoring combinations", points: 0 }]
+    : [{ label: event.category === "crib" ? "Crib" : "Hand", points: event.points }]);
+  return {
+    key: event.id,
+    category: event.category,
+    title: `${playerPossessive(player)} ${event.category}`,
+    points: event.points,
+    items,
+  };
 }
 
 function newScoreNotices(game: GameState): GameNotice[] {
@@ -3551,24 +3765,34 @@ function newScoreNotices(game: GameState): GameNotice[] {
   for (const event of events) {
     if (state.seenScoreNoticeIds.has(event.id)) continue;
     state.seenScoreNoticeIds.add(event.id);
-    const label = scoreNoticeLabel(event);
+    if (!shouldAnnounceScoreEvent(event, events)) continue;
+    const summary = scoreSummaryForEvent(event);
+    if (summary) state.scoreSummaryQueue.push(summary);
     const player = event.player === "human" ? playerDisplayName() : playerName("ai");
-    const pointLabel = event.points === 1 ? "point" : "points";
-    notices.push({
-      key: `score:${event.id}`,
-      kind: "score",
-      text: `${label}. ${player} scores ${event.points} ${pointLabel}.`,
-      label,
-      points: event.points,
-      player: event.player,
-      anchor: event.reason === "Heels" ? "cut" : event.category === "pegging" ? "play" : "scoring",
-    });
+    const parts = handScoreNoticeParts(event)
+      ?? peggingScoreNoticeParts(event)
+      ?? [{ label: scoreNoticeLabel(event), points: event.points }];
+    for (const [index, part] of parts.entries()) {
+      const pointLabel = part.points === 1 ? "point" : "points";
+      notices.push({
+        key: `score:${event.id}:${index}`,
+        kind: "score",
+        text: `${part.label}. ${player} scores ${part.points} ${pointLabel}.`,
+        label: part.label,
+        points: part.points,
+        player: event.player,
+        anchor: event.reason === "Heels" ? "cut" : event.category === "pegging" ? "play" : "scoring",
+        emphasizedCardIds: game.scoring
+          ? scoringEmphasisCardIds(game.scoring.cards, game.turnCard, event.category, part.label)
+          : [],
+      });
+    }
   }
   return notices;
 }
 
 function scoreNoticeLabel(event: ScoreEvent): string {
-  if (event.reason === "Heels") return "His heels";
+  if (event.reason === "Heels") return "Heels";
   if (event.reason === "Go") return "Go point";
   if (event.category === "hand") return "Hand";
   if (event.category === "crib") return "Crib";
@@ -3577,51 +3801,72 @@ function scoreNoticeLabel(event: ScoreEvent): string {
   return "Pegging";
 }
 
-function matchingPrefixLength(left: string[], right: string[]): number {
-  let index = 0;
-  while (index < left.length && index < right.length && left[index] === right[index]) index += 1;
-  return index;
-}
-
 function clearNoticeQueue(): void {
   state.noticeQueue = [];
   if (state.noticeTimer !== null) {
     window.clearTimeout(state.noticeTimer);
     state.noticeTimer = null;
   }
-  state.activeNoticeKind = null;
+  state.activeNotice = null;
   els.result.innerHTML = "";
+  clearScoringCardEmphasis();
 }
 
 function enqueueNotices(notices: GameNotice[]): void {
   if (!notices.length) return;
-  const hasScore = notices.some((notice) => notice.kind === "score");
-  if (hasScore) {
-    state.noticeQueue.unshift(...notices);
-    if (state.activeNoticeKind === "status" && state.noticeTimer !== null) {
-      window.clearTimeout(state.noticeTimer);
-      state.noticeTimer = null;
-      state.activeNoticeKind = null;
-      els.result.innerHTML = "";
-    }
-  } else {
-    state.noticeQueue.push(...notices);
-  }
+  state.noticeQueue.push(...notices);
   drainNoticeQueue();
 }
 
 function drainNoticeQueue(): void {
   if (state.noticeTimer !== null) return;
   const notice = state.noticeQueue.shift();
-  if (!notice) return;
+  if (!notice) {
+    maybeOpenScoreSummary();
+    return;
+  }
+  state.activeNotice = notice;
   showNoticeBubble(notice);
-  state.activeNoticeKind = notice.kind;
   state.noticeTimer = window.setTimeout(() => {
     state.noticeTimer = null;
-    state.activeNoticeKind = null;
+    state.activeNotice = null;
     els.result.innerHTML = "";
+    clearScoringCardEmphasis();
     drainNoticeQueue();
   }, NOTICE_VISIBLE_MS);
+}
+
+function renderScoreSummaryDialog(): void {
+  const summary = state.activeScoreSummary;
+  els.scoreSummaryDialog.hidden = !summary;
+  if (!summary) {
+    els.scoreSummaryItems.innerHTML = "";
+    return;
+  }
+  els.scoreSummaryEyebrow.textContent = summary.category === "crib" ? "Crib counted" : "Hand counted";
+  els.scoreSummaryTitle.textContent = summary.title;
+  els.scoringPoints.textContent = `${summary.points} point${summary.points === 1 ? "" : "s"}`;
+  els.scoreSummaryItems.innerHTML = "";
+  for (const item of summary.items) {
+    const row = document.createElement("li");
+    const label = document.createElement("span");
+    label.textContent = item.label;
+    const points = document.createElement("strong");
+    points.textContent = item.points > 0 ? `+${item.points}` : "0";
+    row.append(label, points);
+    els.scoreSummaryItems.append(row);
+  }
+  els.continueScoring.textContent = "Next";
+  els.continueScoring.disabled = state.pending;
+}
+
+function maybeOpenScoreSummary(): void {
+  if (state.activeScoreSummary || state.noticeTimer !== null || state.noticeQueue.length) return;
+  const next = state.scoreSummaryQueue.shift();
+  if (!next) return;
+  state.activeScoreSummary = next;
+  renderScoreSummaryDialog();
+  window.requestAnimationFrame(() => els.continueScoring.focus({ preventScroll: true }));
 }
 
 function showNoticeBubble(notice: GameNotice): void {
@@ -3630,26 +3875,45 @@ function showNoticeBubble(notice: GameNotice): void {
   bubble.className = `game-notification game-notification-${notice.kind}`;
   bubble.dataset.noticeKey = notice.key;
   bubble.setAttribute("aria-label", notice.text);
-  if (notice.kind === "score") {
-    bubble.dataset.player = notice.player;
-    const label = document.createElement("span");
-    label.className = "game-notification-label";
-    label.textContent = notice.label;
-    const points = document.createElement("strong");
-    points.className = "game-notification-points";
-    points.textContent = `+${notice.points}`;
-    const player = document.createElement("span");
-    player.className = "game-notification-player";
-    player.textContent = notice.player === "human" ? "You" : playerName("ai");
-    label.setAttribute("aria-hidden", "true");
-    points.setAttribute("aria-hidden", "true");
-    player.setAttribute("aria-hidden", "true");
-    bubble.append(label, points, player);
-  } else {
-    bubble.textContent = notice.text;
-  }
+  bubble.dataset.player = notice.player;
+  const label = document.createElement("span");
+  label.className = "game-notification-label";
+  label.textContent = notice.label;
+  const points = document.createElement("strong");
+  points.className = "game-notification-points";
+  points.textContent = `+${notice.points}`;
+  const player = document.createElement("span");
+  player.className = "game-notification-player";
+  player.textContent = notice.player === "human" ? "You" : playerName("ai");
+  label.setAttribute("aria-hidden", "true");
+  points.setAttribute("aria-hidden", "true");
+  player.setAttribute("aria-hidden", "true");
+  bubble.append(label, points, player);
   els.result.append(bubble);
   positionNoticeBubble(bubble, notice);
+  renderScoringCardEmphasis();
+}
+
+function clearScoringCardEmphasis(): void {
+  for (const card of document.querySelectorAll<HTMLElement>(".score-card-wiggle")) {
+    card.classList.remove("score-card-wiggle");
+    card.style.removeProperty("--score-wiggle-delay");
+  }
+}
+
+function renderScoringCardEmphasis(): void {
+  clearScoringCardEmphasis();
+  const notice = state.activeNotice;
+  if (!notice?.emphasizedCardIds.length) return;
+  void els.scoringCards.offsetWidth;
+  notice.emphasizedCardIds.forEach((id, index) => {
+    const selector = `.card[data-id="${id}"]`;
+    const card = els.scoringCards.querySelector<HTMLElement>(selector)
+      ?? els.turnCard.querySelector<HTMLElement>(selector);
+    if (!card) return;
+    card.style.setProperty("--score-wiggle-delay", `${index * 45}ms`);
+    card.classList.add("score-card-wiggle");
+  });
 }
 
 function positionNoticeBubble(bubble: HTMLElement, notice: GameNotice): void {
@@ -5816,13 +6080,13 @@ function shortDate(value: string): string {
 function playAreaTitle(game: GameState): string {
   if (state.dealAnimation) return "";
   if (turnCutPresentation(state.turnCutRevealStage)) return "";
-  if (state.dealCutRevealStage === "cutting") return "Cutting the deck";
-  if (state.dealCutRevealStage) return "Cut result";
-  if (game.phase === "cut_for_deal") return game.cutForDeal?.prompt || "Tap the deck to cut for first deal";
+  if (state.dealCutRevealStage === "ai" && game.cutForDeal) return dealCutOutcomeLabel(game);
+  if (state.dealCutRevealStage) return "Cut for deal. Low card deals.";
+  if (game.phase === "cut_for_deal") return "Cut for deal. Low card deals.";
   if (game.phase === "discard") {
     return game.cribOwner === "User"
-      ? `Select two cards to discard to ${playerPossessive("human")} crib`
-      : `Select two cards to discard to ${playerPossessive("ai")} crib`;
+      ? `Select two cards to discard to ${playerPossessive("human")} crib.`
+      : `Select two cards to discard to ${playerPossessive("ai")} crib.`;
   }
   if (game.phase === "ai_discarding") return "";
   if (game.phase === "pegging") return "";
@@ -5967,14 +6231,14 @@ function render(game: GameState | null): void {
   const waitingForDealCutOk = Boolean(state.dealCutResolve);
   const selectedPlay = selectedPlayableCard(game);
   const masterAdviceAvailable = canAskMaster(game) && !state.masterHint;
-  els.cutForDeal.hidden = !gameActive || (game.phase !== "cut_for_deal" && !waitingForTurnCutClick && !waitingForDealCutOk);
-  els.discard.hidden = !gameActive || Boolean(state.dealAnimation) || waitingForDealCutOk || Boolean(state.turnCutRevealStage) || game.phase !== "discard";
+  els.cutForDeal.hidden = !gameActive || !waitingForTurnCutClick;
+  els.discard.hidden = !gameActive || Boolean(state.dealAnimation) || Boolean(state.dealCutRevealStage) || waitingForDealCutOk || Boolean(state.turnCutRevealStage) || game.phase !== "discard";
   els.play.hidden = !gameActive || Boolean(state.dealAnimation) || waitingForDealCutOk || Boolean(state.turnCutRevealStage) || game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User");
   els.askMaster.hidden = !masterAdviceAvailable;
   els.go.hidden = true;
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
-  els.cutForDeal.textContent = turnCut?.action?.buttonLabel ?? (waitingForDealCutOk ? "OK" : "Cut deck");
-  els.cutForDeal.disabled = game.phase !== "cut_for_deal" && !waitingForTurnCutClick && !waitingForDealCutOk;
+  els.cutForDeal.textContent = turnCut?.action?.buttonLabel ?? "Cut deck";
+  els.cutForDeal.disabled = !waitingForTurnCutClick;
   els.play.textContent = selectedPlay ? `Play ${selectedPlay.rank}${selectedPlay.symbol}` : "Select a card";
   els.play.disabled = game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User" && selectedPlay);
   els.askMaster.disabled = !masterAdviceAvailable || state.pending;
@@ -5996,6 +6260,8 @@ function render(game: GameState | null): void {
     els.acknowledgePeggingReset.disabled = false;
     els.continuePegging.disabled = false;
   }
+  renderScoringCardEmphasis();
+  renderScoreSummaryDialog();
   renderMasterHint(game);
 }
 
@@ -6070,14 +6336,14 @@ async function playDealAnimationIfNeeded(game: GameState): Promise<void> {
   const key = dealAnimationKey(game);
   if (!key || state.animatedDealKeys.has(key)) return;
   state.animatedDealKeys.add(key);
-  if (state.fontSize === "x-large") return;
+  if (tableMotionDisabled()) return;
   const dealer = game.dealer;
   const pone = dealer === "User" ? "AI" : "User";
   state.dealAnimation = { key, dealer, pone };
   state.resultOverride = [`Dealing hand ${game.handNumber}.`];
   render(game);
   await waitForPaint();
-  await waitMs(1840);
+  await waitMs((11 * DEAL_CARD_INTERVAL_MS) + DEAL_CARD_DURATION_MS + 100);
   state.dealAnimation = null;
   state.resultOverride = null;
   render(game);
@@ -6546,8 +6812,7 @@ els.exportGameLog.addEventListener("click", async () => {
     els.settingsPanel.hidden = true;
     els.menuToggle.setAttribute("aria-expanded", "false");
   } catch (error) {
-    const text = error instanceof Error ? error.message : "Export failed";
-    enqueueNotices([{ key: `export:${text}`, kind: "status", text, anchor: "center" }]);
+    showServerBusy(error, () => els.exportGameLog.click());
   } finally {
     els.exportGameLog.disabled = false;
   }
@@ -6624,9 +6889,11 @@ async function openGameReportFromWinner(): Promise<void> {
   render(state.game);
 }
 
-async function cutForDeal(): Promise<void> {
+async function cutForDeal(cutIndex = Math.floor(DEAL_CUT_CARD_COUNT / 2)): Promise<void> {
   if (state.pending) return;
   state.pending = true;
+  state.dealCutIndex = cutIndex;
+  state.dealAiCutIndex = null;
   state.dealCutRevealStage = "cutting";
   render(state.game);
   await waitForPaint();
@@ -6648,17 +6915,15 @@ async function cutForDeal(): Promise<void> {
     await cutAnimation;
     state.selected.clear();
     if (next.cutForDeal?.human && next.cutForDeal.ai) {
+      state.dealAiCutIndex = (cutIndex + Math.ceil(DEAL_CUT_CARD_COUNT / 2)) % DEAL_CUT_CARD_COUNT;
       state.dealCutRevealStage = "human";
-      state.resultOverride = [`User cut ${cutCardText(next.cutForDeal.human)}.`];
       render(next);
       await waitForPaint();
       await waitForTableMotion(800);
       state.dealCutRevealStage = "ai";
-      state.resultOverride = [next.cutForDeal.prompt];
-      const confirmed = waitForDealCutOk();
       render(next);
       await waitForPaint();
-      await confirmed;
+      await waitForTableMotion(1_250);
       state.dealCutRevealStage = null;
       state.resultOverride = null;
       render(next);
@@ -6667,9 +6932,11 @@ async function cutForDeal(): Promise<void> {
       render(next);
     }
   } catch (error) {
-    showServerBusy(error, () => cutForDeal());
+    showServerBusy(error, () => cutForDeal(cutIndex));
   } finally {
     state.dealCutRevealStage = null;
+    state.dealCutIndex = null;
+    state.dealAiCutIndex = null;
     state.dealCutResolve = null;
     state.pending = false;
     render(state.game);
@@ -6677,16 +6944,12 @@ async function cutForDeal(): Promise<void> {
 }
 
 els.cutForDeal.addEventListener("click", () => {
-  if (state.dealCutResolve) {
-    completeDealCutReveal();
-    return;
-  }
   if (state.turnCutResolve) {
     completeTurnCutInteraction();
     return;
   }
   if (state.turnCutRevealStage) return;
-  void cutForDeal();
+  void cutForDeal(Math.floor(DEAL_CUT_CARD_COUNT / 2));
 });
 
 els.askMaster.addEventListener("click", () => {
@@ -6743,12 +7006,17 @@ els.discard.addEventListener("click", async () => {
   try {
     state.resultOverride = null;
     const discardRequest = api("/api/discard", { ids: selectedIds });
+    void discardRequest.catch(() => undefined);
+    await playDiscardToCribAnimation(state.game, "human", selectedIds);
+    if (epoch !== interactionEpoch) return;
     if (optimisticNext) {
       handoffToBackground = true;
       state.selected.clear();
       state.pending = false;
       render(optimisticNext);
       await waitForPaint();
+      await playDiscardToCribAnimation(optimisticNext, "ai");
+      if (epoch !== interactionEpoch) return;
       const cutInteraction = playTurnCutWhileFinishingDiscard(optimisticNext);
       let next: GameState;
       try {
@@ -6853,6 +7121,9 @@ els.acknowledgePeggingReset.addEventListener("click", async () => {
 
 els.continueScoring.addEventListener("click", async () => {
   if (state.pending) return;
+  const dismissedSummary = state.activeScoreSummary;
+  state.activeScoreSummary = null;
+  renderScoreSummaryDialog();
   state.pending = true;
   render(state.game);
   try {
@@ -6862,6 +7133,7 @@ els.continueScoring.addEventListener("click", async () => {
     render(next);
     await playDealAnimationIfNeeded(next);
   } catch (error) {
+    state.activeScoreSummary = dismissedSummary;
     showServerBusy(error, () => els.continueScoring.click());
   } finally {
     state.pending = false;
@@ -7120,6 +7392,8 @@ async function finishDiscardInBackground(
   setAiThinking(false);
   render(state.game);
   await waitForPaint();
+  if (!isCurrent()) return;
+  await playDiscardToCribAnimation(state.game, "ai");
   if (!isCurrent()) return;
   let failed = false;
   try {

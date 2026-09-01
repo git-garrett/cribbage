@@ -2863,22 +2863,36 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   margin-left: -18px;
   border-radius: 5px;
   opacity: 0;
-  animation: deal-card-arrive 0.34s ease-out both;
+}
+
+.deal-animation-ready .deal-animation-card.card,
+.deal-animation-ready .pegging-row .deal-animation-card.card,
+.deal-animation-ready .played-active.pegging-row .deal-animation-card.card {
+  animation: deal-card-travel 500ms cubic-bezier(0.22, 0.72, 0.24, 1) both;
 }
 
 .deal-animation-hand > span + .deal-animation-card.card {
   margin-left: 7px;
 }
 
-@keyframes deal-card-arrive {
+@keyframes deal-card-travel {
   0% {
     opacity: 0;
-    transform: translateY(-14px) scale(0.9) rotate(-4deg);
+    transform: translate(var(--deal-from-x), var(--deal-from-y)) scale(0.96) rotate(var(--deal-start-rotation));
+  }
+
+  6% {
+    opacity: 1;
+  }
+
+  54% {
+    opacity: 1;
+    transform: translate(var(--deal-mid-x), var(--deal-mid-y)) scale(0.98) rotate(var(--deal-mid-rotation));
   }
 
   100% {
     opacity: 1;
-    transform: translateY(0) scale(1) rotate(0deg);
+    transform: translate(0, 0) scale(1) rotate(0deg);
   }
 }
 
@@ -4985,21 +4999,6 @@ body[data-font-size="x-large"] .app[data-view="game"] .circular-track-skunk-labe
   font-size: max(10px, calc(var(--notice-font) * 0.68));
 }
 
-.game-notification-status {
-  width: max-content;
-  max-width: min(calc(100% - 32px), 34rem);
-  padding: 10px 17px;
-  border: 1px solid rgba(232, 197, 117, 0.78);
-  border-radius: 999px;
-  background: rgba(7, 31, 56, 0.94);
-  box-shadow: 0 10px 24px rgba(2, 28, 21, 0.26);
-  color: var(--game-cream);
-  font-size: var(--notice-font);
-  font-weight: 850;
-  line-height: 1.22;
-  animation: game-status-notification 2.2s cubic-bezier(0.2, 0.82, 0.2, 1) both;
-}
-
 @keyframes game-score-notification {
   0% {
     opacity: 0;
@@ -5020,25 +5019,8 @@ body[data-font-size="x-large"] .app[data-view="game"] .circular-track-skunk-labe
   }
 }
 
-@keyframes game-status-notification {
-  0% {
-    opacity: 0;
-    transform: translate(-50%, -34%) scale(0.92);
-  }
-  14%,
-  58% {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(-50%, calc(-50% - 24px)) scale(0.98);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .game-notification-score,
-  .game-notification-status {
+  .game-notification-score {
     animation-name: game-notification-fade;
     animation-timing-function: linear;
   }
@@ -5176,7 +5158,8 @@ body[data-font-size="x-large"] .app[data-view="game"] .circular-track-skunk-labe
   background: transparent;
 }
 
-.app[data-view="game"] .actions button {
+.app[data-view="game"] .actions button,
+.app[data-view="game"] .scoring-summary button {
   width: min(100%, 560px);
   min-height: max(56px, calc(var(--control-font) * 2.45));
   border: 2px solid var(--game-gold);
@@ -5184,6 +5167,13 @@ body[data-font-size="x-large"] .app[data-view="game"] .circular-track-skunk-labe
   background: var(--game-navy);
   color: var(--game-cream);
   font-weight: 850;
+}
+
+.app[data-view="game"] .game-over-alert-box button,
+.app[data-view="game"] .master-hint-actions button,
+.app[data-view="game"] .master-session-actions button,
+.app[data-view="game"] .server-busy-box button {
+  border-radius: 999px;
 }
 
 /* Large retains recognizable card rectangles but removes the tiny corner
@@ -5516,21 +5506,25 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
     align-content: stretch;
   }
 
-  .app[data-view="game"][data-phase="pegging"] > .table {
+  .app[data-view="game"][data-phase="pegging"] > .table,
+  .app[data-view="game"][data-phase="pegging_complete"] > .table {
     grid-template-rows: auto minmax(0, 1fr) auto;
     align-content: stretch;
   }
 
-  .app[data-view="game"][data-phase="pegging"] .ai-strip {
+  .app[data-view="game"][data-phase="pegging"] .ai-strip,
+  .app[data-view="game"][data-phase="pegging_complete"] .ai-strip {
     grid-row: 1;
   }
 
-  .app[data-view="game"][data-phase="pegging"] .played {
+  .app[data-view="game"][data-phase="pegging"] .played,
+  .app[data-view="game"][data-phase="pegging_complete"] .played {
     grid-row: 2;
     align-self: center;
   }
 
-  .app[data-view="game"][data-phase="pegging"] .user-panel {
+  .app[data-view="game"][data-phase="pegging"] .user-panel,
+  .app[data-view="game"][data-phase="pegging_complete"] .user-panel {
     grid-row: 3;
   }
 
@@ -5735,6 +5729,359 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 
 .app[data-view="game"] .deal-animation-hand > span + .deal-animation-card.card {
   margin-left: 7px;
+}
+
+.discard-flight-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 6000;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.discard-flying-card.card {
+  position: fixed;
+  z-index: 2;
+  margin: 0 !important;
+  opacity: 1;
+  pointer-events: none;
+  transform-origin: center;
+  will-change: opacity, transform;
+}
+
+.discard-card-departing {
+  opacity: 0 !important;
+}
+
+.discard-crib-target {
+  position: fixed;
+  z-index: 1;
+  display: grid;
+  gap: 5px;
+  place-items: center;
+  color: #fbf8f0;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 900;
+  transform: translate(-50%, -50%);
+  animation: discard-crib-target-arrive 220ms ease-out both;
+}
+
+.discard-crib-target > span:first-child {
+  padding: 4px 9px;
+  border: 1px solid rgba(232, 197, 117, 0.82);
+  border-radius: 999px;
+  background: #071f38;
+  box-shadow: 0 5px 12px rgba(2, 28, 21, 0.24);
+  white-space: nowrap;
+}
+
+.discard-crib-stack {
+  width: 46px;
+  height: 64px;
+  border: 1px solid rgba(251, 248, 240, 0.72);
+  border-radius: 7px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.18) 25%, transparent 25%) 0 0 / 12px 12px,
+    linear-gradient(135deg, transparent 75%, rgba(255, 255, 255, 0.18) 75%) 0 0 / 12px 12px,
+    #284f86;
+  box-shadow:
+    5px 4px 0 -1px #315f9c,
+    6px 5px 0 0 rgba(251, 248, 240, 0.46),
+    0 12px 22px rgba(2, 28, 21, 0.28);
+}
+
+@keyframes discard-crib-target-arrive {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -44%) scale(0.92);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* The table speaks through one calm, persistent phase label. Score changes
+   remain the only transient bubbles. */
+.app[data-view="game"] .played > h2 {
+  display: block;
+  width: min(100%, 42rem);
+  margin: 0 auto;
+  color: var(--game-cream);
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: max(15px, var(--control-font));
+  font-weight: 850;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.app[data-view="game"] .played > h2[hidden] {
+  display: none;
+}
+
+.app[data-view="game"] .deal-cut-spread {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  align-items: center;
+  width: min(100%, 46rem);
+  min-height: calc(var(--game-card-height) + 58px);
+  margin: 0 auto;
+  padding: 34px calc(var(--game-card-width) / 2) 16px;
+  overflow: visible;
+}
+
+.app[data-view="game"] .deal-cut-choice {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: var(--game-card-height);
+  place-items: center;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.app[data-view="game"] .deal-cut-choice .deal-cut-card {
+  position: relative;
+  margin: 0 !important;
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease, filter 180ms ease;
+}
+
+.app[data-view="game"] .deal-cut-choice:hover .deal-cut-card {
+  filter: brightness(1.1);
+  transform: translateY(-5px);
+}
+
+.app[data-view="game"] .deal-cut-choice:focus-visible {
+  outline: none;
+}
+
+.app[data-view="game"] .deal-cut-choice:focus-visible .deal-cut-card {
+  outline: 3px solid #8bcbff;
+  outline-offset: 4px;
+  z-index: 8;
+}
+
+.app[data-view="game"] .deal-cut-choice-selected,
+.app[data-view="game"] .deal-cut-choice-revealed {
+  z-index: 10;
+}
+
+.app[data-view="game"] .deal-cut-choice-selected .deal-cut-card,
+.app[data-view="game"] .deal-cut-choice-revealed .deal-cut-card {
+  opacity: 0.24;
+  transform: translateY(9px) scale(0.96);
+}
+
+.app[data-view="game"] .deal-cut-choice .deal-cut-card-lift {
+  animation: deal-cut-choice-lift 0.58s cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
+@keyframes deal-cut-choice-lift {
+  0% { transform: translateY(0) rotate(0); }
+  48% { transform: translateY(-18px) rotate(-2deg); }
+  100% { transform: translateY(9px) rotate(0); }
+}
+
+.app[data-view="game"] .deal-cut-reveal {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 12;
+  display: grid;
+  gap: 6px;
+  place-items: center;
+  color: var(--game-cream);
+  font-size: max(11px, var(--fine-font));
+  font-weight: 900;
+  pointer-events: none;
+  transform: translate(-50%, -58%);
+}
+
+.app[data-view="game"] .deal-cut-reveal > span {
+  position: absolute;
+  bottom: calc(100% + 7px);
+  padding: 4px 9px;
+  border: 1px solid rgba(232, 197, 117, 0.72);
+  border-radius: 999px;
+  background: var(--game-navy);
+  box-shadow: 0 5px 14px rgba(2, 28, 21, 0.24);
+  white-space: nowrap;
+}
+
+.app[data-view="game"] .deal-cut-reveal .card {
+  margin: 0 !important;
+  box-shadow: 0 13px 24px rgba(2, 28, 21, 0.34);
+}
+
+.app[data-view="game"] #scoring-cards .card.score-card-wiggle,
+.app[data-view="game"] #turn-card .card.score-card-wiggle {
+  z-index: 8;
+  animation: score-card-wiggle 620ms cubic-bezier(0.36, 0.08, 0.2, 1) var(--score-wiggle-delay, 0ms) infinite;
+  filter: drop-shadow(0 8px 8px rgba(2, 28, 21, 0.28));
+  transform-origin: 50% 88%;
+  will-change: transform;
+}
+
+@keyframes score-card-wiggle {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+
+  20% {
+    transform: translateY(-4px) rotate(-3.5deg);
+  }
+
+  44% {
+    transform: translateY(-2px) rotate(3deg);
+  }
+
+  68% {
+    transform: translateY(-3px) rotate(-2deg);
+  }
+
+  86% {
+    transform: translateY(-1px) rotate(1deg);
+  }
+}
+
+.score-summary-dialog {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  border-radius: inherit;
+  background: rgba(3, 42, 32, 0.72);
+  backdrop-filter: blur(5px);
+}
+
+.score-summary-dialog[hidden] {
+  display: none;
+}
+
+.score-summary-card {
+  width: min(100%, 25rem);
+  padding: 24px;
+  border: 1px solid rgba(232, 197, 117, 0.72);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 50% 0, rgba(232, 197, 117, 0.12), transparent 44%),
+    var(--game-navy);
+  box-shadow: 0 24px 54px rgba(2, 21, 38, 0.42);
+  color: var(--game-cream);
+  text-align: center;
+}
+
+.score-summary-eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--game-gold);
+  font-size: max(10px, var(--fine-font));
+  font-weight: 900;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.score-summary-card h2 {
+  margin: 0;
+  color: var(--game-cream);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: max(24px, calc(var(--heading-font) * 1.08));
+  line-height: 1.1;
+}
+
+.score-summary-total {
+  display: block;
+  margin: 18px 0 14px;
+  color: var(--game-cream);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: max(40px, calc(var(--heading-font) * 1.8));
+  line-height: 1;
+}
+
+.score-summary-items {
+  display: grid;
+  gap: 0;
+  margin: 0 0 20px;
+  padding: 0;
+  border-block: 1px solid rgba(251, 248, 240, 0.14);
+  list-style: none;
+  text-align: left;
+}
+
+.score-summary-items li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 10px 2px;
+  color: #dbece6;
+  font-size: var(--control-font);
+  font-weight: 750;
+}
+
+.score-summary-items li + li {
+  border-top: 1px solid rgba(251, 248, 240, 0.1);
+}
+
+.score-summary-items strong {
+  color: var(--game-gold);
+  font-size: 1.08em;
+}
+
+.score-summary-card > button {
+  width: 100%;
+  min-height: max(54px, calc(var(--control-font) * 2.45));
+  border: 2px solid var(--game-gold);
+  border-radius: 999px;
+  background: var(--game-green);
+  color: var(--game-cream);
+  font: inherit;
+  font-weight: 900;
+}
+
+.score-summary-card > button:focus-visible {
+  outline: 3px solid #8bcbff;
+  outline-offset: 3px;
+}
+
+@media (max-width: 640px) {
+  .app[data-view="game"] .deal-cut-spread {
+    width: 100%;
+    padding-inline: calc(var(--game-card-width) / 2);
+  }
+
+  .score-summary-dialog {
+    align-items: end;
+    padding: 12px;
+  }
+
+  .score-summary-card {
+    padding: 22px 18px calc(18px + env(safe-area-inset-bottom));
+    border-radius: 22px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app[data-view="game"] .deal-cut-choice .deal-cut-card-lift,
+  .app[data-view="game"] .deal-cut-reveal .card,
+  .app[data-view="game"] #scoring-cards .card.score-card-wiggle,
+  .app[data-view="game"] #turn-card .card.score-card-wiggle {
+    animation: none !important;
+  }
+
+  .app[data-view="game"] #scoring-cards .card.score-card-wiggle,
+  .app[data-view="game"] #turn-card .card.score-card-wiggle {
+    outline: 3px solid var(--game-gold);
+    outline-offset: 3px;
+  }
 }
 
 /* Local pathway navigation built from the same felt, navy, ivory, and brass

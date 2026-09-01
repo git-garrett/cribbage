@@ -506,9 +506,14 @@
           <h2 id="scoring-title">Hand score</h2>
           <div id="scoring-cards" class="cards"></div>
           <div id="scoring-result" class="result scoring-result" aria-live="polite"></div>
-          <div class="scoring-summary">
-            <strong id="scoring-points">0</strong>
-            <button id="continue-scoring" type="button">Continue</button>
+        </div>
+        <div id="score-summary-dialog" class="score-summary-dialog" role="dialog" aria-modal="true" aria-labelledby="score-summary-title" hidden>
+          <div class="score-summary-card">
+            <span id="score-summary-eyebrow" class="score-summary-eyebrow">Hand counted</span>
+            <h2 id="score-summary-title">Hand summary</h2>
+            <strong id="scoring-points" class="score-summary-total">0 points</strong>
+            <ul id="score-summary-items" class="score-summary-items"></ul>
+            <button id="continue-scoring" type="button">Next</button>
           </div>
         </div>
         <div class="user-panel">

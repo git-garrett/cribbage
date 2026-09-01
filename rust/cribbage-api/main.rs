@@ -10,7 +10,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cribbage_shadow_engine::cards::{
-    full_deck, score_hand_components, Card, HandScoreComponents, RANKS, SUIT_NAMES, VALUES,
+    full_deck, score_count_components, score_hand_components, Card, HandScoreComponents,
+    PeggingScoreComponents, RANKS, SUIT_NAMES, VALUES,
 };
 use cribbage_shadow_engine::decision::{
     recommend_discard_for_side, recommend_peg_for_side, review_discard_for_side,
@@ -120,6 +121,8 @@ struct SavedScoreEvent {
     cards: Vec<Card>,
     turn_card: Option<Card>,
     count: Option<u8>,
+    #[serde(default)]
+    score_components: Option<PeggingScoreComponents>,
 }
 
 /// The private, server-owned game session as stored in SQLite.  The browser
@@ -1267,6 +1270,7 @@ fn apply_action(
                 Vec::new(),
                 Some(turn_card),
                 None,
+                None,
             );
             Ok(())
         }
@@ -1288,6 +1292,7 @@ fn apply_action(
             let review_game = session.game.clone();
             let score_before = score_snapshot(&session.game);
             session.game.play_card(HUMAN, id)?;
+            let score_components = score_count_components(&session.game.plays);
             record_score_changes(
                 session,
                 score_before,
@@ -1296,6 +1301,7 @@ fn apply_action(
                 Card::new(id).ok().into_iter().collect(),
                 Some(session.game.turn_card),
                 Some(session.game.count),
+                Some(score_components),
             );
             queue_decision_review(session, ReviewKind::Peg, review_game, vec![id]);
             Ok(())
@@ -1312,6 +1318,7 @@ fn apply_action(
                 Vec::new(),
                 Some(session.game.turn_card),
                 Some(session.game.count),
+                None,
             );
             Ok(())
         }
@@ -1321,20 +1328,35 @@ fn apply_action(
                 return Ok(());
             }
             let score_before = score_snapshot(&session.game);
-            match recommend_peg_for_side(&session.game, AI, session.model, None, model_root)? {
-                PegDecision::Go => session.game.say_go(AI),
-                PegDecision::Play { card_id, .. } => {
-                    session.game.play_card(AI, card_id).map(|_| ())
+            let (reason, cards, score_components) = match recommend_peg_for_side(
+                &session.game,
+                AI,
+                session.model,
+                None,
+                model_root,
+            )? {
+                PegDecision::Go => {
+                    session.game.say_go(AI)?;
+                    ("Go", Vec::new(), None)
                 }
-            }?;
+                PegDecision::Play { card_id, .. } => {
+                    session.game.play_card(AI, card_id)?;
+                    (
+                        "Pegging play",
+                        Card::new(card_id).ok().into_iter().collect(),
+                        Some(score_count_components(&session.game.plays)),
+                    )
+                }
+            };
             record_score_changes(
                 session,
                 score_before,
                 SavedScoreCategory::Pegging,
-                "Pegging play",
-                Vec::new(),
+                reason,
+                cards,
                 Some(session.game.turn_card),
                 Some(session.game.count),
+                score_components,
             );
             Ok(())
         }
@@ -1409,6 +1431,7 @@ fn apply_action(
                     reason,
                     cards,
                     Some(session.game.turn_card),
+                    None,
                     None,
                 );
             }
@@ -1492,6 +1515,7 @@ fn ensure_score_opportunity(
         cards,
         turn_card,
         count,
+        score_components: None,
     });
 }
 
@@ -1503,6 +1527,7 @@ fn record_score_changes(
     cards: Vec<Card>,
     turn_card: Option<Card>,
     count: Option<u8>,
+    score_components: Option<PeggingScoreComponents>,
 ) {
     let scores = score_snapshot(&session.game);
     for player in [HUMAN, AI] {
@@ -1511,6 +1536,12 @@ fn record_score_changes(
             continue;
         }
         let event_number = session.score_events.len() + 1;
+        let mut event_score_components = score_components;
+        if let Some(components) = event_score_components.as_mut() {
+            components.last_card = u8::try_from(points)
+                .unwrap_or_default()
+                .saturating_sub(components.total());
+        }
         session.score_events.push(SavedScoreEvent {
             id: format!("{}-score-{}", session.id, event_number),
             at: isoish_now(),
@@ -1525,6 +1556,7 @@ fn record_score_changes(
             cards: cards.clone(),
             turn_card,
             count,
+            score_components: event_score_components,
         });
     }
 }
@@ -1818,6 +1850,18 @@ fn hand_score_components_json(components: HandScoreComponents) -> String {
     )
 }
 
+fn pegging_score_components_json(components: PeggingScoreComponents) -> String {
+    format!(
+        "{{\"total\":{},\"fifteens\":{},\"thirtyOne\":{},\"pairs\":{},\"runs\":{},\"lastCard\":{}}}",
+        components.total(),
+        components.fifteens,
+        components.thirty_one,
+        components.pairs,
+        components.runs,
+        components.last_card,
+    )
+}
+
 fn scoring_json(session: &Session) -> String {
     let game = &session.game;
     let Some((stage, owner, cards, crib, next_label)) = scoring_stage_details(session) else {
@@ -2041,8 +2085,28 @@ fn saved_score_event_json(session: &Session, event: &SavedScoreEvent) -> String 
         .count
         .map(|value| format!(",\"count\":{}", value))
         .unwrap_or_default();
+    let score_components = match (event.category, event.turn_card) {
+        (SavedScoreCategory::Pegging, _) => event
+            .score_components
+            .map(|components| {
+                format!(
+                    ",\"scoreComponents\":{}",
+                    pegging_score_components_json(components)
+                )
+            })
+            .unwrap_or_default(),
+        (SavedScoreCategory::Hand, Some(turn_card)) => format!(
+            ",\"scoreComponents\":{}",
+            hand_score_components_json(score_hand_components(&event.cards, turn_card, false))
+        ),
+        (SavedScoreCategory::Crib, Some(turn_card)) => format!(
+            ",\"scoreComponents\":{}",
+            hand_score_components_json(score_hand_components(&event.cards, turn_card, true))
+        ),
+        _ => String::new(),
+    };
     format!(
-        "{{\"id\":\"{}\",\"at\":\"{}\",\"type\":\"score\",\"gameId\":\"{}\",\"handNumber\":{},\"player\":\"{}\",\"role\":\"{}\",\"category\":\"{}\",\"points\":{},\"reason\":\"{}\",\"totalScore\":{},\"scores\":{{\"human\":{},\"ai\":{}}},\"cards\":{}{}{}}}",
+        "{{\"id\":\"{}\",\"at\":\"{}\",\"type\":\"score\",\"gameId\":\"{}\",\"handNumber\":{},\"player\":\"{}\",\"role\":\"{}\",\"category\":\"{}\",\"points\":{},\"reason\":\"{}\",\"totalScore\":{},\"scores\":{{\"human\":{},\"ai\":{}}},\"cards\":{}{}{}{}}}",
         json_escape(&event.id),
         json_escape(&event.at),
         json_escape(&session.id),
@@ -2058,6 +2122,7 @@ fn saved_score_event_json(session: &Session, event: &SavedScoreEvent) -> String 
         card_labels_json(&event.cards),
         turn_card,
         count,
+        score_components,
     )
 }
 
@@ -3729,6 +3794,31 @@ mod tests {
         let analytics = analytics_events_json(&session);
         assert!(analytics.contains("\"type\":\"score\""));
         assert!(analytics.contains("\"category\":\"hand\""));
+        assert!(analytics.contains("\"scoreComponents\":"));
+        assert!(analytics.contains("\"runs\":5"));
+    }
+
+    #[test]
+    fn pegging_score_events_include_pair_royal_components() {
+        let mut session = new_session(ModelId::Schell13, None);
+        session.waiting_for_deal_cut = false;
+        session.turn_card_revealed = true;
+        session.game.phase = Phase::Pegging;
+        session.game.dealer = HUMAN;
+        session.game.pone = AI;
+        session.game.turn = cribbage_shadow_engine::game::PegTurn::Dealer;
+        session.game.count = 16;
+        session.game.plays = vec![Card::new(7).unwrap(), Card::new(20).unwrap()];
+        session.game.play_owners = vec![AI, HUMAN];
+        session.game.player_mut(HUMAN).hand = vec![Card::new(33).unwrap(), Card::new(1).unwrap()];
+        session.game.player_mut(AI).hand = vec![Card::new(2).unwrap()];
+
+        apply_action(&mut session, "play-human", "{\"id\":33}", ".").unwrap();
+
+        let analytics = analytics_events_json(&session);
+        assert!(analytics.contains("\"category\":\"pegging\""));
+        assert!(analytics.contains("\"scoreComponents\":{\"total\":6"));
+        assert!(analytics.contains("\"pairs\":6"));
     }
 
     #[test]

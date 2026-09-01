@@ -403,17 +403,32 @@ pub fn score_flush_and_right_jack(hand: &[Card], turn_card: Card, crib: bool) ->
     points
 }
 
-pub fn score_count(plays: &[Card]) -> u8 {
-    if plays.len() < 2 {
-        return 0;
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PeggingScoreComponents {
+    pub fifteens: u8,
+    pub thirty_one: u8,
+    pub pairs: u8,
+    pub runs: u8,
+    pub last_card: u8,
+}
+
+impl PeggingScoreComponents {
+    pub fn total(self) -> u8 {
+        self.fifteens + self.thirty_one + self.pairs + self.runs + self.last_card
     }
-    let mut points = 0u8;
+}
+
+pub fn score_count_components(plays: &[Card]) -> PeggingScoreComponents {
+    if plays.len() < 2 {
+        return PeggingScoreComponents::default();
+    }
+    let mut components = PeggingScoreComponents::default();
     let count: u8 = plays.iter().map(|card| card.value).sum();
     if count == 15 {
-        points += 2;
+        components.fifteens = 2;
     }
     if count == 31 {
-        points += 2;
+        components.thirty_one = 2;
     }
 
     let last_rank = plays[plays.len() - 1].rank;
@@ -424,7 +439,7 @@ pub fn score_count(plays: &[Card]) -> u8 {
         }
         same_rank_count += 1;
     }
-    points += match same_rank_count {
+    components.pairs = match same_rank_count {
         2 => 2,
         3 => 6,
         4 => 12,
@@ -448,12 +463,40 @@ pub fn score_count(plays: &[Card]) -> u8 {
             max_rank = max_rank.max(card.rank);
         }
         if unique && (max_rank - min_rank + 1) as usize == run_len {
-            points += run_len as u8;
+            components.runs = run_len as u8;
             break;
         }
     }
 
-    points
+    components
+}
+
+pub fn score_count(plays: &[Card]) -> u8 {
+    score_count_components(plays).total()
+}
+
+#[cfg(test)]
+mod pegging_score_component_tests {
+    use super::*;
+
+    fn cards(ids: &[u8]) -> Vec<Card> {
+        ids.iter().map(|id| Card::new(*id).unwrap()).collect()
+    }
+
+    #[test]
+    fn separates_runs_and_pair_royals() {
+        assert_eq!(score_count_components(&cards(&[2, 3, 4])).runs, 3);
+        assert_eq!(score_count_components(&cards(&[7, 20, 33])).pairs, 6);
+        assert_eq!(score_count_components(&cards(&[0, 13, 26, 39])).pairs, 12);
+    }
+
+    #[test]
+    fn preserves_combined_fifteen_and_pair_components() {
+        let components = score_count_components(&cards(&[0, 3, 4, 17]));
+        assert_eq!(components.fifteens, 2);
+        assert_eq!(components.pairs, 2);
+        assert_eq!(components.total(), 4);
+    }
 }
 
 pub fn self_test() -> Result<(), String> {

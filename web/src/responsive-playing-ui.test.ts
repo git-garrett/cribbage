@@ -23,8 +23,18 @@ describe("branded responsive playing UI", () => {
   });
 
   it("keeps the desktop pegging stack centered when the AI hand disappears", () => {
-    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*data-phase="pegging"\] > \.table\s*\{[^}]*grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto[^}]*align-content:\s*stretch/s);
-    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*data-phase="pegging"\] \.played\s*\{[^}]*grid-row:\s*2[^}]*align-self:\s*center/s);
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*data-phase="pegging"\] > \.table,[\s\S]*grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto[^}]*align-content:\s*stretch/s);
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*data-phase="pegging"\] \.played,[\s\S]*grid-row:\s*2[^}]*align-self:\s*center/s);
+  });
+
+  it("keeps the desktop hand and play slots fixed when pegging completes", () => {
+    expect(css).toMatch(/data-phase="pegging"\] > \.table,[\s\S]*data-phase="pegging_complete"\] > \.table\s*\{[^}]*grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto/s);
+    expect(css).toMatch(/data-phase="pegging"\] \.played,[\s\S]*data-phase="pegging_complete"\] \.played\s*\{[^}]*grid-row:\s*2[^}]*align-self:\s*center/s);
+    expect(css).toMatch(/data-phase="pegging"\] \.user-panel,[\s\S]*data-phase="pegging_complete"\] \.user-panel\s*\{[^}]*grid-row:\s*3/s);
+  });
+
+  it("uses the current pill treatment for scoring and gameplay actions", () => {
+    expect(css).toMatch(/\.app\[data-view="game"\] \.actions button,[\s\S]*\.app\[data-view="game"\] \.scoring-summary button\s*\{[^}]*border-radius:\s*999px/s);
   });
 
   it("uses one fixed right-center anchor for every desktop turn-cut state", () => {
@@ -48,7 +58,8 @@ describe("branded responsive playing UI", () => {
   });
 
   it("uses one central phase directive without reserving a notification row", () => {
-    expect(css).toMatch(/\.app\[data-view="game"\] \.played > h2\s*\{\s*display:\s*none/);
+    expect(css).toMatch(/The table speaks through one calm, persistent phase label[\s\S]*\.app\[data-view="game"\] \.played > h2\s*\{[^}]*display:\s*block/s);
+    expect(css).toMatch(/\.app\[data-view="game"\] \.played > h2\[hidden\]\s*\{\s*display:\s*none/);
     expect(css).toMatch(/\.app\[data-view="game"\] \.turn-cut-label\s*\{\s*display:\s*none/);
     expect(css).not.toContain(".notification-row");
   });

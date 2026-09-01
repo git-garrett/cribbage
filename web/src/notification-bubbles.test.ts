@@ -4,6 +4,10 @@ import { describe, expect, it } from "vitest";
 
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const mainSource = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
+const renderResultSource = mainSource.slice(
+  mainSource.indexOf("function renderResult"),
+  mainSource.indexOf("function scoreSummaryForEvent"),
+);
 
 describe("contextual game notifications", () => {
   it("uses a non-interactive live layer instead of a dedicated notification row", () => {
@@ -15,8 +19,33 @@ describe("contextual game notifications", () => {
 
   it("turns unseen scoring events into player-colored score bubbles", () => {
     expect(mainSource).toMatch(/function newScoreNotices[\s\S]*event\.type === "score"[\s\S]*seenScoreNoticeIds/s);
+    expect(mainSource).toMatch(/seenScoreNoticeIds\.add\(event\.id\);\s*if \(!shouldAnnounceScoreEvent\(event, events\)\) continue;/s);
     expect(mainSource).toMatch(/bubble\.dataset\.player = notice\.player/);
     expect(mainSource).toMatch(/points\.textContent = `\+\$\{notice\.points\}`/);
+    expect(mainSource).toMatch(/event\.reason === "Heels"\) return "Heels"/);
+  });
+
+  it("does not turn general game status copy into transient bubbles", () => {
+    expect(renderResultSource).toContain("enqueueNotices(newScoreNotices(game))");
+    expect(renderResultSource).not.toContain('kind: "status"');
+    expect(renderResultSource).not.toContain("game.result");
+    expect(renderResultSource).not.toContain("game.message");
+  });
+
+  it("waits for score bubbles to finish before opening the hand or crib summary", () => {
+    expect(html).toMatch(/id="score-summary-dialog"[^>]*role="dialog"[^>]*aria-modal="true"/);
+    expect(html).toMatch(/id="score-summary-items"/);
+    expect(html).toMatch(/id="continue-scoring"[^>]*>Next</);
+    expect(mainSource).toMatch(/if \(!notice\) \{\s*maybeOpenScoreSummary\(\);/s);
+    expect(mainSource).toMatch(/scoreSummaryQueue\.push\(summary\)/);
+  });
+
+  it("renders deal cutting as a clickable row with localized player and opponent reveals", () => {
+    expect(mainSource).toContain("const DEAL_CUT_CARD_COUNT = 9");
+    expect(mainSource).toMatch(/for \(let index = 0; index < DEAL_CUT_CARD_COUNT; index \+= 1\)/);
+    expect(mainSource).toMatch(/slot\.setAttribute\("role", "button"\)[\s\S]*Cut at card \$\{index \+ 1\} of \$\{DEAL_CUT_CARD_COUNT\}/s);
+    expect(mainSource).toContain('state.dealCutRevealStage = "human"');
+    expect(mainSource).toContain('state.dealCutRevealStage = "ai"');
   });
 
   it("anchors pegging, cut, and hand scores to the action that produced them", () => {

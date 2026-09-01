@@ -41,7 +41,8 @@ describe("Extra Large accessibility typography", () => {
   });
 
   it("skips shuffle, deal, and cut motion at Extra Large", () => {
-    expect(mainSource).toMatch(/state\.animatedDealKeys\.add\(key\);\s*if \(state\.fontSize === "x-large"\) return;/s);
+    expect(mainSource).toMatch(/state\.animatedDealKeys\.add\(key\);\s*if \(tableMotionDisabled\(\)\) return;/s);
+    expect(mainSource).toMatch(/function tableMotionDisabled\(\)[^{]*\{\s*return state\.fontSize === "x-large" \|\| window\.matchMedia\("\(prefers-reduced-motion: reduce\)"\)\.matches;/s);
     expect(mainSource).toMatch(/function waitForTableMotion\(ms: number\)[^{]*\{\s*return waitMs\(state\.fontSize === "x-large" \? 0 : ms\);/s);
     expect(css).toMatch(/body\[data-font-size="x-large"\] \.deal-animation-card\.card,[^{]*body\[data-font-size="x-large"\] \.deal-cut-row \.cut-deck-cutting::after,[^{]*body\[data-font-size="x-large"\] \.pegging-row \.turn-cut-deck-cutting::after,[^{]*body\[data-font-size="x-large"\] \.played-active\.pegging-row \.turn-cut-deck-cutting::after,[^{]*body\[data-font-size="x-large"\] \.turn-card-reveal-animated \.card,[^{]*body\[data-font-size="x-large"\] \.cut-card-reveal \.card\s*\{[^}]*animation:\s*none\s*!important/s);
   });
