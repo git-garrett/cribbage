@@ -4914,12 +4914,12 @@ body[data-font-size="x-large"] .app[data-view="game"] .circular-track-skunk-labe
 .game-notification-score {
   --notice-accent: var(--game-gold);
   display: grid;
-  width: clamp(88px, calc(var(--notice-font) * 5.8), 150px);
+  width: clamp(106px, calc(var(--notice-font) * 6.96), 180px);
   aspect-ratio: 1;
   place-items: center;
   align-content: center;
   gap: 1px;
-  padding: 12px 8px 10px;
+  padding: 14px 10px 12px;
   border: 2px solid var(--game-gold);
   border-radius: 50%;
   background:
@@ -4931,6 +4931,38 @@ body[data-font-size="x-large"] .app[data-view="game"] .circular-track-skunk-labe
   color: var(--game-cream);
   animation: game-score-notification 2.2s cubic-bezier(0.2, 0.82, 0.2, 1) both;
   isolation: isolate;
+}
+
+/* Hand-count bubbles wait until their causal cards have physically lifted
+   into the counting position. Pegging bubbles, which do not lift a hand,
+   retain their immediate cadence. */
+.game-notification-score[data-card-emphasis="true"] {
+  animation-name: game-score-notification-after-lift;
+  animation-delay: 420ms;
+  animation-duration: 1.78s;
+}
+
+@keyframes game-score-notification-after-lift {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -38%) scale(0.68);
+  }
+
+  10% {
+    opacity: 1;
+    transform: translate(-50%, -55%) scale(1.04);
+  }
+
+  16%,
+  68% {
+    opacity: 1;
+    transform: translate(-50%, -55%) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, calc(-55% - 30px)) scale(0.96);
+  }
 }
 
 .game-notification-score[data-player="human"] {
@@ -4946,7 +4978,7 @@ body[data-font-size="x-large"] .app[data-view="game"] .circular-track-skunk-labe
   position: absolute;
   top: 8%;
   right: 9%;
-  width: clamp(9px, calc(var(--notice-font) * 0.68), 18px);
+  width: clamp(11px, calc(var(--notice-font) * 0.82), 22px);
   aspect-ratio: 1;
   border-radius: 50%;
   background: var(--notice-accent);
@@ -4970,33 +5002,36 @@ body[data-font-size="x-large"] .app[data-view="game"] .circular-track-skunk-labe
 
 .game-notification-label,
 .game-notification-player {
-  max-width: 82%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   font-weight: 900;
   line-height: 1;
 }
 
 .game-notification-label {
+  max-width: 92%;
   color: var(--game-gold);
-  font-size: max(10px, calc(var(--notice-font) * 0.72));
+  font-size: max(12px, calc(var(--notice-font) * 0.864));
   letter-spacing: 0.08em;
+  line-height: 0.94;
+  text-wrap: balance;
   text-transform: uppercase;
 }
 
 .game-notification-points {
   color: var(--game-cream);
   font-family: Georgia, "Times New Roman", serif;
-  font-size: max(38px, calc(var(--notice-font) * 2.35));
+  font-size: max(46px, calc(var(--notice-font) * 2.82));
   font-weight: 700;
   line-height: 0.9;
 }
 
 .game-notification-player {
+  max-width: 86%;
+  overflow: hidden;
   color: #cfe8de;
-  font-size: max(10px, calc(var(--notice-font) * 0.68));
+  font-size: max(12px, calc(var(--notice-font) * 0.816));
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @keyframes game-score-notification {
@@ -5918,35 +5953,84 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   box-shadow: 0 13px 24px rgba(2, 28, 21, 0.34);
 }
 
-.app[data-view="game"] #scoring-cards .card.score-card-wiggle,
-.app[data-view="game"] #turn-card .card.score-card-wiggle {
+.app[data-view="game"][data-phase^="score_"] > .table {
+  grid-template-rows: minmax(0, 1fr);
+  align-content: stretch;
+}
+
+.app[data-view="game"] .scoring-review {
+  position: absolute;
+  right: 18px;
+  left: 18px;
+  z-index: 4;
+  justify-items: center;
+  overflow: visible;
+}
+
+.app[data-view="game"] .scoring-review[data-owner="ai"] {
+  top: 18px;
+  bottom: auto;
+}
+
+.app[data-view="game"] .scoring-review[data-owner="human"] {
+  top: auto;
+  bottom: 18px;
+}
+
+.app[data-view="game"] .scoring-review #scoring-cards {
+  flex-wrap: nowrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: calc((var(--game-card-height) * 0.2) + 8px);
+  overflow: visible;
+}
+
+.app[data-view="game"] .scoring-review #scoring-cards .card + .card {
+  margin-left: calc(var(--game-card-width) * -0.16);
+}
+
+.app[data-view="game"] #scoring-cards .card.score-card-lift,
+.app[data-view="game"] #turn-card .card.score-card-lift {
   z-index: 8;
-  animation: score-card-wiggle 620ms cubic-bezier(0.36, 0.08, 0.2, 1) var(--score-wiggle-delay, 0ms) infinite;
+  animation: score-card-lift-cycle 2.2s linear both;
   filter: drop-shadow(0 8px 8px rgba(2, 28, 21, 0.28));
-  transform-origin: 50% 88%;
   will-change: transform;
 }
 
-@keyframes score-card-wiggle {
-  0%,
+@keyframes score-card-lift-cycle {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    animation-timing-function: cubic-bezier(0.2, 0.82, 0.2, 1.24);
+  }
+
+  13% {
+    transform: translateY(calc(var(--game-card-height) * -0.218)) rotate(0deg);
+    animation-timing-function: ease-in-out;
+  }
+
+  17% {
+    transform: translateY(calc(var(--game-card-height) * -0.188)) rotate(0deg);
+    animation-timing-function: ease-in-out;
+  }
+
+  21% {
+    transform: translateY(calc(var(--game-card-height) * -0.206)) rotate(0deg);
+    animation-timing-function: ease-out;
+  }
+
+  25%,
+  74% {
+    transform: translateY(calc(var(--game-card-height) * -0.2)) rotate(0deg);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.72, 0.2);
+  }
+
+  91% {
+    transform: translateY(calc(var(--game-card-height) * 0.012)) rotate(0deg);
+    animation-timing-function: ease-out;
+  }
+
   100% {
     transform: translateY(0) rotate(0deg);
-  }
-
-  20% {
-    transform: translateY(-4px) rotate(-3.5deg);
-  }
-
-  44% {
-    transform: translateY(-2px) rotate(3deg);
-  }
-
-  68% {
-    transform: translateY(-3px) rotate(-2deg);
-  }
-
-  86% {
-    transform: translateY(-1px) rotate(1deg);
   }
 }
 
@@ -6072,15 +6156,21 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 @media (prefers-reduced-motion: reduce) {
   .app[data-view="game"] .deal-cut-choice .deal-cut-card-lift,
   .app[data-view="game"] .deal-cut-reveal .card,
-  .app[data-view="game"] #scoring-cards .card.score-card-wiggle,
-  .app[data-view="game"] #turn-card .card.score-card-wiggle {
+  .app[data-view="game"] #scoring-cards .card.score-card-lift,
+  .app[data-view="game"] #turn-card .card.score-card-lift {
     animation: none !important;
   }
 
-  .app[data-view="game"] #scoring-cards .card.score-card-wiggle,
-  .app[data-view="game"] #turn-card .card.score-card-wiggle {
+  .app[data-view="game"] #scoring-cards .card.score-card-lift,
+  .app[data-view="game"] #turn-card .card.score-card-lift {
     outline: 3px solid var(--game-gold);
     outline-offset: 3px;
+  }
+
+  .game-notification-score[data-card-emphasis="true"] {
+    animation-name: game-notification-fade;
+    animation-delay: 0s;
+    animation-duration: 2.2s;
   }
 }
 

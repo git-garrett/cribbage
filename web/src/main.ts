@@ -3699,10 +3699,12 @@ function selectedPlayableCard(game: GameState): GameState["humanHand"][number] |
 function renderScoring(scoring: GameState["scoring"]): void {
   els.scoringReview.hidden = !scoring;
   if (!scoring) {
+    delete els.scoringReview.dataset.owner;
     els.scoringCards.innerHTML = "";
     els.scoringResult.innerHTML = "";
     return;
   }
+  els.scoringReview.dataset.owner = scoring.owner === "AI" ? "ai" : "human";
   els.scoringTitle.textContent = presentGameText(scoring.title);
   renderCards(els.scoringCards, scoring.cards);
   els.scoringResult.textContent = "";
@@ -3876,6 +3878,7 @@ function showNoticeBubble(notice: GameNotice): void {
   bubble.dataset.noticeKey = notice.key;
   bubble.setAttribute("aria-label", notice.text);
   bubble.dataset.player = notice.player;
+  bubble.dataset.cardEmphasis = notice.emphasizedCardIds.length ? "true" : "false";
   const label = document.createElement("span");
   label.className = "game-notification-label";
   label.textContent = notice.label;
@@ -3884,7 +3887,7 @@ function showNoticeBubble(notice: GameNotice): void {
   points.textContent = `+${notice.points}`;
   const player = document.createElement("span");
   player.className = "game-notification-player";
-  player.textContent = notice.player === "human" ? "You" : playerName("ai");
+  player.textContent = playerName(notice.player);
   label.setAttribute("aria-hidden", "true");
   points.setAttribute("aria-hidden", "true");
   player.setAttribute("aria-hidden", "true");
@@ -3895,9 +3898,8 @@ function showNoticeBubble(notice: GameNotice): void {
 }
 
 function clearScoringCardEmphasis(): void {
-  for (const card of document.querySelectorAll<HTMLElement>(".score-card-wiggle")) {
-    card.classList.remove("score-card-wiggle");
-    card.style.removeProperty("--score-wiggle-delay");
+  for (const card of document.querySelectorAll<HTMLElement>(".score-card-lift")) {
+    card.classList.remove("score-card-lift");
   }
 }
 
@@ -3906,13 +3908,12 @@ function renderScoringCardEmphasis(): void {
   const notice = state.activeNotice;
   if (!notice?.emphasizedCardIds.length) return;
   void els.scoringCards.offsetWidth;
-  notice.emphasizedCardIds.forEach((id, index) => {
+  notice.emphasizedCardIds.forEach((id) => {
     const selector = `.card[data-id="${id}"]`;
     const card = els.scoringCards.querySelector<HTMLElement>(selector)
       ?? els.turnCard.querySelector<HTMLElement>(selector);
     if (!card) return;
-    card.style.setProperty("--score-wiggle-delay", `${index * 45}ms`);
-    card.classList.add("score-card-wiggle");
+    card.classList.add("score-card-lift");
   });
 }
 
@@ -3923,11 +3924,11 @@ function positionNoticeBubble(bubble: HTMLElement, notice: GameNotice): void {
   else if (notice.anchor === "cut") anchor = els.turnCard.querySelector(".card");
   else if (notice.anchor === "play") anchor = els.plays.querySelector(".played-active .card:last-child");
   const anchorRect = anchor?.getBoundingClientRect();
-  const edgeInset = notice.kind === "score" ? Math.min(74, layerRect.width * 0.24) : Math.min(56, layerRect.width * 0.18);
+  const edgeInset = notice.kind === "score" ? Math.min(90, layerRect.width * 0.28) : Math.min(56, layerRect.width * 0.18);
   const rawX = anchorRect ? anchorRect.left - layerRect.left + (anchorRect.width / 2) : layerRect.width / 2;
   const rawY = anchorRect ? anchorRect.top - layerRect.top + (anchorRect.height * 0.36) : layerRect.height * 0.46;
   const x = Math.max(edgeInset, Math.min(layerRect.width - edgeInset, rawX));
-  const y = Math.max(64, Math.min(layerRect.height - 72, rawY));
+  const y = Math.max(78, Math.min(layerRect.height - 88, rawY));
   bubble.style.setProperty("--notice-x", `${x}px`);
   bubble.style.setProperty("--notice-y", `${y}px`);
 }

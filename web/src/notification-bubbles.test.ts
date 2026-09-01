@@ -22,7 +22,15 @@ describe("contextual game notifications", () => {
     expect(mainSource).toMatch(/seenScoreNoticeIds\.add\(event\.id\);\s*if \(!shouldAnnounceScoreEvent\(event, events\)\) continue;/s);
     expect(mainSource).toMatch(/bubble\.dataset\.player = notice\.player/);
     expect(mainSource).toMatch(/points\.textContent = `\+\$\{notice\.points\}`/);
+    expect(mainSource).toContain("player.textContent = playerName(notice.player)");
     expect(mainSource).toMatch(/event\.reason === "Heels"\) return "Heels"/);
+  });
+
+  it("uses the larger branded bubble scale for every scoring category", () => {
+    const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+    expect(css).toMatch(/\.game-notification-score\s*\{[^}]*width:\s*clamp\(106px,[^,]+,\s*180px\)/s);
+    expect(css).toMatch(/\.game-notification-points\s*\{[^}]*font-size:\s*max\(46px,/s);
+    expect(css).toMatch(/\.game-notification-player\s*\{[^}]*font-size:\s*max\(12px,/s);
   });
 
   it("does not turn general game status copy into transient bubbles", () => {
