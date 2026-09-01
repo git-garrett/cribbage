@@ -5788,21 +5788,36 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   opacity: 0 !important;
 }
 
-.discard-crib-target {
-  position: fixed;
-  z-index: 1;
+.crib-tray {
+  position: absolute;
+  right: 18px;
+  z-index: 7;
   display: grid;
-  gap: 5px;
+  width: var(--game-card-width);
+  gap: 7px;
   place-items: center;
   color: #fbf8f0;
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   font-size: 11px;
   font-weight: 900;
-  transform: translate(-50%, -50%);
-  animation: discard-crib-target-arrive 220ms ease-out both;
+  pointer-events: none;
+  transition: filter 180ms ease, transform 180ms ease;
 }
 
-.discard-crib-target > span:first-child {
+.crib-tray[hidden] {
+  display: none;
+}
+
+.crib-tray[data-owner="ai"] {
+  top: 18px;
+}
+
+.crib-tray[data-owner="human"] {
+  bottom: calc(var(--game-card-height) + 68px);
+}
+
+.crib-tray-label {
+  justify-self: end;
   padding: 4px 9px;
   border: 1px solid rgba(232, 197, 117, 0.82);
   border-radius: 999px;
@@ -5811,31 +5826,58 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   white-space: nowrap;
 }
 
-.discard-crib-stack {
-  width: 46px;
-  height: 64px;
+.crib-tray-stack {
+  position: relative;
+  display: block;
+  width: var(--game-card-width);
+  height: var(--game-card-height);
   border: 1px solid rgba(251, 248, 240, 0.72);
-  border-radius: 7px;
+  border-radius: 10px;
+  background: rgba(251, 248, 240, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(7, 31, 56, 0.2);
+}
+
+.crib-tray-stack::before,
+.crib-tray-stack::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(251, 248, 240, 0.72);
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.crib-tray[data-fill="partial"] .crib-tray-stack::before,
+.crib-tray[data-fill="full"] .crib-tray-stack::before,
+.crib-tray[data-fill="full"] .crib-tray-stack::after {
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.18) 25%, transparent 25%) 0 0 / 12px 12px,
     linear-gradient(135deg, transparent 75%, rgba(255, 255, 255, 0.18) 75%) 0 0 / 12px 12px,
     #284f86;
+  opacity: 1;
+}
+
+.crib-tray[data-fill="partial"] .crib-tray-stack::before,
+.crib-tray[data-fill="full"] .crib-tray-stack::before {
+  transform: translate(-2px, -2px) rotate(-1.5deg);
   box-shadow:
-    5px 4px 0 -1px #315f9c,
-    6px 5px 0 0 rgba(251, 248, 240, 0.46),
     0 12px 22px rgba(2, 28, 21, 0.28);
 }
 
-@keyframes discard-crib-target-arrive {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -44%) scale(0.92);
-  }
+.crib-tray[data-fill="full"] .crib-tray-stack::after {
+  transform: translate(4px, 3px) rotate(2deg);
+  box-shadow: 0 12px 22px rgba(2, 28, 21, 0.28);
+}
 
-  to {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
-  }
+.crib-tray-receiving {
+  filter: drop-shadow(0 0 9px rgba(232, 197, 117, 0.72));
+  transform: scale(1.025);
+}
+
+.crib-tray[data-owner="ai"]:not([hidden]) ~ .ai-strip,
+.app[data-view="game"][data-deal-cut-active="false"] .crib-tray[data-owner="ai"]:not([hidden]) ~ .played {
+  padding-right: calc(var(--game-card-width) + 16px);
 }
 
 /* The table speaks through one calm, persistent phase label. Score changes
@@ -5858,9 +5900,20 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   display: none;
 }
 
+.app[data-view="game"][data-deal-cut-active="true"] #plays.deal-cut-active {
+  display: block;
+  width: 100%;
+  min-height: calc(var(--game-card-height) + 58px);
+  overflow: visible;
+}
+
+.app[data-view="game"][data-deal-cut-active="true"] .played {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .app[data-view="game"] .deal-cut-spread {
   display: grid;
-  grid-template-columns: repeat(9, minmax(0, 1fr));
+  grid-template-columns: repeat(52, minmax(0, 1fr));
   align-items: center;
   width: min(100%, 46rem);
   min-height: calc(var(--game-card-height) + 58px);
@@ -5908,8 +5961,8 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 
 .app[data-view="game"] .deal-cut-choice-selected .deal-cut-card,
 .app[data-view="game"] .deal-cut-choice-revealed .deal-cut-card {
-  opacity: 0.24;
-  transform: translateY(9px) scale(0.96);
+  opacity: 0.18;
+  transform: none;
 }
 
 .app[data-view="game"] .deal-cut-choice .deal-cut-card-lift {
@@ -5917,9 +5970,9 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 }
 
 @keyframes deal-cut-choice-lift {
-  0% { transform: translateY(0) rotate(0); }
-  48% { transform: translateY(-18px) rotate(-2deg); }
-  100% { transform: translateY(9px) rotate(0); }
+  0% { opacity: 1; transform: translateY(0) rotate(0); }
+  48% { opacity: 1; transform: translateY(-18px) rotate(-2deg); }
+  100% { opacity: 0.18; transform: translateY(0) rotate(0); }
 }
 
 .app[data-view="game"] .deal-cut-reveal {

@@ -555,6 +555,9 @@ const els = {
   turnCard: document.querySelector("#turn-card") as HTMLElement,
   playAreaTitle: document.querySelector("#play-area-title") as HTMLElement,
   plays: document.querySelector("#plays") as HTMLElement,
+  cribTray: document.querySelector("#crib-tray") as HTMLElement,
+  cribTrayLabel: document.querySelector("#crib-tray-label") as HTMLElement,
+  cribTrayStack: document.querySelector("#crib-tray-stack") as HTMLElement,
   userHandTitle: document.querySelector("#user-hand-title") as HTMLElement,
   userPanelHeader: document.querySelector(".user-panel-header") as HTMLElement,
   userHandMeta: document.querySelector("#user-hand-meta") as HTMLElement,
@@ -3315,7 +3318,7 @@ function renderPlayedCards(game: GameState): void {
   }
 }
 
-const DEAL_CUT_CARD_COUNT = 9;
+const DEAL_CUT_CARD_COUNT = 52;
 
 function cutCardText(card: NonNullable<GameState["turnCard"]>): string {
   return `${card.rank}${card.symbol}`;
@@ -3344,6 +3347,8 @@ function renderDealCut(game: GameState, revealStage: "cutting" | "human" | "ai" 
   els.plays.hidden = false;
   const row = document.createElement("div");
   row.className = "deal-cut-spread";
+  row.setAttribute("role", "group");
+  row.setAttribute("aria-label", "Choose where to cut the 52-card deck");
   const humanIndex = state.dealCutIndex ?? Math.floor(DEAL_CUT_CARD_COUNT / 2);
   const aiIndex = state.dealAiCutIndex ?? Math.max(0, humanIndex - 3);
   const showHumanCut = Boolean(game.cutForDeal?.human && (revealStage === "human" || revealStage === "ai"));
@@ -3355,7 +3360,7 @@ function renderDealCut(game: GameState, revealStage: "cutting" | "human" | "ai" 
     if (index === state.dealCutIndex) slot.classList.add("deal-cut-choice-selected");
     slot.setAttribute("role", "button");
     slot.setAttribute("aria-label", `Cut at card ${index + 1} of ${DEAL_CUT_CARD_COUNT}`);
-    slot.tabIndex = state.pending ? -1 : 0;
+    slot.tabIndex = state.pending || revealStage || index !== humanIndex ? -1 : 0;
     const deckCard = cardBack();
     deckCard.classList.add("deal-cut-card");
     deckCard.setAttribute("aria-hidden", "true");
@@ -3366,6 +3371,13 @@ function renderDealCut(game: GameState, revealStage: "cutting" | "human" | "ai" 
     };
     slot.addEventListener("click", choose);
     slot.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        const direction = event.key === "ArrowLeft" ? -1 : 1;
+        const targetIndex = Math.max(0, Math.min(DEAL_CUT_CARD_COUNT - 1, index + direction));
+        (row.children.item(targetIndex) as HTMLElement | null)?.focus();
+        return;
+      }
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       choose();
@@ -3606,19 +3618,44 @@ function discardFlightSources(player: PlayerKey, cardIds: readonly number[]): Di
 }
 
 function cribFlightDestination(): { x: number; y: number } {
-  const core = els.board.querySelector<HTMLElement>(".circular-board-core");
-  const coreRect = core?.getBoundingClientRect();
-  if (coreRect && coreRect.width > 0 && coreRect.height > 0) {
+  const stackRect = els.cribTrayStack.getBoundingClientRect();
+  if (!els.cribTray.hidden && stackRect.width > 0 && stackRect.height > 0) {
     return {
-      x: coreRect.left + (coreRect.width / 2),
-      y: coreRect.top + (coreRect.height * 0.58),
+      x: stackRect.left + (stackRect.width / 2),
+      y: stackRect.top + (stackRect.height / 2),
     };
   }
   const tableRect = els.table.getBoundingClientRect();
+  const humanOwnsCrib = state.game?.cribOwner === "User";
   return {
-    x: tableRect.left + (tableRect.width / 2),
-    y: tableRect.top + (tableRect.height * 0.38),
+    x: tableRect.right - 18 - (tableRect.width > 520 ? 41 : 34),
+    y: humanOwnsCrib ? tableRect.bottom - 92 : tableRect.top + 74,
   };
+}
+
+function cribTrayFill(game: GameState): "empty" | "partial" | "full" {
+  const animatedDiscards = (["human", "ai"] as const)
+    .filter((player) => state.animatedDiscardKeys.has(discardAnimationKey(game, player)))
+    .length;
+  if (animatedDiscards >= 2) return "full";
+  if (animatedDiscards === 1) return "partial";
+  if (game.phase === "ai_discarding") return "partial";
+  if (game.phase === "pegging" || game.phase === "pegging_complete") return "full";
+  return "empty";
+}
+
+function renderCribTray(game: GameState): void {
+  const visible = game.phase === "discard" ||
+    game.phase === "ai_discarding" ||
+    game.phase === "pegging" ||
+    game.phase === "pegging_complete";
+  els.cribTray.hidden = !visible;
+  if (!visible) return;
+  const owner: PlayerKey = game.cribOwner === "User" ? "human" : "ai";
+  els.cribTray.dataset.owner = owner;
+  els.cribTray.dataset.fill = cribTrayFill(game);
+  els.cribTrayLabel.textContent = `${playerPossessive(owner)} crib`;
+  els.cribTray.setAttribute("aria-label", `${playerPossessive(owner)} crib`);
 }
 
 async function playDiscardToCribAnimation(
@@ -3639,16 +3676,7 @@ async function playDiscardToCribAnimation(
   layer.className = "discard-flight-layer";
   layer.dataset.player = player;
   layer.setAttribute("aria-hidden", "true");
-  const target = document.createElement("div");
-  target.className = "discard-crib-target";
-  target.style.left = `${destination.x}px`;
-  target.style.top = `${destination.y}px`;
-  const targetLabel = document.createElement("span");
-  targetLabel.textContent = `${gameParticipantName(game.cribOwner)} crib`;
-  const targetStack = document.createElement("span");
-  targetStack.className = "discard-crib-stack";
-  target.append(targetLabel, targetStack);
-  layer.append(target);
+  els.cribTray.classList.add("crib-tray-receiving");
 
   for (const source of sources) {
     source.element?.classList.add("discard-card-departing");
@@ -3669,8 +3697,8 @@ async function playDiscardToCribAnimation(
     const midY = (dy * 0.46) - 34;
     return source.card.animate([
       { opacity: 1, transform: "translate3d(0, 0, 0) scale(1) rotate(0deg)" },
-      { offset: 0.5, opacity: 1, transform: `translate3d(${midX}px, ${midY}px, 0) scale(0.82) rotate(${index ? 5 : -5}deg)` },
-      { opacity: 0.96, transform: `translate3d(${dx}px, ${dy}px, 0) scale(0.46) rotate(${index ? 8 : -7}deg)` },
+      { offset: 0.5, opacity: 1, transform: `translate3d(${midX}px, ${midY}px, 0) scale(1.02) rotate(${index ? 5 : -5}deg)` },
+      { opacity: 0.96, transform: `translate3d(${dx}px, ${dy}px, 0) scale(0.96) rotate(${index ? 4 : -4}deg)` },
     ], {
       duration: 720,
       delay: index * 130,
@@ -3681,6 +3709,8 @@ async function playDiscardToCribAnimation(
 
   await Promise.all(flights);
   await waitMs(100);
+  els.cribTray.dataset.fill = player === "ai" ? "full" : "partial";
+  els.cribTray.classList.remove("crib-tray-receiving");
   layer.remove();
   for (const source of sources) source.element?.classList.remove("discard-card-departing");
 }
@@ -6149,6 +6179,8 @@ function render(game: GameState | null): void {
   els.splashNameRow.hidden = Boolean(playerFirstName);
   els.splashFirstName.value = playerFirstName || els.splashFirstName.value;
   els.app.dataset.phase = game.phase;
+  const showingDealCut = Boolean(state.dealCutRevealStage) || game.phase === "cut_for_deal";
+  els.app.dataset.dealCutActive = showingDealCut ? "true" : "false";
   els.app.dataset.cutConfirming = state.dealCutResolve ? "true" : "false";
   renderUtilityPages();
   els.app.dataset.inlineResult = shouldInlineResult(game) ? "true" : "false";
@@ -6181,6 +6213,7 @@ function render(game: GameState | null): void {
   renderScoring(game.scoring);
   renderGameOver(game);
   renderBoard(game);
+  renderCribTray(game);
   const hideHandsForInterstitial = Boolean(
     state.dealAnimation ||
     state.dealCutRevealStage ||
@@ -6191,6 +6224,7 @@ function render(game: GameState | null): void {
   els.playAreaTitle.textContent = playTitle;
   els.playAreaTitle.hidden = !playTitle;
   els.plays.classList.remove("pegging-history-only");
+  els.plays.classList.toggle("deal-cut-active", showingDealCut);
   els.userPanelHeader.hidden = hideHandsForInterstitial;
   els.userHandTitle.hidden = false;
   els.userHandTitle.textContent = game.peggingResetPending

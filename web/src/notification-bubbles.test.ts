@@ -55,7 +55,7 @@ describe("contextual game notifications", () => {
   });
 
   it("renders deal cutting as a clickable row with localized player and opponent reveals", () => {
-    expect(mainSource).toContain("const DEAL_CUT_CARD_COUNT = 9");
+    expect(mainSource).toContain("const DEAL_CUT_CARD_COUNT = 52");
     expect(mainSource).toMatch(/for \(let index = 0; index < DEAL_CUT_CARD_COUNT; index \+= 1\)/);
     expect(mainSource).toMatch(/slot\.setAttribute\("role", "button"\)[\s\S]*Cut at card \$\{index \+ 1\} of \$\{DEAL_CUT_CARD_COUNT\}/s);
     expect(mainSource).toContain('state.dealCutRevealStage = "human"');
