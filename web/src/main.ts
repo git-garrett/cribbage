@@ -139,6 +139,7 @@ interface ScoreSummary {
   title: string;
   points: number;
   items: Array<{ label: string; points: number }>;
+  nextLabel: string;
 }
 
 const EMPTY_LEADERBOARD_SUMMARY: LeaderboardSummarySource = {
@@ -3741,7 +3742,17 @@ function renderResult(game: GameState): void {
   if (!game.scoring) els.scoringResult.innerHTML = "";
 }
 
-function scoreSummaryForEvent(event: ScoreEvent): ScoreSummary | null {
+function scoreSummaryNextLabel(game: GameState): string {
+  const scoring = game.scoring;
+  if (!scoring) return "Next";
+  if (scoring.nextLabel === "View game result") return "View Game Result";
+  const dealer = game.dealer === "User" ? "human" : "ai";
+  if (scoring.stage === "pone") return `${playerPossessive(dealer)} Hand Next`;
+  if (scoring.stage === "dealer") return `${playerPossessive(dealer)} Crib Next`;
+  return "Next Hand";
+}
+
+function scoreSummaryForEvent(event: ScoreEvent, game: GameState): ScoreSummary | null {
   if (event.category !== "hand" && event.category !== "crib") return null;
   const player = event.player === "human" ? "human" : "ai";
   const items = handScoreNoticeParts(event) ?? (event.points === 0
@@ -3753,6 +3764,7 @@ function scoreSummaryForEvent(event: ScoreEvent): ScoreSummary | null {
     title: `${playerPossessive(player)} ${event.category}`,
     points: event.points,
     items,
+    nextLabel: scoreSummaryNextLabel(game),
   };
 }
 
@@ -3768,7 +3780,7 @@ function newScoreNotices(game: GameState): GameNotice[] {
     if (state.seenScoreNoticeIds.has(event.id)) continue;
     state.seenScoreNoticeIds.add(event.id);
     if (!shouldAnnounceScoreEvent(event, events)) continue;
-    const summary = scoreSummaryForEvent(event);
+    const summary = scoreSummaryForEvent(event, game);
     if (summary) state.scoreSummaryQueue.push(summary);
     const player = event.player === "human" ? playerDisplayName() : playerName("ai");
     const parts = handScoreNoticeParts(event)
@@ -3858,7 +3870,7 @@ function renderScoreSummaryDialog(): void {
     row.append(label, points);
     els.scoreSummaryItems.append(row);
   }
-  els.continueScoring.textContent = "Next";
+  els.continueScoring.textContent = summary.nextLabel;
   els.continueScoring.disabled = state.pending;
 }
 

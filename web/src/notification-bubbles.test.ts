@@ -48,6 +48,12 @@ describe("contextual game notifications", () => {
     expect(mainSource).toMatch(/scoreSummaryQueue\.push\(summary\)/);
   });
 
+  it("names the next dealer hand and crib on scoring-summary actions", () => {
+    expect(mainSource).toMatch(/scoring\.stage === "pone"\) return `\$\{playerPossessive\(dealer\)\} Hand Next`/);
+    expect(mainSource).toMatch(/scoring\.stage === "dealer"\) return `\$\{playerPossessive\(dealer\)\} Crib Next`/);
+    expect(mainSource).toContain("els.continueScoring.textContent = summary.nextLabel");
+  });
+
   it("renders deal cutting as a clickable row with localized player and opponent reveals", () => {
     expect(mainSource).toContain("const DEAL_CUT_CARD_COUNT = 9");
     expect(mainSource).toMatch(/for \(let index = 0; index < DEAL_CUT_CARD_COUNT; index \+= 1\)/);
