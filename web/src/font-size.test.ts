@@ -67,10 +67,10 @@ describe("Extra Large accessibility typography", () => {
   });
 
   it("uses one compact row for the Large mobile header", () => {
-    expect(css).toMatch(/body\[data-font-size="large"\] \.topbar\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto auto/s);
+    expect(css).toMatch(/body\[data-font-size="large"\] \.topbar\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto/s);
     expect(css).toMatch(/body\[data-font-size="large"\] \.topbar > div:first-child\s*\{[^}]*grid-column:\s*1/s);
     expect(css).toMatch(/body\[data-font-size="large"\] \.font-size-control\s*\{[^}]*grid-column:\s*2/s);
-    expect(css).toMatch(/body\[data-font-size="large"\] #menu-toggle\s*\{[^}]*grid-column:\s*3/s);
+    expect(css).toMatch(/\.app-back\s*\{[^}]*justify-self:\s*end/s);
   });
 
   it("carries Large typography through startup and aggregate statistics", () => {
@@ -91,7 +91,7 @@ describe("Mobile notification layout", () => {
 
   it("keeps persistent controls at least 44 pixels tall", () => {
     expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*\.font-size-control select\s*\{[^}]*min-height:\s*44px/s);
-    expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*#menu-toggle\s*\{[^}]*width:\s*44px[^}]*min-height:\s*44px/s);
+    expect(css).toMatch(/\.app\[data-view="game"\] \.app-back\s*\{[^}]*min-height:\s*var\(--game-menu-size\)/s);
     expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*\.notification-row\s*\{[^}]*--notice-nav-size:\s*44px/s);
   });
 });

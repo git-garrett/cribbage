@@ -108,21 +108,21 @@ pub fn initialize(data_dir: &std::path::Path) -> Result<(), String> {
         )
         .map_err(|error| format!("create authentication tables: {}", error))?;
 
-    let now = unix_seconds();
-    for (username, email) in EXISTING_USERS {
-        connection
-            .execute(
-                "INSERT INTO auth_users
-                 (username, display_name, email, normalized_email, created_at, updated_at)
-                 VALUES (?1, ?1, ?2, ?3, ?4, ?4)
-                 ON CONFLICT(username) DO UPDATE SET
-                   display_name = excluded.display_name,
-                   email = excluded.email,
-                   normalized_email = excluded.normalized_email,
-                   updated_at = excluded.updated_at",
-                params![username, email, normalize_email(email), now],
-            )
-            .map_err(|error| format!("seed account for {}: {}", username, error))?;
+    let users: i64 = connection
+        .query_row("SELECT COUNT(*) FROM auth_users", [], |row| row.get(0))
+        .map_err(|error| format!("count authentication accounts: {}", error))?;
+    if users == 0 {
+        let now = unix_seconds();
+        for (username, email) in EXISTING_USERS {
+            connection
+                .execute(
+                    "INSERT INTO auth_users
+                     (username, display_name, email, normalized_email, created_at, updated_at)
+                     VALUES (?1, ?1, ?2, ?3, ?4, ?4)",
+                    params![username, email, normalize_email(email), now],
+                )
+                .map_err(|error| format!("seed account for {}: {}", username, error))?;
+        }
     }
     Ok(())
 }
@@ -154,8 +154,7 @@ pub fn auth_required() -> bool {
 pub fn protects(path: &str) -> bool {
     matches!(
         path,
-        "/api/game/action"
-            | "/api/game/session/save"
+        "/api/game/session/save"
             | "/api/game/session/load"
             | "/api/game/session/complete"
             | "/api/games"
@@ -636,7 +635,7 @@ fn find_user_by_email(
         .map_err(|error| format!("read account: {}", error))
 }
 
-fn user_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuthUser> {
+pub(super) fn user_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuthUser> {
     Ok(AuthUser {
         id: row.get(0)?,
         username: row.get(1)?,
@@ -898,6 +897,39 @@ mod tests {
             .unwrap();
         assert_eq!(rows, 7);
         assert_eq!(vince, "Vpellegrini@me.com");
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn initialization_does_not_restore_an_edited_seed_identity() {
+        let server = test_server("preserves-edits");
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection
+            .execute(
+                "UPDATE auth_users
+                 SET username = 'New Garrett', display_name = 'New Garrett',
+                     email = 'new@example.com', normalized_email = 'new@example.com'
+                 WHERE username = 'Garrett'",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+
+        initialize(&server.data_dir).unwrap();
+
+        let connection = open_game_database(&server.data_dir).unwrap();
+        let rows: i64 = connection
+            .query_row("SELECT COUNT(*) FROM auth_users", [], |row| row.get(0))
+            .unwrap();
+        let edited: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM auth_users WHERE username = 'New Garrett' AND email = 'new@example.com'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(rows, 7);
+        assert_eq!(edited, 1);
         std::fs::remove_dir_all(server.data_dir).unwrap();
     }
 

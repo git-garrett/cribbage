@@ -43,4 +43,14 @@ describe("shouldUploadCompletedGame", () => {
       playerTag: "Garrett",
     })).toBe(false);
   });
+
+  it("never uploads QA games from a local development session", () => {
+    expect(shouldUploadCompletedGame({
+      remoteEnabled: true,
+      localQaMode: true,
+      force: true,
+      alreadyUploaded: false,
+      playerTag: "Garrett",
+    })).toBe(false);
+  });
 });

@@ -1,5 +1,6 @@
 interface CompletedGameUploadPolicy {
   remoteEnabled: boolean;
+  localQaMode?: boolean;
   force: boolean;
   alreadyUploaded: boolean;
   playerTag: string;
@@ -7,10 +8,11 @@ interface CompletedGameUploadPolicy {
 
 export function shouldUploadCompletedGame({
   remoteEnabled,
+  localQaMode = false,
   force,
   alreadyUploaded,
   playerTag,
 }: CompletedGameUploadPolicy): boolean {
-  if (!remoteEnabled || !playerTag.trim()) return false;
+  if (localQaMode || !remoteEnabled || !playerTag.trim()) return false;
   return force || !alreadyUploaded;
 }

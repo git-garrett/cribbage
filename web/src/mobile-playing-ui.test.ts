@@ -7,11 +7,13 @@ const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const mainSource = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 
 describe("Concept B mobile playing UI", () => {
-  it("uses the scalable dark lockup and live hand number in the header", () => {
+  it("uses the scalable dark lockup and a pathway-style home control in the header", () => {
     expect(html).toMatch(/class="app-brand-logo" src="\/brand\/strong-cribbage-lockup-dark\.svg"/);
     expect(html).toMatch(/<picture class="splash-logo">[\s\S]*?lockup-dark\.svg[\s\S]*?lockup-light\.svg[\s\S]*?<\/picture>/);
-    expect(html).toMatch(/id="hand-number" class="hand-number"/);
-    expect(mainSource).toMatch(/els\.handNumber\.textContent = `Hand \$\{game\.handNumber\}`/);
+    expect(html).toMatch(/id="app-back" class="pathway-back app-back"/);
+    expect(html).not.toMatch(/id="hand-number"/);
+    expect(html).not.toMatch(/id="new-game"/);
+    expect(mainSource).toMatch(/els\.appBack\.addEventListener\("click", \(\) => \{[\s\S]*navigatePathway\("home"\)/);
   });
 
   it("moves the text-size selector inside the hamburger menu", () => {

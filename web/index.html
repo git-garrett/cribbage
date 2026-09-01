@@ -29,6 +29,40 @@
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
+    <aside id="people-presence" class="people-presence" aria-label="Human players" hidden>
+      <button id="people-presence-toggle" class="people-presence-toggle" type="button" aria-expanded="false" aria-controls="people-presence-panel">
+        <span class="people-presence-pegs" aria-hidden="true"><i></i><i></i></span>
+        <span id="people-presence-label">0 online</span>
+        <span id="people-presence-alert" class="people-presence-alert" hidden>0</span>
+      </button>
+      <section id="people-presence-panel" class="people-presence-panel" aria-labelledby="people-presence-title" hidden>
+        <header>
+          <div>
+            <p class="people-eyebrow">The clubhouse</p>
+            <h2 id="people-presence-title">Players online</h2>
+          </div>
+          <button id="people-presence-close" type="button" aria-label="Close player list">×</button>
+        </header>
+        <div id="people-challenge-section" class="people-drawer-section" hidden>
+          <h3>Waiting for you</h3>
+          <div id="people-challenge-list" class="people-list"></div>
+        </div>
+        <div class="people-drawer-section">
+          <h3>Online now</h3>
+          <div id="people-online-list" class="people-list"></div>
+        </div>
+        <section id="auth-account-row" class="people-drawer-section people-account-section" hidden>
+          <h3>Account</h3>
+          <button id="auth-account-profile" class="people-account-action" type="button"></button>
+          <button id="auth-logout" class="people-account-action people-account-signout" type="button">Log out</button>
+        </section>
+        <section id="auth-login-row" class="people-drawer-section people-account-section">
+          <h3>Account</h3>
+          <button id="auth-login" class="people-account-action" type="button">Log in</button>
+        </section>
+      </section>
+    </aside>
+
     <section id="pathway-page" class="pathway-page" aria-labelledby="pathway-title" hidden>
       <div class="pathway-shell">
         <header class="pathway-brandbar">
@@ -49,7 +83,7 @@
               <p>Play, learn, review your progress, or adjust settings.</p>
             </div>
             <nav class="pathway-primary-grid" aria-label="Strong Cribbage sections">
-              <button class="pathway-card pathway-card-featured" type="button" data-pathway-target="play">
+              <button class="pathway-card" type="button" data-pathway-target="play">
                 <span class="pathway-card-kicker">Take a seat</span>
                 <strong>Play Now</strong>
                 <span>Choose a human or AI opponent.</span>
@@ -61,10 +95,11 @@
                 <span>Whether you're a beginner or want strategies for mastering the game.</span>
                 <b aria-hidden="true">→</b>
               </button>
-              <button id="pathway-statistics" class="pathway-card" type="button" disabled>
+              <button id="pathway-statistics" class="pathway-card" type="button">
                 <span class="pathway-card-kicker">Track your game</span>
                 <strong>Statistics</strong>
                 <span>See your results and scoring profile.</span>
+                <em class="pathway-login-note">Sign in required</em>
                 <b aria-hidden="true">→</b>
               </button>
               <button class="pathway-card" type="button" data-pathway-target="settings">
@@ -86,7 +121,7 @@
               <p>Choose the kind of game you want to play.</p>
             </header>
             <div class="pathway-choice-grid pathway-choice-grid-play" tabindex="0" role="group" aria-label="Play options">
-              <button class="pathway-choice pathway-choice-featured" type="button" data-pathway-destination="easy">
+              <button class="pathway-choice" type="button" data-pathway-destination="easy">
                 <span>AI opponent</span>
                 <strong>Easy</strong>
                 <small>Good for Learners</small>
@@ -100,11 +135,13 @@
                 <span>AI opponent</span>
                 <strong>Master</strong>
                 <small>Challenges the Best Players</small>
+                <em class="pathway-login-note">Sign in required</em>
               </button>
-              <button class="pathway-choice pathway-choice-human" type="button" data-pathway-destination="human" disabled>
+              <button class="pathway-choice pathway-choice-human" type="button" data-pathway-destination="human">
                 <span>Human match</span>
                 <strong>Find a Human Opponent</strong>
-                <em class="pathway-coming-soon">Coming soon</em>
+                <small>See who’s online and ready to play.</small>
+                <em class="pathway-login-note">Sign in required</em>
               </button>
               <button class="pathway-choice pathway-choice-dynamic" type="button" data-pathway-destination="dynamic" disabled>
                 <span>Adaptive opponent</span>
@@ -121,6 +158,21 @@
             </div>
           </section>
 
+          <section class="pathway-view pathway-subview pathway-human" data-pathway-view="human" aria-labelledby="pathway-human-title" hidden>
+            <header class="pathway-subhead">
+              <button class="pathway-back" type="button" data-pathway-back>
+                <span aria-hidden="true">←</span> Home
+              </button>
+              <p class="pathway-eyebrow">Find a Human Opponent</p>
+              <h2 id="pathway-human-title">Find a seat across the board.</h2>
+              <p>Players looking for a game appear first.</p>
+            </header>
+            <div class="human-directory-shell">
+              <div class="human-directory-key"><i aria-hidden="true"></i> Looking for a game</div>
+              <div id="human-directory" class="human-directory" aria-live="polite"></div>
+            </div>
+          </section>
+
           <section class="pathway-view pathway-subview" data-pathway-view="tutorial" aria-labelledby="pathway-tutorial-title" hidden>
             <header class="pathway-subhead">
               <button class="pathway-back" type="button" data-pathway-back>
@@ -131,17 +183,20 @@
               <p>Whether you're a beginner or want strategies for mastering the game.</p>
             </header>
             <div class="pathway-choice-grid pathway-choice-grid-tutorial">
-              <button class="pathway-choice" type="button" data-pathway-destination="tutorial-beginner">
+              <button class="pathway-choice" type="button" data-pathway-destination="tutorial-beginner" disabled>
                 <span>Learn to Play</span>
                 <strong>Beginner</strong>
+                <em class="pathway-coming-soon">Coming soon</em>
               </button>
-              <button class="pathway-choice" type="button" data-pathway-destination="tutorial-intermediate">
+              <button class="pathway-choice" type="button" data-pathway-destination="tutorial-intermediate" disabled>
                 <span>Learn to Score Points</span>
                 <strong>Intermediate</strong>
+                <em class="pathway-coming-soon">Coming soon</em>
               </button>
-              <button class="pathway-choice" type="button" data-pathway-destination="tutorial-expert">
+              <button class="pathway-choice" type="button" data-pathway-destination="tutorial-expert" disabled>
                 <span>Learn Cribbage Strategy</span>
                 <strong>Expert Strategies</strong>
+                <em class="pathway-coming-soon">Coming soon</em>
               </button>
             </div>
           </section>
@@ -160,9 +215,10 @@
                 <span>Display</span>
                 <strong>Size</strong>
               </button>
-              <button class="pathway-choice" type="button" data-pathway-destination="sounds">
+              <button class="pathway-choice" type="button" data-pathway-destination="sounds" disabled>
                 <span>Audio</span>
                 <strong>Sounds</strong>
+                <em class="pathway-coming-soon">Coming soon</em>
               </button>
             </div>
           </section>
@@ -170,6 +226,117 @@
 
       </div>
     </section>
+
+    <section id="people-profile-page" class="people-page" aria-labelledby="people-profile-title" hidden>
+      <div class="people-page-shell">
+        <button id="people-profile-back" class="people-page-back" type="button"><span aria-hidden="true">←</span> Back</button>
+        <article class="people-profile-card">
+          <div id="people-profile-avatar" class="people-avatar people-profile-avatar" aria-hidden="true"></div>
+          <div class="people-profile-heading">
+            <p class="people-eyebrow">Player profile</p>
+            <h1 id="people-profile-title">Player</h1>
+            <p id="people-profile-presence" class="people-profile-presence"></p>
+          </div>
+          <button id="people-profile-play" class="people-primary-action" type="button" hidden>Play now</button>
+        </article>
+        <section id="people-profile-head-to-head" class="people-profile-head-to-head" aria-labelledby="people-profile-head-to-head-title" hidden>
+          <header class="people-head-to-head-heading">
+            <div>
+              <p class="people-eyebrow">Across the board</p>
+              <h2 id="people-profile-head-to-head-title">Head to Head</h2>
+            </div>
+            <span id="people-profile-head-to-head-games" class="people-head-to-head-games"></span>
+          </header>
+          <div id="people-profile-head-to-head-score" class="people-head-to-head-score" aria-label="Head to head score">
+            <span>You</span>
+            <strong id="people-profile-head-to-head-viewer-wins">0</strong>
+            <i aria-hidden="true"></i>
+            <strong id="people-profile-head-to-head-profile-wins">0</strong>
+            <span id="people-profile-head-to-head-opponent">Opponent</span>
+          </div>
+          <p id="people-profile-head-to-head-summary" class="people-head-to-head-summary"></p>
+        </section>
+        <form id="people-profile-form" class="people-profile-form" hidden>
+          <header>
+            <p class="people-eyebrow">Your account</p>
+            <h2>Edit your profile</h2>
+          </header>
+          <div class="people-profile-fields">
+            <label>
+              <span>Username</span>
+              <input id="people-profile-username" type="text" minlength="2" maxlength="28" autocomplete="username" required>
+            </label>
+            <label>
+              <span>Email</span>
+              <input id="people-profile-email" type="email" autocomplete="email" required>
+            </label>
+            <label class="people-avatar-field">
+              <span>Profile picture</span>
+              <input id="people-profile-image" type="file" accept="image/jpeg,image/png,image/webp">
+              <small>Images are cropped square and resized before upload.</small>
+            </label>
+          </div>
+          <div class="people-profile-actions">
+            <button id="people-profile-save" class="people-primary-action" type="submit">Save profile</button>
+            <button id="people-password-reset" class="people-secondary-action" type="button">Send password reset</button>
+          </div>
+          <p id="people-profile-status" class="people-form-status" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+    </section>
+
+    <section id="human-table-page" class="human-table-page" aria-labelledby="human-table-title" hidden>
+      <div class="human-table-shell">
+        <button id="human-table-back" class="people-page-back" type="button"><span aria-hidden="true">←</span> Leave table</button>
+        <div class="human-table-heading">
+          <p class="people-eyebrow">Private table</p>
+          <h1 id="human-table-title">Waiting at the table.</h1>
+          <p id="human-table-message">Your opponent has been invited.</p>
+        </div>
+        <div class="human-table-felt">
+          <article id="human-table-challenger" class="human-seat"></article>
+          <div class="human-table-center">
+            <span class="human-table-cut-line" aria-hidden="true"></span>
+            <div id="human-table-cuts" class="human-table-cuts"></div>
+          </div>
+          <article id="human-table-challenged" class="human-seat"></article>
+        </div>
+        <button id="human-table-cut" class="people-primary-action human-table-cut" type="button" hidden>Cut for deal</button>
+        <p id="human-table-status" class="people-form-status" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <dialog id="size-dialog" class="size-dialog" aria-labelledby="size-dialog-title">
+      <form method="dialog" class="size-dialog-shell">
+        <header>
+          <div>
+            <p class="people-eyebrow">Accessibility</p>
+            <h2 id="size-dialog-title">Choose your text size.</h2>
+          </div>
+          <button id="size-dialog-close" class="size-dialog-close" type="button" aria-label="Close size settings">×</button>
+        </header>
+        <div class="size-options" role="radiogroup" aria-label="Text size">
+          <label class="size-option">
+            <input type="radio" name="pathway-size" value="normal">
+            <span><strong>Normal</strong><small>Comfortable and compact</small></span>
+            <b aria-hidden="true">Aa</b>
+          </label>
+          <label class="size-option">
+            <input type="radio" name="pathway-size" value="large">
+            <span><strong>Large</strong><small>More room for every word</small></span>
+            <b aria-hidden="true">Aa</b>
+          </label>
+          <label class="size-option">
+            <input type="radio" name="pathway-size" value="x-large">
+            <span><strong>X-large</strong><small>Maximum legibility</small></span>
+            <b aria-hidden="true">Aa</b>
+          </label>
+        </div>
+        <button id="size-dialog-save" class="people-primary-action" type="submit">Use this size</button>
+        <p id="size-dialog-status" class="people-form-status" role="status" aria-live="polite"></p>
+      </form>
+    </dialog>
+
     <section id="auth-page" class="auth-page" aria-labelledby="auth-title" hidden>
       <div class="auth-shell">
         <picture class="auth-logo">
@@ -178,7 +345,7 @@
         </picture>
         <div class="auth-peg-track" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
         <div class="auth-heading">
-          <p class="auth-eyebrow">Invitation only · AI 13.0</p>
+          <p class="auth-eyebrow">Invitation only · Master</p>
           <h1 id="auth-title">Your seat is waiting.</h1>
           <p id="auth-intro">Sign in to continue your games and keep your results with your account.</p>
         </div>
@@ -195,6 +362,7 @@
           <button id="auth-code-request" class="auth-secondary" type="button">Email me a sign-in code</button>
           <button id="auth-forgot-password" class="auth-link" type="button">Forgot password?</button>
         </form>
+        <button id="auth-cancel" class="auth-link auth-cancel" type="button" hidden>← Back</button>
         <form id="auth-otp-form" class="auth-form" hidden>
           <label>
             <span>Six-digit code</span>
@@ -240,11 +408,8 @@
           <img class="app-brand-logo" src="/brand/strong-cribbage-lockup-dark.svg" alt="">
           <h1 class="visually-hidden">Strong Cribbage</h1>
         </div>
-        <span id="hand-number" class="hand-number">Hand 1</span>
-        <button id="menu-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="settings-panel" aria-label="Menu">
-          <span></span>
-          <span></span>
-          <span></span>
+        <button id="app-back" class="pathway-back app-back" type="button">
+          <span aria-hidden="true">←</span> Home
         </button>
         <div id="settings-panel" class="settings-panel" hidden>
           <label class="font-size-control" for="font-size-select">
@@ -258,17 +423,17 @@
           <label class="opponent-control" hidden>
             AI
             <select id="opponent" disabled>
-              <option value="schell_table-peg_table-16.3">AI 16.3 (experimental)</option>
-              <option value="schell_table-peg_table-16.1">AI 16.1 (experimental)</option>
-              <option value="schell_table-peg_table-16.0">AI 16.0</option>
-              <option value="schell_table-peg_table-15.2">AI 15.2</option>
-              <option value="schell_table-peg_table-15.1">AI 15.1</option>
-              <option value="schell_table-peg_table-15.0">AI 15.0</option>
-              <option value="schell_table-peg_table-14.8.1">AI 14.8.1</option>
-              <option value="schell_table-peg_table-14.8">AI 14.8</option>
-              <option value="schell_table-peg_table-14.3">AI 14.3</option>
-              <option value="schell_table-peg_table-13.0" selected>AI 13.0</option>
-              <option value="schell_table-peg_table-9.1">AI 9.1</option>
+              <option value="schell_table-peg_table-16.3">Experimental Master</option>
+              <option value="schell_table-peg_table-16.1">Experimental Master</option>
+              <option value="schell_table-peg_table-16.0">Experimental Master</option>
+              <option value="schell_table-peg_table-15.2">Experimental Master</option>
+              <option value="schell_table-peg_table-15.1">Experimental Master</option>
+              <option value="schell_table-peg_table-15.0">Experimental Master</option>
+              <option value="schell_table-peg_table-14.8.1">Experimental Master</option>
+              <option value="schell_table-peg_table-14.8">Experimental Master</option>
+              <option value="schell_table-peg_table-14.3">Experimental Master</option>
+              <option value="schell_table-peg_table-13.0" selected>Master</option>
+              <option value="schell_table-peg_table-9.1">Tough</option>
               <option value="myrmidon-5">Myrmidon 5</option>
             </select>
           </label>
@@ -293,25 +458,20 @@
             </label>
             <button id="trouble-game" type="button">Trouble game</button>
           </details>
-          <button id="new-game" type="button">New game</button>
           <button id="my-stats-open" type="button">My Stats</button>
-          <div id="auth-account-row" class="account-menu-row" hidden>
-            <span id="auth-account-name"></span>
-            <button id="auth-logout" type="button">Sign out</button>
-          </div>
           <div class="app-version">Version <span id="app-version">-</span></div>
         </div>
       </section>
 
       <section class="scoreboard">
         <div class="score">
-          <span class="score-label"><span class="player-name">User <span id="human-dealer" class="dealer-button" hidden>Crib</span></span></span>
+          <span class="score-label"><span id="human-name" class="player-name">Player <span id="human-dealer" class="dealer-button" hidden>Crib</span></span></span>
           <strong id="human-score">0</strong>
           <span id="human-pace" class="score-pace"></span>
           <span id="human-final" class="score-final"></span>
         </div>
         <div class="score ai">
-          <span class="score-label"><span class="player-name">AI <span id="ai-dealer" class="dealer-button" hidden>Crib</span></span></span>
+          <span class="score-label"><span id="ai-name" class="player-name">Master <span id="ai-dealer" class="dealer-button" hidden>Crib</span></span></span>
           <strong id="ai-score">0</strong>
           <span id="ai-pace" class="score-pace"></span>
           <span id="ai-final" class="score-final"></span>
@@ -321,7 +481,7 @@
 
       <section class="table">
         <div class="ai-strip">
-          <h2>AI hand</h2>
+          <h2 id="ai-hand-title">Master’s hand</h2>
           <div id="ai-hand" class="cards small"></div>
         </div>
         <div class="status">
@@ -330,7 +490,7 @@
           <span>Turn: <strong id="turn">-</strong></span>
           <span id="model-thinking" class="thinking-indicator" role="status" aria-live="polite" hidden>
             <span class="throbber" aria-hidden="true"></span>
-            <span class="thinking-label">AI thinking</span>
+            <span class="thinking-label">Master thinking</span>
           </span>
         </div>
         <div class="played">
@@ -357,7 +517,7 @@
         </div>
         <div class="user-panel">
           <div class="user-panel-header">
-            <h2 id="user-hand-title">User hand</h2>
+            <h2 id="user-hand-title">Player hand</h2>
             <span id="user-hand-meta" class="user-hand-meta"></span>
           </div>
           <div class="user-hand-layout">
@@ -368,6 +528,7 @@
             <button id="discard" type="button" disabled>Discard selected</button>
             <button id="cut-for-deal" type="button" hidden>Cut deck</button>
             <button id="play" type="button" disabled>Play selected</button>
+            <button id="ask-master" class="ask-master" type="button" hidden>Ask Master</button>
             <button id="go" type="button" disabled>Go</button>
             <button id="acknowledge-pegging-reset" class="inline-continue" type="button" hidden>OK</button>
             <button id="continue-pegging" class="inline-continue" type="button" hidden>Count hands</button>
@@ -385,7 +546,33 @@
       <div id="thinking-overlay" class="thinking-overlay" role="status" aria-live="polite" hidden>
         <div class="thinking-overlay-box">
           <span class="throbber thinking-overlay-throbber" aria-hidden="true"></span>
-          <span id="thinking-overlay-label">AI thinking</span>
+          <span id="thinking-overlay-label">Master thinking</span>
+        </div>
+      </div>
+
+      <div id="master-hint-dialog" class="master-hint-dialog" role="dialog" aria-modal="true" aria-labelledby="master-hint-title" hidden>
+        <div class="master-hint-card">
+          <p class="master-hint-eyebrow">Master’s advice</p>
+          <h2 id="master-hint-title">Master recommends</h2>
+          <p id="master-hint-copy" class="master-hint-copy"></p>
+          <div class="master-hint-actions">
+            <button id="master-hint-dismiss" class="master-hint-dismiss" type="button">Dismiss</button>
+            <button id="master-hint-apply" class="master-hint-apply" type="button">Play Master’s Pick</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="master-session-dialog" class="master-session-dialog" role="dialog" aria-modal="true" aria-labelledby="master-session-title" hidden>
+        <div class="master-session-card">
+          <p class="master-hint-eyebrow">Master game in progress</p>
+          <h2 id="master-session-title">Leave the Master table?</h2>
+          <p>Your Master game is saved. You can play another opponent now, but you cannot start another Master game until this one is completed or forfeited.</p>
+          <p id="master-session-status" class="master-session-status" role="status" aria-live="polite"></p>
+          <div class="master-session-actions">
+            <button id="master-session-cancel" class="master-hint-dismiss" type="button">Keep playing</button>
+            <button id="master-session-save" class="master-session-save" type="button">Save for later</button>
+            <button id="master-session-forfeit" class="master-session-forfeit" type="button">Forfeit Master game</button>
+          </div>
         </div>
       </div>
 
@@ -405,6 +592,61 @@
           </div>
           <button id="analytics-close" type="button">Done</button>
         </div>
+        <div id="stats-view-tabs" class="my-stats-opponent-tabs stats-view-tabs" role="tablist" aria-label="Statistics views" hidden>
+          <button type="button" role="tab" data-stats-view="stats" aria-selected="true">My Stats</button>
+          <button type="button" role="tab" data-stats-view="leaderboard" aria-selected="false">Leaderboard</button>
+          <button type="button" role="tab" data-stats-view="game-log" aria-selected="false">Game Log</button>
+        </div>
+        <div id="my-stats-opponent-tabs" class="my-stats-opponent-tabs" role="tablist" aria-label="Stats by opponent" hidden>
+          <button type="button" role="tab" data-my-stats-opponent="master" aria-selected="true">Master</button>
+          <button type="button" role="tab" data-my-stats-opponent="human" aria-selected="false">Human</button>
+          <button type="button" role="tab" data-my-stats-opponent="easy" aria-selected="false">Easy</button>
+          <button type="button" role="tab" data-my-stats-opponent="tough" aria-selected="false">Tough</button>
+          <button type="button" role="tab" data-my-stats-opponent="grandmaster" data-stats-available="false" aria-selected="false">Grandmaster</button>
+          <button type="button" role="tab" data-my-stats-opponent="dynamic" data-stats-available="false" aria-selected="false">Dynamic</button>
+        </div>
+        <section id="stats-leaderboard" class="stats-leaderboard" aria-labelledby="stats-leaderboard-title" hidden>
+          <header>
+            <h2 id="stats-leaderboard-title">Leaderboard</h2>
+            <p id="stats-leaderboard-summary">No leaderboard data yet.</p>
+          </header>
+          <div id="stats-leaderboard-highlights" class="analytics-totals"></div>
+          <div id="stats-leaderboard-list" class="analytics-list"></div>
+        </section>
+        <section id="stats-game-log" class="stats-game-log" aria-labelledby="stats-game-log-title" hidden>
+          <header>
+            <h2 id="stats-game-log-title">Game Log</h2>
+            <p id="game-log-summary">No completed games yet.</p>
+          </header>
+          <div class="game-log-filters" aria-label="Game log filters">
+            <label class="game-log-filter">
+              Opponent
+              <select id="game-log-opponent">
+                <option value="">All opponents</option>
+              </select>
+            </label>
+            <label class="game-log-filter">
+              Result
+              <select id="game-log-result">
+                <option value="">All results</option>
+                <option value="win">Wins</option>
+                <option value="loss">Losses</option>
+                <option value="skunk">Skunks</option>
+              </select>
+            </label>
+            <label class="game-log-filter">
+              Match type
+              <select id="game-log-match-type">
+                <option value="">Human and AI</option>
+                <option value="ai">AI</option>
+                <option value="human">Human</option>
+              </select>
+            </label>
+          </div>
+          <div class="game-log-layout">
+            <div id="game-log-list" class="game-log-list"></div>
+          </div>
+        </section>
         <div id="analytics-totals" class="analytics-totals"></div>
         <div class="analytics-section" hidden>
           <h3>Games</h3>
@@ -421,25 +663,6 @@
         <div class="analytics-section" hidden>
           <h3>Pegging</h3>
           <div id="analytics-pegging" class="analytics-list"></div>
-        </div>
-      </section>
-
-      <section id="game-log-page" class="game-log-page" aria-label="Game log" hidden>
-        <div class="analytics-header">
-          <div>
-            <h2>Game log</h2>
-            <p id="game-log-summary">No completed games yet.</p>
-          </div>
-          <button id="game-log-close" type="button">Done</button>
-        </div>
-        <label class="game-log-filter">
-          Opponent
-          <select id="game-log-opponent">
-            <option value="">All opponents</option>
-          </select>
-        </label>
-        <div class="game-log-layout">
-          <div id="game-log-list" class="game-log-list"></div>
         </div>
       </section>
 

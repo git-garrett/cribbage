@@ -23,6 +23,8 @@ export type CircularTrackPoint = {
   rotation: number;
 };
 
+export type CircularBoardPlayers = Record<PlayerKey, string>;
+
 export function circularTrackPoint(position: number | string, radius: number): CircularTrackPoint {
   const numericPosition = Number(position);
   let angleDegrees: number;
@@ -56,9 +58,9 @@ export function circularBoardPresentation(game: GameState): CircularBoardPresent
   }
   if (game.phase === "discard" || game.phase === "ai_discarding") {
     return {
-      eyebrow: "Hand",
-      value: String(game.handNumber),
-      detail: game.phase === "ai_discarding" ? "AI choosing" : `Choose 2 · ${game.cribOwner} crib`,
+      eyebrow: "Discard",
+      value: game.phase === "ai_discarding" ? "…" : "2",
+      detail: game.phase === "ai_discarding" ? "Opponent choosing" : `${game.cribOwner} crib`,
     };
   }
   if (game.phase === "cut_for_deal") {
@@ -170,6 +172,7 @@ export function updateCircularBoard(
   container: HTMLElement,
   game: GameState,
   override?: CircularBoardPresentation | null,
+  players: CircularBoardPlayers = { human: "Player", ai: "Master" },
 ): void {
   const board = container.querySelector<HTMLElement>(".circular-board");
   const svg = board?.querySelector<SVGSVGElement>(".circular-track-svg");
@@ -187,13 +190,16 @@ export function updateCircularBoard(
   }
 
   const presentation = override || circularBoardPresentation(game);
+  const namedDetail = presentation.detail
+    .replace(/\bUser\b/g, players.human)
+    .replace(/\bAI\b/g, players.ai);
   eyebrow.textContent = presentation.eyebrow;
   value.textContent = presentation.value;
   value.dataset.compact = presentation.value.length > 2 ? "true" : "false";
-  detail.textContent = presentation.detail;
+  detail.textContent = namedDetail;
   board.setAttribute(
     "aria-label",
-    `Cribbage score track. User ${game.scores.human}, AI ${game.scores.ai}. ${presentation.eyebrow} ${presentation.value}. ${presentation.detail}.`,
+    `Cribbage score track. ${players.human} ${game.scores.human}, ${players.ai} ${game.scores.ai}. ${presentation.eyebrow} ${presentation.value}. ${namedDetail}.`,
   );
 }
 

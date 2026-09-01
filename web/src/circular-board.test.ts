@@ -52,7 +52,7 @@ describe("circular cribbage track", () => {
     });
   });
 
-  it("puts the discard instruction in the center without relying on duplicate chrome", () => {
+  it("puts discard guidance in the center without repeating the hand number", () => {
     const game = {
       phase: "discard",
       handNumber: 4,
@@ -60,9 +60,9 @@ describe("circular cribbage track", () => {
     } as GameState;
 
     expect(circularBoardPresentation(game)).toEqual({
-      eyebrow: "Hand",
-      value: "4",
-      detail: "Choose 2 · AI crib",
+      eyebrow: "Discard",
+      value: "2",
+      detail: "AI crib",
     });
   });
 

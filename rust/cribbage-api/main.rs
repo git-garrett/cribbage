@@ -24,6 +24,7 @@ use serde_json::{json, Value};
 
 mod auth;
 mod email;
+mod people;
 
 const HUMAN: Side = Side::Left;
 const AI: Side = Side::Right;
@@ -46,11 +47,17 @@ struct Session {
     created_at: String,
     updated_at: String,
     completed_at: Option<String>,
+    forfeited: bool,
     decision_reviews: Vec<SavedDecisionReview>,
     score_events: Vec<SavedScoreEvent>,
     next_review_id: u32,
     event_sequence: u64,
     pending_final_scoring: Option<FinalScoring>,
+}
+
+enum DeferredRecommendation {
+    AiDiscard(CribbageGame, ModelId),
+    MasterHint(CribbageGame),
 }
 
 #[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
@@ -134,6 +141,8 @@ struct PersistedSession {
     created_at: String,
     updated_at: String,
     completed_at: Option<String>,
+    #[serde(default)]
+    forfeited: bool,
     decision_reviews: Vec<SavedDecisionReview>,
     #[serde(default)]
     score_events: Vec<SavedScoreEvent>,
@@ -231,6 +240,8 @@ fn main() {
     });
     auth::initialize(&data_dir)
         .unwrap_or_else(|error| panic!("could not initialize authentication storage: {}", error));
+    people::initialize(&data_dir)
+        .unwrap_or_else(|error| panic!("could not initialize people storage: {}", error));
     auth::validate_configuration()
         .unwrap_or_else(|error| panic!("invalid authentication configuration: {}", error));
     let uploads = load_uploads(&data_dir).unwrap_or_else(|error| {
@@ -273,7 +284,12 @@ fn handle_connection(mut stream: TcpStream, server: &Server) -> Result<(), Strin
     }
     let authenticated_user = auth::authenticated_user(server, &request)
         .map_err(|error| format!("authenticate request: {}", error))?;
-    if auth::auth_required() && auth::protects(&request.path) && authenticated_user.is_none() {
+    if let Some(response) = people::handle(server, &request, authenticated_user.as_ref()) {
+        return write_response(&mut stream, response);
+    }
+    let requires_user = (auth::auth_required() && auth::protects(&request.path))
+        || (request.path == "/api/game/action" && game_action_requires_auth(server, &request.body));
+    if requires_user && authenticated_user.is_none() {
         return write_response(
             &mut stream,
             Response::json(401, "{\"error\":\"Sign in to continue.\"}".to_string()),
@@ -465,6 +481,33 @@ fn model_json() -> String {
     )
 }
 
+fn game_action_requires_auth(server: &Server, body: &str) -> bool {
+    let action = json_string(body, "action").unwrap_or_default();
+    if action == "new" || action == "state" && json_string(body, "gameId").is_none() {
+        return json_string(body, "opponent")
+            .and_then(|value| ModelId::from_str(&value).ok())
+            .map(|model| !guest_model(model))
+            .unwrap_or(true);
+    }
+    let Some(session_id) = json_string(body, "gameId") else {
+        return true;
+    };
+    if let Ok(app) = server.state.lock() {
+        if let Some(session) = app.sessions.get(&session_id) {
+            return !guest_model(session.model);
+        }
+    }
+    load_session_by_id(&server.data_dir, &session_id)
+        .ok()
+        .flatten()
+        .map(|session| !guest_model(session.model))
+        .unwrap_or(true)
+}
+
+fn guest_model(model: ModelId) -> bool {
+    matches!(model, ModelId::Myrmidon5 | ModelId::Schell91)
+}
+
 fn game_action(server: &Server, body: &str) -> Response {
     let action = json_string(body, "action").unwrap_or_default();
     let tag = json_string(body, "tag")
@@ -475,27 +518,27 @@ fn game_action(server: &Server, body: &str) -> Response {
     // the lock, then evaluate it after releasing the global session lock. A
     // slow preparation for one game must not make every other game appear
     // unavailable.
-    let result = (|| -> Result<(String, Option<(CribbageGame, ModelId)>), String> {
+    let result = (|| -> Result<(String, Option<DeferredRecommendation>), String> {
         let mut app = server
             .state
             .lock()
             .map_err(|_| "server state lock poisoned".to_string())?;
         if action == "new" || action == "state" && json_string(body, "gameId").is_none() {
+            let model = json_string(body, "opponent")
+                .and_then(|value| ModelId::from_str(&value).ok())
+                .unwrap_or(ModelId::Schell13);
             if let Some(existing) = tag.as_deref().and_then(|tag| {
                 app.sessions
                     .values()
                     .filter(|session| {
                         session.tag.as_deref() == Some(tag)
                             && session_status(session) == "active"
-                            && !session.waiting_for_deal_cut
+                            && session.model == model
                     })
                     .max_by_key(|session| &session.updated_at)
             }) {
                 return response_for_session(existing).map(|response| (response, None));
             }
-            let model = json_string(body, "opponent")
-                .and_then(|value| ModelId::from_str(&value).ok())
-                .unwrap_or(ModelId::Schell13);
             let mut session = new_session(model, tag);
             session.event_sequence = 1;
             if let Err(error) = persist_session_event(&server.data_dir, &session, "new", body) {
@@ -532,7 +575,7 @@ fn game_action(server: &Server, body: &str) -> Response {
         {
             session.completed_at = Some(isoish_now());
         }
-        let records_event = !matches!(action.as_str(), "state" | "prepare-ai-discard");
+        let records_event = !matches!(action.as_str(), "state" | "prepare-ai-discard" | "master-hint");
         if records_event {
             session.updated_at = isoish_now();
             session.event_sequence += 1;
@@ -548,21 +591,29 @@ fn game_action(server: &Server, body: &str) -> Response {
             }
         }
         let response = response_for_session(session)?;
-        let recommendation_game = if matches!(
-            action.as_str(),
-            "prepare-cut-for-deal" | "prepare-ai-discard"
-        ) && !session.waiting_for_deal_cut
+        let recommendation_game = if action == "master-hint" {
+            Some(DeferredRecommendation::MasterHint(session.game.clone()))
+        } else if matches!(action.as_str(), "prepare-cut-for-deal" | "prepare-ai-discard")
+            && !session.waiting_for_deal_cut
             && session.game.phase == Phase::Discard
         {
-            Some((session.game.clone(), session.model))
+            Some(DeferredRecommendation::AiDiscard(session.game.clone(), session.model))
         } else {
             None
         };
         Ok((response, recommendation_game))
     })();
     match result {
-        Ok((response, Some((game, model)))) => {
+        Ok((response, Some(DeferredRecommendation::AiDiscard(game, model)))) => {
             match response_with_discard_recommendation(response, &game, model, &server.model_root) {
+                Ok(json) => Response::json(200, json),
+                Err(error) => {
+                    Response::json(400, format!("{{\"error\":\"{}\"}}", json_escape(&error)))
+                }
+            }
+        }
+        Ok((response, Some(DeferredRecommendation::MasterHint(game)))) => {
+            match response_with_master_hint(response, &game, &server.model_root) {
                 Ok(json) => Response::json(200, json),
                 Err(error) => {
                     Response::json(400, format!("{{\"error\":\"{}\"}}", json_escape(&error)))
@@ -599,6 +650,7 @@ fn new_session_from_seed(model: ModelId, tag: Option<String>, seed: u32, counter
         created_at: isoish_now(),
         updated_at: isoish_now(),
         completed_at: None,
+        forfeited: false,
         decision_reviews: Vec::new(),
         score_events: Vec::new(),
         next_review_id: 1,
@@ -678,6 +730,7 @@ fn persisted_session(session: &Session) -> PersistedSession {
         created_at: session.created_at.clone(),
         updated_at: session.updated_at.clone(),
         completed_at: session.completed_at.clone(),
+        forfeited: session.forfeited,
         decision_reviews: session.decision_reviews.clone(),
         score_events: session.score_events.clone(),
         next_review_id: session.next_review_id,
@@ -705,6 +758,7 @@ fn restore_persisted_session(stored: PersistedSession) -> Result<Session, String
         created_at: stored.created_at,
         updated_at: stored.updated_at,
         completed_at: stored.completed_at,
+        forfeited: stored.forfeited,
         decision_reviews: stored.decision_reviews,
         score_events: stored.score_events,
         next_review_id: stored.next_review_id,
@@ -714,7 +768,9 @@ fn restore_persisted_session(stored: PersistedSession) -> Result<Session, String
 }
 
 fn session_status(session: &Session) -> &'static str {
-    if session.game.phase == Phase::GameOver && session.pending_final_scoring.is_none() {
+    if session.forfeited {
+        "forfeited"
+    } else if session.game.phase == Phase::GameOver && session.pending_final_scoring.is_none() {
         "complete"
     } else {
         "active"
@@ -862,17 +918,27 @@ fn load_session_by_id(data_dir: &Path, session_id: &str) -> Result<Option<Sessio
         .transpose()
 }
 
-fn load_session_by_tag(data_dir: &Path, tag: &str) -> Result<Option<Session>, String> {
+fn load_session_by_tag(
+    data_dir: &Path,
+    tag: &str,
+    model: Option<ModelId>,
+) -> Result<Option<Session>, String> {
     let connection = open_game_database(data_dir)?;
-    let saved = connection
-        .query_row(
+    let saved = match model {
+        Some(model) => connection.query_row(
+            "SELECT session_json FROM cribbage_game_sessions
+             WHERE tag = ?1 AND model = ?2 AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
+            params![tag, model.as_str()],
+            |row| row.get::<_, String>(0),
+        ).optional(),
+        None => connection.query_row(
             "SELECT session_json FROM cribbage_game_sessions
              WHERE tag = ?1 AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
             [tag],
             |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .map_err(|error| format!("find saved game by tag: {}", error))?;
+        ).optional(),
+    }
+    .map_err(|error| format!("find saved game by tag: {}", error))?;
     saved
         .map(|text| {
             let stored = serde_json::from_str::<PersistedSession>(&text)
@@ -1115,6 +1181,26 @@ fn apply_action(
             Ok(())
         }
         "prepare-ai-discard" => Ok(()),
+        "master-hint" => {
+            if session.model == ModelId::Schell13 {
+                return Err("Master is already your opponent.".to_string());
+            }
+            match session.game.phase {
+                Phase::Discard if !session.waiting_for_deal_cut && !session.waiting_for_ai_discard => Ok(()),
+                Phase::Pegging
+                    if !session.game.pegging_reset_pending
+                        && session.game.current_player() == HUMAN => Ok(()),
+                _ => Err("Master advice is not available for this decision.".to_string()),
+            }
+        }
+        "forfeit" => {
+            if session.model != ModelId::Schell13 {
+                return Err("Only a Master game can be forfeited here.".to_string());
+            }
+            session.forfeited = true;
+            session.completed_at = Some(isoish_now());
+            Ok(())
+        }
         "prepare-next-hand-ai-discard" => {
             Err("The next hand must begin with an explicit scoring acknowledgement.".to_string())
         }
@@ -1536,6 +1622,36 @@ fn response_with_discard_recommendation(
         ",\"recommendation\":{{\"cardIds\":{},\"bestLead\":{}}}}}",
         number_array_json(&decision.card_ids),
         option_u8_json(decision.best_lead),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(response)
+}
+
+fn response_with_master_hint(
+    mut response: String,
+    game: &CribbageGame,
+    model_root: &str,
+) -> Result<String, String> {
+    let (kind, card_ids) = match game.phase {
+        Phase::Discard => {
+            let decision = recommend_discard_for_side(game, HUMAN, ModelId::Schell13, model_root)?;
+            ("discard", decision.card_ids)
+        }
+        Phase::Pegging => match recommend_peg_for_side(game, HUMAN, ModelId::Schell13, None, model_root)? {
+            PegDecision::Play { card_id, .. } => ("play", vec![card_id]),
+            PegDecision::Go => ("go", Vec::new()),
+        },
+        _ => return Err("Master advice is not available for this decision.".to_string()),
+    };
+    let Some(body) = response.strip_suffix('}').map(str::to_string) else {
+        return Err("could not append Master hint".to_string());
+    };
+    response = body;
+    write!(
+        response,
+        ",\"hint\":{{\"kind\":\"{}\",\"cardIds\":{}}}}}",
+        kind,
+        number_array_json(&card_ids),
     )
     .map_err(|error| error.to_string())?;
     Ok(response)
@@ -2275,6 +2391,7 @@ fn save_session(server: &Server, body: &str) -> Response {
 
 fn load_session(server: &Server, body: &str) -> Response {
     let tag = json_string(body, "tag").unwrap_or_default();
+    let requested_model = json_string(body, "opponent").and_then(|value| ModelId::from_str(&value).ok());
     let result = (|| -> Result<String, String> {
         let mut app = server
             .state
@@ -2284,12 +2401,14 @@ fn load_session(server: &Server, body: &str) -> Response {
             .sessions
             .values()
             .filter(|session| {
-                session.tag.as_deref() == Some(tag.as_str()) && session_status(session) == "active"
+                session.tag.as_deref() == Some(tag.as_str())
+                    && session_status(session) == "active"
+                    && requested_model.is_none_or(|model| session.model == model)
             })
             .max_by_key(|session| &session.updated_at)
             .map(|session| session.id.clone());
         if in_memory_id.is_none() {
-            if let Some(session) = load_session_by_tag(&server.data_dir, &tag)? {
+            if let Some(session) = load_session_by_tag(&server.data_dir, &tag, requested_model)? {
                 let id = session.id.clone();
                 app.sessions.insert(id, session);
             }
@@ -2303,6 +2422,7 @@ fn load_session(server: &Server, body: &str) -> Response {
                     .filter(|session| {
                         session.tag.as_deref() == Some(tag.as_str())
                             && session_status(session) == "active"
+                            && requested_model.is_none_or(|model| session.model == model)
                     })
                     .max_by_key(|session| &session.updated_at)
             });
@@ -3006,6 +3126,81 @@ mod tests {
                 snapshot_json(&session).contains(&format!("\"opponent\":\"{}\"", model.as_str()))
             );
         }
+    }
+
+    #[test]
+    fn lower_opponent_new_does_not_resume_a_saved_master_game() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-model-session-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let server = Server {
+            state: Mutex::new(AppState::default()),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+        let master = game_action(
+            &server,
+            &json!({"action": "new", "opponent": MODEL_13_0, "tag": "Garrett"}).to_string(),
+        );
+        assert_eq!(master.status, 200);
+        let master_response = serde_json::from_str::<Value>(&master.body).unwrap();
+        let master_game_id = master_response["snapshot"]["gameId"].as_str().unwrap();
+        let cut = game_action(
+            &server,
+            &json!({"action": "cut-for-deal", "gameId": master_game_id, "tag": "Garrett"}).to_string(),
+        );
+        assert_eq!(cut.status, 200);
+        let easy = game_action(
+            &server,
+            &json!({"action": "new", "opponent": MYRMIDON_5, "tag": "Garrett"}).to_string(),
+        );
+        assert_eq!(easy.status, 200);
+        let response = serde_json::from_str::<Value>(&easy.body).unwrap();
+        assert_eq!(response["snapshot"]["opponent"], MYRMIDON_5);
+
+        let resumed_master = game_action(
+            &server,
+            &json!({"action": "new", "opponent": MODEL_13_0, "tag": "Garrett"}).to_string(),
+        );
+        let resumed = serde_json::from_str::<Value>(&resumed_master.body).unwrap();
+        assert_eq!(resumed["snapshot"]["gameId"], master_game_id);
+
+        let forfeit = game_action(
+            &server,
+            &json!({"action": "forfeit", "gameId": master_game_id, "tag": "Garrett"}).to_string(),
+        );
+        assert_eq!(forfeit.status, 200);
+        let replacement_master = game_action(
+            &server,
+            &json!({"action": "new", "opponent": MODEL_13_0, "tag": "Garrett"}).to_string(),
+        );
+        let replacement = serde_json::from_str::<Value>(&replacement_master.body).unwrap();
+        assert_ne!(replacement["snapshot"]["gameId"], master_game_id);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn guest_access_allows_easy_and_tough_but_requires_login_for_master() {
+        let server = Server {
+            state: Mutex::new(AppState::default()),
+            model_root: String::new(),
+            data_dir: std::env::temp_dir().join("cribbage-unused-guest-access"),
+        };
+        assert!(!game_action_requires_auth(
+            &server,
+            &json!({"action": "new", "payload": {"opponent": MYRMIDON_5}}).to_string(),
+        ));
+        assert!(!game_action_requires_auth(
+            &server,
+            &json!({"action": "new", "payload": {"opponent": MODEL_9_1}}).to_string(),
+        ));
+        assert!(game_action_requires_auth(
+            &server,
+            &json!({"action": "new", "payload": {"opponent": MODEL_13_0}}).to_string(),
+        ));
     }
 
     #[test]
