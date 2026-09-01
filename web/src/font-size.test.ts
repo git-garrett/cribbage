@@ -57,7 +57,8 @@ describe("Extra Large accessibility typography", () => {
   it("uses Large rank-over-suit notation inside the card rectangle on mobile", () => {
     expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*body\[data-font-size="large"\] \.card:not\(\.back\)\s*\{[^}]*display:\s*inline-grid[^}]*grid-template-rows:\s*auto auto/s);
     expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*body\[data-font-size="large"\] \.card \.corner\s*\{[^}]*display:\s*none/s);
-    expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*body\[data-font-size="large"\] \.card \.rank,[^{]*body\[data-font-size="large"\] \.card \.suit\s*\{[^}]*font-size:\s*var\(--app-font\)\s*!important/s);
+    expect(css).toMatch(/body\[data-font-size="large"\] \.app\[data-view="game"\] \.card \.rank\s*\{[^}]*font-size:\s*max\(31px,\s*var\(--app-font\)\)\s*!important/s);
+    expect(css).toMatch(/body\[data-font-size="large"\] \.app\[data-view="game"\] \.card \.suit\s*\{[^}]*font-size:\s*max\(27px,\s*calc\(var\(--app-font\) \* 0\.9\)\)\s*!important/s);
   });
 
   it("keeps Large pegging ranks readable instead of overlapping them", () => {

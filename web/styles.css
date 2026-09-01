@@ -4609,8 +4609,8 @@ body[data-font-size="x-large"] .cut-card-reveal .card {
   --game-core-value-size: 67px;
   --game-card-width: 76px;
   --game-card-height: 108px;
-  --game-played-card-width: 49px;
-  --game-played-card-height: 70px;
+  --game-played-card-width: var(--game-card-width);
+  --game-played-card-height: var(--game-card-height);
   width: 100%;
   max-width: 1280px;
 }
@@ -4622,10 +4622,10 @@ body[data-font-size="large"] .app[data-view="game"] {
   --game-menu-size: 48px;
   --game-score-overlap: 50px;
   --game-core-value-size: 56px;
-  --game-card-width: 74px;
-  --game-card-height: 104px;
-  --game-played-card-width: 53px;
-  --game-played-card-height: 75px;
+  --game-card-width: 82px;
+  --game-card-height: 116px;
+  --game-played-card-width: var(--game-card-width);
+  --game-played-card-height: var(--game-card-height);
 }
 
 body[data-font-size="x-large"] .app[data-view="game"] {
@@ -4635,6 +4635,10 @@ body[data-font-size="x-large"] .app[data-view="game"] {
   --game-menu-size: 54px;
   --game-score-overlap: 58px;
   --game-core-value-size: 50px;
+  --game-card-width: 48px;
+  --game-card-height: 76px;
+  --game-played-card-width: var(--game-card-width);
+  --game-played-card-height: var(--game-card-height);
 }
 
 .app[data-view="game"] > .topbar {
@@ -5196,10 +5200,15 @@ body[data-font-size="large"] .app[data-view="game"] .card .corner {
   display: none;
 }
 
-body[data-font-size="large"] .app[data-view="game"] .card .rank,
+body[data-font-size="large"] .app[data-view="game"] .card .rank {
+  display: block;
+  font-size: max(31px, var(--app-font)) !important;
+  line-height: 0.9;
+}
+
 body[data-font-size="large"] .app[data-view="game"] .card .suit {
   display: block;
-  font-size: var(--app-font) !important;
+  font-size: max(27px, calc(var(--app-font) * 0.9)) !important;
   line-height: 0.9;
 }
 
@@ -5231,6 +5240,8 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   }
 
   .app[data-view="game"] {
+    --game-card-width: clamp(64px, 19.5vw, 76px);
+    --game-card-height: clamp(91px, 27.7vw, 108px);
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto auto minmax(0, 1fr);
     gap: 0;
@@ -5313,11 +5324,25 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
     gap: 6px;
   }
 
+  body[data-font-size="large"] .app[data-view="game"] {
+    --game-card-width: clamp(66px, 21vw, 82px);
+    --game-card-height: clamp(94px, 29.7vw, 116px);
+  }
+
+  body[data-font-size="x-large"] .app[data-view="game"] {
+    --game-card-width: 48px;
+    --game-card-height: 76px;
+  }
+
   body[data-font-size="x-large"] .app[data-view="game"] .user-panel #human-hand {
     justify-content: flex-start;
     min-height: calc(var(--app-font) * 2.2);
     padding-inline: 4px;
     overflow: hidden;
+  }
+
+  body[data-font-size="x-large"] .app[data-view="game"] .user-hand-meta {
+    display: none;
   }
 
   body[data-font-size="x-large"] .app[data-view="game"] .user-panel #human-hand .card.selected {
@@ -5354,6 +5379,8 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
     --game-logo-width: 208px;
     --game-score-overlap: 48px;
     --game-core-value-size: 76px;
+    --game-card-width: 82px;
+    --game-card-height: 116px;
     max-width: 920px;
     padding: 14px;
   }
@@ -5366,8 +5393,8 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
     --game-core-value-size: 68px;
     --game-card-width: 86px;
     --game-card-height: 122px;
-    --game-played-card-width: 62px;
-    --game-played-card-height: 88px;
+    --game-played-card-width: var(--game-card-width);
+    --game-played-card-height: var(--game-card-height);
   }
 
   body[data-font-size="x-large"] .app[data-view="game"] {
@@ -5376,6 +5403,8 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
     --game-logo-width: 224px;
     --game-score-overlap: 65px;
     --game-core-value-size: 62px;
+    --game-card-width: 48px;
+    --game-card-height: 76px;
   }
 
   .app[data-view="game"] > .scoreboard {
@@ -5474,6 +5503,10 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
     align-content: space-between;
     min-width: 0;
     padding: 22px;
+  }
+
+  .app[data-view="game"] .played {
+    position: relative;
   }
 
   .app[data-view="game"][data-phase="cut_for_deal"] > .table,
@@ -5643,6 +5676,65 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   .app[data-view="game"] .deal-animation-hand > span + .deal-animation-card.card {
     margin-left: 7px;
   }
+}
+
+/* Every card on the playing table uses the same hand-card footprint. Rows
+   overlap full-size cards when space is tight instead of shrinking individual
+   representations such as the cut card or pegging sequence. */
+.app[data-view="game"] .card {
+  width: var(--game-card-width) !important;
+  height: var(--game-card-height) !important;
+  min-width: 0;
+  min-height: 0;
+  flex: 0 0 auto;
+  border-radius: 10px;
+}
+
+.app[data-view="game"] .card .corner {
+  display: none;
+}
+
+.app[data-view="game"] .card:not(.back) .rank {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: max(31px, var(--app-font)) !important;
+}
+
+.app[data-view="game"] .card:not(.back) .suit {
+  font-size: max(27px, calc(var(--app-font) * 0.9)) !important;
+}
+
+.app[data-view="game"] #plays .played-active.pegging-row,
+.app[data-view="game"] #scoring-cards,
+.app[data-view="game"] .ai-strip .cards {
+  min-height: var(--game-card-height);
+}
+
+.app[data-view="game"] #plays .played-active.pegging-row .card + .card {
+  margin-left: -22px;
+}
+
+.app[data-view="game"] .played > .score-cut {
+  width: var(--game-card-width);
+  height: var(--game-card-height);
+}
+
+.app[data-view="game"] .ai-strip .cards {
+  gap: 0;
+  overflow: visible;
+}
+
+.app[data-view="game"] .ai-strip .card + .card {
+  margin-left: calc(18px - var(--game-card-width));
+}
+
+.app[data-view="game"] .deal-animation-card.card,
+.app[data-view="game"] .pegging-row .deal-animation-card.card,
+.app[data-view="game"] .played-active.pegging-row .deal-animation-card.card {
+  margin-left: calc(14px - var(--game-card-width));
+}
+
+.app[data-view="game"] .deal-animation-hand > span + .deal-animation-card.card {
+  margin-left: 7px;
 }
 
 /* Local pathway navigation built from the same felt, navy, ivory, and brass
