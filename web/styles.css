@@ -3100,11 +3100,21 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   transform-origin: 70% 100%;
 }
 
+.pegging-row .turn-cut-deck-cutting::after,
+.pegging-row .turn-cut-deck-cut::after,
+.played-active.pegging-row .turn-cut-deck-cutting::after,
+.played-active.pegging-row .turn-cut-deck-cut::after {
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
+  border-radius: inherit;
+  will-change: transform, filter, box-shadow;
+}
+
 .deal-cut-row .cut-deck-cut::after,
 .pegging-row .turn-cut-deck-cut::after,
 .played-active.pegging-row .turn-cut-deck-cut::after {
   opacity: 0.9;
-  transform: translate(36%, -23%) rotate(7deg);
+  transform: translate3d(-38%, -24%, 0) rotate(-6deg);
 }
 
 /* The deal-cut results occupy the columns directly beside the deck.  Keep
@@ -3141,7 +3151,15 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
 
 .pegging-row .turn-card-reveal-animated .card,
 .played-active.pegging-row .turn-card-reveal-animated .card {
-  animation: cut-card-flip 0.42s ease-out both;
+  opacity: 0;
+  transform-origin: center bottom;
+  backface-visibility: hidden;
+  will-change: opacity, transform;
+}
+
+.pegging-row.turn-card-reveal-ready .turn-card-reveal-animated .card,
+.played-active.pegging-row.turn-card-reveal-ready .turn-card-reveal-animated .card {
+  animation: turn-card-from-bottom 0.62s cubic-bezier(0.2, 0.72, 0.2, 1) both;
 }
 
 .turn-cut-row .cut-slot-human {
@@ -3161,17 +3179,60 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
 @keyframes deck-cut-slide {
   0% {
     opacity: 1;
-    transform: translate(0, 0) rotate(0deg);
+    filter: brightness(1);
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
   }
 
-  38% {
+  28% {
     opacity: 1;
-    transform: translate(18%, -10%) rotate(3deg);
+    filter: brightness(1.08);
+    transform: translate3d(-7%, -12%, 0) rotate(-1.5deg) scale(1.015);
+    box-shadow: 0 18px 25px rgba(3, 28, 21, 0.3);
   }
 
   100% {
     opacity: 0.9;
-    transform: translate(36%, -23%) rotate(7deg);
+    filter: brightness(1.02);
+    transform: translate3d(-38%, -24%, 0) rotate(-6deg) scale(1);
+    box-shadow: 0 13px 20px rgba(3, 28, 21, 0.26);
+  }
+}
+
+@keyframes turn-card-from-bottom {
+  0% {
+    opacity: 0;
+    transform: perspective(720px) translate3d(var(--turn-card-from-x), var(--turn-card-from-y), 0) rotateX(-88deg) rotate(-1deg) scale(0.98);
+  }
+
+  14% {
+    opacity: 1;
+  }
+
+  56% {
+    opacity: 1;
+    transform: perspective(720px) translate3d(var(--turn-card-mid-x), var(--turn-card-mid-y), 0) rotateX(9deg) rotate(0.8deg) scale(1.01);
+  }
+
+  76% {
+    transform: perspective(720px) translate3d(0, -3px, 0) rotateX(-3deg) rotate(0deg) scale(1);
+  }
+
+  100% {
+    opacity: 1;
+    transform: perspective(720px) translate3d(0, 0, 0) rotateX(0deg) rotate(0deg) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pegging-row .turn-cut-deck-cutting::after,
+  .played-active.pegging-row .turn-cut-deck-cutting::after {
+    animation: none;
+  }
+
+  .pegging-row .turn-card-reveal-animated .card,
+  .played-active.pegging-row .turn-card-reveal-animated .card {
+    opacity: 1;
+    animation: none;
   }
 }
 
@@ -4240,6 +4301,10 @@ body[data-font-size="x-large"] .played-active.pegging-row .turn-cut-deck-cutting
 body[data-font-size="x-large"] .turn-card-reveal-animated .card,
 body[data-font-size="x-large"] .cut-card-reveal .card {
   animation: none !important;
+}
+
+body[data-font-size="x-large"] .turn-card-reveal-animated .card {
+  opacity: 1;
 }
 
 .pegging-overflow-marker {

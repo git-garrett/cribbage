@@ -42,4 +42,12 @@ describe("physical card motion", () => {
     expect(css).toMatch(/\.deal-cut-spread\s*\{[^}]*grid-template-columns:\s*repeat\(52,/s);
     expect(css).toMatch(/@keyframes deal-cut-choice-lift[\s\S]*100% \{ opacity: 0\.18; transform: translateY\(0\)/s);
   });
+
+  it("lifts a full-size top packet and flips the turn card from the lower deck", () => {
+    expect(css).toMatch(/\.pegging-row \.turn-cut-deck-cutting::after,[\s\S]*height:\s*calc\(100% \+ 2px\)/s);
+    expect(css).toMatch(/@keyframes deck-cut-slide[\s\S]*translate3d\(-38%, -24%, 0\) rotate\(-6deg\)/s);
+    expect(mainSource).toMatch(/function prepareTurnCardReveal[\s\S]*deckRect\.bottom - cardRect\.bottom[\s\S]*turn-card-reveal-ready/s);
+    expect(css).toMatch(/\.turn-card-reveal-animated \.card[^}]*transform-origin:\s*center bottom/s);
+    expect(css).toMatch(/@keyframes turn-card-from-bottom[\s\S]*var\(--turn-card-from-x\)[\s\S]*rotateX\(-88deg\)[\s\S]*rotateX\(0deg\)/s);
+  });
 });

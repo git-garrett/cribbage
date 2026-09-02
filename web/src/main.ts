@@ -3580,6 +3580,19 @@ function makeTurnCutControl(element: HTMLElement, ariaLabel: string): void {
   });
 }
 
+function prepareTurnCardReveal(row: HTMLElement, deck: HTMLElement, card: HTMLElement): void {
+  if (!row.isConnected || !deck.isConnected || !card.isConnected) return;
+  const deckRect = deck.getBoundingClientRect();
+  const cardRect = card.getBoundingClientRect();
+  const fromX = deckRect.left + (deckRect.width / 2) - (cardRect.left + (cardRect.width / 2));
+  const fromY = deckRect.bottom - cardRect.bottom;
+  card.style.setProperty("--turn-card-from-x", `${fromX}px`);
+  card.style.setProperty("--turn-card-from-y", `${fromY}px`);
+  card.style.setProperty("--turn-card-mid-x", `${fromX * 0.28}px`);
+  card.style.setProperty("--turn-card-mid-y", `${(fromY * 0.28) - Math.min(18, deckRect.height * 0.12)}px`);
+  row.classList.add("turn-card-reveal-ready");
+}
+
 function renderTurnCut(game: GameState): void {
   const presentation = turnCutPresentation(state.turnCutRevealStage);
   if (!presentation) return;
@@ -3609,12 +3622,16 @@ function renderTurnCut(game: GameState): void {
 
   const showCutCard = state.turnCutRevealStage === "ai-turn" ||
     state.turnCutRevealStage === "revealed";
+  let animatedCutCard: HTMLElement | null = null;
   if (showCutCard && game.turnCard) {
     const cut = document.createElement("div");
-    cut.className = `cut-result turn-card-reveal${shouldAnimateTurnCutCard(game) ? " turn-card-reveal-animated" : ""}`;
+    const animateCutCard = shouldAnimateTurnCutCard(game);
+    cut.className = `cut-result turn-card-reveal${animateCutCard ? " turn-card-reveal-animated" : ""}`;
     const cutLabel = document.createElement("span");
     cutLabel.textContent = "Cut";
-    cut.append(cutLabel, cardElement(game.turnCard));
+    const card = cardElement(game.turnCard);
+    cut.append(cutLabel, card);
+    if (animateCutCard) animatedCutCard = card;
     if (state.turnCutRevealStage === "revealed") {
       makeTurnCutControl(cut, presentation.action?.ariaLabel ?? "Continue to pegging");
     }
@@ -3622,6 +3639,10 @@ function renderTurnCut(game: GameState): void {
   }
   row.append(emptySlot, deck, cutSlot);
   els.plays.append(label, row);
+  const cardToAnimate = animatedCutCard;
+  if (cardToAnimate) {
+    window.requestAnimationFrame(() => prepareTurnCardReveal(row, deck, cardToAnimate));
+  }
 }
 
 const DEAL_CARD_INTERVAL_MS = 125;
