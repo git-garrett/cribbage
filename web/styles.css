@@ -2814,17 +2814,20 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
 
 .deal-animation {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 10px;
   align-items: center;
+  justify-items: center;
   width: 100%;
-  min-height: 146px;
-  padding: 8px;
+  height: 100%;
+  min-height: clamp(360px, 58svh, 540px);
+  padding: 8px 0;
 }
 
 .deal-animation-deck {
-  grid-column: 2;
-  grid-row: 1;
+  grid-column: 1;
+  grid-row: 2;
   width: 58px;
   height: 82px;
   border-radius: 7px;
@@ -2833,7 +2836,9 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
 .deal-animation-hand {
   display: flex;
   align-items: center;
+  justify-content: center;
   min-width: 0;
+  max-width: 100%;
 }
 
 .deal-animation-hand > span {
@@ -2843,16 +2848,16 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   font-weight: 850;
 }
 
-.deal-animation-pone {
+.deal-animation-hand[data-owner="ai"] {
   grid-column: 1;
   grid-row: 1;
-  justify-content: flex-end;
+  align-self: start;
 }
 
-.deal-animation-dealer {
-  grid-column: 3;
-  grid-row: 1;
-  justify-content: flex-start;
+.deal-animation-hand[data-owner="human"] {
+  grid-column: 1;
+  grid-row: 3;
+  align-self: end;
 }
 
 .deal-animation-card.card,
@@ -5094,6 +5099,16 @@ body[data-font-size="x-large"] .app[data-view="game"] .circular-track-skunk-labe
 .app[data-view="game"] .played {
   align-items: center;
   gap: 10px;
+}
+
+.app[data-view="game"][data-deal-animation-active="true"] .played {
+  grid-template-columns: minmax(0, 1fr);
+  align-self: stretch;
+}
+
+.app[data-view="game"][data-deal-animation-active="true"] #plays {
+  width: 100%;
+  height: 100%;
 }
 
 .app[data-view="game"] #plays .pegging-row.played-archive {

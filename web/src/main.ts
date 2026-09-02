@@ -3559,11 +3559,12 @@ function prepareDealAnimation(shell: HTMLElement, deck: HTMLElement): void {
     const cardRect = card.getBoundingClientRect();
     const fromX = deckX - (cardRect.left + (cardRect.width / 2));
     const fromY = deckY - (cardRect.top + (cardRect.height / 2));
-    const direction = card.closest(".deal-animation-pone") ? -1 : 1;
+    const owner = card.closest<HTMLElement>(".deal-animation-hand")?.dataset.owner;
+    const direction = owner === "ai" ? -1 : 1;
     card.style.setProperty("--deal-from-x", `${fromX}px`);
     card.style.setProperty("--deal-from-y", `${fromY}px`);
-    card.style.setProperty("--deal-mid-x", `${fromX * 0.46}px`);
-    card.style.setProperty("--deal-mid-y", `${(fromY * 0.46) - 18}px`);
+    card.style.setProperty("--deal-mid-x", `${(fromX * 0.46) + (direction * 18)}px`);
+    card.style.setProperty("--deal-mid-y", `${fromY * 0.46}px`);
     card.style.setProperty("--deal-start-rotation", `${direction * 7}deg`);
     card.style.setProperty("--deal-mid-rotation", `${direction * -2}deg`);
   }
@@ -3581,8 +3582,10 @@ function renderDealAnimation(): void {
   shell.append(deck);
   const pone = document.createElement("div");
   pone.className = "deal-animation-hand deal-animation-pone";
+  pone.dataset.owner = state.dealAnimation.pone === "AI" ? "ai" : "human";
   const dealer = document.createElement("div");
   dealer.className = "deal-animation-hand deal-animation-dealer";
+  dealer.dataset.owner = state.dealAnimation.dealer === "AI" ? "ai" : "human";
   const poneLabel = document.createElement("span");
   poneLabel.textContent = `${gameParticipantName(state.dealAnimation.pone)} hand`;
   const dealerLabel = document.createElement("span");
@@ -6264,6 +6267,7 @@ function render(game: GameState | null): void {
   els.app.dataset.phase = game.phase;
   const showingDealCut = Boolean(state.dealCutRevealStage) || game.phase === "cut_for_deal";
   els.app.dataset.dealCutActive = showingDealCut ? "true" : "false";
+  els.app.dataset.dealAnimationActive = state.dealAnimation ? "true" : "false";
   els.app.dataset.cutConfirming = state.dealCutResolve ? "true" : "false";
   renderUtilityPages();
   els.app.dataset.inlineResult = shouldInlineResult(game) ? "true" : "false";
