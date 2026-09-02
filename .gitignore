@@ -22,3 +22,6 @@ benchmarks
 production-pulls
 web/src/models/rank-crib-discard/*.checkpoint.json
 web/src/models/rank-crib-discard/*.status.json
+ios/App/App.xcodeproj/project.xcworkspace/
+references/
+screenlog.*

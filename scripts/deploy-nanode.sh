@@ -170,6 +170,9 @@ pull() {
     echo "No production SQLite files found at ${REMOTE_DATA_DIR}/cribbage-server.sqlite*" >&2
     exit 1
   }
+  if remote_exec "test -f '${REMOTE_DATA_DIR}/leaderboard-games.tsv'"; then
+    "${SCP_BASE[@]}" "$REMOTE:${REMOTE_DATA_DIR}/leaderboard-games.tsv" "$target/"
+  fi
   remote_exec "systemctl status cribbage --no-pager" > "$target/cribbage-service-status.txt" || true
   remote_exec "curl -s http://${REMOTE_BIND_HOST}:${REMOTE_PORT_APP}/health" > "$target/health.json" || true
   echo "$target"
