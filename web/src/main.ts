@@ -6373,7 +6373,7 @@ function render(game: GameState | null): void {
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
   els.cutForDeal.textContent = turnCut?.action?.buttonLabel ?? "Cut deck";
   els.cutForDeal.disabled = !waitingForTurnCutClick;
-  els.play.textContent = selectedPlay ? `Play ${selectedPlay.rank}${selectedPlay.symbol}` : "Select a card";
+  els.play.textContent = selectedPlay ? `Play ${selectedPlay.rank}${selectedPlay.symbol}` : "Play selected";
   els.play.disabled = game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User" && selectedPlay);
   els.askMaster.disabled = !masterAdviceAvailable || state.pending;
   els.go.disabled = !game.canGo;

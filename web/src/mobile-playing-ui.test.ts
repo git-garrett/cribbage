@@ -26,7 +26,12 @@ describe("Concept B mobile playing UI", () => {
     expect(css).toMatch(/\.circular-board\s*\{[^}]*display:\s*none/s);
   });
 
-  it("names the play action for the selected card", () => {
-    expect(mainSource).toMatch(/els\.play\.textContent = selectedPlay \? `Play \$\{selectedPlay\.rank\}\$\{selectedPlay\.symbol\}` : "Select a card"/);
+  it("keeps a disabled play prompt visible until a card is selected, then names that card", () => {
+    const visibilityRule = mainSource.match(/els\.play\.hidden = ([^;]*);/)?.[1] ?? "";
+    expect(visibilityRule).toContain('game.phase === "pegging"');
+    expect(visibilityRule).toContain('game.turn === "User"');
+    expect(visibilityRule).not.toContain("selectedPlay");
+    expect(mainSource).toMatch(/els\.play\.disabled = [^;]*game\.phase === "pegging"[^;]*game\.turn === "User" && selectedPlay/);
+    expect(mainSource).toMatch(/els\.play\.textContent = selectedPlay \? `Play \$\{selectedPlay\.rank\}\$\{selectedPlay\.symbol\}` : "Play selected"/);
   });
 });
