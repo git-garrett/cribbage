@@ -157,6 +157,7 @@ pub fn protects(path: &str) -> bool {
         "/api/game/session/save"
             | "/api/game/session/load"
             | "/api/game/session/complete"
+            | "/api/game/review"
             | "/api/games"
     )
 }
@@ -252,7 +253,7 @@ fn password_login(server: &Server, request: &Request) -> Response {
     if !valid {
         return invalid_credentials();
     }
-    create_session_response(server, &user.expect("valid password has a user"))
+    create_session_response(server, request, &user.expect("valid password has a user"))
 }
 
 fn otp_request(server: &Server, request: &Request) -> Response {
@@ -311,7 +312,7 @@ fn otp_verify(server: &Server, request: &Request) -> Response {
         return invalid_code();
     };
     match consume_challenge(server, &user, "otp", &input.code, 5) {
-        Ok(true) => create_session_response(server, &user),
+        Ok(true) => create_session_response(server, request, &user),
         Ok(false) => invalid_code(),
         Err(error) => internal_error(error),
     }
@@ -374,7 +375,7 @@ fn password_reset(server: &Server, request: &Request) -> Response {
             &input.token,
             &input.password,
         ) {
-            Ok(true) => create_session_response(server, &user),
+            Ok(true) => create_session_response(server, request, &user),
             Ok(false) => invalid_link(),
             Err(error) => internal_error(error),
         },
@@ -431,7 +432,7 @@ fn invite_accept(server: &Server, request: &Request) -> Response {
     match user_for_token(server, "invite", &input.token) {
         Ok(Some(user)) => {
             match set_password_and_consume(server, &user, "invite", &input.token, &input.password) {
-                Ok(true) => create_session_response(server, &user),
+                Ok(true) => create_session_response(server, request, &user),
                 Ok(false) => invalid_link(),
                 Err(error) => internal_error(error),
             }
@@ -455,12 +456,12 @@ fn logout(server: &Server, request: &Request) -> Response {
         format!(
             "{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{}",
             SESSION_COOKIE,
-            secure_cookie_suffix()
+            secure_cookie_suffix(request)
         ),
     )
 }
 
-fn create_session_response(server: &Server, user: &AuthUser) -> Response {
+fn create_session_response(server: &Server, request: &Request, user: &AuthUser) -> Response {
     let token = random_token(32);
     let now = unix_seconds();
     let connection = match open_game_database(&server.data_dir) {
@@ -486,7 +487,7 @@ fn create_session_response(server: &Server, user: &AuthUser) -> Response {
             SESSION_COOKIE,
             token,
             SESSION_SECONDS,
-            secure_cookie_suffix()
+            secure_cookie_suffix(request)
         ),
     )
 }
@@ -784,12 +785,60 @@ fn public_origin() -> String {
         .to_string()
 }
 
-fn secure_cookie_suffix() -> &'static str {
+fn secure_cookie_suffix(request: &Request) -> &'static str {
+    if request
+        .headers
+        .get("x-forwarded-proto")
+        .is_some_and(|protocol| protocol.eq_ignore_ascii_case("https"))
+    {
+        return "; Secure";
+    }
+    if request
+        .headers
+        .get("x-forwarded-proto")
+        .is_some_and(|protocol| protocol.eq_ignore_ascii_case("http"))
+        || request
+            .headers
+            .get("host")
+            .is_some_and(|host| local_http_host(host))
+    {
+        return "";
+    }
     if public_origin().starts_with("https://") {
         "; Secure"
     } else {
         ""
     }
+}
+
+fn local_http_host(value: &str) -> bool {
+    let value = value.trim().to_ascii_lowercase();
+    let host = if let Some(bracketed) = value.strip_prefix('[') {
+        bracketed.split(']').next().unwrap_or(bracketed)
+    } else if let Some((host, port)) = value.rsplit_once(':') {
+        if port.bytes().all(|byte| byte.is_ascii_digit()) {
+            host
+        } else {
+            value.as_str()
+        }
+    } else {
+        value.as_str()
+    };
+    if host == "localhost" || host == "::1" || host.ends_with(".local") {
+        return true;
+    }
+    let parts = host
+        .split('.')
+        .map(|part| part.parse::<u8>())
+        .collect::<Result<Vec<_>, _>>();
+    let Ok(parts) = parts else {
+        return false;
+    };
+    parts.len() == 4
+        && (parts[0] == 10
+            || parts[0] == 127
+            || (parts[0] == 172 && (16..=31).contains(&parts[1]))
+            || (parts[0] == 192 && parts[1] == 168))
 }
 
 fn unix_seconds() -> i64 {
@@ -1002,6 +1051,41 @@ mod tests {
         assert!(cookie.contains("Secure"));
         assert!(cookie.contains("SameSite=Lax"));
         assert!(!cookie.contains(password));
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn password_login_keeps_local_http_sessions_usable() {
+        let server = test_server("local-password-login");
+        let password = "a long memorable cribbage passphrase";
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection
+            .execute(
+                "UPDATE auth_users SET password_hash = ?2 WHERE normalized_email = ?1",
+                params!["founder@evenvision.com", hash_password(password).unwrap()],
+            )
+            .unwrap();
+        let request = Request {
+            method: "POST".to_string(),
+            path: "/api/auth/login".to_string(),
+            headers: HashMap::from([("host".to_string(), "127.0.0.1:8765".to_string())]),
+            body: json!({
+                "email": "founder@evenvision.com",
+                "password": password
+            })
+            .to_string(),
+        };
+
+        let response = password_login(&server, &request);
+        let cookie = response
+            .headers
+            .iter()
+            .find(|(name, _)| name == "Set-Cookie")
+            .map(|(_, value)| value)
+            .expect("login response has a session cookie");
+
+        assert!(!cookie.contains("Secure"));
+        assert!(cookie.contains("Max-Age=2592000"));
         std::fs::remove_dir_all(server.data_dir).unwrap();
     }
 }

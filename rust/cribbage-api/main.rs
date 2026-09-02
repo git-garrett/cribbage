@@ -52,6 +52,7 @@ struct Session {
     completed_at: Option<String>,
     forfeited: bool,
     decision_reviews: Vec<SavedDecisionReview>,
+    help_events: Vec<SavedHelpEvent>,
     score_events: Vec<SavedScoreEvent>,
     next_review_id: u32,
     event_sequence: u64,
@@ -78,6 +79,14 @@ struct SavedDecisionReview {
     game: CribbageGame,
     selected_card_ids: Vec<u8>,
     completed: Option<CompletedDecisionReview>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct SavedHelpEvent {
+    id: String,
+    at: String,
+    hand_number: u32,
+    decision_key: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -150,6 +159,8 @@ struct PersistedSession {
     #[serde(default)]
     forfeited: bool,
     decision_reviews: Vec<SavedDecisionReview>,
+    #[serde(default)]
+    help_events: Vec<SavedHelpEvent>,
     #[serde(default)]
     score_events: Vec<SavedScoreEvent>,
     next_review_id: u32,
@@ -311,6 +322,7 @@ fn handle_connection(mut stream: TcpStream, server: &Server) -> Result<(), Strin
         ("GET", "/api/model") => Response::json(200, model_json()),
         ("GET", "/api/leaderboard") => Response::json(200, leaderboard_json(server)?),
         ("POST", "/api/game/action") => game_action(server, &request_body),
+        ("POST", "/api/game/review") => review_game(server, &request_body),
         ("POST", "/api/game/session/save") => save_session(server, &request_body),
         ("POST", "/api/game/session/load") => load_session(server, &request_body),
         ("POST", "/api/game/session/complete") => Response::json(200, "{\"ok\":true}".to_string()),
@@ -511,7 +523,10 @@ fn game_action_requires_auth(server: &Server, body: &str) -> bool {
 }
 
 fn guest_model(model: ModelId) -> bool {
-    matches!(model, ModelId::Myrmidon5 | ModelId::Schell91)
+    matches!(
+        model,
+        ModelId::Myrmidon5 | ModelId::Schell91 | ModelId::Schell911
+    )
 }
 
 fn game_action(server: &Server, body: &str) -> Response {
@@ -634,6 +649,82 @@ fn game_action(server: &Server, body: &str) -> Response {
     }
 }
 
+fn review_game(server: &Server, body: &str) -> Response {
+    let result = (|| -> Result<String, String> {
+        let game_id =
+            json_string(body, "gameId").ok_or_else(|| "Missing completed game id.".to_string())?;
+        let requested_tag = json_string(body, "tag").filter(|value| !value.trim().is_empty());
+        let pending = {
+            let mut app = server
+                .state
+                .lock()
+                .map_err(|_| "server state lock poisoned".to_string())?;
+            if !app.sessions.contains_key(&game_id) {
+                if let Some(session) = load_session_by_id(&server.data_dir, &game_id)? {
+                    app.sessions.insert(game_id.clone(), session);
+                }
+            }
+            let session = app
+                .sessions
+                .get(&game_id)
+                .ok_or_else(|| "The saved game is not available for analysis.".to_string())?;
+            if requested_tag
+                .as_deref()
+                .is_some_and(|tag| session.tag.as_deref() != Some(tag))
+            {
+                return Err("The saved game belongs to another player.".to_string());
+            }
+            session
+                .decision_reviews
+                .iter()
+                .find(|review| review.completed.is_none())
+                .cloned()
+        };
+
+        if let Some(pending) = pending {
+            let completed = evaluate_saved_decision_review(&pending, &server.model_root)?;
+            let mut app = server
+                .state
+                .lock()
+                .map_err(|_| "server state lock poisoned".to_string())?;
+            let session = app
+                .sessions
+                .get_mut(&game_id)
+                .ok_or_else(|| "The saved game is no longer available.".to_string())?;
+            let before = session.clone();
+            if let Some(saved) = session
+                .decision_reviews
+                .iter_mut()
+                .find(|review| review.id == pending.id && review.completed.is_none())
+            {
+                saved.completed = Some(completed);
+                session.updated_at = isoish_now();
+                session.event_sequence += 1;
+                if let Err(error) =
+                    persist_session_event(&server.data_dir, session, "review-decision", body)
+                {
+                    *session = before;
+                    return Err(error);
+                }
+            }
+        }
+
+        let app = server
+            .state
+            .lock()
+            .map_err(|_| "server state lock poisoned".to_string())?;
+        response_for_session(
+            app.sessions
+                .get(&game_id)
+                .ok_or_else(|| "The saved game is no longer available.".to_string())?,
+        )
+    })();
+    match result {
+        Ok(json) => Response::json(200, json),
+        Err(error) => Response::json(400, format!("{{\"error\":\"{}\"}}", json_escape(&error))),
+    }
+}
+
 fn new_session(model: ModelId, tag: Option<String>) -> Session {
     let counter = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
     let seed = (unix_millis() as u32).wrapping_add((counter as u32).wrapping_mul(0x9e37_79b9));
@@ -661,6 +752,7 @@ fn new_session_from_seed(model: ModelId, tag: Option<String>, seed: u32, counter
         completed_at: None,
         forfeited: false,
         decision_reviews: Vec::new(),
+        help_events: Vec::new(),
         score_events: Vec::new(),
         next_review_id: 1,
         event_sequence: 0,
@@ -742,6 +834,7 @@ fn persisted_session(session: &Session) -> PersistedSession {
         completed_at: session.completed_at.clone(),
         forfeited: session.forfeited,
         decision_reviews: session.decision_reviews.clone(),
+        help_events: session.help_events.clone(),
         score_events: session.score_events.clone(),
         next_review_id: session.next_review_id,
         event_sequence: session.event_sequence,
@@ -770,6 +863,7 @@ fn restore_persisted_session(stored: PersistedSession) -> Result<Session, String
         completed_at: stored.completed_at,
         forfeited: stored.forfeited,
         decision_reviews: stored.decision_reviews,
+        help_events: stored.help_events,
         score_events: stored.score_events,
         next_review_id: stored.next_review_id,
         event_sequence: stored.event_sequence,
@@ -1204,6 +1298,24 @@ fn apply_action(
                 _ => Err("Ace advice is not available for this decision.".to_string()),
             }
         }
+        "record-help" => {
+            let decision_key = json_string(body, "decisionKey")
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "Missing Ace help decision key.".to_string())?;
+            if !session
+                .help_events
+                .iter()
+                .any(|event| event.decision_key == decision_key)
+            {
+                session.help_events.push(SavedHelpEvent {
+                    id: format!("{}-help-{}", session.id, session.help_events.len() + 1),
+                    at: isoish_now(),
+                    hand_number: session.game.hand_number,
+                    decision_key: decision_key.chars().take(180).collect(),
+                });
+            }
+            Ok(())
+        }
         "forfeit" => {
             if session.model != ModelId::Schell13 {
                 return Err("Only an Ace game can be forfeited here.".to_string());
@@ -1584,36 +1696,43 @@ fn complete_decision_reviews(
         if completed >= limit || pending.completed.is_some() {
             continue;
         }
-        let review = match pending.kind {
-            ReviewKind::Discard => {
-                if pending.selected_card_ids.len() != 2 {
-                    return Err("saved discard review is malformed".to_string());
-                }
-                review_discard_for_side(
-                    &pending.game,
-                    HUMAN,
-                    ModelId::Schell13,
-                    [pending.selected_card_ids[0], pending.selected_card_ids[1]],
-                    model_root,
-                )?
-            }
-            ReviewKind::Peg => {
-                let Some(selected) = pending.selected_card_ids.first().copied() else {
-                    return Err("saved pegging review is malformed".to_string());
-                };
-                review_peg_for_side(
-                    &pending.game,
-                    HUMAN,
-                    ModelId::Schell13,
-                    selected,
-                    model_root,
-                )?
-            }
-        };
-        pending.completed = Some(completed_review(review));
+        pending.completed = Some(evaluate_saved_decision_review(pending, model_root)?);
         completed += 1;
     }
     Ok(())
+}
+
+fn evaluate_saved_decision_review(
+    pending: &SavedDecisionReview,
+    model_root: &str,
+) -> Result<CompletedDecisionReview, String> {
+    let review = match pending.kind {
+        ReviewKind::Discard => {
+            if pending.selected_card_ids.len() != 2 {
+                return Err("saved discard review is malformed".to_string());
+            }
+            review_discard_for_side(
+                &pending.game,
+                HUMAN,
+                ModelId::Schell13,
+                [pending.selected_card_ids[0], pending.selected_card_ids[1]],
+                model_root,
+            )?
+        }
+        ReviewKind::Peg => {
+            let Some(selected) = pending.selected_card_ids.first().copied() else {
+                return Err("saved pegging review is malformed".to_string());
+            };
+            review_peg_for_side(
+                &pending.game,
+                HUMAN,
+                ModelId::Schell13,
+                selected,
+                model_root,
+            )?
+        }
+    };
+    Ok(completed_review(review))
 }
 
 fn completed_review(review: EngineDecisionReview) -> CompletedDecisionReview {
@@ -2057,6 +2176,15 @@ fn analytics_events_json(session: &Session) -> String {
             .iter()
             .map(|review| decision_review_event_json(session, review)),
     );
+    events.extend(session.help_events.iter().map(|event| {
+        format!(
+            "{{\"id\":\"{}\",\"at\":\"{}\",\"type\":\"help\",\"action\":\"request\",\"gameId\":\"{}\",\"handNumber\":{},\"advisor\":\"Ace\"}}",
+            json_escape(&event.id),
+            json_escape(&event.at),
+            json_escape(&session.id),
+            event.hand_number,
+        )
+    }));
     if game.phase == Phase::GameOver && session.pending_final_scoring.is_none() {
         let human_score = game.player(HUMAN).score;
         let ai_score = game.player(AI).score;
@@ -3278,6 +3406,10 @@ mod tests {
             &server,
             &json!({"action": "new", "payload": {"opponent": MODEL_9_1}}).to_string(),
         ));
+        assert!(!game_action_requires_auth(
+            &server,
+            &json!({"action": "new", "payload": {"opponent": MODEL_9_11}}).to_string(),
+        ));
         assert!(game_action_requires_auth(
             &server,
             &json!({"action": "new", "payload": {"opponent": MODEL_13_0}}).to_string(),
@@ -3905,6 +4037,20 @@ mod tests {
             .unwrap();
         assert_eq!(events, 1);
         std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn ace_help_is_deduplicated_by_decision_and_emitted_as_analytics() {
+        let mut session = new_session(ModelId::Myrmidon5, Some("Garrett".to_string()));
+        let body = r#"{"decisionKey":"game:hand-1:discard"}"#;
+
+        apply_action(&mut session, "record-help", body, ".").unwrap();
+        apply_action(&mut session, "record-help", body, ".").unwrap();
+
+        assert_eq!(session.help_events.len(), 1);
+        let analytics = analytics_events_json(&session);
+        assert!(analytics.contains("\"type\":\"help\""));
+        assert!(analytics.contains("\"advisor\":\"Ace\""));
     }
 
     #[test]
