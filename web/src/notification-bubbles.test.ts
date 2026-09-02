@@ -17,9 +17,9 @@ describe("contextual game notifications", () => {
     expect(html).not.toContain("notice-forward");
   });
 
-  it("turns unseen scoring events into player-colored score bubbles", () => {
-    expect(mainSource).toMatch(/function newScoreNotices[\s\S]*event\.type === "score"[\s\S]*seenScoreNoticeIds/s);
-    expect(mainSource).toMatch(/seenScoreNoticeIds\.add\(event\.id\);\s*if \(!shouldAnnounceScoreEvent\(event, events\)\) continue;/s);
+  it("turns unseen active-game scores into player-colored score bubbles", () => {
+    expect(mainSource).toMatch(/function newScoreNotices[\s\S]*collectNewScoreEvents\(state\.scoreNoticeCursor, gameId, game\.analyticsEvents\)/s);
+    expect(mainSource).toMatch(/for \(const event of collectNewScoreEvents[\s\S]*if \(!shouldAnnounceScoreEvent\(event, events\)\) continue;/s);
     expect(mainSource).toMatch(/bubble\.dataset\.player = notice\.player/);
     expect(mainSource).toMatch(/points\.textContent = `\+\$\{notice\.points\}`/);
     expect(mainSource).toContain("player.textContent = playerName(notice.player)");

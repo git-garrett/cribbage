@@ -29,6 +29,14 @@ import {
   shouldAnnounceScoreEvent,
 } from "./score-notice-policy";
 import {
+  baselineScoreEvents,
+  collectNewScoreEvents,
+  createScoreNoticeCursor,
+  scoreEventsForGame,
+  type ScoreEvent,
+  type ScoreNoticeCursor,
+} from "./score-notice-cursor";
+import {
   type TurnCutRevealStage,
   shouldRevealCribOwner,
   shouldShowDecisionSnapshotCut,
@@ -259,8 +267,7 @@ const state: {
   noticeResultLines: string[];
   noticeTimer: number | null;
   activeNotice: GameNotice | null;
-  scoreNoticesInitialized: boolean;
-  seenScoreNoticeIds: Set<string>;
+  scoreNoticeCursor: ScoreNoticeCursor;
   dealCutRevealStage: "cutting" | "human" | "ai" | null;
   dealCutIndex: number | null;
   dealAiCutIndex: number | null;
@@ -315,8 +322,7 @@ const state: {
   noticeResultLines: [],
   noticeTimer: null,
   activeNotice: null,
-  scoreNoticesInitialized: false,
-  seenScoreNoticeIds: new Set(),
+  scoreNoticeCursor: createScoreNoticeCursor(),
   dealCutRevealStage: null,
   dealCutIndex: null,
   dealAiCutIndex: null,
@@ -356,8 +362,7 @@ function resetTransientGameUi(): void {
   state.completingReviews = false;
   state.reviewProgress = null;
   state.noticeResultLines = [];
-  state.scoreNoticesInitialized = false;
-  state.seenScoreNoticeIds = new Set();
+  state.scoreNoticeCursor = createScoreNoticeCursor();
   clearNoticeQueue();
   state.dealCutRevealStage = null;
   state.dealCutIndex = null;
@@ -888,7 +893,6 @@ type ScoreKey = "peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "c
 const ERROR_WIN_PROBABILITY_THRESHOLD = 0.0025;
 const ERROR_SCORE_KEYS: ScoreKey[] = ["peggingDealer", "peggingPone", "handDealer", "handPone", "crib"];
 type GameEndEvent = Extract<AnalyticsEvent, { type: "game" }> & { action: "end" };
-type ScoreEvent = Extract<AnalyticsEvent, { type: "score" }>;
 type DiscardEvent = Extract<AnalyticsEvent, { type: "discard" }>;
 type PeggingEvent = Extract<AnalyticsEvent, { type: "pegging" }>;
 type DecisionReviewEvent = (DiscardEvent | PeggingEvent) & { review: AnalyticsDecisionReview };
@@ -3063,6 +3067,11 @@ async function loadRemoteActiveGameSession(opponent?: Opponent): Promise<GameSta
   if (!session) return null;
   if (SIMPLE_NETWORK_MODE && !isAllowedSimpleNetworkOpponent(session.snapshot.opponent)) return null;
   applyAuthoritativeGameState(session.snapshot, session.state);
+  baselineScoreEvents(
+    state.scoreNoticeCursor,
+    scoreNoticeGameId(session.state),
+    session.state.analyticsEvents,
+  );
   state.hasResumableGame = true;
   return session.state;
 }
@@ -3799,16 +3808,10 @@ function scoreSummaryForEvent(event: ScoreEvent, game: GameState): ScoreSummary 
 }
 
 function newScoreNotices(game: GameState): GameNotice[] {
-  const events = game.analyticsEvents.filter((event): event is ScoreEvent => event.type === "score");
-  if (!state.scoreNoticesInitialized) {
-    for (const event of events) state.seenScoreNoticeIds.add(event.id);
-    state.scoreNoticesInitialized = true;
-    return [];
-  }
+  const gameId = scoreNoticeGameId(game);
+  const events = scoreEventsForGame(gameId, game.analyticsEvents);
   const notices: GameNotice[] = [];
-  for (const event of events) {
-    if (state.seenScoreNoticeIds.has(event.id)) continue;
-    state.seenScoreNoticeIds.add(event.id);
+  for (const event of collectNewScoreEvents(state.scoreNoticeCursor, gameId, game.analyticsEvents)) {
     if (!shouldAnnounceScoreEvent(event, events)) continue;
     const summary = scoreSummaryForEvent(event, game);
     if (summary) state.scoreSummaryQueue.push(summary);
@@ -3833,6 +3836,15 @@ function newScoreNotices(game: GameState): GameNotice[] {
     }
   }
   return notices;
+}
+
+function scoreNoticeGameId(game: GameState): string | null {
+  if (currentSnapshot?.gameId) return currentSnapshot.gameId;
+  for (let index = game.analyticsEvents.length - 1; index >= 0; index -= 1) {
+    const gameId = game.analyticsEvents[index]?.gameId;
+    if (gameId) return gameId;
+  }
+  return null;
 }
 
 function scoreNoticeLabel(event: ScoreEvent): string {
