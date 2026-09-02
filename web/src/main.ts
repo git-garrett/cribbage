@@ -11,6 +11,12 @@ import type {
   PlayerKey,
   ScorePhase,
 } from "./api-types";
+import {
+  aceAdviceDecisionKey,
+  choiceDiffersFromAce,
+  isAceAdviceOpponent,
+  type AceAdviceAction,
+} from "./ace-advice";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 import { maybeLoadAdSense } from "./adsense";
 import { circularTurnCutPresentation, createCircularBoard, updateCircularBoard } from "./circular-board";
@@ -288,7 +294,9 @@ const state: {
   cutForDealPreparation: CutForDealPreparation | null;
   aiDiscardPreparation: { key: string; promise: Promise<AiDiscardPreparationResult> } | null;
   finishingDiscardKey: string | null;
-  masterHint: MasterHint | null;
+  aceAdvicePreparation: AceAdvicePreparation | null;
+  aceMistake: AceMistake | null;
+  masterHint: PresentedAceAdvice | null;
   pendingPathwayOpponent: Opponent | null;
   pendingMasterGameId: string | null;
 } = {
@@ -344,6 +352,8 @@ const state: {
   cutForDealPreparation: null,
   aiDiscardPreparation: null,
   finishingDiscardKey: null,
+  aceAdvicePreparation: null,
+  aceMistake: null,
   masterHint: null,
   pendingPathwayOpponent: null,
   pendingMasterGameId: null,
@@ -387,6 +397,8 @@ function resetTransientGameUi(): void {
   state.turnCutResolve = null;
   state.cutForDealPreparation = null;
   state.aiDiscardPreparation = null;
+  state.aceAdvicePreparation = null;
+  state.aceMistake = null;
   state.masterHint = null;
   state.pendingPathwayOpponent = null;
   state.pendingMasterGameId = null;
@@ -565,6 +577,7 @@ const els = {
   serverBusyAlert: document.querySelector("#server-busy-alert") as HTMLElement,
   serverBusyRetry: document.querySelector("#server-busy-retry") as HTMLButtonElement,
   turnCard: document.querySelector("#turn-card") as HTMLElement,
+  aceMistake: document.querySelector("#ace-mistake") as HTMLButtonElement,
   playAreaTitle: document.querySelector("#play-area-title") as HTMLElement,
   plays: document.querySelector("#plays") as HTMLElement,
   cribTray: document.querySelector("#crib-tray") as HTMLElement,
@@ -599,6 +612,9 @@ const els = {
   gameOverClose: document.querySelector("#game-over-close") as HTMLButtonElement,
   singleGameReport: document.querySelector("#single-game-report") as HTMLElement,
   masterHintDialog: document.querySelector("#master-hint-dialog") as HTMLElement,
+  masterHintCard: document.querySelector("#master-hint-card") as HTMLElement,
+  masterHintEyebrow: document.querySelector("#master-hint-eyebrow") as HTMLElement,
+  masterHintTitle: document.querySelector("#master-hint-title") as HTMLElement,
   masterHintCopy: document.querySelector("#master-hint-copy") as HTMLElement,
   masterHintDismiss: document.querySelector("#master-hint-dismiss") as HTMLButtonElement,
   masterHintApply: document.querySelector("#master-hint-apply") as HTMLButtonElement,
@@ -2919,6 +2935,25 @@ interface MasterHint {
   cardIds: number[];
 }
 
+interface AceAdvice extends MasterHint {
+  cards: Array<{ id: number; rank: string; symbol: string }>;
+}
+
+interface PresentedAceAdvice extends AceAdvice {
+  mode: "hint" | "mistake";
+}
+
+interface AceAdvicePreparation {
+  key: string;
+  advice: AceAdvice | null;
+  promise: Promise<AceAdvice>;
+}
+
+interface AceMistake {
+  handNumber: number;
+  advice: AceAdvice;
+}
+
 interface ServerMasterHintResponse extends ServerGameActionResponse {
   hint: MasterHint;
 }
@@ -2985,7 +3020,7 @@ async function serverGameAction(action: string, payload: Record<string, unknown>
 }
 
 function lowerLevelOpponent(opponent: string | undefined): boolean {
-  return opponent === PATHWAY_OPPONENTS.easy || opponent === PATHWAY_OPPONENTS.tough;
+  return isAceAdviceOpponent(opponent);
 }
 
 function canAskMaster(game: GameState): boolean {
@@ -3006,25 +3041,75 @@ function canAskMaster(game: GameState): boolean {
   );
 }
 
+function aceAdvicePreparationKey(game: GameState | null): string | null {
+  if (!game || !currentSnapshot || !canAskMaster(game)) return null;
+  return aceAdviceDecisionKey(currentSnapshot.gameId, game);
+}
+
+function aceAdviceFromHint(game: GameState, hint: MasterHint): AceAdvice {
+  const cards = hint.cardIds
+    .map((id) => game.humanHand.find((card) => card.id === id))
+    .filter((card): card is GameState["humanHand"][number] => Boolean(card))
+    .map(({ id, rank, symbol }) => ({ id, rank, symbol }));
+  return { ...hint, cards };
+}
+
+function startAceAdvicePreparation(game: GameState): AceAdvicePreparation | null {
+  const key = aceAdvicePreparationKey(game);
+  if (!key || state.pending) return null;
+  if (state.aceAdvicePreparation?.key === key) return state.aceAdvicePreparation;
+  const snapshot = currentSnapshot;
+  if (!snapshot) return null;
+
+  let preparation: AceAdvicePreparation;
+  const promise = serverJson<ServerMasterHintResponse>("/api/game/action", {
+    action: "master-hint",
+    payload: {},
+    snapshot,
+    tag: currentSessionTag() || null,
+  }).then((response) => {
+    const advice = aceAdviceFromHint(game, response.hint);
+    if (state.aceAdvicePreparation === preparation) preparation.advice = advice;
+    return advice;
+  });
+  preparation = { key, advice: null, promise };
+  state.aceAdvicePreparation = preparation;
+  void promise.catch(() => {
+    if (state.aceAdvicePreparation === preparation) state.aceAdvicePreparation = null;
+  });
+  return preparation;
+}
+
+function preparedAceAdviceFor(game: GameState | null): AceAdvicePreparation | null {
+  const key = aceAdvicePreparationKey(game);
+  return key && state.aceAdvicePreparation?.key === key ? state.aceAdvicePreparation : null;
+}
+
+function reviewUserChoiceWithAce(
+  game: GameState | null,
+  action: AceAdviceAction,
+  selectedCardIds: readonly number[],
+): void {
+  const preparation = preparedAceAdviceFor(game);
+  state.aceAdvicePreparation = null;
+  if (!game || !preparation?.advice) return;
+  if (!choiceDiffersFromAce(action, selectedCardIds, preparation.advice)) return;
+  state.aceMistake = { handNumber: game.handNumber, advice: preparation.advice };
+}
+
 async function requestMasterHint(): Promise<void> {
   const game = state.game;
-  const requestSnapshot = currentSnapshot;
-  const requestGeneration = currentSnapshotGeneration();
-  if (!game || !requestSnapshot || state.pending || !canAskMaster(game)) return;
+  if (!game || state.pending || !canAskMaster(game)) return;
+  const preparation = startAceAdvicePreparation(game);
+  if (!preparation) return;
   state.pending = true;
   state.masterHint = null;
   render(game);
   try {
-    const response = await serverJson<ServerMasterHintResponse>("/api/game/action", {
-      action: "master-hint",
-      payload: {},
-      snapshot: requestSnapshot,
-      tag: currentSessionTag() || null,
-    });
-    if (!canApplySnapshotResponse(requestSnapshot, requestGeneration)) return;
-    applyAuthoritativeGameState(response.snapshot, response.state);
-    state.masterHint = response.hint;
-    render(response.state);
+    const advice = preparation.advice ?? await preparation.promise;
+    if (aceAdvicePreparationKey(state.game) !== preparation.key) return;
+    state.masterHint = { ...advice, mode: "hint" };
+    render(state.game);
     window.setTimeout(() => els.masterHintApply.focus(), 0);
   } catch (error) {
     showServerBusy(error, () => void requestMasterHint());
@@ -3035,27 +3120,42 @@ async function requestMasterHint(): Promise<void> {
 }
 
 function dismissMasterHint({ focus = false }: { focus?: boolean } = {}): void {
+  const mode = state.masterHint?.mode;
   state.masterHint = null;
+  if (mode === "mistake") state.aceMistake = null;
   els.masterHintDialog.hidden = true;
-  if (focus) els.askMaster.focus();
+  if (focus) {
+    window.setTimeout(() => {
+      if (mode === "hint" && !els.askMaster.hidden) {
+        els.askMaster.focus();
+        return;
+      }
+      els.humanHand.querySelector<HTMLButtonElement>("button.card:not(:disabled)")?.focus();
+    }, 0);
+  }
 }
 
-function renderMasterHint(game: GameState): void {
+function renderMasterHint(): void {
   const hint = state.masterHint;
   if (!hint) {
     els.masterHintDialog.hidden = true;
     return;
   }
-  const cards = hint.cardIds
-    .map((id) => game.humanHand.find((card) => card.id === id))
-    .filter((card): card is GameState["humanHand"][number] => Boolean(card));
   const recommendation = hint.kind === "go"
     ? "Ace recommends Go."
-    : cards.length
-      ? `Ace recommends ${hint.kind === "discard" ? "discarding" : "playing"} ${cards.map((card) => `${card.rank}${card.symbol}`).join(" and ")}.`
+    : hint.cards.length
+      ? `Ace recommends ${hint.kind === "discard" ? "discarding" : "playing"} ${hint.cards.map((card) => `${card.rank}${card.symbol}`).join(" and ")}.`
       : "Ace’s recommendation is no longer available.";
-  els.masterHintCopy.textContent = recommendation;
-  els.masterHintApply.disabled = !cards.length && hint.kind !== "go";
+  const reviewingMistake = hint.mode === "mistake";
+  els.masterHintCard.dataset.mode = hint.mode;
+  els.masterHintEyebrow.textContent = reviewingMistake ? "Ace spotted an error" : "Ace’s advice";
+  els.masterHintTitle.textContent = reviewingMistake ? "Review this choice" : "Ace recommends";
+  els.masterHintCopy.textContent = reviewingMistake
+    ? `${hint.kind === "discard" ? "Those discards were" : "That play was"} an error. ${recommendation}`
+    : recommendation;
+  els.masterHintDismiss.textContent = reviewingMistake ? "Got it" : "Dismiss";
+  els.masterHintApply.hidden = reviewingMistake;
+  els.masterHintApply.disabled = !hint.cards.length && hint.kind !== "go";
   els.masterHintDialog.hidden = false;
 }
 
@@ -3781,6 +3881,20 @@ function renderCutCard(card: GameState["turnCard"]): void {
   els.scoreCut.hidden = !card;
   els.turnCard.hidden = !card;
   if (card) els.turnCard.append(cardElement(card));
+}
+
+function renderAceMistakeBadge(game: GameState): void {
+  if (state.aceMistake && state.aceMistake.handNumber !== game.handNumber) state.aceMistake = null;
+  const opponent = currentSnapshot?.opponent ?? selectedMenuOpponent();
+  const visible = Boolean(
+    state.aceMistake &&
+    state.masterHint?.mode !== "mistake" &&
+    lowerLevelOpponent(opponent) &&
+    game.turnCardRevealed &&
+    game.turnCard &&
+    (game.phase === "pegging" || game.phase === "pegging_complete"),
+  );
+  els.aceMistake.hidden = !visible;
 }
 
 function selectedPlayableCard(game: GameState): GameState["humanHand"][number] | undefined {
@@ -6298,6 +6412,7 @@ function render(game: GameState | null): void {
   els.modelLoading.hidden = !showModelLoadingUi;
   renderServerBusy();
   renderCutCard(state.turnCutRevealStage || !game.turnCardRevealed ? null : game.turnCard);
+  renderAceMistakeBadge(game);
   renderScoring(game.scoring);
   renderGameOver(game);
   renderBoard(game);
@@ -6397,7 +6512,8 @@ function render(game: GameState | null): void {
   }
   renderScoringCardEmphasis();
   renderScoreSummaryDialog();
-  renderMasterHint(game);
+  renderMasterHint();
+  if (!state.pending && masterAdviceAvailable) startAceAdvicePreparation(game);
 }
 
 function shouldAdvancePeggingAi(game: GameState): boolean {
@@ -7091,6 +7207,14 @@ els.askMaster.addEventListener("click", () => {
   void requestMasterHint();
 });
 
+els.aceMistake.addEventListener("click", () => {
+  const mistake = state.aceMistake;
+  if (!mistake) return;
+  state.masterHint = { ...mistake.advice, mode: "mistake" };
+  render(state.game);
+  window.setTimeout(() => els.masterHintDismiss.focus(), 0);
+});
+
 els.masterHintDismiss.addEventListener("click", () => {
   dismissMasterHint({ focus: true });
   render(state.game);
@@ -7132,6 +7256,7 @@ els.masterSessionForfeit.addEventListener("click", () => {
 els.discard.addEventListener("click", async () => {
   if (state.pending) return;
   const selectedIds = Array.from(state.selected);
+  reviewUserChoiceWithAce(state.game, "discard", selectedIds);
   const optimisticNext = optimisticAiDiscardingState(state.game, selectedIds);
   const epoch = interactionEpoch;
   state.pending = true;
@@ -7199,6 +7324,7 @@ els.play.addEventListener("click", async () => {
   if (state.pending) return;
   const card = state.game ? selectedPlayableCard(state.game) : null;
   if (!card) return;
+  reviewUserChoiceWithAce(state.game, "play", [card.id]);
   state.pending = true;
   render(state.game);
   await waitForPaint();

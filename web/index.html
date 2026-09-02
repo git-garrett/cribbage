@@ -503,6 +503,9 @@
           <div id="score-cut" class="score-cut">
             <span>Cut</span>
             <span id="turn-card" class="cut-card"></span>
+            <button id="ace-mistake" class="ace-mistake" type="button" aria-label="Review your last choice with Ace" hidden>
+              <span aria-hidden="true">!</span>
+            </button>
           </div>
         </div>
         <div id="result" class="game-notifications" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -556,8 +559,8 @@
       </div>
 
       <div id="master-hint-dialog" class="master-hint-dialog" role="dialog" aria-modal="true" aria-labelledby="master-hint-title" hidden>
-        <div class="master-hint-card">
-          <p class="master-hint-eyebrow">Ace’s advice</p>
+        <div id="master-hint-card" class="master-hint-card">
+          <p id="master-hint-eyebrow" class="master-hint-eyebrow">Ace’s advice</p>
           <h2 id="master-hint-title">Ace recommends</h2>
           <p id="master-hint-copy" class="master-hint-copy"></p>
           <div class="master-hint-actions">

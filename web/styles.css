@@ -1023,6 +1023,7 @@ button:disabled {
 }
 
 .score-cut {
+  position: relative;
   display: grid;
   gap: 2px;
   justify-items: center;
@@ -2488,6 +2489,58 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   color: #fff8dc;
 }
 
+.ace-mistake {
+  --ace-mistake-size: clamp(44px, calc(var(--control-small-font) * 2.05), 68px);
+  position: absolute;
+  top: calc(100% + 9px);
+  left: 50%;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  width: var(--ace-mistake-size);
+  height: var(--ace-mistake-size);
+  min-height: var(--ace-mistake-size);
+  padding: 0;
+  border: 3px solid #e8c575;
+  border-radius: 50%;
+  background: #a43832;
+  color: #fbf8f0;
+  font-family: Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-size: clamp(24px, var(--control-font), 38px);
+  font-weight: 900;
+  line-height: 1;
+  box-shadow:
+    0 8px 18px rgba(3, 25, 19, 0.34),
+    inset 0 1px 0 rgba(251, 248, 240, 0.24);
+  transform: translateX(-50%);
+  animation: ace-mistake-arrive 280ms cubic-bezier(0.2, 0.78, 0.24, 1.2) both;
+}
+
+.ace-mistake[hidden] {
+  display: none;
+}
+
+.ace-mistake > span {
+  transform: translateY(-0.03em);
+}
+
+.ace-mistake:focus-visible {
+  outline: 3px solid #8bcbff;
+  outline-offset: 3px;
+}
+
+@keyframes ace-mistake-arrive {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -7px) scale(0.72);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+}
+
 .master-hint-dialog {
   position: fixed;
   inset: 0;
@@ -2630,6 +2683,10 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   margin-top: 6px;
 }
 
+.master-hint-card[data-mode="mistake"] .master-hint-actions {
+  grid-template-columns: 1fr;
+}
+
 .master-hint-actions button {
   min-height: 48px;
   padding: 9px 12px;
@@ -2654,6 +2711,18 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   .master-hint-apply:hover {
     border-color: #fff1b5;
     filter: brightness(1.06);
+  }
+
+  .app[data-view="game"] .ace-mistake:not(:disabled):hover {
+    border-color: #fff1b5;
+    background: #bd433b;
+    transform: translate(-50%, -2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ace-mistake {
+    animation: none;
   }
 }
 
