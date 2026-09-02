@@ -92,6 +92,15 @@ pub struct CribbageGame {
     pub pegging_reset_pending: bool,
     pub phase: Phase,
     pub rng_state: u32,
+    /// Runtime-only scoring limit. Normal games end at 121; offline trajectory
+    /// completion raises this limit so both uncapped score streams can be
+    /// observed. Saved games deliberately retain the standard limit.
+    #[serde(skip, default = "standard_winning_score")]
+    winning_score: i32,
+}
+
+fn standard_winning_score() -> i32 {
+    121
 }
 
 impl CribbageGame {
@@ -117,6 +126,7 @@ impl CribbageGame {
             pegging_reset_pending: false,
             phase: Phase::Discard,
             rng_state: if seed == 0 { 0x9e3779b9 } else { seed },
+            winning_score: standard_winning_score(),
         };
         game.start_hand();
         game
@@ -171,6 +181,18 @@ impl CribbageGame {
 
     pub fn player_mut(&mut self, side: Side) -> &mut PlayerState {
         &mut self.players[side.index()]
+    }
+
+    pub fn winning_score(&self) -> i32 {
+        self.winning_score
+    }
+
+    pub fn set_winning_score(&mut self, score: i32) -> Result<(), String> {
+        if score < 121 {
+            return Err("winning score cannot be below 121".to_string());
+        }
+        self.winning_score = score;
+        Ok(())
     }
 
     pub fn current_player(&self) -> Side {
@@ -393,9 +415,10 @@ impl CribbageGame {
         if points <= 0 || self.phase == Phase::GameOver {
             return;
         }
+        let winning_score = self.winning_score;
         let player = self.player_mut(side);
-        player.score = (player.score + points).min(121);
-        if player.score >= 121 {
+        player.score = (player.score + points).min(winning_score);
+        if player.score >= winning_score {
             self.phase = Phase::GameOver;
         }
     }
@@ -435,6 +458,16 @@ mod tests {
         assert_eq!(game.turn_card.id, 41);
         assert_eq!(game.dealer, Side::Left);
         assert_eq!(game.pone, Side::Right);
+    }
+
+    #[test]
+    fn offline_scoring_limit_preserves_points_beyond_121() {
+        let mut game = CribbageGame::new_with_seed(0x9e3779b9, Side::Left);
+        game.set_winning_score(1_000_121).unwrap();
+        game.player_mut(Side::Left).score = 120;
+        game.peg(Side::Left, 5);
+        assert_eq!(game.player(Side::Left).score, 125);
+        assert_ne!(game.phase, Phase::GameOver);
     }
 
     #[test]

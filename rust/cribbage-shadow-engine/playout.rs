@@ -19,6 +19,15 @@ pub struct PlayoutResult {
     pub record: CompactPlayoutRecord,
 }
 
+#[derive(Clone, Debug)]
+pub struct TrajectoryResult {
+    pub left_score: i32,
+    pub right_score: i32,
+    pub hands: u32,
+    pub steps: u32,
+    pub record: CompactPlayoutRecord,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct CompactPlayoutRecord {
     pub hands: Vec<CompactHandRecord>,
@@ -139,6 +148,90 @@ impl ModelPlayout {
 
     pub fn set_model16_policy_mode(&mut self, mode: Model16PolicyMode) {
         self.model16_policy_mode = mode;
+    }
+
+    /// Reconstruct the beginning of a previously dealt hand without replaying
+    /// any earlier decisions. Every deal consumes one deterministic shuffle,
+    /// so advancing through preceding deals restores the exact deck RNG state.
+    pub fn new_at_hand(
+        seed: u32,
+        first_deal: Side,
+        hand_number: u32,
+        left_score: i32,
+        right_score: i32,
+        left_model: ModelId,
+        right_model: ModelId,
+    ) -> Result<ModelPlayout, String> {
+        if hand_number == 0 {
+            return Err("hand number must be at least one".to_string());
+        }
+        let mut playout = ModelPlayout::new(seed, first_deal, left_model, right_model)?;
+        while playout.game.hand_number < hand_number {
+            playout.game.deal = playout.game.deal.other();
+            playout.game.hand_number += 1;
+            playout.game.start_hand();
+        }
+        playout.game.player_mut(Side::Left).score = left_score;
+        playout.game.player_mut(Side::Right).score = right_score;
+        playout.record = CompactPlayoutRecord::default();
+        playout.start_hand_record();
+        Ok(playout)
+    }
+
+    /// Continue an uncapped scoring trajectory until both sides have reached
+    /// their requested totals. This is an offline data operation; live games
+    /// retain the standard 121-point terminal rule.
+    pub fn play_until_both_reach(
+        &mut self,
+        root: &str,
+        left_target: i32,
+        right_target: i32,
+        max_steps: u32,
+    ) -> Result<TrajectoryResult, String> {
+        if left_target < 1 || right_target < 1 {
+            return Err("trajectory targets must be positive".to_string());
+        }
+        let scoring_limit = left_target.max(right_target).saturating_add(1_000_000);
+        self.game.set_winning_score(scoring_limit)?;
+        for step in 0..max_steps {
+            match self.game.phase {
+                Phase::Discard => self.play_discard_round(root)?,
+                Phase::Pegging => self.play_pegging_step(root)?,
+                Phase::PeggingComplete => {
+                    let hand_number = self.game.hand_number;
+                    self.clear_model911_hand_caches();
+                    self.finalize_scoring_for_current_hand();
+                    self.game.score_after_pegging()?;
+                    self.finish_current_hand_record();
+                    if self.game.phase == Phase::Discard && self.game.hand_number != hand_number {
+                        self.peg_leads = [None, None];
+                        self.start_hand_record();
+                    }
+                }
+                Phase::ScorePone | Phase::ScoreDealer | Phase::ScoreCrib => {
+                    self.game.continue_scoring()?;
+                }
+                Phase::GameOver => {
+                    return Err("trajectory hit its safety scoring limit".to_string());
+                }
+            }
+            let left_score = self.game.player(Side::Left).score;
+            let right_score = self.game.player(Side::Right).score;
+            if left_score >= left_target && right_score >= right_target {
+                self.clear_model911_hand_caches();
+                return Ok(TrajectoryResult {
+                    left_score,
+                    right_score,
+                    hands: self.game.hand_number,
+                    steps: step + 1,
+                    record: self.record.clone(),
+                });
+            }
+        }
+        Err(format!(
+            "model trajectory exceeded {} steps before reaching {}:{}",
+            max_steps, left_target, right_target
+        ))
     }
 
     pub fn play_to_end(&mut self, root: &str, max_steps: u32) -> Result<PlayoutResult, String> {
@@ -632,7 +725,8 @@ impl ModelPlayout {
         let dealer = self.game.dealer;
         let pone_points =
             score_hand(&self.game.player(pone).table, self.game.turn_card, false) as i32;
-        let scored_pone = points_until_win(self.game.player(pone).score, pone_points);
+        let winning_score = self.game.winning_score();
+        let scored_pone = points_until_win(self.game.player(pone).score, pone_points, winning_score);
         let mut available_pone = pone_points;
         let mut simulated_left = left_before + if pone == Side::Left { scored_pone } else { 0 };
         let mut simulated_right = right_before + if pone == Side::Right { scored_pone } else { 0 };
@@ -640,10 +734,14 @@ impl ModelPlayout {
         let mut scored_crib = 0;
         let mut available_dealer = 0;
         let mut available_crib = 0;
-        if simulated_left < 121 && simulated_right < 121 {
+        if simulated_left < winning_score && simulated_right < winning_score {
             let dealer_points =
                 score_hand(&self.game.player(dealer).table, self.game.turn_card, false) as i32;
-            scored_dealer = points_until_win(self.game.player(dealer).score, dealer_points);
+            scored_dealer = points_until_win(
+                self.game.player(dealer).score,
+                dealer_points,
+                winning_score,
+            );
             available_dealer = dealer_points;
             simulated_left += if dealer == Side::Left {
                 scored_dealer
@@ -656,14 +754,17 @@ impl ModelPlayout {
                 0
             };
         }
-        if simulated_left < 121 && simulated_right < 121 {
+        if simulated_left < winning_score && simulated_right < winning_score {
             let crib_points =
                 score_hand(&self.game.player(dealer).crib, self.game.turn_card, true) as i32;
-            scored_crib =
-                points_until_win(self.game.player(dealer).score + scored_dealer, crib_points);
+            scored_crib = points_until_win(
+                self.game.player(dealer).score + scored_dealer,
+                crib_points,
+                winning_score,
+            );
             available_crib = crib_points;
         }
-        if left_before >= 121 || right_before >= 121 {
+        if left_before >= winning_score || right_before >= winning_score {
             available_pone = 0;
         }
         if let Some(hand) = self.current_hand_mut() {
@@ -696,11 +797,11 @@ impl ModelPlayout {
     }
 }
 
-fn points_until_win(score: i32, points: i32) -> i32 {
-    if score >= 121 {
+fn points_until_win(score: i32, points: i32, winning_score: i32) -> i32 {
+    if score >= winning_score {
         0
     } else {
-        points.min(121 - score)
+        points.min(winning_score - score)
     }
 }
 
@@ -721,6 +822,40 @@ mod tests {
             ModelId::Schell1481,
         );
         assert!(playout.is_ok());
+    }
+
+    #[test]
+    fn reconstructs_a_later_hand_without_replaying_decisions() {
+        let seed = 0x0911_0911;
+        let first_deal = Side::Right;
+        let mut expected = CribbageGame::new_with_seed(seed, first_deal);
+        while expected.hand_number < 9 {
+            expected.deal = expected.deal.other();
+            expected.hand_number += 1;
+            expected.start_hand();
+        }
+        let rebuilt = ModelPlayout::new_at_hand(
+            seed,
+            first_deal,
+            9,
+            103,
+            97,
+            ModelId::Schell91,
+            ModelId::Schell911,
+        )
+        .unwrap();
+        assert_eq!(rebuilt.game.dealer, expected.dealer);
+        assert_eq!(rebuilt.game.turn_card, expected.turn_card);
+        assert_eq!(
+            rebuilt.game.player(Side::Left).hand,
+            expected.player(Side::Left).hand
+        );
+        assert_eq!(
+            rebuilt.game.player(Side::Right).hand,
+            expected.player(Side::Right).hand
+        );
+        assert_eq!(rebuilt.game.player(Side::Left).score, 103);
+        assert_eq!(rebuilt.game.player(Side::Right).score, 97);
     }
 
     #[test]
