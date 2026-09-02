@@ -2229,6 +2229,22 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   max-width: none;
 }
 
+.snapshot-scoreboard > .score:first-child {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.snapshot-scoreboard > .score.ai {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.snapshot-scoreboard > .score-cut {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-self: center;
+}
+
 .snapshot-decision-summary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

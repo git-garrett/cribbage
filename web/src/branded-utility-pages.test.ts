@@ -38,6 +38,12 @@ describe("branded utility pages", () => {
     expect(css).toMatch(/\.my-stats-table thead th[\s\S]*overflow-wrap: normal;[\s\S]*word-break: normal/);
   });
 
+  it("keeps Ace review scores above a centered cut card", () => {
+    expect(css).toMatch(/\.snapshot-scoreboard > \.score:first-child\s*\{[^}]*grid-column:\s*1[^}]*grid-row:\s*1/s);
+    expect(css).toMatch(/\.snapshot-scoreboard > \.score\.ai\s*\{[^}]*grid-column:\s*2[^}]*grid-row:\s*1/s);
+    expect(css).toMatch(/\.snapshot-scoreboard > \.score-cut\s*\{[^}]*grid-column:\s*1 \/ -1[^}]*grid-row:\s*2[^}]*justify-self:\s*center/s);
+  });
+
   it("retains mobile and reduced-motion treatment", () => {
     expect(css).toMatch(/@media \(max-width: 640px\)[\s\S]*\.app\[data-view="analytics"\][\s\S]*\.model-info-layout[\s\S]*grid-template-columns: 1fr/);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*\.game-log-item,[\s\S]*\.model-info-item[\s\S]*transition: none/);
