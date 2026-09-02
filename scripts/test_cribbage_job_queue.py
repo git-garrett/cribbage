@@ -6,6 +6,7 @@ import plistlib
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("cribbage_job_queue.py")
@@ -144,6 +145,26 @@ class CribbageJobQueueTests(unittest.TestCase):
             changed_path = self.write_spec(root, changed)
             with self.assertRaisesRegex(ValueError, "different job specification"):
                 queue.read_status(queue.load_spec(changed_path))
+
+    def test_stop_falls_back_to_the_supervisor_process_group(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            spec = self.spec(root, [{"name": "one", "command": ["/usr/bin/true"]}])
+            path = self.write_spec(root, spec)
+            status = queue.read_status(spec)
+            status.update({"pid": 4321, "state": "running", "stages": []})
+            queue.atomic_json(queue.status_path(spec), status)
+
+            bootout_failure = queue.subprocess.CompletedProcess([], 5)
+            with (
+                mock.patch.object(queue.subprocess, "run", return_value=bootout_failure),
+                mock.patch.object(queue.os, "getpgid", return_value=4321),
+                mock.patch.object(queue.os, "killpg") as killpg,
+            ):
+                self.assertEqual(queue.stop_job(path), 0)
+
+            killpg.assert_called_once_with(4321, queue.signal.SIGTERM)
+            self.assertEqual(queue.read_status(spec)["state"], "stopped")
 
 
 if __name__ == "__main__":

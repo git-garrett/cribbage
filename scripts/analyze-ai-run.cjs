@@ -245,6 +245,8 @@ function completedDecisionHands(games, hands) {
 
 function evCalibration(db, runIds, completedHands) {
   const runPlaceholders = placeholders(runIds);
+  const hasPegEvKind = hasColumn(db, "compact_peg_plays", "selected_ev_kind");
+  const hasPegLegalCount = hasColumn(db, "compact_peg_plays", "legal_count");
   const discards = db.prepare(`
     SELECT
       d.game_id,
@@ -272,7 +274,9 @@ function evCalibration(db, runIds, completedHands) {
       p.role,
       p.model,
       p.selected_ev,
+      ${hasPegEvKind ? "p.selected_ev_kind" : "NULL AS selected_ev_kind"},
       p.action,
+      ${hasPegLegalCount ? "p.legal_count" : "NULL AS legal_count"},
       p.count_after,
       p.points
     FROM compact_peg_plays p
@@ -280,6 +284,18 @@ function evCalibration(db, runIds, completedHands) {
     WHERE g.run_id IN (${runPlaceholders}) AND p.selected_ev IS NOT NULL AND p.action = 0
     ORDER BY p.game_id, p.hand_number, p.sequence
   `).all(...runIds);
+
+  const untaggedPegRowsByModel = new Map();
+  for (const row of pegRows) {
+    if (row.selected_ev_kind || row.legal_count === 1) continue;
+    if (!untaggedPegRowsByModel.has(row.model)) untaggedPegRowsByModel.set(row.model, []);
+    untaggedPegRowsByModel.get(row.model).push(row);
+  }
+  const legacyImmediatePegModels = new Set(
+    [...untaggedPegRowsByModel.entries()]
+      .filter(([, rows]) => rows.length > 0 && rows.every((row) => Math.abs(row.selected_ev - row.points) < 1e-9))
+      .map(([model]) => model),
+  );
   const pegAllRows = db.prepare(`
     SELECT
       p.game_id,
@@ -319,6 +335,9 @@ function evCalibration(db, runIds, completedHands) {
   const skipped = {
     discardFinalHand: 0,
     pegFinalHand: 0,
+    pegForcedPlay: 0,
+    pegLegacyImmediate: 0,
+    pegUnknownEvKind: 0,
   };
   function add(kind, model, role, ev, realized) {
     const key = `${kind}:${role}:${model}`;
@@ -347,6 +366,18 @@ function evCalibration(db, runIds, completedHands) {
   }
 
   for (const row of pegRows) {
+    if (row.legal_count === 1) {
+      skipped.pegForcedPlay += 1;
+      continue;
+    }
+    if (row.selected_ev_kind && row.selected_ev_kind !== "future_net") {
+      skipped.pegUnknownEvKind += 1;
+      continue;
+    }
+    if (!row.selected_ev_kind && legacyImmediatePegModels.has(row.model)) {
+      skipped.pegLegacyImmediate += 1;
+      continue;
+    }
     const key = `${row.game_id}:${row.hand_number}`;
     if (!completedHands.included.has(key)) {
       skipped.pegFinalHand += 1;
@@ -361,6 +392,7 @@ function evCalibration(db, runIds, completedHands) {
     buckets: [...buckets.values()].sort((a, b) =>
       a.kind.localeCompare(b.kind) || a.role.localeCompare(b.role) || a.model.localeCompare(b.model)),
     skipped,
+    legacyImmediatePegModels: [...legacyImmediatePegModels].sort(),
   };
 }
 
@@ -704,7 +736,8 @@ function main() {
     } : null,
     ev: {
       note: "EV calibration excludes all decisions from each game's final hand so end-of-game cutoffs do not count skipped future value as realized zero.",
-      componentNote: "Compact rows store total discard EV and future net pegging-decision EV, not separate hand/crib/peg EV components.",
+      componentNote: "Discard rows store total EV. Pegging calibration includes only future-net EV choices; forced plays and legacy immediate-score telemetry are excluded.",
+      legacyImmediatePegModels: ev.legacyImmediatePegModels,
       excluded: ev.skipped,
       rows: evRows,
     },
@@ -787,8 +820,11 @@ function main() {
     lines.push("");
   }
   lines.push("EV calibration note: excludes every decision from each game's final hand so end-of-game cutoffs do not count skipped future value as realized zero.");
-  lines.push("EV component note: compact rows currently store total discard EV and future net pegging-decision EV, not separate hand/crib/peg EV components.");
-  lines.push(`Excluded final-hand EV rows: discard ${ev.skipped.discardFinalHand}, peg ${ev.skipped.pegFinalHand}`);
+  lines.push("EV component note: discard rows store total EV. Pegging calibration includes only future-net EV choices; forced plays and legacy immediate-score telemetry are excluded.");
+  if (ev.legacyImmediatePegModels.length) {
+    lines.push(`Legacy immediate-score pegging telemetry excluded for: ${ev.legacyImmediatePegModels.join(", ")}`);
+  }
+  lines.push(`Excluded EV rows: final-hand discard ${ev.skipped.discardFinalHand}, final-hand peg ${ev.skipped.pegFinalHand}, forced peg ${ev.skipped.pegForcedPlay}, legacy immediate peg ${ev.skipped.pegLegacyImmediate}, unknown peg EV kind ${ev.skipped.pegUnknownEvKind}`);
   lines.push(table(
     ["Kind", "Role", "Model", "Rows", "Avg EV", "Avg realized", "Realized - EV", "Mean abs error"],
     evRows.map((row) => [

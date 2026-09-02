@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import plistlib
+import signal
 import shutil
 import sqlite3
 import subprocess
@@ -369,13 +370,31 @@ def stop_job(spec_path: Path) -> int:
     spec = load_spec(spec_path)
     service = f"gui/{os.getuid()}/{launch_label(spec)}"
     completed = subprocess.run(["launchctl", "bootout", service], check=False)
+    stopped = completed.returncode == 0
     if status_path(spec).exists():
         status = read_status(spec)
+        if not stopped:
+            pid = status.get("pid")
+            if isinstance(pid, int) and pid > 1:
+                try:
+                    process_group = os.getpgid(pid)
+                    if process_group != pid:
+                        raise RuntimeError(
+                            f"refusing to stop unexpected process group {process_group} for pid {pid}"
+                        )
+                    os.killpg(process_group, signal.SIGTERM)
+                    stopped = True
+                except ProcessLookupError:
+                    stopped = True
+                except (OSError, RuntimeError) as error:
+                    print(f"failed to stop job process group: {error}", file=sys.stderr)
+        if not stopped:
+            return completed.returncode or 1
         status["statusPath"] = str(status_path(spec))
         status["state"] = "stopped"
         status["updatedAt"] = utc_now()
         atomic_json(status_path(spec), status)
-    return completed.returncode
+    return 0 if stopped else completed.returncode
 
 
 def validate_command(spec_path: Path) -> int:

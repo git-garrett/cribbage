@@ -590,10 +590,10 @@ fn append_peg_rows(sql: &mut String, game_id: &str, record: &CompactPlayoutRecor
     for play in &record.peg_plays {
         sql.push_str(&format!(
             concat!(
-                "INSERT OR REPLACE INTO compact_peg_plays (game_id, hand_number, sequence, player, role, model, selected_ev, ",
+                "INSERT OR REPLACE INTO compact_peg_plays (game_id, hand_number, sequence, player, role, model, selected_ev, selected_ev_kind, ",
                 "selected_win_probability, model16_policy_source, model16_policy_confidence, model16_policy_selected_weight, ",
                 "decision_elapsed_us, legal_count, action, card, count_before, count_after, points, left_score, right_score) ",
-                "VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n"
+                "VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n"
             ),
             sql_text(game_id),
             play.hand_number,
@@ -602,6 +602,9 @@ fn append_peg_rows(sql: &mut String, game_id: &str, record: &CompactPlayoutRecor
             sql_opt_role(play.role),
             play.model.map(|model| sql_text(model.as_str())).unwrap_or_else(|| "NULL".to_string()),
             sql_opt_f64(play.selected_ev),
+            play.selected_ev
+                .map(|_| sql_text("future_net"))
+                .unwrap_or_else(|| "NULL".to_string()),
             sql_opt_f64(play.selected_win_probability),
             play.model16_policy
                 .map(|trace| sql_text(model16_policy_source_name(trace.source)))
@@ -710,6 +713,7 @@ CREATE TABLE IF NOT EXISTS compact_peg_plays (
   role INTEGER,
   model TEXT,
   selected_ev REAL,
+  selected_ev_kind TEXT,
   selected_win_probability REAL,
   model16_policy_source TEXT,
   model16_policy_confidence INTEGER,
@@ -787,6 +791,7 @@ fn ensure_compact_schema_columns(db_path: &Path) -> Result<(), String> {
         sql.push_str("ALTER TABLE compact_peg_plays ADD COLUMN decision_elapsed_us INTEGER;\n");
     }
     let policy_columns = [
+        ("selected_ev_kind", "TEXT"),
         ("model16_policy_source", "TEXT"),
         ("model16_policy_confidence", "INTEGER"),
         ("model16_policy_selected_weight", "INTEGER"),
@@ -969,6 +974,7 @@ mod tests {
     #[test]
     fn compact_schema_contains_model16_decision_telemetry() {
         let schema = compact_schema_sql();
+        assert!(schema.contains("selected_ev_kind TEXT"));
         assert!(schema.contains("model16_policy_source TEXT"));
         assert!(schema.contains("model16_policy_confidence INTEGER"));
         assert!(schema.contains("model16_policy_selected_weight INTEGER"));
