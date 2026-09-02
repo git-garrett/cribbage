@@ -6,7 +6,7 @@ const mainSource = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
 describe("physical card motion", () => {
-  it("deals from the deck to alternating opponent-north and player-south destinations", () => {
+  it("deals from the deck to alternating opponent-upper-left and player-lower-left destinations", () => {
     expect(mainSource).toMatch(/const poneOrder = index \* 2;[\s\S]*const dealerOrder = poneOrder \+ 1;/s);
     expect(mainSource).toContain('pone.dataset.owner = state.dealAnimation.pone === "AI" ? "ai" : "human"');
     expect(mainSource).toContain('dealer.dataset.owner = state.dealAnimation.dealer === "AI" ? "ai" : "human"');
@@ -14,6 +14,9 @@ describe("physical card motion", () => {
     expect(mainSource).toMatch(/--deal-from-x[\s\S]*--deal-from-y[\s\S]*deal-animation-ready/s);
     expect(mainSource).toMatch(/closest<HTMLElement>\("\.deal-animation-hand"\)\?\.dataset\.owner[\s\S]*owner === "ai" \? -1 : 1/s);
     expect(css).toMatch(/\.deal-animation\s*\{[^}]*grid-template-rows:\s*minmax\(0, 1fr\) auto minmax\(0, 1fr\)/s);
+    expect(css).toMatch(/\.deal-animation\s*\{[^}]*justify-items:\s*start/s);
+    expect(css).toMatch(/\.deal-animation-deck\s*\{[^}]*justify-self:\s*center/s);
+    expect(css).toMatch(/\.deal-animation-hand\s*\{[^}]*justify-content:\s*flex-start[^}]*justify-self:\s*start/s);
     expect(css).toMatch(/\.deal-animation-hand\[data-owner="ai"\]\s*\{[^}]*grid-row:\s*1/s);
     expect(css).toMatch(/\.deal-animation-hand\[data-owner="human"\]\s*\{[^}]*grid-row:\s*3/s);
     expect(css).not.toMatch(/\.deal-animation-pone\s*\{[^}]*grid-column:\s*1/s);
