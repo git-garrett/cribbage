@@ -6,6 +6,14 @@ export interface ScoringEmphasisCard {
 }
 
 type ScoringCategory = "pegging" | "hand" | "crib";
+export type HandScoreComponent = "fifteens" | "runs" | "pairs" | "knobs" | "flush";
+
+export interface HandScoringCombination {
+  component: HandScoreComponent;
+  label: "Fifteen" | "Run" | "Pair" | "Knobs" | "Flush";
+  points: number;
+  cardIds: number[];
+}
 
 function rankValue(rank: string): number {
   if (rank === "A") return 1;
@@ -13,6 +21,133 @@ function rankValue(rank: string): number {
   if (rank === "Q") return 12;
   if (rank === "K") return 13;
   return Number(rank);
+}
+
+function fifteenCombinations(cards: readonly ScoringEmphasisCard[]): HandScoringCombination[] {
+  const combinations: HandScoringCombination[] = [];
+  for (let mask = 1; mask < (1 << cards.length); mask += 1) {
+    let total = 0;
+    const cardIds: number[] = [];
+    for (let index = 0; index < cards.length; index += 1) {
+      if (!(mask & (1 << index))) continue;
+      total += cards[index].value;
+      cardIds.push(cards[index].id);
+    }
+    if (total === 15) combinations.push({ component: "fifteens", label: "Fifteen", points: 2, cardIds });
+  }
+  return combinations;
+}
+
+interface RankGroup {
+  rank: number;
+  cards: ScoringEmphasisCard[];
+}
+
+function rankGroups(cards: readonly ScoringEmphasisCard[]): RankGroup[] {
+  const grouped = new Map<number, ScoringEmphasisCard[]>();
+  for (const card of cards) {
+    const rank = rankValue(card.rank);
+    const group = grouped.get(rank) ?? [];
+    group.push(card);
+    grouped.set(rank, group);
+  }
+  return [...grouped.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([rank, groupedCards]) => ({ rank, cards: groupedCards }));
+}
+
+function longestRunGroups(cards: readonly ScoringEmphasisCard[]): RankGroup[][] {
+  const spans: RankGroup[][] = [];
+  let current: RankGroup[] = [];
+  for (const group of rankGroups(cards)) {
+    if (!current.length || group.rank === current[current.length - 1].rank + 1) current.push(group);
+    else {
+      spans.push(current);
+      current = [group];
+    }
+  }
+  if (current.length) spans.push(current);
+  const longest = Math.max(0, ...spans.map((span) => span.length));
+  return longest >= 3 ? spans.filter((span) => span.length === longest) : [];
+}
+
+function runCombinations(cards: readonly ScoringEmphasisCard[]): HandScoringCombination[] {
+  const combinations: HandScoringCombination[] = [];
+  for (const run of longestRunGroups(cards)) {
+    let selections: ScoringEmphasisCard[][] = [[]];
+    for (const group of run) {
+      selections = selections.flatMap((selection) =>
+        group.cards.map((card) => [...selection, card])
+      );
+    }
+    for (const selection of selections) {
+      combinations.push({
+        component: "runs",
+        label: "Run",
+        points: run.length,
+        cardIds: selection.map((card) => card.id),
+      });
+    }
+  }
+  return combinations;
+}
+
+function pairCombinations(cards: readonly ScoringEmphasisCard[]): HandScoringCombination[] {
+  const combinations: HandScoringCombination[] = [];
+  for (const group of rankGroups(cards)) {
+    for (let left = 0; left < group.cards.length; left += 1) {
+      for (let right = left + 1; right < group.cards.length; right += 1) {
+        combinations.push({
+          component: "pairs",
+          label: "Pair",
+          points: 2,
+          cardIds: [group.cards[left].id, group.cards[right].id],
+        });
+      }
+    }
+  }
+  return combinations;
+}
+
+function knobsCombination(
+  hand: readonly ScoringEmphasisCard[],
+  turnCard: ScoringEmphasisCard | null,
+): HandScoringCombination[] {
+  if (!turnCard) return [];
+  const jack = hand.find((card) => card.rank === "J" && card.suit === turnCard.suit);
+  return jack
+    ? [{ component: "knobs", label: "Knobs", points: 1, cardIds: [jack.id] }]
+    : [];
+}
+
+function flushCombination(
+  hand: readonly ScoringEmphasisCard[],
+  turnCard: ScoringEmphasisCard | null,
+  category: ScoringCategory,
+): HandScoringCombination[] {
+  if (!hand.length || !hand.every((card) => card.suit === hand[0].suit)) return [];
+  const turnMatches = Boolean(turnCard && turnCard.suit === hand[0].suit);
+  if (category === "crib" && !turnMatches) return [];
+  const cardIds = [
+    ...hand.map((card) => card.id),
+    ...(turnMatches && turnCard ? [turnCard.id] : []),
+  ];
+  return [{ component: "flush", label: "Flush", points: cardIds.length, cardIds }];
+}
+
+export function handScoringCombinations(
+  hand: readonly ScoringEmphasisCard[],
+  turnCard: ScoringEmphasisCard | null,
+  category: "hand" | "crib",
+): HandScoringCombination[] {
+  const allCards = turnCard ? [...hand, turnCard] : [...hand];
+  return [
+    ...fifteenCombinations(allCards),
+    ...runCombinations(allCards),
+    ...pairCombinations(allCards),
+    ...knobsCombination(hand, turnCard),
+    ...flushCombination(hand, turnCard, category),
+  ];
 }
 
 function fifteenCardIds(cards: readonly ScoringEmphasisCard[]): Set<number> {

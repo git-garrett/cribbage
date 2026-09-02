@@ -3810,7 +3810,7 @@ function scoreSummaryNextLabel(game: GameState): string {
 function scoreSummaryForEvent(event: ScoreEvent, game: GameState): ScoreSummary | null {
   if (event.category !== "hand" && event.category !== "crib") return null;
   const player = event.player === "human" ? "human" : "ai";
-  const items = handScoreNoticeParts(event) ?? (event.points === 0
+  const items = handScoreNoticeParts(event, game.scoring?.cards, game.turnCard) ?? (event.points === 0
     ? [{ label: "No scoring combinations", points: 0 }]
     : [{ label: event.category === "crib" ? "Crib" : "Hand", points: event.points }]);
   return {
@@ -3842,7 +3842,7 @@ function newScoreNotices(game: GameState): GameNotice[] {
     const summary = scoreSummaryForEvent(event, game);
     if (summary) state.scoreSummaryQueue.push(summary);
     const player = event.player === "human" ? playerDisplayName() : playerName("ai");
-    const parts = handScoreNoticeParts(event)
+    const parts = handScoreNoticeParts(event, game.scoring?.cards, game.turnCard)
       ?? peggingScoreNoticeParts(event)
       ?? [{ label: scoreNoticeLabel(event), points: event.points }];
     for (const [index, part] of parts.entries()) {
@@ -3855,9 +3855,9 @@ function newScoreNotices(game: GameState): GameNotice[] {
         points: part.points,
         player: event.player,
         anchor: event.reason === "Heels" ? "cut" : event.category === "pegging" ? "play" : "scoring",
-        emphasizedCardIds: game.scoring
+        emphasizedCardIds: part.cardIds ?? (game.scoring
           ? scoringEmphasisCardIds(game.scoring.cards, game.turnCard, event.category, part.label)
-          : [],
+          : []),
       });
     }
   }

@@ -1,3 +1,9 @@
+import {
+  handScoringCombinations,
+  type HandScoreComponent,
+  type ScoringEmphasisCard,
+} from "./scoring-card-emphasis";
+
 export interface ScoreNoticeEvent {
   handNumber: number;
   player: string;
@@ -18,6 +24,7 @@ export interface ScoreNoticeEvent {
 export interface ScoreNoticePart {
   label: string;
   points: number;
+  cardIds?: number[];
 }
 
 export function shouldAnnounceScoreEvent(
@@ -34,19 +41,36 @@ export function shouldAnnounceScoreEvent(
   );
 }
 
-export function handScoreNoticeParts(event: ScoreNoticeEvent): ScoreNoticePart[] | null {
+export function handScoreNoticeParts(
+  event: ScoreNoticeEvent,
+  hand?: readonly ScoringEmphasisCard[],
+  turnCard: ScoringEmphasisCard | null = null,
+): ScoreNoticePart[] | null {
   if (event.points <= 0 || (event.category !== "hand" && event.category !== "crib")) return null;
   if (!event.scoreComponents) return null;
-  const ordered: Array<[keyof NonNullable<ScoreNoticeEvent["scoreComponents"]>, string]> = [
+  const ordered: Array<[HandScoreComponent, string]> = [
     ["fifteens", "Fifteens"],
     ["runs", "Runs"],
     ["pairs", "Pairs"],
     ["knobs", "Knobs"],
     ["flush", "Flush"],
   ];
+  const combinations = hand
+    ? handScoringCombinations(hand, turnCard, event.category)
+    : [];
   const parts = ordered.flatMap(([key, label]) => {
     const points = event.scoreComponents?.[key];
-    return typeof points === "number" && points > 0 ? [{ label, points }] : [];
+    if (typeof points !== "number" || points <= 0) return [];
+    const exact = combinations.filter((combination) => combination.component === key);
+    const exactPoints = exact.reduce((total, combination) => total + combination.points, 0);
+    if (exact.length && exactPoints === points) {
+      return exact.map((combination) => ({
+        label: combination.label,
+        points: combination.points,
+        cardIds: combination.cardIds,
+      }));
+    }
+    return [{ label, points }];
   });
   return parts.length ? parts : null;
 }

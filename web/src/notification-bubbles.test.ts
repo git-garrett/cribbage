@@ -49,6 +49,11 @@ describe("contextual game notifications", () => {
     expect(mainSource).toMatch(/scoreSummaryQueue\.push\(summary\)/);
   });
 
+  it("uses each hand-score combination's exact cards for its animation", () => {
+    expect(mainSource).toContain("handScoreNoticeParts(event, game.scoring?.cards, game.turnCard)");
+    expect(mainSource).toMatch(/emphasizedCardIds: part\.cardIds \?\?/);
+  });
+
   it("rebuilds the current hand or crib summary after restoring a game", () => {
     expect(renderResultSource).toContain("ensureCurrentScoreSummary(game)");
     expect(mainSource).toMatch(/function ensureCurrentScoreSummary[\s\S]*currentScoringScoreEvent[\s\S]*scoreSummaryQueue\.push\(summary\)/s);

@@ -6,6 +6,11 @@ import {
   shouldAnnounceScoreEvent,
   type ScoreNoticeEvent,
 } from "./score-notice-policy";
+import type { ScoringEmphasisCard } from "./scoring-card-emphasis";
+
+function card(id: number, rank: string, suit: string, value: number): ScoringEmphasisCard {
+  return { id, rank, suit, value };
+}
 
 function score(overrides: Partial<ScoreNoticeEvent> = {}): ScoreNoticeEvent {
   return {
@@ -67,6 +72,63 @@ describe("score notification policy", () => {
 
   it("does not split literal zero hands", () => {
     expect(handScoreNoticeParts(score({ points: 0, category: "crib", scoreComponents: { total: 0 } }))).toBeNull();
+  });
+
+  it("splits QQAA into an individually animated pair for each rank", () => {
+    const hand = [
+      card(1, "Q", "hearts", 10),
+      card(2, "Q", "clubs", 10),
+      card(3, "A", "spades", 1),
+      card(4, "A", "diamonds", 1),
+    ];
+    expect(handScoreNoticeParts(score({
+      category: "hand",
+      points: 4,
+      scoreComponents: { total: 4, pairs: 4 },
+    }), hand, card(5, "9", "clubs", 9))).toEqual([
+      { label: "Pair", points: 2, cardIds: [3, 4] },
+      { label: "Pair", points: 2, cardIds: [1, 2] },
+    ]);
+  });
+
+  it("splits double-double runs and pairs into their individual scores", () => {
+    const hand = [
+      card(1, "3", "hearts", 3),
+      card(2, "3", "clubs", 3),
+      card(3, "4", "spades", 4),
+      card(4, "4", "diamonds", 4),
+    ];
+    const parts = handScoreNoticeParts(score({
+      category: "hand",
+      points: 20,
+      scoreComponents: { total: 20, fifteens: 4, runs: 12, pairs: 4 },
+    }), hand, card(5, "5", "clubs", 5));
+    expect(parts?.filter((part) => part.label === "Run")).toEqual([
+      { label: "Run", points: 3, cardIds: [1, 3, 5] },
+      { label: "Run", points: 3, cardIds: [1, 4, 5] },
+      { label: "Run", points: 3, cardIds: [2, 3, 5] },
+      { label: "Run", points: 3, cardIds: [2, 4, 5] },
+    ]);
+    expect(parts?.filter((part) => part.label === "Pair")).toEqual([
+      { label: "Pair", points: 2, cardIds: [1, 2] },
+      { label: "Pair", points: 2, cardIds: [3, 4] },
+    ]);
+  });
+
+  it("falls back to the authoritative aggregate when card decomposition disagrees", () => {
+    const hand = [
+      card(1, "A", "hearts", 1),
+      card(2, "2", "clubs", 2),
+      card(3, "3", "spades", 3),
+      card(4, "4", "diamonds", 4),
+    ];
+    expect(handScoreNoticeParts(score({
+      category: "hand",
+      points: 6,
+      scoreComponents: { total: 6, runs: 6 },
+    }), hand, card(5, "5", "clubs", 5))).toEqual([
+      { label: "Runs", points: 6 },
+    ]);
   });
 
   it("names pegging runs and each pair tier", () => {
