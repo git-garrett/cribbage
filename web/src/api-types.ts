@@ -158,6 +158,15 @@ export type AnalyticsEvent =
   | {
       id: string;
       at: string;
+      type: "help";
+      action: "request";
+      gameId: string;
+      handNumber: number;
+      advisor: "Ace";
+    }
+  | {
+      id: string;
+      at: string;
       type: "score";
       gameId: string;
       handNumber: number;

@@ -13,8 +13,8 @@ import type {
 } from "./api-types";
 import {
   aceAdviceDecisionKey,
-  choiceDiffersFromAce,
   isAceAdviceOpponent,
+  mistakeAdviceForChoice,
   type AceAdviceAction,
 } from "./ace-advice";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
@@ -24,16 +24,26 @@ import { comparisonTone, type ComparisonTone } from "./comparison-difference";
 import { endGameAds } from "./end-game-ad";
 import { shouldAnimateScoringCards, shouldShowScoreBubble } from "./fast-counting-policy";
 import { singleGameReportRows } from "./game-report";
+import {
+  gameAnalysisProgress,
+  helpCountForGame,
+  pendingAnalysisGameIds,
+} from "./game-analysis";
 import { rankLeaderboardWins } from "./leaderboard";
 import { mergedLifetimeResults, type LifetimeScoringStats } from "./my-stats";
 import { myStatsTableRows } from "./my-stats-table";
-import { peggingDisplaySeries, recentPeggingCards } from "./pegging-display";
+import { resumablePathwayDestinations } from "./pathway-resume";
+import { peggingDisplayCardLimit, peggingDisplaySeries, recentPeggingCards } from "./pegging-display";
+import { opponentGoEvent } from "./pegging-presentation";
 import { resolveRemoteAiBase } from "./runtime-config";
-import { scoringEmphasisCardIds } from "./scoring-card-emphasis";
+import { shouldRestoreSavedGameSurface } from "./resume-surface";
+import { isCoherentSavedGameState } from "./saved-game-state";
 import { scoringTitle } from "./scoring-title";
+import { analyticsForStatsOpponent } from "./stats-opponent";
 import {
   handScoreNoticeParts,
   peggingScoreNoticeParts,
+  scoreNoticeEmphasisCardIds,
   shouldAnnounceScoreEvent,
 } from "./score-notice-policy";
 import {
@@ -142,16 +152,19 @@ interface LeaderboardSummarySource {
   mostSkunks: LeaderboardPlayer[];
 }
 
-type GameNotice = {
+type GameNoticeBase = {
   key: string;
-  kind: "score";
   text: string;
   label: string;
-  points: number;
   player: PlayerKey;
   anchor: "play" | "cut" | "scoring";
   emphasizedCardIds: number[];
 };
+
+type GameNotice = GameNoticeBase & (
+  | { kind: "score"; points: number }
+  | { kind: "go"; callout: "GO"; playerText: string }
+);
 
 interface ScoreSummary {
   key: string;
@@ -180,6 +193,7 @@ type PathwayView = "home" | "play" | "human" | "tutorial" | "settings" | "gamepl
 type PathwayRoute = PathwayView | "statistics";
 type MyStatsOpponent = "master" | "human" | "easy" | "tough" | "grandmaster" | "dynamic";
 type StatsView = "stats" | "leaderboard" | "game-log";
+type GameLogView = "games" | "errors";
 
 const MY_STATS_OPPONENT_LABEL: Record<MyStatsOpponent, string> = {
   master: "Ace",
@@ -263,6 +277,7 @@ const state: {
   analyticsOpen: boolean;
   analyticsMode: "my" | "full";
   statsView: StatsView;
+  gameLogView: GameLogView;
   myStatsOpponent: MyStatsOpponent;
   leaderboardOpen: boolean;
   leaderboardLoading: boolean;
@@ -287,6 +302,7 @@ const state: {
   noticeTimer: number | null;
   activeNotice: GameNotice | null;
   scoreNoticeCursor: ScoreNoticeCursor;
+  announcedGoNoticeKeys: Set<string>;
   dealCutRevealStage: "cutting" | "human" | "ai" | null;
   dealCutIndex: number | null;
   dealAiCutIndex: number | null;
@@ -325,6 +341,7 @@ const state: {
   analyticsOpen: false,
   analyticsMode: "my",
   statsView: "stats",
+  gameLogView: "games",
   myStatsOpponent: "master",
   leaderboardOpen: false,
   leaderboardLoading: false,
@@ -349,6 +366,7 @@ const state: {
   noticeTimer: null,
   activeNotice: null,
   scoreNoticeCursor: createScoreNoticeCursor(),
+  announcedGoNoticeKeys: new Set(),
   dealCutRevealStage: null,
   dealCutIndex: null,
   dealAiCutIndex: null,
@@ -377,10 +395,12 @@ type TurnCutProgress = "ai-turn" | "user-turn" | null;
 
 let interactionEpoch = 0;
 let gameStateGeneration = 0;
+let aceMistakeChoiceRevision = 0;
 
 function resetTransientGameUi(): void {
   interactionEpoch += 1;
   gameStateGeneration += 1;
+  aceMistakeChoiceRevision += 1;
   state.selected.clear();
   state.resultOverride = null;
   state.serverBusy = null;
@@ -393,6 +413,7 @@ function resetTransientGameUi(): void {
   state.reviewProgress = null;
   state.noticeResultLines = [];
   state.scoreNoticeCursor = createScoreNoticeCursor();
+  state.announcedGoNoticeKeys = new Set();
   clearNoticeQueue();
   state.dealCutRevealStage = null;
   state.dealCutIndex = null;
@@ -431,8 +452,15 @@ function setAiThinking(active: boolean): void {
 
 const els = {
   app: document.querySelector(".app") as HTMLElement,
+  topbar: document.querySelector(".app > .topbar") as HTMLElement,
   table: document.querySelector(".table") as HTMLElement,
+  actions: document.querySelector(".app > .table .actions") as HTMLElement,
+  scoreboard: document.querySelector(".app > .scoreboard") as HTMLElement,
+  played: document.querySelector(".app > .table > .played") as HTMLElement,
+  aceTools: document.querySelector("#ace-tools") as HTMLElement,
   pathwayPage: document.querySelector("#pathway-page") as HTMLElement,
+  pathwayBrandbar: document.querySelector(".pathway-brandbar") as HTMLElement,
+  pathwayHeaderHome: document.querySelector("#pathway-header-home") as HTMLButtonElement,
   pathwayViews: [...document.querySelectorAll<HTMLElement>("[data-pathway-view]")],
   pathwayTargetButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-target]")],
   pathwayBackButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-back]")],
@@ -511,6 +539,7 @@ const els = {
   splashFirstName: document.querySelector("#splash-first-name") as HTMLInputElement,
   board: document.querySelector("#board") as HTMLElement,
   appBack: document.querySelector("#app-back") as HTMLButtonElement,
+  mobileHeaderReveal: document.querySelector("#mobile-header-reveal") as HTMLButtonElement,
   fontSizeSelect: document.querySelector("#font-size-select") as HTMLSelectElement,
   fastCounting: document.querySelector("#fast-counting") as HTMLInputElement,
   hintsEnabled: document.querySelector("#hints-enabled") as HTMLInputElement,
@@ -547,6 +576,12 @@ const els = {
   analyticsPegging: document.querySelector("#analytics-pegging") as HTMLElement,
   gameLogOpen: document.querySelector("#game-log-open") as HTMLButtonElement,
   gameLogSummary: document.querySelector("#game-log-summary") as HTMLElement,
+  gameLogAnalyzeAll: document.querySelector("#game-log-analyze-all") as HTMLButtonElement,
+  gameLogViewTabButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-game-log-view]")],
+  gameLogGames: document.querySelector("#game-log-games") as HTMLElement,
+  gameLogErrors: document.querySelector("#game-log-errors") as HTMLElement,
+  gameLogErrorsSummary: document.querySelector("#game-log-errors-summary") as HTMLElement,
+  gameLogErrorsList: document.querySelector("#game-log-errors-list") as HTMLElement,
   gameLogOpponent: document.querySelector("#game-log-opponent") as HTMLSelectElement,
   gameLogResult: document.querySelector("#game-log-result") as HTMLSelectElement,
   gameLogMatchType: document.querySelector("#game-log-match-type") as HTMLSelectElement,
@@ -574,13 +609,14 @@ const els = {
   decisionSnapshotTable: document.querySelector("#decision-snapshot-table") as HTMLElement,
   result: document.querySelector("#result") as HTMLElement,
   resultInline: document.querySelector("#result-inline") as HTMLElement,
-  scoringResult: document.querySelector("#scoring-result") as HTMLElement,
+  humanScorePanel: document.querySelector(".scoreboard > .score:first-child") as HTMLElement,
   humanScore: document.querySelector("#human-score") as HTMLElement,
   humanPace: document.querySelector("#human-pace") as HTMLElement,
   humanFinal: document.querySelector("#human-final") as HTMLElement,
   humanName: document.querySelector("#human-name") as HTMLElement,
   humanDealer: document.querySelector("#human-dealer") as HTMLElement,
   scoreCut: document.querySelector("#score-cut") as HTMLElement,
+  aiScorePanel: document.querySelector(".scoreboard > .score.ai") as HTMLElement,
   aiScore: document.querySelector("#ai-score") as HTMLElement,
   aiPace: document.querySelector("#ai-pace") as HTMLElement,
   aiFinal: document.querySelector("#ai-final") as HTMLElement,
@@ -643,6 +679,10 @@ const els = {
   masterSessionForfeit: document.querySelector("#master-session-forfeit") as HTMLButtonElement,
 };
 
+let mobileGameplayHeaderHideTimer: number | null = null;
+let mobileGameplayHeaderWasActive = false;
+let mobileHeaderTouchStartY: number | null = null;
+
 function applyProductionOpponentVisibility(production: boolean): void {
   if (!production) return;
   for (const selector of [
@@ -700,7 +740,7 @@ async function reconcileRemoteGameState(): Promise<GameState | null> {
   // An action may have reached the server even if its response was interrupted.
   // Before replaying it, use the authoritative session to avoid leaving the UI
   // behind an already-revealed cut card or an AI discard that has completed.
-  if (!usesRemoteAi() || !currentSnapshot?.gameId) return null;
+  if (!currentSnapshot?.gameId) return null;
   return serverGameAction("state");
 }
 
@@ -934,6 +974,7 @@ interface AnalyticsTotals {
   doubleSkunked: number;
   analyzedGames: number;
   errors: number;
+  helps: number;
   peggingDealer: number;
   peggingPone: number;
   handDealer: number;
@@ -989,6 +1030,10 @@ function loadSavedGame(): SavedGameRecord | null {
     const parsed = JSON.parse(saved) as Partial<SavedGameRecord>;
     if (parsed.version !== 1 || !parsed.snapshot || !parsed.state) return null;
     const record = parsed as SavedGameRecord;
+    if (!isCoherentSavedGameState(record.state)) {
+      safeLocalStorageRemove(SAVE_KEY);
+      return null;
+    }
     // Snapshots from before server-authoritative reveal support may already
     // contain the turn card. Treat any missing reveal marker as private.
     if (record.snapshot.turnCardRevealed !== true || record.state.turnCardRevealed !== true) {
@@ -1141,15 +1186,6 @@ window.addEventListener("popstate", () => {
     console.warn("Player route could not be restored", error);
   });
 });
-try {
-  if (state.game) render(state.game);
-} catch (error) {
-  console.warn("Initial game render failed", error);
-  state.splashOpen = SIMPLE_NETWORK_MODE && !playerFirstName;
-  document.body.dataset.splash = state.splashOpen ? "true" : "false";
-  els.splashPage.hidden = !state.splashOpen;
-  showServerBusy(error, null);
-}
 
 function loadAnalytics(): AnalyticsStore {
   const fallback: AnalyticsStore = { version: 1, events: [] };
@@ -1631,6 +1667,7 @@ function humanCutElement(card: HumanCutCard, label: string): HTMLElement {
 
 function renderHumanTable(table: HumanTable): void {
   activeHumanTable = table;
+  syncPathwayResumePresentation();
   els.humanTableChallenger.replaceChildren(...playerSeat(table.challenger, "Challenger"));
   els.humanTableChallenged.replaceChildren(...playerSeat(table.challenged, "Invited player"));
   els.humanTableCuts.replaceChildren();
@@ -1685,6 +1722,7 @@ async function openHumanTable(tableId: string, options: { push?: boolean } = {})
 function hideHumanTable(): void {
   els.humanTablePage.hidden = true;
   activeHumanTable = null;
+  syncPathwayResumePresentation();
   if (humanTablePollTimer !== null) window.clearTimeout(humanTablePollTimer);
   humanTablePollTimer = null;
 }
@@ -1870,6 +1908,7 @@ function showAuthView(view: AuthView, message = "", error = false): void {
   els.peopleProfilePage.hidden = true;
   els.humanTablePage.hidden = true;
   els.splashPage.hidden = true;
+  syncMobileGameplayHeaderPlacement();
   els.authLoginForm.hidden = view !== "login";
   els.authOtpForm.hidden = view !== "otp";
   els.authPasswordForm.hidden = view !== "reset" && view !== "invite";
@@ -2014,12 +2053,17 @@ function uploadCompletedGame(gameId: string, force = false): void {
   const events = store.events.filter((event) => event.gameId === gameId).map((event) => tagPhoneRecord(event));
   if (!events.length) return;
   const endEvent = events.find((event) => event.type === "game" && event.action === "end");
+  if (!endEvent) return;
+  const startEvent = events.find(
+    (event): event is Extract<AnalyticsEvent, { type: "game" }> & { tags?: string[]; sessionTag?: string } =>
+      event.type === "game" && event.action === "start",
+  );
   void serverJson<CompletedGameUploadResponse>("/api/games", {
     gameId,
     tag: playerTag,
     appVersion: __APP_VERSION__,
-    model: currentSnapshot?.opponent ?? SIMPLE_NETWORK_OPPONENT,
-    finalResult: endEvent ?? null,
+    model: startEvent?.opponent ?? currentSnapshot?.opponent ?? SIMPLE_NETWORK_OPPONENT,
+    finalResult: endEvent,
     snapshot: currentSnapshot?.gameId === gameId ? currentSnapshot : null,
     events,
   }).then((response) => {
@@ -2126,6 +2170,9 @@ function showPathwayView(view: PathwayView): void {
   if (!PATHWAY_NAV_ENABLED) return;
   els.pathwayPage.hidden = false;
   els.pathwayPage.dataset.view = view;
+  els.pathwayHeaderHome.hidden = view === "home";
+  syncMobileGameplayHeaderPlacement();
+  syncPathwayResumePresentation();
   for (const pathwayView of els.pathwayViews) {
     pathwayView.hidden = pathwayView.dataset.pathwayView !== view;
     if (pathwayView.dataset.pathwayView === view) {
@@ -2134,6 +2181,25 @@ function showPathwayView(view: PathwayView): void {
   }
   els.pathwayPage.scrollTo({ top: 0, left: 0 });
   if (authenticatedUser) void refreshPeople({ heartbeat: true });
+}
+
+function syncPathwayResumePresentation(): void {
+  const resumable = new Set(resumablePathwayDestinations({
+    opponent: currentSnapshot?.opponent,
+    phase: state.game?.phase,
+    modelGameActive: state.hasResumableGame,
+    humanGameActive: activeHumanTable !== null,
+  }));
+  for (const button of els.pathwayDestinationButtons) {
+    const destination = button.dataset.pathwayDestination as "easy" | "tough" | "master" | "human";
+    const active = resumable.has(destination);
+    button.classList.toggle("pathway-choice-resumable", active);
+    button.dataset.resumable = active ? "true" : "false";
+    if (active) button.setAttribute("aria-current", "true");
+    else button.removeAttribute("aria-current");
+    const status = button.querySelector<HTMLElement>(".pathway-resume-status");
+    if (status) status.hidden = !active;
+  }
 }
 
 function pathwayOpponentLabel(opponent: Opponent): "Easy" | "Tough" | "Ace" {
@@ -3131,12 +3197,23 @@ function reviewUserChoiceWithAce(
   action: AceAdviceAction,
   selectedCardIds: readonly number[],
 ): void {
+  const choiceRevision = ++aceMistakeChoiceRevision;
+  state.aceMistake = null;
   const preparation = preparedAceAdviceFor(game);
   state.aceAdvicePreparation = null;
-  if (!game || !preparation?.advice) return;
+  if (!game || !preparation) return;
   if (!state.errorNoticesEnabled) return;
-  if (!choiceDiffersFromAce(action, selectedCardIds, preparation.advice)) return;
-  state.aceMistake = { handNumber: game.handNumber, advice: preparation.advice };
+  const handNumber = game.handNumber;
+  void mistakeAdviceForChoice(
+    action,
+    selectedCardIds,
+    preparation.advice ?? preparation.promise,
+    () => aceMistakeChoiceRevision === choiceRevision,
+  ).then((advice) => {
+    if (!advice || !state.errorNoticesEnabled || state.game?.handNumber !== handNumber) return;
+    state.aceMistake = { handNumber, advice };
+    render(state.game);
+  }).catch(() => undefined);
 }
 
 async function requestMasterHint(): Promise<void> {
@@ -3150,6 +3227,7 @@ async function requestMasterHint(): Promise<void> {
   try {
     const advice = preparation.advice ?? await preparation.promise;
     if (aceAdvicePreparationKey(state.game) !== preparation.key) return;
+    await api("/api/record-help", { decisionKey: preparation.key });
     state.masterHint = { ...advice, mode: "hint" };
     render(state.game);
     window.setTimeout(() => els.masterHintApply.focus(), 0);
@@ -3345,7 +3423,9 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       return serverGameAction("trouble-game");
     }
     if (path === "/api/discard") {
-      return serverGameAction("discard", { ids: (body?.ids as number[]) || [] });
+      const next = await serverGameAction("discard", { ids: (body?.ids as number[]) || [] });
+      if (currentSnapshot?.gameId) storeLiveDecisionReview(currentSnapshot.gameId);
+      return next;
     }
     if (path === "/api/finish-discard") {
       return serverGameAction("finish-discard");
@@ -3360,10 +3440,14 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       return serverGameAction("reveal-turn-card");
     }
     if (path === "/api/play") {
-      return serverGameAction("play", { id: body?.id as number });
+      const next = await serverGameAction("play", { id: body?.id as number });
+      if (currentSnapshot?.gameId) storeLiveDecisionReview(currentSnapshot.gameId);
+      return next;
     }
     if (path === "/api/play-human") {
-      return serverGameAction("play-human", { id: body?.id as number });
+      const next = await serverGameAction("play-human", { id: body?.id as number });
+      if (currentSnapshot?.gameId) storeLiveDecisionReview(currentSnapshot.gameId);
+      return next;
     }
     if (path === "/api/go") {
       return serverGameAction("go");
@@ -3381,6 +3465,9 @@ async function api(path: string, body: Record<string, unknown> | null = null): P
       return serverGameAction("complete-decision-reviews", {
         limit: typeof body?.limit === "number" ? body.limit : undefined,
       });
+    }
+    if (path === "/api/record-help") {
+      return serverGameAction("record-help", { decisionKey: String(body?.decisionKey ?? "") });
     }
     if (path === "/api/continue-scoring") {
       return serverGameAction("continue-scoring");
@@ -3459,7 +3546,7 @@ function renderCards(container: HTMLElement, cards: GameState["humanHand"], opti
 }
 
 function renderPlayedCards(game: GameState): void {
-  const compactCardLimit = 4;
+  const compactCardLimit = peggingDisplayCardLimit(window.innerWidth);
   const series = peggingDisplaySeries(game);
   els.plays.innerHTML = "";
   els.plays.hidden = series.length === 0;
@@ -3777,9 +3864,124 @@ function renderDealAnimation(): void {
   window.requestAnimationFrame(() => prepareDealAnimation(shell, deck));
 }
 
+interface CardFlightRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+interface PeggingPlaySource {
+  rect: CardFlightRect;
+}
+
+function capturePeggingPlaySource(player: PlayerKey, cardId?: number): PeggingPlaySource | null {
+  const humanCard = cardId === undefined
+    ? null
+    : els.humanHand.querySelector<HTMLElement>(`.card[data-id="${cardId}"]`);
+  const aiCards = [...els.aiHand.querySelectorAll<HTMLElement>(".card:not(.placeholder)")];
+  const element = player === "human" ? humanCard : aiCards.at(-1) ?? null;
+  const rect = element?.getBoundingClientRect();
+  if (rect?.width && rect.height) {
+    return { rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } };
+  }
+  if (player === "human") return null;
+
+  const anchor = els.aiScorePanel.getBoundingClientRect();
+  const sample = els.humanHand.querySelector<HTMLElement>(".card")
+    ?? els.plays.querySelector<HTMLElement>(".card");
+  const sampleRect = sample?.getBoundingClientRect();
+  const width = sampleRect?.width || 76;
+  const height = sampleRect?.height || 108;
+  return {
+    rect: {
+      left: anchor.right - width,
+      top: anchor.bottom + 10,
+      width,
+      height,
+    },
+  };
+}
+
+function newlyPlayedCard(
+  previous: GameState,
+  next: GameState,
+  player: PlayerKey,
+): GameState["plays"][number] | null {
+  if (next.plays.length <= previous.plays.length) return null;
+  const card = next.plays.at(-1);
+  if (!card || card.owner !== player) return null;
+  return card;
+}
+
+async function animatePeggingPlay(
+  previous: GameState,
+  next: GameState,
+  player: PlayerKey,
+  source: PeggingPlaySource | null,
+): Promise<void> {
+  const card = newlyPlayedCard(previous, next, player);
+  if (!card || !source || tableMotionDisabled()) return;
+  const destinations = [...els.plays.querySelectorAll<HTMLElement>(
+    `.played-active.pegging-row .card:not(.pegging-overflow-card)[data-id="${card.id}"]`,
+  )];
+  const destination = destinations.at(-1);
+  if (!destination) return;
+  const destinationRect = destination.getBoundingClientRect();
+  if (!destinationRect.width || !destinationRect.height) return;
+
+  const layer = document.createElement("div");
+  layer.className = "pegging-play-flight-layer";
+  layer.dataset.player = player;
+  layer.setAttribute("aria-hidden", "true");
+  const flyingCard = destination.cloneNode(true) as HTMLElement;
+  flyingCard.classList.remove("pegging-card-arriving");
+  flyingCard.classList.add("pegging-flying-card");
+  flyingCard.style.left = `${destinationRect.left}px`;
+  flyingCard.style.top = `${destinationRect.top}px`;
+  flyingCard.style.width = `${destinationRect.width}px`;
+  flyingCard.style.height = `${destinationRect.height}px`;
+  layer.append(flyingCard);
+  destination.classList.add("pegging-card-arriving");
+  document.body.append(layer);
+
+  const startX = source.rect.left - destinationRect.left;
+  const startY = source.rect.top - destinationRect.top;
+  const startScaleX = source.rect.width / destinationRect.width;
+  const startScaleY = source.rect.height / destinationRect.height;
+  const midScaleX = 1 + ((startScaleX - 1) * 0.42);
+  const midScaleY = 1 + ((startScaleY - 1) * 0.42);
+  const rotation = player === "ai" ? "4deg" : "-2deg";
+
+  try {
+    await flyingCard.animate([
+      {
+        opacity: 0.92,
+        transform: `translate3d(${startX}px, ${startY}px, 0) scale(${startScaleX}, ${startScaleY}) rotate(${rotation})`,
+      },
+      {
+        offset: 0.56,
+        opacity: 1,
+        transform: `translate3d(${startX * 0.42}px, ${(startY * 0.42) - 16}px, 0) scale(${midScaleX}, ${midScaleY}) rotate(${player === "ai" ? "1.5deg" : "-0.8deg"})`,
+      },
+      {
+        opacity: 1,
+        transform: "translate3d(0, 0, 0) scale(1) rotate(0deg)",
+      },
+    ], {
+      duration: player === "ai" ? 560 : 480,
+      easing: "cubic-bezier(0.22, 0.72, 0.24, 1)",
+      fill: "both",
+    }).finished.catch(() => undefined);
+  } finally {
+    destination.classList.remove("pegging-card-arriving");
+    layer.remove();
+  }
+}
+
 interface DiscardFlightSource {
   element: HTMLElement | null;
-  rect: { left: number; top: number; width: number; height: number };
+  rect: CardFlightRect;
   card: HTMLElement;
 }
 
@@ -3869,6 +4071,83 @@ function cribTrayFill(game: GameState): "empty" | "partial" | "full" {
   return "empty";
 }
 
+function usesMobileGameplayLayout(): boolean {
+  return window.innerWidth <= 640;
+}
+
+function mobileGameplayHeaderActive(): boolean {
+  return usesMobileGameplayLayout() &&
+    els.app.dataset.view === "game" &&
+    els.pathwayPage.hidden &&
+    els.splashPage.hidden &&
+    els.authPage.hidden &&
+    els.peopleProfilePage.hidden &&
+    els.humanTablePage.hidden;
+}
+
+function clearMobileGameplayHeaderHideTimer(): void {
+  if (mobileGameplayHeaderHideTimer === null) return;
+  window.clearTimeout(mobileGameplayHeaderHideTimer);
+  mobileGameplayHeaderHideTimer = null;
+}
+
+function hideMobileGameplayHeader(): void {
+  clearMobileGameplayHeaderHideTimer();
+  if (!mobileGameplayHeaderActive() || !els.peoplePresencePanel.hidden) return;
+  if (els.topbar.contains(document.activeElement)) return;
+  els.topbar.classList.add("mobile-game-header-hidden");
+}
+
+function scheduleMobileGameplayHeaderHide(delay = 2800): void {
+  clearMobileGameplayHeaderHideTimer();
+  if (!mobileGameplayHeaderActive() || !els.peoplePresencePanel.hidden) return;
+  mobileGameplayHeaderHideTimer = window.setTimeout(hideMobileGameplayHeader, delay);
+}
+
+function showMobileGameplayHeader(autoHide = true): void {
+  if (!mobileGameplayHeaderActive()) return;
+  els.topbar.classList.remove("mobile-game-header-hidden");
+  if (autoHide) scheduleMobileGameplayHeaderHide();
+  else clearMobileGameplayHeaderHideTimer();
+}
+
+function syncMobileGameplayHeaderPlacement(): void {
+  const active = mobileGameplayHeaderActive();
+  const pathwayHeaderActive = !els.pathwayPage.hidden;
+  const utilityHeaderActive = state.analyticsOpen || state.leaderboardOpen || state.modelInfoOpen || state.decisionReviewOpen;
+  document.body.classList.toggle("mobile-game-header-active", active);
+  if (active || utilityHeaderActive) {
+    if (els.peoplePresence.parentElement !== els.topbar) els.topbar.append(els.peoplePresence);
+    if (active && !mobileGameplayHeaderWasActive) showMobileGameplayHeader();
+  } else if (pathwayHeaderActive) {
+    clearMobileGameplayHeaderHideTimer();
+    els.topbar.classList.remove("mobile-game-header-hidden");
+    if (els.peoplePresence.parentElement !== els.pathwayBrandbar) {
+      els.pathwayBrandbar.append(els.peoplePresence);
+    }
+  } else {
+    clearMobileGameplayHeaderHideTimer();
+    els.topbar.classList.remove("mobile-game-header-hidden");
+    if (els.peoplePresence.parentElement !== document.body) {
+      document.body.insertBefore(els.peoplePresence, els.pathwayPage);
+    }
+  }
+  mobileGameplayHeaderWasActive = active;
+}
+
+function syncGameplayArtifactPlacement(game: GameState): void {
+  const cribParent = usesMobileGameplayLayout()
+    ? game.cribOwner === "User" ? els.humanScorePanel : els.aiScorePanel
+    : els.table;
+  const cutParent = usesMobileGameplayLayout() ? els.scoreboard : els.played;
+  const hintParent = usesMobileGameplayLayout() ? els.aceTools : els.actions;
+  const mistakeParent = usesMobileGameplayLayout() ? els.aceTools : els.scoreCut;
+  if (els.cribTray.parentElement !== cribParent) cribParent.append(els.cribTray);
+  if (els.scoreCut.parentElement !== cutParent) cutParent.append(els.scoreCut);
+  if (els.askMaster.parentElement !== hintParent) hintParent.append(els.askMaster);
+  if (els.aceMistake.parentElement !== mistakeParent) mistakeParent.append(els.aceMistake);
+}
+
 function renderCribTray(game: GameState): void {
   const visible = game.phase === "discard" ||
     game.phase === "ai_discarding" ||
@@ -3879,7 +4158,7 @@ function renderCribTray(game: GameState): void {
   const owner: PlayerKey = game.cribOwner === "User" ? "human" : "ai";
   els.cribTray.dataset.owner = owner;
   els.cribTray.dataset.fill = cribTrayFill(game);
-  els.cribTrayLabel.textContent = `${playerPossessive(owner)} crib`;
+  els.cribTrayLabel.textContent = usesMobileGameplayLayout() ? "Crib" : `${playerPossessive(owner)} crib`;
   els.cribTray.setAttribute("aria-label", `${playerPossessive(owner)} crib`);
 }
 
@@ -3973,7 +4252,6 @@ function renderScoring(scoring: GameState["scoring"]): void {
     delete els.scoringReview.dataset.owner;
     delete els.scoringReview.dataset.transition;
     els.scoringCards.innerHTML = "";
-    els.scoringResult.innerHTML = "";
     return;
   }
   els.scoringReview.dataset.owner = scoring.owner === "AI" ? "ai" : "human";
@@ -3988,7 +4266,6 @@ function renderScoring(scoring: GameState["scoring"]): void {
     scoring.stage === "crib" ? "crib" : "hand",
   );
   renderCards(els.scoringCards, scoring.cards);
-  els.scoringResult.textContent = "";
 }
 
 function scoringBreakdownText(scoring: NonNullable<GameState["scoring"]>): string {
@@ -4022,12 +4299,13 @@ function renderResult(game: GameState): void {
     return;
   }
   const notices = newScoreNotices(game);
+  const goNotice = newOpponentGoNotice(game);
+  if (goNotice) notices.push(goNotice);
   ensureCurrentScoreSummary(game);
   enqueueNotices(notices);
   maybeOpenScoreSummary();
   state.noticeResultLines = [];
   els.resultInline.innerHTML = "";
-  if (!game.scoring) els.scoringResult.innerHTML = "";
 }
 
 function scoreSummaryNextLabel(game: GameState): string {
@@ -4066,6 +4344,25 @@ function ensureCurrentScoreSummary(game: GameState): void {
   if (summary) state.scoreSummaryQueue.push(summary);
 }
 
+function newOpponentGoNotice(game: GameState): GameNotice | null {
+  const event = opponentGoEvent(game);
+  if (!event) return null;
+  const key = `go:${event.id}`;
+  if (state.announcedGoNoticeKeys.has(key)) return null;
+  state.announcedGoNoticeKeys.add(key);
+  return {
+    key,
+    kind: "go",
+    text: `${playerName("ai")} says Go. Your play.`,
+    label: `${playerName("ai")} says`,
+    callout: "GO",
+    player: "human",
+    playerText: "Your play",
+    anchor: "play",
+    emphasizedCardIds: [],
+  };
+}
+
 function newScoreNotices(game: GameState): GameNotice[] {
   const gameId = scoreNoticeGameId(game);
   const events = scoreEventsForGame(gameId, game.analyticsEvents);
@@ -4089,9 +4386,12 @@ function newScoreNotices(game: GameState): GameNotice[] {
         points: part.points,
         player: event.player,
         anchor: event.reason === "Heels" ? "cut" : event.category === "pegging" ? "play" : "scoring",
-        emphasizedCardIds: part.cardIds ?? (game.scoring
-          ? scoringEmphasisCardIds(game.scoring.cards, game.turnCard, event.category, part.label)
-          : []),
+        emphasizedCardIds: scoreNoticeEmphasisCardIds(
+          event,
+          part,
+          game.scoring?.cards,
+          game.turnCard,
+        ),
       });
     }
   }
@@ -4199,7 +4499,7 @@ function maybeOpenScoreSummary(): void {
 function showNoticeBubble(notice: GameNotice): void {
   els.result.innerHTML = "";
   const bubble = document.createElement("div");
-  bubble.className = `game-notification game-notification-${notice.kind}`;
+  bubble.className = `game-notification game-notification-score${notice.kind === "go" ? " game-notification-go" : ""}`;
   bubble.dataset.noticeKey = notice.key;
   bubble.setAttribute("aria-label", notice.text);
   bubble.dataset.player = notice.player;
@@ -4209,16 +4509,19 @@ function showNoticeBubble(notice: GameNotice): void {
   label.textContent = notice.label;
   const points = document.createElement("strong");
   points.className = "game-notification-points";
-  points.textContent = `+${notice.points}`;
+  points.textContent = notice.kind === "score" ? `+${notice.points}` : notice.callout;
   const player = document.createElement("span");
   player.className = "game-notification-player";
-  player.textContent = playerName(notice.player);
+  player.textContent = notice.kind === "score" ? playerName(notice.player) : notice.playerText;
   label.setAttribute("aria-hidden", "true");
   points.setAttribute("aria-hidden", "true");
   player.setAttribute("aria-hidden", "true");
   bubble.append(label, points, player);
   els.result.append(bubble);
   positionNoticeBubble(bubble, notice);
+  window.requestAnimationFrame(() => {
+    if (bubble.isConnected) positionNoticeBubble(bubble, notice);
+  });
   renderScoringCardEmphasis();
 }
 
@@ -4250,7 +4553,7 @@ function positionNoticeBubble(bubble: HTMLElement, notice: GameNotice): void {
   else if (notice.anchor === "cut") anchor = els.turnCard.querySelector(".card");
   else if (notice.anchor === "play") anchor = els.plays.querySelector(".played-active .card:last-child");
   const anchorRect = anchor?.getBoundingClientRect();
-  const edgeInset = notice.kind === "score" ? Math.min(90, layerRect.width * 0.28) : Math.min(56, layerRect.width * 0.18);
+  const edgeInset = Math.min(90, layerRect.width * 0.28);
   const rawX = anchorRect ? anchorRect.left - layerRect.left + (anchorRect.width / 2) : layerRect.width / 2;
   const rawY = anchorRect ? anchorRect.top - layerRect.top + (anchorRect.height * 0.36) : layerRect.height * 0.46;
   const x = Math.max(edgeInset, Math.min(layerRect.width - edgeInset, rawX));
@@ -4319,6 +4622,7 @@ function renderGameReportInto(
   const analysis = decisionAnalysisForGame(events, end.gameId);
   report.human.analyzedGames = analysis.analyzed ? 1 : 0;
   report.human.errors = analysis.errors;
+  report.human.helps = helpCountForGame(events, end.gameId);
   const title = document.createElement("h2");
   title.textContent = titleText;
   const summary = document.createElement("p");
@@ -4339,17 +4643,15 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
 
   const mistakes = sortedDecisionMistakes(events, end.gameId);
   const pending = pendingDecisionReviews(events, end.gameId);
+  const reviewed = reviewedUserDecisions(events, end.gameId);
 
   if (pending.length) {
     const pendingNotice = document.createElement("div");
     pendingNotice.className = "decision-review-pending";
-    const canAnalyze = canAnalyzeCurrentGameDecisionReviews(end.gameId);
     const pendingBody = document.createElement("div");
     pendingBody.className = "decision-review-pending-body";
     const pendingText = document.createElement("span");
-    pendingText.textContent = canAnalyze
-      ? `Analyze ${playerPossessive("human")} errors with ${DECISION_REVIEWER_NAME} and learn how to improve:`
-      : `${pending.length} ${playerDisplayName()} decision${pending.length === 1 ? "" : "s"} not analyzed.`;
+    pendingText.textContent = `${pending.length} ${playerDisplayName()} decision${pending.length === 1 ? "" : "s"} still need${pending.length === 1 ? "s" : ""} ${DECISION_REVIEWER_NAME} analysis.`;
     pendingBody.append(pendingText);
     if (state.completingReviews && state.reviewProgress) {
       const total = Math.max(1, state.reviewProgress.total);
@@ -4366,23 +4668,23 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
       pendingBody.append(progressRow);
     }
     pendingNotice.append(pendingBody);
-    if (canAnalyze) {
-      const analyze = document.createElement("button");
-      analyze.type = "button";
-      analyze.className = "decision-review-analyze";
-      analyze.textContent = state.completingReviews ? "Analyzing" : `Analyze with ${DECISION_REVIEWER_NAME}`;
-      analyze.disabled = state.completingReviews || state.pending;
-      analyze.addEventListener("click", () => {
-        void analyzeCurrentGameDecisionReviews();
-      });
-      pendingNotice.append(analyze);
-    }
+    const analyze = document.createElement("button");
+    analyze.type = "button";
+    analyze.className = "decision-review-analyze";
+    analyze.textContent = state.completingReviews ? "Analyzing" : `Analyze with ${DECISION_REVIEWER_NAME}`;
+    analyze.disabled = state.completingReviews || state.pending;
+    analyze.addEventListener("click", () => {
+      void analyzeGameDecisionReviews(end.gameId);
+    });
+    pendingNotice.append(analyze);
     section.append(pendingNotice);
-    return section;
+    if (!reviewed.length) return section;
   }
 
   const model = document.createElement("p");
-  model.textContent = `Compared with ${DECISION_REVIEWER_NAME} decision analysis. Win probability is primary; point EV is supporting context.`;
+  model.textContent = pending.length
+    ? `Completed decisions are compared with ${DECISION_REVIEWER_NAME} decision analysis. Win probability is primary; point EV is supporting context.`
+    : `Compared with ${DECISION_REVIEWER_NAME} decision analysis. Win probability is primary; point EV is supporting context.`;
   const totals = decisionEvTotals(mistakes);
   section.append(model, decisionEvSummary(totals), decisionWinProbabilityImpact(totals));
 
@@ -4439,16 +4741,6 @@ function pendingDecisionReviews(events: AnalyticsEvent[], gameId: string): Array
   );
 }
 
-function canAnalyzeCurrentGameDecisionReviews(gameId: string): boolean {
-  const pendingDiscardCount = currentSnapshot?.pendingDiscardReviews?.length ?? 0;
-  const pendingPeggingCount = currentSnapshot?.pendingPeggingReviews?.length ?? 0;
-  return Boolean(
-    state.game?.phase === "game_over" &&
-      currentSnapshot?.gameId === gameId &&
-      pendingDiscardCount + pendingPeggingCount > 0,
-  );
-}
-
 function decisionMistakes(events: AnalyticsEvent[], gameId: string): DecisionReviewEvent[] {
   return events.filter((event): event is DecisionReviewEvent => {
     if (
@@ -4475,8 +4767,9 @@ function reviewedUserDecisions(events: AnalyticsEvent[], gameId: string): Decisi
 }
 
 function decisionAnalysisForGame(events: AnalyticsEvent[], gameId: string): { analyzed: boolean; errors: number } {
+  const progress = gameAnalysisProgress(events, gameId);
   return {
-    analyzed: reviewedUserDecisions(events, gameId).length > 0,
+    analyzed: progress.complete,
     errors: decisionMistakes(events, gameId).length,
   };
 }
@@ -5084,9 +5377,9 @@ function decisionReviewText(event: DecisionReviewEvent): string {
       ? `; point EV impact ${formatEv(-Math.max(0, review.delta))}`
       : "";
   if (event.type === "discard") {
-    return `${playerDisplayName()} discarded ${review.selected.join(" ")}; ${playerName("ai")} advised ${review.recommended.join(" ")}${delta}.`;
+    return `${playerDisplayName()} discarded ${review.selected.join(" ")}; ${DECISION_REVIEWER_NAME} advised ${review.recommended.join(" ")}${delta}.`;
   }
-  return `${playerDisplayName()} played ${review.selected.join(" ")}; ${playerName("ai")} advised ${review.recommended.join(" ")}${delta}.`;
+  return `${playerDisplayName()} played ${review.selected.join(" ")}; ${DECISION_REVIEWER_NAME} advised ${review.recommended.join(" ")}${delta}.`;
 }
 
 function sameCards(left: string[], right: string[]): boolean {
@@ -5233,11 +5526,43 @@ function renderMyStats(
 ): void {
   renderMyStatsOpponentTabs();
   if (state.myStatsOpponent !== "master") {
-    renderEmptyMyStatsOpponent();
+    const scopedEvents = analyticsForStatsOpponent(events, state.myStatsOpponent);
+    const scopedScoreEvents = scopedEvents.filter((event): event is ScoreEvent => event.type === "score");
+    const scopedGameEvents = scopedEvents.filter((event): event is Extract<AnalyticsEvent, { type: "game" }> =>
+      event.type === "game"
+    );
+    const completedGames = scopedGameEvents.filter((event) => event.action === "end").length;
+    if (!completedGames) {
+      renderEmptyMyStatsOpponent();
+      return;
+    }
+    const totals = playerAnalyticsTotals(scopedEvents, scopedScoreEvents, scopedGameEvents);
+    const opponentLabel = MY_STATS_OPPONENT_LABEL[state.myStatsOpponent];
+    els.analyticsTitle.textContent = "My Stats";
+    els.analyticsSummary.textContent = `${completedGames} completed game${completedGames === 1 ? "" : "s"} against ${opponentLabel} recorded on this device.`;
+    els.analyticsTotals.innerHTML = "";
+    els.analyticsTotals.classList.add("my-stats-comparison");
+    els.analyticsTotals.append(myStatsComparisonTable(
+      playerDisplayName(),
+      totals,
+      completedGames,
+      completedGames,
+      false,
+      opponentLabel,
+    ));
+    renderAnalyticsRows(els.analyticsGames, []);
+    renderAnalyticsRows(els.analyticsHands, []);
+    renderAnalyticsRows(els.analyticsScores, []);
+    renderAnalyticsRows(els.analyticsPegging, []);
     return;
   }
-  const completedGames = gameEvents.filter((event) => event.action === "end").length;
-  const localTotals = playerAnalyticsTotals(events, scoreEvents, gameEvents);
+  const scopedEvents = analyticsForStatsOpponent(events, "master");
+  const scopedScoreEvents = scopedEvents.filter((event): event is ScoreEvent => event.type === "score");
+  const scopedGameEvents = scopedEvents.filter((event): event is Extract<AnalyticsEvent, { type: "game" }> =>
+    event.type === "game"
+  );
+  const completedGames = scopedGameEvents.filter((event) => event.action === "end").length;
+  const localTotals = playerAnalyticsTotals(scopedEvents, scopedScoreEvents, scopedGameEvents);
   const lifetime = mergedLifetimeResults(
     playerFirstName,
     state.leaderboardSummary.playerStats ?? [],
@@ -5347,6 +5672,31 @@ function playerAnalyticsTotals(
 function renderGameLog(): void {
   const events = loadAnalytics().events;
   const games = gameLogRecords(events);
+  const pendingGameIds = pendingAnalysisGameIds(events, games.map((game) => game.gameId));
+  const pendingDecisions = pendingGameIds.reduce(
+    (sum, gameId) => sum + gameAnalysisProgress(events, gameId).pending,
+    0,
+  );
+  els.gameLogAnalyzeAll.disabled = !pendingDecisions || state.completingReviews;
+  els.gameLogAnalyzeAll.textContent = state.completingReviews && state.reviewProgress
+    ? `Analyzing ${state.reviewProgress.total - state.reviewProgress.remaining}/${state.reviewProgress.total}`
+    : pendingDecisions
+      ? `Analyze all (${pendingGameIds.length})`
+      : "All analyzed";
+  for (const button of els.gameLogViewTabButtons) {
+    const selected = button.dataset.gameLogView === state.gameLogView;
+    button.classList.toggle("is-selected", selected);
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  }
+  els.gameLogGames.hidden = state.gameLogView !== "games";
+  els.gameLogErrors.hidden = state.gameLogView !== "errors";
+  els.gameLogSummary.textContent = `${games.length} completed game${games.length === 1 ? "" : "s"}${pendingDecisions ? ` · ${pendingDecisions} decision${pendingDecisions === 1 ? "" : "s"} awaiting analysis` : " · Analysis complete"}.`;
+  if (state.gameLogView === "errors") {
+    renderGameLogErrors(events, games);
+    return;
+  }
+
   syncGameLogFilter(games);
   const selectedOpponent = els.gameLogOpponent.value;
   const selectedResult = els.gameLogResult.value;
@@ -5376,30 +5726,92 @@ function renderGameLog(): void {
   }
 
   for (const game of filtered) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "game-log-item";
-    button.classList.toggle("selected", game.gameId === state.selectedLogGameId);
+    const item = document.createElement("article");
+    item.className = "game-log-item";
+    item.classList.toggle("selected", game.gameId === state.selectedLogGameId);
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "game-log-item-open";
     const result = game.end.finalScores
       ? `${game.end.finalScores.human}-${game.end.finalScores.ai}`
       : "Final score unavailable";
-    button.innerHTML = "";
     const title = document.createElement("strong");
     title.textContent = `${shortDate(game.end.at)} · vs ${engineName(game.opponent)}`;
     const meta = document.createElement("span");
     meta.textContent = `${playerName(game.end.winner, game.opponent)} won ${result}${game.end.result && game.end.result !== "regular" ? ` (${game.end.result})` : ""}`;
     const ev = document.createElement("span");
+    const progress = gameAnalysisProgress(events, game.gameId);
     const totals = decisionEvTotals(decisionMistakes(events, game.gameId));
-    ev.textContent = `${formatPercentagePointDelta(totals.total)} error win% (${totals.count}); ${formatEvPoints(totals.pointEvTotal)} EV`;
+    ev.textContent = progress.pending
+      ? `${progress.reviewed}/${progress.total} moves checked${totals.count ? ` · ${totals.count} error${totals.count === 1 ? "" : "s"} found` : ""}`
+      : `${formatPercentagePointDelta(totals.total)} error win% (${totals.count}); ${formatEvPoints(totals.pointEvTotal)} EV`;
     ev.className = totals.total < 0 ? "game-log-ev has-errors" : "game-log-ev";
-    button.append(title, meta, ev);
-    button.addEventListener("click", () => {
-      state.selectedLogGameId = game.gameId;
-      state.analyticsOpen = false;
-      state.decisionReviewOpen = true;
-      render(state.game);
+    open.append(title, meta, ev);
+    open.addEventListener("click", () => openLoggedGameReport(game.gameId));
+    item.append(open);
+    if (progress.pending) {
+      const analyze = document.createElement("button");
+      analyze.type = "button";
+      analyze.className = "game-log-item-analyze";
+      analyze.textContent = "Analyze";
+      analyze.setAttribute("aria-label", `Analyze ${shortDate(game.end.at)} game against ${engineName(game.opponent)}`);
+      analyze.disabled = state.completingReviews;
+      analyze.addEventListener("click", () => void analyzeGameDecisionReviews(game.gameId));
+      item.append(analyze);
+    }
+    els.gameLogList.append(item);
+  }
+}
+
+function openLoggedGameReport(gameId: string, errorEventId: string | null = null): void {
+  closeDecisionSnapshot();
+  state.selectedLogGameId = gameId;
+  state.analyticsOpen = false;
+  state.decisionReviewOpen = true;
+  render(state.game);
+  if (errorEventId) {
+    state.snapshotEventId = errorEventId;
+    renderDecisionSnapshot(loadAnalytics().events);
+  }
+}
+
+function renderGameLogErrors(events: AnalyticsEvent[], games: GameLogRecord[]): void {
+  const gamesById = new Map(games.map((game) => [game.gameId, game]));
+  const errors = games
+    .flatMap((game) => decisionMistakes(events, game.gameId))
+    .sort((left, right) => {
+      const leftDate = gamesById.get(left.gameId)?.end.at ?? left.at;
+      const rightDate = gamesById.get(right.gameId)?.end.at ?? right.at;
+      return rightDate.localeCompare(leftDate) || decisionMistakeSortValue(right) - decisionMistakeSortValue(left);
     });
-    els.gameLogList.append(button);
+  els.gameLogErrorsSummary.textContent = errors.length
+    ? `${errors.length} error${errors.length === 1 ? "" : "s"} found across analyzed decisions.`
+    : "No analyzed errors yet.";
+  els.gameLogErrorsList.innerHTML = "";
+  if (!errors.length) {
+    const empty = document.createElement("p");
+    empty.className = "analytics-empty";
+    empty.textContent = pendingAnalysisGameIds(events, games.map((game) => game.gameId)).length
+      ? "Analyze unfinished games to complete this list."
+      : "Ace did not flag any errors in the analyzed games.";
+    els.gameLogErrorsList.append(empty);
+    return;
+  }
+  for (const error of errors) {
+    const game = gamesById.get(error.gameId);
+    if (!game) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "game-log-error-item";
+    const title = document.createElement("strong");
+    title.textContent = `Hand ${error.handNumber} ${error.type === "discard" ? "discard" : "peg"} · vs ${engineName(game.opponent)}`;
+    const detail = document.createElement("span");
+    detail.textContent = decisionReviewText(error);
+    const impact = document.createElement("em");
+    impact.textContent = `${shortDate(game.end.at)} · ${formatPercentagePointDelta(decisionErrorWinProbabilityImpact(error))} win%`;
+    button.append(title, detail, impact);
+    button.addEventListener("click", () => openLoggedGameReport(game.gameId, error.id));
+    els.gameLogErrorsList.append(button);
   }
 }
 
@@ -6026,6 +6438,7 @@ function emptyAnalyticsTotals(): AnalyticsTotals {
     doubleSkunked: 0,
     analyzedGames: 0,
     errors: 0,
+    helps: 0,
     peggingDealer: 0,
     peggingPone: 0,
     handDealer: 0,
@@ -6224,13 +6637,13 @@ function myStatsComparisonTable(
   scoringGames: number,
   lifetimeGames: number,
   serverScoring: boolean,
+  opponentLabel = playerName("ai"),
 ): HTMLElement {
   const section = document.createElement("div");
   section.className = "my-stats-table-wrap";
 
   const table = document.createElement("table");
   table.className = "my-stats-table";
-  const opponentLabel = playerName("ai");
   table.setAttribute("aria-label", `${playerLabel} and ${opponentLabel} statistics comparison; difference is ${playerLabel} minus ${opponentLabel}`);
 
   const head = table.createTHead();
@@ -6432,6 +6845,7 @@ function renderUtilityPages(): void {
         : state.decisionReviewOpen
           ? "decision-review"
           : "game";
+  syncMobileGameplayHeaderPlacement();
   els.analyticsPage.hidden = !state.analyticsOpen;
   els.leaderboardPage.hidden = !state.leaderboardOpen;
   els.modelInfoPage.hidden = !state.modelInfoOpen;
@@ -6447,12 +6861,14 @@ function render(game: GameState | null): void {
     renderUtilityPages();
     return;
   }
+  syncGameplayArtifactPlacement(game);
   els.pathwayStatistics.disabled = false;
   syncAnalytics(game.analyticsEvents);
   state.game = game;
   if (SIMPLE_NETWORK_MODE && game.phase === "game_over") state.hasResumableGame = false;
   document.body.dataset.splash = state.splashOpen ? "true" : "false";
   els.splashPage.hidden = !state.splashOpen;
+  syncMobileGameplayHeaderPlacement();
   maybeLoadAdSense({
     hostname: window.location.hostname,
     isNativePlatform: Capacitor.isNativePlatform(),
@@ -6523,7 +6939,10 @@ function render(game: GameState | null): void {
       : game.phase === "pegging"
       ? `${playerPossessive("human")} hand`
       : `${playerPossessive("human")} hand`;
-  const showHandMeta = !hideHandsForInterstitial && game.phase === "pegging" && !game.peggingResetPending;
+  const showHandMeta = !usesMobileGameplayLayout() &&
+    !hideHandsForInterstitial &&
+    game.phase === "pegging" &&
+    !game.peggingResetPending;
   els.userHandMeta.hidden = !showHandMeta;
   els.userHandMeta.textContent = showHandMeta
     ? `Dealer: ${gameParticipantName(game.dealer)} · ${game.aiHandCount} ${engineName(currentSnapshot?.opponent ?? els.opponent.value)} ${game.aiHandCount === 1 ? "card" : "cards"}`
@@ -6812,8 +7231,11 @@ async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
     if (shouldAdvancePeggingAi(current)) {
       render(current);
       await waitForPaint();
+      const previous = current;
+      const source = capturePeggingPlaySource("ai");
       current = await withDelayedAiThinking(current, () => api("/api/advance-pegging", {}));
       render(current);
+      await animatePeggingPlay(previous, current, "ai", source);
       continue;
     }
     return current;
@@ -6821,28 +7243,89 @@ async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
   throw new Error("Pegging continuation did not settle.");
 }
 
-async function analyzeCurrentGameDecisionReviews(): Promise<void> {
-  if (!state.game || state.game.phase !== "game_over" || state.pending || state.completingReviews) return;
-  const total = (currentSnapshot?.pendingDiscardReviews?.length ?? 0) + (currentSnapshot?.pendingPeggingReviews?.length ?? 0);
+const storedReviewQueues = new Map<string, Promise<ReturnType<typeof gameAnalysisProgress>>>();
+
+function requestNextStoredDecisionReview(gameId: string): Promise<ReturnType<typeof gameAnalysisProgress>> {
+  const previous = storedReviewQueues.get(gameId) ?? Promise.resolve(gameAnalysisProgress(loadAnalytics().events, gameId));
+  const request = previous.catch(() => gameAnalysisProgress(loadAnalytics().events, gameId)).then(async () => {
+    const before = gameAnalysisProgress(loadAnalytics().events, gameId);
+    if (!before.pending) return before;
+    const response = await serverJson<ServerGameActionResponse>("/api/game/review", {
+      gameId,
+      tag: currentSessionTag() || null,
+    });
+    syncAnalytics(response.state.analyticsEvents);
+    return gameAnalysisProgress(loadAnalytics().events, gameId);
+  });
+  storedReviewQueues.set(gameId, request);
+  void request.finally(() => {
+    if (storedReviewQueues.get(gameId) === request) storedReviewQueues.delete(gameId);
+  }).catch(() => undefined);
+  return request;
+}
+
+function storeLiveDecisionReview(gameId: string): void {
+  void requestNextStoredDecisionReview(gameId).then(() => {
+    if (state.analyticsOpen || state.decisionReviewOpen || currentSnapshot?.gameId === gameId) render(state.game);
+  }).catch((error) => {
+    console.warn("Live Ace decision review will be backfilled later", error);
+  });
+}
+
+async function analyzeGameDecisionReviews(gameId: string): Promise<void> {
+  if (state.pending || state.completingReviews) return;
+  const initial = gameAnalysisProgress(loadAnalytics().events, gameId);
+  if (!initial.pending) return;
+  state.completingReviews = true;
+  state.reviewProgress = { total: initial.pending, remaining: initial.pending };
+  render(state.game);
+  try {
+    for (;;) {
+      const beforeRemaining = gameAnalysisProgress(loadAnalytics().events, gameId).pending;
+      if (!beforeRemaining) break;
+      const progress = await requestNextStoredDecisionReview(gameId);
+      const remaining = progress.pending;
+      state.reviewProgress = { total: initial.pending, remaining };
+      render(state.game);
+      if (!remaining || remaining >= beforeRemaining) break;
+      await waitMs(35);
+    }
+  } catch (error) {
+    showServerBusy(error, () => analyzeGameDecisionReviews(gameId));
+  } finally {
+    state.completingReviews = false;
+    state.reviewProgress = null;
+    render(state.game);
+  }
+}
+
+async function analyzeAllLoggedGames(): Promise<void> {
+  if (state.pending || state.completingReviews) return;
+  const events = loadAnalytics().events;
+  const games = gameLogRecords(events);
+  const gameIds = pendingAnalysisGameIds(events, games.map((game) => game.gameId));
+  const total = gameIds.reduce((sum, gameId) => sum + gameAnalysisProgress(events, gameId).pending, 0);
   if (!total) return;
   state.completingReviews = true;
   state.reviewProgress = { total, remaining: total };
   render(state.game);
   try {
-    for (;;) {
-      const beforeRemaining = (currentSnapshot?.pendingDiscardReviews?.length ?? 0) +
-        (currentSnapshot?.pendingPeggingReviews?.length ?? 0);
-      if (!beforeRemaining) break;
-      const next = await api("/api/complete-decision-reviews", { limit: 1 });
-      const remaining = (currentSnapshot?.pendingDiscardReviews?.length ?? 0) +
-        (currentSnapshot?.pendingPeggingReviews?.length ?? 0);
-      state.reviewProgress = { total, remaining };
-      render(next);
-      if (!remaining || remaining >= beforeRemaining) break;
-      await waitMs(35);
+    let remaining = total;
+    for (const gameId of gameIds) {
+      for (;;) {
+        const before = gameAnalysisProgress(loadAnalytics().events, gameId).pending;
+        if (!before) break;
+        const progress = await requestNextStoredDecisionReview(gameId);
+        const completed = before - progress.pending;
+        if (completed <= 0) break;
+        remaining = Math.max(0, remaining - completed);
+        state.reviewProgress = { total, remaining };
+        render(state.game);
+        await waitMs(35);
+      }
     }
   } catch (error) {
-    showServerBusy(error, () => analyzeCurrentGameDecisionReviews());
+    showServerBusy(error, () => analyzeAllLoggedGames());
   } finally {
     state.completingReviews = false;
     state.reviewProgress = null;
@@ -6873,11 +7356,17 @@ els.appBack.addEventListener("click", () => {
   render(state.game);
 });
 
+els.pathwayHeaderHome.addEventListener("click", () => navigatePathway("home"));
+
 for (const button of els.pathwayDestinationButtons) {
   if (button.disabled) continue;
   const destination = button.dataset.pathwayDestination;
   if (destination === "human") {
     button.addEventListener("click", () => {
+      if (button.dataset.resumable === "true" && activeHumanTable) {
+        void openHumanTable(activeHumanTable.id);
+        return;
+      }
       if (!authenticatedUser) {
         requestAuthentication({ kind: "human" }, "Sign in to find a human opponent.");
         return;
@@ -6896,7 +7385,16 @@ for (const button of els.pathwayDestinationButtons) {
   }
   const opponent = pathwayOpponent(destination);
   if (!opponent) continue;
-  button.addEventListener("click", () => void launchPathwayOpponent(opponent));
+  button.addEventListener("click", () => {
+    if (button.dataset.resumable === "true") {
+      els.pathwayPage.hidden = true;
+      state.splashOpen = false;
+      document.body.dataset.splash = "false";
+      void resumeGameFromSplash();
+      return;
+    }
+    void launchPathwayOpponent(opponent);
+  });
 }
 
 els.pathwayStatistics.addEventListener("click", () => {
@@ -6911,13 +7409,19 @@ els.peoplePresenceToggle.addEventListener("click", () => {
   const open = els.peoplePresencePanel.hidden;
   els.peoplePresencePanel.hidden = !open;
   els.peoplePresenceToggle.setAttribute("aria-expanded", String(open));
-  if (open) void refreshPeople({ heartbeat: Boolean(authenticatedUser) });
+  if (open) {
+    showMobileGameplayHeader(false);
+    void refreshPeople({ heartbeat: Boolean(authenticatedUser) });
+  } else {
+    scheduleMobileGameplayHeaderHide(700);
+  }
 });
 
 els.peoplePresenceClose.addEventListener("click", () => {
   els.peoplePresencePanel.hidden = true;
   els.peoplePresenceToggle.setAttribute("aria-expanded", "false");
   els.peoplePresenceToggle.focus();
+  scheduleMobileGameplayHeaderHide(700);
 });
 
 els.authLogin.addEventListener("click", () => {
@@ -7051,6 +7555,11 @@ document.addEventListener("keydown", (event) => {
 });
 
 function openAnalytics(mode: "my" | "full"): void {
+  if (mode === "my" && PATHWAY_NAV_ENABLED && pathwayRouteFromLocation() !== "statistics") {
+    window.history.pushState(pathwayHistoryState("statistics"), "", pathwayUrl("statistics"));
+    pathwayStatsReturn = true;
+    els.pathwayPage.hidden = true;
+  }
   closeDecisionSnapshot();
   state.analyticsMode = mode;
   state.statsView = "stats";
@@ -7079,6 +7588,7 @@ els.analyticsOpen.addEventListener("click", () => {
 
 for (const button of els.myStatsOpponentTabButtons) {
   button.addEventListener("click", () => {
+    if (button.dataset.statsAvailable === "false") return;
     state.myStatsOpponent = button.dataset.myStatsOpponent as MyStatsOpponent;
     render(state.game);
   });
@@ -7091,6 +7601,17 @@ for (const button of els.statsViewTabButtons) {
     if (state.statsView === "leaderboard") void loadInitialLeaderboard();
   });
 }
+
+for (const button of els.gameLogViewTabButtons) {
+  button.addEventListener("click", () => {
+    state.gameLogView = button.dataset.gameLogView as GameLogView;
+    render(state.game);
+  });
+}
+
+els.gameLogAnalyzeAll.addEventListener("click", () => {
+  void analyzeAllLoggedGames();
+});
 
 els.analyticsClose.addEventListener("click", () => {
   if (pathwayStatsReturn && pathwayRouteFromLocation() === "statistics") {
@@ -7106,15 +7627,8 @@ els.analyticsClose.addEventListener("click", () => {
 });
 
 function openStatsGameLog(): void {
-  closeDecisionSnapshot();
-  state.analyticsMode = "my";
+  openAnalytics("my");
   state.statsView = "game-log";
-  state.analyticsOpen = true;
-  state.leaderboardOpen = false;
-  state.modelInfoOpen = false;
-  state.decisionReviewOpen = false;
-  els.settingsPanel.hidden = true;
-  els.menuToggle.setAttribute("aria-expanded", "false");
   render(state.game);
 }
 
@@ -7456,7 +7970,9 @@ els.discard.addEventListener("click", async () => {
 els.play.addEventListener("click", async () => {
   if (state.pending) return;
   const card = state.game ? selectedPlayableCard(state.game) : null;
-  if (!card) return;
+  const previous = state.game;
+  if (!card || !previous) return;
+  const playSource = capturePeggingPlaySource("human", card.id);
   reviewUserChoiceWithAce(state.game, "play", [card.id]);
   state.pending = true;
   render(state.game);
@@ -7466,7 +7982,7 @@ els.play.addEventListener("click", async () => {
     const next = await api("/api/play-human", { id: card.id });
     state.selected.clear();
     render(next);
-    await waitForPaint();
+    await animatePeggingPlay(previous, next, "human", playSource);
     await continuePeggingAfterRender(next);
   } catch (error) {
     state.selected = new Set([card.id]);
@@ -7583,6 +8099,7 @@ async function startNewGameFromUi(
       els.settingsPanel.hidden = true;
       els.menuToggle.setAttribute("aria-expanded", "false");
       render(remoteGame);
+      if (await resumeReconciledGame(remoteGame)) return;
       await continuePeggingAfterRender(remoteGame);
       return;
     }
@@ -7592,6 +8109,7 @@ async function startNewGameFromUi(
     els.settingsPanel.hidden = true;
     els.menuToggle.setAttribute("aria-expanded", "false");
     render(next);
+    if (!(await resumeReconciledGame(next))) await continuePeggingAfterRender(next);
   } catch (error) {
     showServerBusy(error, () => startNewGameFromUi());
   } finally {
@@ -7607,9 +8125,10 @@ async function resumeGameFromSplash(): Promise<void> {
   state.splashOpen = false;
   render(state.game);
   try {
-    const game = state.game ?? await loadRemoteActiveGameSession();
+    const game = await reconcileRemoteGameState() ?? state.game ?? await loadRemoteActiveGameSession();
     if (!game) return;
     render(game);
+    if (await resumeReconciledGame(game)) return;
     await continuePeggingAfterRender(game);
   } catch (error) {
     showServerBusy(error, () => resumeGameFromSplash());
@@ -7773,9 +8292,72 @@ els.troubleGame.addEventListener("click", async () => {
   }
 });
 
+window.addEventListener("touchstart", (event) => {
+  if (!mobileGameplayHeaderActive() ||
+      !els.topbar.classList.contains("mobile-game-header-hidden") ||
+      event.touches.length !== 1 ||
+      window.scrollY > 2) {
+    mobileHeaderTouchStartY = null;
+    return;
+  }
+  const touch = event.touches[0];
+  mobileHeaderTouchStartY = touch.clientY;
+}, { passive: true });
+
+window.addEventListener("touchmove", (event) => {
+  if (mobileHeaderTouchStartY === null || event.touches.length !== 1) return;
+  const touch = event.touches[0];
+  if (touch.clientY - mobileHeaderTouchStartY >= 46) {
+    mobileHeaderTouchStartY = null;
+    showMobileGameplayHeader();
+  }
+}, { passive: true });
+
+window.addEventListener("touchend", () => {
+  mobileHeaderTouchStartY = null;
+}, { passive: true });
+
+document.addEventListener("pointerdown", (event) => {
+  if (!mobileGameplayHeaderActive()) return;
+  const target = event.target;
+  if (target instanceof Node && !els.topbar.contains(target)) hideMobileGameplayHeader();
+}, { capture: true });
+
+els.mobileHeaderReveal.addEventListener("click", (event) => {
+  event.stopPropagation();
+  showMobileGameplayHeader();
+});
+
+els.topbar.addEventListener("focusin", () => showMobileGameplayHeader(false));
+els.topbar.addEventListener("focusout", () => scheduleMobileGameplayHeaderHide());
+
 window.addEventListener("resize", () => render(state.game));
 window.addEventListener("pagehide", () => {
   uploadLocalCompletedGames(true);
+});
+
+let authenticationRecovery: Promise<void> | null = null;
+
+function recoverInterruptedAuthentication(): void {
+  if (
+    authenticationRecovery ||
+    authenticatedUser ||
+    !AUTHENTICATION_ENABLED ||
+    els.authPage.hidden ||
+    els.authStatus.dataset.error !== "true"
+  ) return;
+  authenticationRecovery = (async () => {
+    if (!await initializeAuthentication()) return;
+    await initializePeople();
+    await resumeAuthenticatedDestination();
+  })().finally(() => {
+    authenticationRecovery = null;
+  });
+}
+
+window.addEventListener("pageshow", recoverInterruptedAuthentication);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") recoverInterruptedAuthentication();
 });
 
 async function finishDiscardInBackground(
@@ -7876,6 +8458,21 @@ async function initializeApplication(): Promise<void> {
     return;
   }
   await initializeGameState();
+}
+
+if (shouldRestoreSavedGameSurface({
+  route: PATHWAY_NAV_ENABLED ? pathwayRouteFromLocation() : null,
+  activeGame: Boolean(state.game && state.game.phase !== "game_over"),
+})) {
+  try {
+    render(state.game);
+  } catch (error) {
+    console.warn("Initial game render failed", error);
+    state.splashOpen = SIMPLE_NETWORK_MODE && !playerFirstName;
+    document.body.dataset.splash = state.splashOpen ? "true" : "false";
+    els.splashPage.hidden = !state.splashOpen;
+    showServerBusy(error, null);
+  }
 }
 
 void initializeApplication();

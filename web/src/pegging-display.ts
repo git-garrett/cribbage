@@ -14,6 +14,10 @@ export interface RecentPeggingCards<Card> {
   visible: Card[];
 }
 
+export function peggingDisplayCardLimit(viewportWidth: number): number {
+  return viewportWidth <= 640 ? 7 : 4;
+}
+
 export function recentPeggingCards<Card>(cards: Card[], visibleLimit: number): RecentPeggingCards<Card> {
   const cutoff = Math.max(0, cards.length - Math.max(0, visibleLimit));
   return {

@@ -9,6 +9,7 @@ export interface SingleGameReportTotals {
   doubleSkunked: number;
   analyzedGames: number;
   errors: number;
+  helps: number;
   peggingDealer: number;
   peggingPone: number;
   handDealer: number;
@@ -97,6 +98,12 @@ export function singleGameReportRows(
     averageRow("Avg hand as pone", player.handPone, player.handPoneHands, ai.handPone, ai.handPoneHands),
     averageRow("Avg crib", player.crib, player.cribHands, ai.crib, ai.cribHands),
     fullCycleRow(player, ai),
+    {
+      label: "Ace helps",
+      player: String(player.helps),
+      ai: "—",
+      difference: "—",
+    },
   ];
 
   if (player.skunks || player.skunked || ai.skunks || ai.skunked) {

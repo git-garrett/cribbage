@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   handScoreNoticeParts,
   peggingScoreNoticeParts,
+  scoreNoticeEmphasisCardIds,
   shouldAnnounceScoreEvent,
   type ScoreNoticeEvent,
 } from "./score-notice-policy";
@@ -105,6 +106,32 @@ describe("score notification policy", () => {
     }), hand, card(5, "2", "clubs", 2))).toEqual([
       { label: "Pair Royal", points: 6, cardIds: [1, 2, 3] },
     ]);
+  });
+
+  it("animates both the matching jack and the cut card for knobs", () => {
+    const hand = [
+      card(1, "J", "hearts", 10),
+      card(2, "4", "clubs", 4),
+      card(3, "7", "spades", 7),
+      card(4, "9", "diamonds", 9),
+    ];
+    expect(handScoreNoticeParts(score({
+      category: "hand",
+      points: 1,
+      scoreComponents: { total: 1, knobs: 1 },
+    }), hand, card(5, "2", "hearts", 2))).toEqual([
+      { label: "Knobs", points: 1, cardIds: [1, 5] },
+    ]);
+  });
+
+  it("animates the cut card when heels is counted", () => {
+    const cut = card(5, "J", "hearts", 10);
+    expect(scoreNoticeEmphasisCardIds(
+      { ...score({ category: "pegging", points: 2 }), reason: "Heels" },
+      { label: "Heels", points: 2 },
+      undefined,
+      cut,
+    )).toEqual([5]);
   });
 
   it("splits double-double runs and pairs into their individual scores", () => {

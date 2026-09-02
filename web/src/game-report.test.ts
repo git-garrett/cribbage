@@ -11,6 +11,7 @@ const totals = (overrides: Partial<SingleGameReportTotals> = {}): SingleGameRepo
   doubleSkunked: 0,
   analyzedGames: 0,
   errors: 0,
+  helps: 0,
   peggingDealer: 0,
   peggingPone: 0,
   handDealer: 0,
@@ -97,5 +98,10 @@ describe("singleGameReportRows", () => {
     expect(rows.map((row) => row.label)).not.toContain("Errors, total");
     expect(rows.map((row) => row.label)).not.toContain("Errors / game");
     expect(rows).toContainEqual({ label: "Avg full cycle", player: "27.00", ai: "23.00", difference: "+4.00" });
+  });
+
+  it("reports how many times the player asked Ace for help", () => {
+    const rows = singleGameReportRows(totals({ helps: 3 }), totals());
+    expect(rows).toContainEqual({ label: "Ace helps", player: "3", ai: "—", difference: "—" });
   });
 });

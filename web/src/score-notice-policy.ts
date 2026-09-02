@@ -1,5 +1,6 @@
 import {
   handScoringCombinations,
+  scoringEmphasisCardIds,
   type HandScoreComponent,
   type ScoringEmphasisCard,
 } from "./scoring-card-emphasis";
@@ -9,6 +10,7 @@ export interface ScoreNoticeEvent {
   player: string;
   category: string;
   points: number;
+  reason?: string;
   scoreComponents?: {
     total: number;
     fifteens?: number;
@@ -25,6 +27,21 @@ export interface ScoreNoticePart {
   label: string;
   points: number;
   cardIds?: number[];
+}
+
+export function scoreNoticeEmphasisCardIds(
+  event: ScoreNoticeEvent,
+  part: ScoreNoticePart,
+  hand: readonly ScoringEmphasisCard[] | undefined,
+  turnCard: ScoringEmphasisCard | null,
+): number[] {
+  if (part.cardIds) return part.cardIds;
+  if (event.reason === "Heels") return turnCard ? [turnCard.id] : [];
+  if (!hand) return [];
+  const category = event.category === "hand" || event.category === "crib"
+    ? event.category
+    : "pegging";
+  return scoringEmphasisCardIds(hand, turnCard, category, part.label);
 }
 
 export function shouldAnnounceScoreEvent(

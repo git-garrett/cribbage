@@ -119,7 +119,7 @@ function knobsCombination(
   if (!turnCard) return [];
   const jack = hand.find((card) => card.rank === "J" && card.suit === turnCard.suit);
   return jack
-    ? [{ component: "knobs", label: "Knobs", points: 1, cardIds: [jack.id] }]
+    ? [{ component: "knobs", label: "Knobs", points: 1, cardIds: [jack.id, turnCard.id] }]
     : [];
 }
 

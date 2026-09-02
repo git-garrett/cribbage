@@ -35,6 +35,14 @@ describe("physical card motion", () => {
     expect(css).toMatch(/\.crib-tray\[data-fill="partial"\][\s\S]*linear-gradient[\s\S]*#284f86/s);
   });
 
+  it("flies each pegging play from its hand position into the active series", () => {
+    expect(mainSource).toMatch(/function capturePeggingPlaySource[\s\S]*els\.humanHand[\s\S]*els\.aiHand/s);
+    expect(mainSource).toMatch(/function animatePeggingPlay[\s\S]*pegging-play-flight-layer[\s\S]*pegging-card-arriving/s);
+    expect(mainSource).toMatch(/animatePeggingPlay\(previous, current, "ai", source\)/);
+    expect(mainSource).toMatch(/const playSource = capturePeggingPlaySource\("human", card\.id\)[\s\S]*animatePeggingPlay\(previous, next, "human", playSource\)/s);
+    expect(css).toMatch(/\.pegging-play-flight-layer\s*\{[^}]*position:\s*fixed[^}]*pointer-events:\s*none/s);
+  });
+
   it("keeps the full deal-cut deck in one stable 52-card ribbon", () => {
     expect(mainSource).toContain("const DEAL_CUT_CARD_COUNT = 52");
     expect(mainSource).toContain('els.app.dataset.dealCutActive = showingDealCut ? "true" : "false"');
@@ -45,7 +53,8 @@ describe("physical card motion", () => {
 
   it("lifts a full-size top packet and flips the turn card from the lower deck", () => {
     expect(css).toMatch(/\.pegging-row \.turn-cut-deck-cutting::after,[\s\S]*height:\s*calc\(100% \+ 2px\)/s);
-    expect(css).toMatch(/@keyframes deck-cut-slide[\s\S]*translate3d\(-38%, -24%, 0\) rotate\(-6deg\)/s);
+    expect(css).toMatch(/@keyframes deck-cut-slide[\s\S]*translate3d\(-48%, -34%, 0\) rotate\(-7deg\)/s);
+    expect(css).toMatch(/#plays \.played-active\.pegging-row\.turn-cut-row\s*\{[^}]*overflow:\s*visible/s);
     expect(mainSource).toMatch(/function prepareTurnCardReveal[\s\S]*deckRect\.bottom - cardRect\.bottom[\s\S]*turn-card-reveal-ready/s);
     expect(css).toMatch(/\.turn-card-reveal-animated \.card[^}]*transform-origin:\s*center bottom/s);
     expect(css).toMatch(/@keyframes turn-card-from-bottom[\s\S]*var\(--turn-card-from-x\)[\s\S]*rotateX\(-88deg\)[\s\S]*rotateX\(0deg\)/s);

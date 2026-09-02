@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { peggingDisplaySeries, recentPeggingCards } from "./pegging-display";
+import { peggingDisplayCardLimit, peggingDisplaySeries, recentPeggingCards } from "./pegging-display";
 
 describe("peggingDisplaySeries", () => {
   const card = (id: number, owner: "human" | "ai") => ({ id, owner });
@@ -31,5 +31,11 @@ describe("peggingDisplaySeries", () => {
       visible: [3, 4, 5, 6, 7],
     });
     expect(recentPeggingCards([1, 2, 3], 5)).toEqual({ hidden: [], visible: [1, 2, 3] });
+  });
+
+  it("uses overlap to retain more of the current series on mobile", () => {
+    expect(peggingDisplayCardLimit(390)).toBe(7);
+    expect(peggingDisplayCardLimit(640)).toBe(7);
+    expect(peggingDisplayCardLimit(641)).toBe(4);
   });
 });

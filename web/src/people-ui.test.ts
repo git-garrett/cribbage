@@ -18,6 +18,14 @@ describe("human clubhouse UI", () => {
     expect(css).toContain(".my-stats-opponent-tabs");
   });
 
+  it("makes unavailable opponent tabs genuinely non-interactive", () => {
+    for (const opponent of ["grandmaster", "dynamic"]) {
+      expect(html).toMatch(new RegExp(`data-my-stats-opponent="${opponent}"[^>]*disabled`));
+    }
+    expect(source).toMatch(/button\.dataset\.statsAvailable === "false"[\s\S]*return/);
+    expect(css).toMatch(/\.my-stats-opponent-tabs button:disabled\s*\{[^}]*cursor:\s*not-allowed/s);
+  });
+
   it("sizes mobile statistics tabs to their text and preserves semantic diff colors", () => {
     expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*\.my-stats-opponent-tabs button\s*\{[^}]*inline-size:\s*max-content[^}]*white-space:\s*nowrap/s);
     expect(css).toMatch(/\.my-stats-table \.difference\.comparison-good\s*\{[^}]*color:\s*var\(--comparison-good\)/s);
@@ -49,7 +57,8 @@ describe("human clubhouse UI", () => {
     expect(source).toContain("function openStatsGameLog");
     expect(source).toContain("function gameLogResult");
     expect(source).toContain("function gameLogMatchType");
-    expect(source).toMatch(/state\.selectedLogGameId = game\.gameId;[\s\S]*state\.decisionReviewOpen = true/);
+    expect(source).toContain("openLoggedGameReport(game.gameId)");
+    expect(source).toMatch(/function openLoggedGameReport[\s\S]*state\.selectedLogGameId = gameId;[\s\S]*state\.decisionReviewOpen = true/);
     expect(source).toContain("renderGameReportInto(");
   });
 

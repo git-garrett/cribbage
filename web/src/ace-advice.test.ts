@@ -2,7 +2,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { GameState } from "./api-types";
-import { aceAdviceDecisionKey, choiceDiffersFromAce, isAceAdviceOpponent } from "./ace-advice";
+import {
+  aceAdviceDecisionKey,
+  choiceDiffersFromAce,
+  isAceAdviceOpponent,
+  mistakeAdviceForChoice,
+} from "./ace-advice";
 
 const mainSource = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 const htmlSource = readFileSync(new URL("../index.html", import.meta.url), "utf8");
@@ -63,6 +68,37 @@ describe("Ace advice preparation", () => {
     expect(choiceDiffersFromAce("play", [8], { kind: "discard", cardIds: [7, 8] })).toBe(false);
   });
 
+  it("retains an intentional error comparison while Ace advice is still pending", async () => {
+    let finishAdvice!: (advice: { kind: "play"; cardIds: number[] }) => void;
+    const pendingAdvice = new Promise<{ kind: "play"; cardIds: number[] }>((resolve) => {
+      finishAdvice = resolve;
+    });
+    const review = mistakeAdviceForChoice("play", [8], pendingAdvice);
+
+    finishAdvice({ kind: "play", cardIds: [7] });
+
+    await expect(review).resolves.toEqual({ kind: "play", cardIds: [7] });
+  });
+
+  it("suppresses a pending error after the user makes a subsequent play", async () => {
+    let finishAdvice!: (advice: { kind: "play"; cardIds: number[] }) => void;
+    const pendingAdvice = new Promise<{ kind: "play"; cardIds: number[] }>((resolve) => {
+      finishAdvice = resolve;
+    });
+    let choiceRevision = 1;
+    const review = mistakeAdviceForChoice(
+      "play",
+      [9],
+      pendingAdvice,
+      () => choiceRevision === 1,
+    );
+
+    choiceRevision = 2;
+    finishAdvice({ kind: "play", cardIds: [7] });
+
+    await expect(review).resolves.toBeNull();
+  });
+
   it("keys advice to the exact pegging decision", () => {
     const before = decision({ count: 10, legalCardIds: [1, 2] });
     const after = decision({ count: 15, legalCardIds: [2] });
@@ -70,16 +106,22 @@ describe("Ace advice preparation", () => {
     expect(aceAdviceDecisionKey("game-1", before)).not.toBe(aceAdviceDecisionKey("game-1", after));
   });
 
-  it("prepares eligible advice before a click and consumes only a completed result", () => {
+  it("prepares eligible advice before a click and retains a pending comparison", () => {
     expect(mainSource).toContain("startAceAdvicePreparation(game)");
-    expect(mainSource).toMatch(/if \(!game \|\| !preparation\?\.advice\) return;/);
+    expect(mainSource).toMatch(/if \(!game \|\| !preparation\) return;/);
+    expect(mainSource).toContain("preparation.advice ?? preparation.promise");
     expect(mainSource).toContain('reviewUserChoiceWithAce(state.game, "discard", selectedIds)');
     expect(mainSource).toContain('reviewUserChoiceWithAce(state.game, "play", [card.id])');
   });
 
+  it("expires the prior Error notice when a new user play is reviewed", () => {
+    expect(mainSource).toMatch(/function reviewUserChoiceWithAce[\s\S]*const choiceRevision = \+\+aceMistakeChoiceRevision;[\s\S]*state\.aceMistake = null;/s);
+    expect(mainSource).toMatch(/mistakeAdviceForChoice\([\s\S]*\(\) => aceMistakeChoiceRevision === choiceRevision/s);
+  });
+
   it("places an accessible review badge with the cut card", () => {
     expect(htmlSource).toMatch(/id="turn-card"[\s\S]*id="ace-mistake"/);
-    expect(htmlSource).toContain('aria-label="Review your last choice with Ace"');
+    expect(htmlSource).toContain('aria-label="Error: review your last choice with Ace"');
     expect(stylesSource).toContain(".ace-mistake:focus-visible");
     expect(stylesSource).toMatch(/\.ace-mistake \{[\s\S]*border-radius: 50%/);
   });

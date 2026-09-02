@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const mainSource = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
+const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const renderResultSource = mainSource.slice(
   mainSource.indexOf("function renderResult"),
   mainSource.indexOf("function scoreSummaryForEvent"),
@@ -21,16 +22,23 @@ describe("contextual game notifications", () => {
     expect(mainSource).toMatch(/function newScoreNotices[\s\S]*collectNewScoreEvents\(state\.scoreNoticeCursor, gameId, game\.analyticsEvents\)/s);
     expect(mainSource).toMatch(/for \(const event of collectNewScoreEvents[\s\S]*if \(!shouldAnnounceScoreEvent\(event, events\)\) continue;/s);
     expect(mainSource).toMatch(/bubble\.dataset\.player = notice\.player/);
-    expect(mainSource).toMatch(/points\.textContent = `\+\$\{notice\.points\}`/);
-    expect(mainSource).toContain("player.textContent = playerName(notice.player)");
+    expect(mainSource).toMatch(/points\.textContent = notice\.kind === "score" \? `\+\$\{notice\.points\}`/);
+    expect(mainSource).toContain('player.textContent = notice.kind === "score" ? playerName(notice.player) : notice.playerText');
     expect(mainSource).toMatch(/event\.reason === "Heels"\) return "Heels"/);
   });
 
   it("uses the larger branded bubble scale for every scoring category", () => {
-    const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
     expect(css).toMatch(/\.game-notification-score\s*\{[^}]*width:\s*clamp\(106px,[^,]+,\s*180px\)/s);
     expect(css).toMatch(/\.game-notification-points\s*\{[^}]*font-size:\s*max\(46px,/s);
     expect(css).toMatch(/\.game-notification-player\s*\{[^}]*font-size:\s*max\(12px,/s);
+  });
+
+  it("returns the action to the player with a Go bubble when the opponent cannot continue", () => {
+    expect(mainSource).toMatch(/function newOpponentGoNotice[\s\S]*opponentGoEvent\(game\)/s);
+    expect(mainSource).toContain('kind: "go"');
+    expect(mainSource).toContain('callout: "GO"');
+    expect(mainSource).toContain('playerText: "Your play"');
+    expect(css).toMatch(/\.game-notification-go\s*\{[^}]*--notice-accent:\s*#70bdff/s);
   });
 
   it("does not turn general game status copy into transient bubbles", () => {
@@ -51,7 +59,7 @@ describe("contextual game notifications", () => {
 
   it("uses each hand-score combination's exact cards for its animation", () => {
     expect(mainSource).toContain("handScoreNoticeParts(event, game.scoring?.cards, game.turnCard)");
-    expect(mainSource).toMatch(/emphasizedCardIds: part\.cardIds \?\?/);
+    expect(mainSource).toMatch(/emphasizedCardIds: scoreNoticeEmphasisCardIds\([\s\S]*event,[\s\S]*part,[\s\S]*game\.scoring\?\.cards,[\s\S]*game\.turnCard/s);
   });
 
   it("rebuilds the current hand or crib summary after restoring a game", () => {

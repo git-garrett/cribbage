@@ -71,11 +71,26 @@ describe("local pathway navigation", () => {
     expect(source).toMatch(/analyticsClose\.addEventListener\("click"[\s\S]*showPathwayView\("home"\)/);
   });
 
+  it("shares the Home, centered logo, and online-pill header arrangement away from home", () => {
+    expect(html).toMatch(/<header class="pathway-brandbar">[\s\S]*id="pathway-header-home"[\s\S]*class="pathway-logo"/);
+    expect(css).toMatch(/\.pathway-brandbar\s*\{[^}]*grid-template-columns:\s*minmax\(58px, 1fr\) minmax\(0, auto\) minmax\(70px, 1fr\)[^}]*min-height:\s*68px/s);
+    expect(css).toMatch(/\.pathway-logo\s*\{[^}]*grid-column:\s*2[^}]*width:\s*min\(168px, 43vw\)/s);
+    expect(css).toMatch(/\.pathway-brandbar > \.people-presence\s*\{[^}]*grid-column:\s*3/s);
+  });
+
+  it("removes the redundant Home control on the app home and aligns logo left, online right", () => {
+    expect(source).toContain('els.pathwayHeaderHome.hidden = view === "home"');
+    expect(css).toMatch(/\.pathway-page\[data-view="home"\] \.pathway-brandbar\s*\{[^}]*grid-template-columns:\s*minmax\(0, auto\) minmax\(70px, 1fr\)/s);
+    expect(css).toMatch(/\.pathway-page\[data-view="home"\] \.pathway-logo\s*\{[^}]*grid-column:\s*1[^}]*justify-self:\s*start/s);
+    expect(css).toMatch(/\.pathway-page\[data-view="home"\] \.pathway-brandbar > \.people-presence\s*\{[^}]*grid-column:\s*2/s);
+  });
+
   it("keeps pathway navigation in browser history", () => {
     expect(source).toContain('const PATHWAY_VIEW_PARAM = "pathwayView"');
     expect(source).toContain("window.history.pushState(pathwayHistoryState(route), \"\", pathwayUrl(route))");
     expect(source).toMatch(/window\.addEventListener\("popstate"[\s\S]*applyPathwayRoute\(pathwayRouteFromLocation\(\)\)/);
     expect(source).toMatch(/pathwayStatsReturn[\s\S]*window\.history\.back\(\)/);
+    expect(source).toMatch(/function openAnalytics[\s\S]*pushState\(pathwayHistoryState\("statistics"\)/);
   });
 
   it("provides responsive, keyboard-visible, reduced-motion-aware styling", () => {
@@ -121,6 +136,14 @@ describe("local pathway navigation", () => {
     }
     expect(css).toMatch(/\.pathway-choice:disabled\s*{[\s\S]*background: color-mix[\s\S]*cursor: not-allowed/);
     expect(css).toContain(".pathway-coming-soon");
+  });
+
+  it("highlights the active opponent card as a resumable seat", () => {
+    expect(html.match(/class="pathway-resume-status" hidden>Resume<\/em>/g)).toHaveLength(4);
+    expect(source).toContain("syncPathwayResumePresentation()");
+    expect(source).toContain('button.classList.toggle("pathway-choice-resumable", active)');
+    expect(source).toMatch(/button\.dataset\.resumable === "true"[\s\S]*resumeGameFromSplash\(\)/);
+    expect(css).toMatch(/\.pathway-choice-resumable\s*\{[^}]*border-color:\s*var\(--pathway-gold-deep\)/s);
   });
 
   it("requires an account for Statistics, human games, and Ace", () => {

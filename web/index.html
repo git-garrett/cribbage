@@ -66,6 +66,9 @@
     <section id="pathway-page" class="pathway-page" aria-labelledby="pathway-title" hidden>
       <div class="pathway-shell">
         <header class="pathway-brandbar">
+          <button id="pathway-header-home" class="pathway-back pathway-header-home" type="button">
+            <span aria-hidden="true">←</span> Home
+          </button>
           <picture class="pathway-logo">
             <source media="(prefers-color-scheme: dark)" srcset="/brand/strong-cribbage-lockup-dark.svg">
             <img src="/brand/strong-cribbage-lockup-light.svg" alt="Strong Cribbage">
@@ -125,22 +128,26 @@
                 <span>AI opponent</span>
                 <strong>Easy</strong>
                 <small>Good for Learners</small>
+                <em class="pathway-resume-status" hidden>Resume</em>
               </button>
               <button class="pathway-choice" type="button" data-pathway-destination="tough">
                 <span>AI opponent</span>
                 <strong>Tough</strong>
                 <small>Challenges Most Players</small>
+                <em class="pathway-resume-status" hidden>Resume</em>
               </button>
               <button class="pathway-choice" type="button" data-pathway-destination="master">
                 <span>AI opponent</span>
                 <strong>Ace</strong>
                 <small>Challenges the Best Players</small>
+                <em class="pathway-resume-status" hidden>Resume</em>
                 <em class="pathway-login-note">Sign in required</em>
               </button>
               <button class="pathway-choice pathway-choice-human" type="button" data-pathway-destination="human">
                 <span>Human match</span>
                 <strong>Find a Human Opponent</strong>
                 <small>See who’s online and ready to play.</small>
+                <em class="pathway-resume-status" hidden>Resume</em>
                 <em class="pathway-login-note">Sign in required</em>
               </button>
               <button class="pathway-choice pathway-choice-dynamic" type="button" data-pathway-destination="dynamic" disabled>
@@ -399,6 +406,7 @@
           <button id="auth-password-submit" class="auth-primary" type="submit">Sign in</button>
           <button id="auth-code-request" class="auth-secondary" type="button">Email me a sign-in code</button>
           <button id="auth-forgot-password" class="auth-link" type="button">Forgot password?</button>
+          <p class="auth-access">Don’t have an account? <a href="mailto:founder@evenvision.com?subject=Strong%20Cribbage%20access%20request">Request access</a>.</p>
         </form>
         <button id="auth-cancel" class="auth-link auth-cancel" type="button" hidden>← Back</button>
         <form id="auth-otp-form" class="auth-form" hidden>
@@ -442,6 +450,9 @@
     </section>
     <main class="app">
       <section class="topbar">
+        <button id="mobile-header-reveal" class="mobile-header-reveal" type="button" aria-label="Show navigation">
+          <span aria-hidden="true"></span>
+        </button>
         <div class="app-brand">
           <img class="app-brand-logo" src="/brand/strong-cribbage-lockup-dark.svg" alt="">
           <h1 class="visually-hidden">Strong Cribbage</h1>
@@ -515,6 +526,7 @@
           <span id="ai-final" class="score-final"></span>
         </div>
         <div class="board" id="board" aria-label="Cribbage board"></div>
+        <div id="ace-tools" class="ace-tools" aria-label="Ace help" aria-live="polite"></div>
       </section>
 
       <section class="table">
@@ -541,8 +553,9 @@
           <div id="score-cut" class="score-cut">
             <span>Cut</span>
             <span id="turn-card" class="cut-card"></span>
-            <button id="ace-mistake" class="ace-mistake" type="button" aria-label="Review your last choice with Ace" hidden>
-              <span aria-hidden="true">!</span>
+            <button id="ace-mistake" class="ace-mistake" type="button" aria-label="Error: review your last choice with Ace" hidden>
+              <span class="board-tool-symbol" aria-hidden="true">!</span>
+              <span class="board-tool-label" aria-hidden="true">Error</span>
             </button>
           </div>
         </div>
@@ -550,7 +563,6 @@
         <div id="scoring-review" class="scoring-review" hidden>
           <h2 id="scoring-title">Hand score</h2>
           <div id="scoring-cards" class="cards"></div>
-          <div id="scoring-result" class="result scoring-result" aria-live="polite"></div>
         </div>
         <div id="score-summary-dialog" class="score-summary-dialog" role="dialog" aria-modal="true" aria-labelledby="score-summary-title" hidden>
           <div class="score-summary-card">
@@ -574,7 +586,11 @@
             <button id="discard" type="button" disabled>Discard selected</button>
             <button id="cut-for-deal" type="button" hidden>Cut deck</button>
             <button id="play" type="button" disabled>Play selected</button>
-            <button id="ask-master" class="ask-master" type="button" hidden>Ask Ace</button>
+            <button id="ask-master" class="ask-master" type="button" aria-label="Ask Ace for a hint" hidden>
+              <span class="ask-master-copy">Ask Ace</span>
+              <span class="board-tool-symbol" aria-hidden="true">?</span>
+              <span class="board-tool-label" aria-hidden="true">Hint</span>
+            </button>
             <button id="go" type="button" disabled>Go</button>
             <button id="acknowledge-pegging-reset" class="inline-continue" type="button" hidden>OK</button>
             <button id="continue-pegging" class="inline-continue" type="button" hidden>Count hands</button>
@@ -648,8 +664,8 @@
           <button type="button" role="tab" data-my-stats-opponent="human" aria-selected="false">Human</button>
           <button type="button" role="tab" data-my-stats-opponent="easy" aria-selected="false">Easy</button>
           <button type="button" role="tab" data-my-stats-opponent="tough" aria-selected="false">Tough</button>
-          <button type="button" role="tab" data-my-stats-opponent="grandmaster" data-stats-available="false" aria-selected="false">Legend</button>
-          <button type="button" role="tab" data-my-stats-opponent="dynamic" data-stats-available="false" aria-selected="false">Dynamic</button>
+          <button type="button" role="tab" data-my-stats-opponent="grandmaster" data-stats-available="false" aria-selected="false" disabled>Legend</button>
+          <button type="button" role="tab" data-my-stats-opponent="dynamic" data-stats-available="false" aria-selected="false" disabled>Dynamic</button>
         </div>
         <section id="stats-leaderboard" class="stats-leaderboard" aria-labelledby="stats-leaderboard-title" hidden>
           <header>
@@ -661,36 +677,49 @@
         </section>
         <section id="stats-game-log" class="stats-game-log" aria-labelledby="stats-game-log-title" hidden>
           <header>
-            <h2 id="stats-game-log-title">Game Log</h2>
-            <p id="game-log-summary">No completed games yet.</p>
+            <div>
+              <h2 id="stats-game-log-title">Game Log</h2>
+              <p id="game-log-summary">No completed games yet.</p>
+            </div>
+            <button id="game-log-analyze-all" class="game-log-analyze-all" type="button">Analyze all</button>
           </header>
-          <div class="game-log-filters" aria-label="Game log filters">
-            <label class="game-log-filter">
-              Opponent
-              <select id="game-log-opponent">
-                <option value="">All opponents</option>
-              </select>
-            </label>
-            <label class="game-log-filter">
-              Result
-              <select id="game-log-result">
-                <option value="">All results</option>
-                <option value="win">Wins</option>
-                <option value="loss">Losses</option>
-                <option value="skunk">Skunks</option>
-              </select>
-            </label>
-            <label class="game-log-filter">
-              Match type
-              <select id="game-log-match-type">
-                <option value="">Human and AI</option>
-                <option value="ai">AI</option>
-                <option value="human">Human</option>
-              </select>
-            </label>
+          <div id="game-log-view-tabs" class="my-stats-opponent-tabs game-log-view-tabs" role="tablist" aria-label="Game log views">
+            <button type="button" role="tab" data-game-log-view="games" aria-selected="true">Games</button>
+            <button type="button" role="tab" data-game-log-view="errors" aria-selected="false">Errors</button>
           </div>
-          <div class="game-log-layout">
-            <div id="game-log-list" class="game-log-list"></div>
+          <div id="game-log-games">
+            <div class="game-log-filters" aria-label="Game log filters">
+              <label class="game-log-filter">
+                Opponent
+                <select id="game-log-opponent">
+                  <option value="">All opponents</option>
+                </select>
+              </label>
+              <label class="game-log-filter">
+                Result
+                <select id="game-log-result">
+                  <option value="">All results</option>
+                  <option value="win">Wins</option>
+                  <option value="loss">Losses</option>
+                  <option value="skunk">Skunks</option>
+                </select>
+              </label>
+              <label class="game-log-filter">
+                Match type
+                <select id="game-log-match-type">
+                  <option value="">Human and AI</option>
+                  <option value="ai">AI</option>
+                  <option value="human">Human</option>
+                </select>
+              </label>
+            </div>
+            <div class="game-log-layout">
+              <div id="game-log-list" class="game-log-list"></div>
+            </div>
+          </div>
+          <div id="game-log-errors" class="game-log-errors" hidden>
+            <p id="game-log-errors-summary">No analyzed errors yet.</p>
+            <div id="game-log-errors-list" class="game-log-errors-list"></div>
           </div>
         </section>
         <div id="analytics-totals" class="analytics-totals"></div>

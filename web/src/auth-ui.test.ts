@@ -17,10 +17,20 @@ describe("account entry", () => {
     expect(source).toContain('"/api/auth/invite/accept"');
   });
 
+  it("offers prospective players a direct way to request access", () => {
+    expect(html).toMatch(/Don’t have an account\?\s*<a href="mailto:founder@evenvision\.com\?subject=Strong%20Cribbage%20access%20request">Request access<\/a>/);
+  });
+
   it("keeps credentials in secure server sessions rather than browser storage", () => {
     expect(source).toContain('credentials: "include"');
     expect(source).not.toMatch(/localStorage[^\n]*(token|password)/i);
     expect(css).toMatch(/body\[data-auth="signed-out"\] \.app/);
+  });
+
+  it("rechecks an interrupted account session when Safari returns to the page", () => {
+    expect(source).toContain("function recoverInterruptedAuthentication");
+    expect(source).toContain('window.addEventListener("pageshow", recoverInterruptedAuthentication)');
+    expect(source).toMatch(/visibilitychange[\s\S]*recoverInterruptedAuthentication/);
   });
 
   it("uses the cribbage peg-track brand signature", () => {

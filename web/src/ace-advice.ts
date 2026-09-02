@@ -38,3 +38,14 @@ export function choiceDiffersFromAce(
   if (recommendation.kind !== action) return false;
   return canonicalCardIds(selectedCardIds) !== canonicalCardIds(recommendation.cardIds);
 }
+
+export async function mistakeAdviceForChoice<Advice extends AceRecommendation>(
+  action: AceAdviceAction,
+  selectedCardIds: readonly number[],
+  pendingAdvice: Advice | PromiseLike<Advice>,
+  shouldPublish: () => boolean = () => true,
+): Promise<Advice | null> {
+  const advice = await pendingAdvice;
+  if (!shouldPublish()) return null;
+  return choiceDiffersFromAce(action, selectedCardIds, advice) ? advice : null;
+}

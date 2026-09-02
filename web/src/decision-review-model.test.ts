@@ -13,7 +13,7 @@ describe("postgame decision reviewer", () => {
     expect(mainSource).toContain('`Compared with ${DECISION_REVIEWER_NAME} decision analysis.');
     expect(mainSource).not.toContain('`Analyze with ${playerName("ai")}`');
 
-    const reviewImplementation = apiSource.match(/fn complete_decision_reviews\([\s\S]*?\n}\n\nfn completed_review/)?.[0] ?? "";
+    const reviewImplementation = apiSource.match(/fn evaluate_saved_decision_review\([\s\S]*?\n}\n\nfn completed_review/)?.[0] ?? "";
     expect(reviewImplementation.match(/ModelId::Schell13/g)).toHaveLength(2);
   });
 
