@@ -10,7 +10,7 @@ export type HandScoreComponent = "fifteens" | "runs" | "pairs" | "knobs" | "flus
 
 export interface HandScoringCombination {
   component: HandScoreComponent;
-  label: "Fifteen" | "Run" | "Pair" | "Knobs" | "Flush";
+  label: "Fifteen" | "Run" | "Pair" | "Pair Royal" | "Double Pair Royal" | "Knobs" | "Flush";
   points: number;
   cardIds: number[];
 }
@@ -95,16 +95,19 @@ function runCombinations(cards: readonly ScoringEmphasisCard[]): HandScoringComb
 function pairCombinations(cards: readonly ScoringEmphasisCard[]): HandScoringCombination[] {
   const combinations: HandScoringCombination[] = [];
   for (const group of rankGroups(cards)) {
-    for (let left = 0; left < group.cards.length; left += 1) {
-      for (let right = left + 1; right < group.cards.length; right += 1) {
-        combinations.push({
-          component: "pairs",
-          label: "Pair",
-          points: 2,
-          cardIds: [group.cards[left].id, group.cards[right].id],
-        });
-      }
-    }
+    if (group.cards.length < 2) continue;
+    const label = group.cards.length === 3
+      ? "Pair Royal"
+      : group.cards.length === 4
+        ? "Double Pair Royal"
+        : "Pair";
+    const points = group.cards.length * (group.cards.length - 1);
+    combinations.push({
+      component: "pairs",
+      label,
+      points,
+      cardIds: group.cards.map((card) => card.id),
+    });
   }
   return combinations;
 }

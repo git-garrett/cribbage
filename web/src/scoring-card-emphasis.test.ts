@@ -131,7 +131,7 @@ describe("individual hand scoring combinations", () => {
       ]);
   });
 
-  it("expands a pair royal into three individual pairs alongside three runs", () => {
+  it("keeps a pair royal together as one scoring combination alongside three runs", () => {
     const hand = [
       card(1, "7", "hearts", 7),
       card(2, "7", "clubs", 7),
@@ -143,9 +143,21 @@ describe("individual hand scoring combinations", () => {
       .toHaveLength(3);
     expect(combinations.filter((combination) => combination.component === "pairs"))
       .toEqual([
-        { component: "pairs", label: "Pair", points: 2, cardIds: [1, 2] },
-        { component: "pairs", label: "Pair", points: 2, cardIds: [1, 3] },
-        { component: "pairs", label: "Pair", points: 2, cardIds: [2, 3] },
+        { component: "pairs", label: "Pair Royal", points: 6, cardIds: [1, 2, 3] },
+      ]);
+  });
+
+  it("keeps four of a kind together as a double pair royal", () => {
+    const hand = [
+      card(1, "Q", "hearts", 10),
+      card(2, "Q", "clubs", 10),
+      card(3, "Q", "spades", 10),
+      card(4, "Q", "diamonds", 10),
+    ];
+    expect(handScoringCombinations(hand, card(5, "2", "clubs", 2), "hand")
+      .filter((combination) => combination.component === "pairs"))
+      .toEqual([
+        { component: "pairs", label: "Double Pair Royal", points: 12, cardIds: [1, 2, 3, 4] },
       ]);
   });
 

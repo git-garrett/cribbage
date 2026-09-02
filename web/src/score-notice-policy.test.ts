@@ -91,6 +91,22 @@ describe("score notification policy", () => {
     ]);
   });
 
+  it("presents three of a kind as one pair royal bubble", () => {
+    const hand = [
+      card(1, "7", "hearts", 7),
+      card(2, "7", "clubs", 7),
+      card(3, "7", "spades", 7),
+      card(4, "K", "diamonds", 10),
+    ];
+    expect(handScoreNoticeParts(score({
+      category: "hand",
+      points: 6,
+      scoreComponents: { total: 6, pairs: 6 },
+    }), hand, card(5, "2", "clubs", 2))).toEqual([
+      { label: "Pair Royal", points: 6, cardIds: [1, 2, 3] },
+    ]);
+  });
+
   it("splits double-double runs and pairs into their individual scores", () => {
     const hand = [
       card(1, "3", "hearts", 3),
