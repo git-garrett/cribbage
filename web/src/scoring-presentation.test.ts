@@ -11,6 +11,19 @@ describe("scoring presentation", () => {
     expect(css).toMatch(/\.scoring-review\[data-owner="ai"\]\s*\{[^}]*top:\s*18px[^}]*bottom:\s*auto/s);
     expect(css).toMatch(/\.scoring-review\[data-owner="human"\]\s*\{[^}]*top:\s*auto[^}]*bottom:\s*18px/s);
     expect(css).toMatch(/\.scoring-review #scoring-cards\s*\{[^}]*flex-wrap:\s*nowrap[^}]*justify-content:\s*center[^}]*margin-top:\s*calc\(\(var\(--game-card-height\) \* 0\.2\) \+ 8px\)/s);
+    expect(css).toMatch(/\.scoring-review\[data-owner="ai"\][^{]*\{[^}]*--scoring-owner-accent:\s*var\(--ai\)/s);
+    expect(css).toMatch(/\.scoring-review\[data-owner="human"\][^{]*\{[^}]*--scoring-owner-accent:\s*var\(--human\)/s);
+  });
+
+  it("swipes the completed rack away before the next owner rack enters and scoring resumes", () => {
+    expect(mainSource).toContain('type ScoringTransitionStage = "leaving" | "entering" | null');
+    expect(mainSource).toContain('els.scoringReview.dataset.transition = state.scoringTransitionStage');
+    expect(mainSource).toContain('if (state.scoringTransitionStage === "entering")');
+    expect(mainSource).toContain("await playScoringStageTransition");
+    expect(css).toMatch(/\.scoring-review\[data-transition="leaving"\][^{]*\{[^}]*animation:\s*scoring-rack-leave\s+220ms/s);
+    expect(css).toMatch(/\.scoring-review\[data-transition="entering"\][^{]*\{[^}]*animation:\s*scoring-rack-enter\s+300ms/s);
+    expect(css).toContain("@keyframes scoring-rack-leave");
+    expect(css).toContain("@keyframes scoring-rack-enter");
   });
 
   it("lifts scoring cards one fifth of a card before the delayed bubble appears", () => {

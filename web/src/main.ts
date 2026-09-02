@@ -165,6 +165,7 @@ const EMPTY_LEADERBOARD_SUMMARY: LeaderboardSummarySource = {
 
 type ServerBusyRetry = () => void | Promise<void>;
 type AppFontSize = "normal" | "large" | "x-large";
+type ScoringTransitionStage = "leaving" | "entering" | null;
 type PathwayView = "home" | "play" | "human" | "tutorial" | "settings";
 type PathwayRoute = PathwayView | "statistics";
 type MyStatsOpponent = "master" | "human" | "easy" | "tough" | "grandmaster" | "dynamic";
@@ -276,6 +277,7 @@ const state: {
   dealCutResolve: (() => void) | null;
   scoreSummaryQueue: ScoreSummary[];
   activeScoreSummary: ScoreSummary | null;
+  scoringTransitionStage: ScoringTransitionStage;
   dealAnimation: { key: string; dealer: string; pone: string } | null;
   animatedDealKeys: Set<string>;
   animatedDiscardKeys: Set<string>;
@@ -331,6 +333,7 @@ const state: {
   dealCutResolve: null,
   scoreSummaryQueue: [],
   activeScoreSummary: null,
+  scoringTransitionStage: null,
   dealAnimation: null,
   animatedDealKeys: new Set(),
   animatedDiscardKeys: new Set(),
@@ -373,6 +376,7 @@ function resetTransientGameUi(): void {
   state.dealCutResolve = null;
   state.scoreSummaryQueue = [];
   state.activeScoreSummary = null;
+  state.scoringTransitionStage = null;
   state.dealAnimation = null;
   state.animatedDealKeys = new Set();
   state.animatedDiscardKeys = new Set();
@@ -3511,9 +3515,39 @@ function renderTurnCut(game: GameState): void {
 
 const DEAL_CARD_INTERVAL_MS = 125;
 const DEAL_CARD_DURATION_MS = 500;
+const SCORING_RACK_LEAVE_MS = 220;
+const SCORING_RACK_ENTER_MS = 300;
 
 function tableMotionDisabled(): boolean {
   return state.fontSize === "x-large" || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+async function playScoringStageTransition(action: () => Promise<GameState>): Promise<GameState> {
+  const animateOutgoing = Boolean(state.game?.scoring) && !tableMotionDisabled();
+  if (animateOutgoing) {
+    state.scoringTransitionStage = "leaving";
+    render(state.game);
+    await waitForPaint();
+  }
+
+  try {
+    const [next] = await Promise.all([
+      action(),
+      animateOutgoing ? waitMs(SCORING_RACK_LEAVE_MS) : Promise.resolve(),
+    ]);
+    state.scoringTransitionStage = next.scoring && !tableMotionDisabled() ? "entering" : null;
+    render(next);
+    if (state.scoringTransitionStage === "entering") {
+      await waitForPaint();
+      await waitMs(SCORING_RACK_ENTER_MS);
+      state.scoringTransitionStage = null;
+      render(next);
+    }
+    return next;
+  } catch (error) {
+    state.scoringTransitionStage = null;
+    throw error;
+  }
 }
 
 function prepareDealAnimation(shell: HTMLElement, deck: HTMLElement): void {
@@ -3753,11 +3787,17 @@ function renderScoring(scoring: GameState["scoring"]): void {
   els.scoringReview.hidden = !scoring;
   if (!scoring) {
     delete els.scoringReview.dataset.owner;
+    delete els.scoringReview.dataset.transition;
     els.scoringCards.innerHTML = "";
     els.scoringResult.innerHTML = "";
     return;
   }
   els.scoringReview.dataset.owner = scoring.owner === "AI" ? "ai" : "human";
+  if (state.scoringTransitionStage) {
+    els.scoringReview.dataset.transition = state.scoringTransitionStage;
+  } else {
+    delete els.scoringReview.dataset.transition;
+  }
   els.scoringTitle.textContent = presentGameText(scoring.title);
   renderCards(els.scoringCards, scoring.cards);
   els.scoringResult.textContent = "";
@@ -3785,6 +3825,11 @@ function renderResult(game: GameState): void {
   if (game.phase === "game_over") {
     state.noticeResultLines = [];
     clearNoticeQueue();
+    els.resultInline.innerHTML = "";
+    return;
+  }
+  if (state.scoringTransitionStage === "entering") {
+    state.noticeResultLines = [];
     els.resultInline.innerHTML = "";
     return;
   }
@@ -7213,11 +7258,11 @@ els.continueScoring.addEventListener("click", async () => {
   render(state.game);
   try {
     state.resultOverride = null;
-    const next = await api("/api/continue-scoring", {});
+    const next = await playScoringStageTransition(() => api("/api/continue-scoring", {}));
     state.selected.clear();
-    render(next);
     await playDealAnimationIfNeeded(next);
   } catch (error) {
+    state.scoringTransitionStage = null;
     state.activeScoreSummary = dismissedSummary;
     showServerBusy(error, () => els.continueScoring.click());
   } finally {

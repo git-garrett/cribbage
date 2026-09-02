@@ -6012,6 +6012,7 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 }
 
 .app[data-view="game"] .scoring-review {
+  --scoring-owner-accent: var(--game-gold);
   position: absolute;
   right: 18px;
   left: 18px;
@@ -6021,13 +6022,26 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 }
 
 .app[data-view="game"] .scoring-review[data-owner="ai"] {
+  --scoring-owner-accent: var(--ai);
   top: 18px;
   bottom: auto;
 }
 
 .app[data-view="game"] .scoring-review[data-owner="human"] {
+  --scoring-owner-accent: var(--human);
   top: auto;
   bottom: 18px;
+}
+
+.app[data-view="game"] .scoring-review > h2 {
+  margin: 0;
+  padding: 2px 10px 7px;
+  border-bottom: 3px solid var(--scoring-owner-accent);
+  color: var(--game-cream);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: max(17px, var(--subheading-font));
+  line-height: 1.1;
+  text-shadow: 0 2px 5px rgba(2, 28, 21, 0.45);
 }
 
 .app[data-view="game"] .scoring-review #scoring-cards {
@@ -6040,6 +6054,47 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 
 .app[data-view="game"] .scoring-review #scoring-cards .card + .card {
   margin-left: calc(var(--game-card-width) * -0.16);
+}
+
+.app[data-view="game"] .scoring-review[data-transition="leaving"] {
+  pointer-events: none;
+  animation: scoring-rack-leave 220ms cubic-bezier(0.55, 0, 1, 0.45) both;
+  will-change: opacity, transform;
+}
+
+.app[data-view="game"] .scoring-review[data-transition="entering"] {
+  pointer-events: none;
+  animation: scoring-rack-enter 300ms cubic-bezier(0.16, 0.84, 0.24, 1) both;
+  will-change: opacity, transform;
+}
+
+@keyframes scoring-rack-leave {
+  from {
+    opacity: 1;
+    transform: translateX(0) rotate(0deg);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateX(-112%) rotate(-2deg);
+  }
+}
+
+@keyframes scoring-rack-enter {
+  0% {
+    opacity: 0;
+    transform: translateX(112%) rotate(2deg);
+  }
+
+  72% {
+    opacity: 1;
+    transform: translateX(-2.5%) rotate(-0.3deg);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateX(0) rotate(0deg);
+  }
 }
 
 .app[data-view="game"] #scoring-cards .card.score-card-lift,
@@ -6207,6 +6262,10 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .app[data-view="game"] .scoring-review[data-transition] {
+    animation: none !important;
+  }
+
   .app[data-view="game"] .deal-cut-choice .deal-cut-card-lift,
   .app[data-view="game"] .deal-cut-reveal .card,
   .app[data-view="game"] #scoring-cards .card.score-card-lift,
