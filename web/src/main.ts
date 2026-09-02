@@ -48,6 +48,7 @@ import {
 import { shouldUploadCompletedGame } from "./upload-policy";
 
 const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-13.0";
+const DECISION_REVIEWER_NAME = "Ace";
 const PATHWAY_OPPONENTS = {
   easy: "myrmidon-5",
   tough: "schell_table-peg_table-9.1",
@@ -4150,7 +4151,7 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
     pendingBody.className = "decision-review-pending-body";
     const pendingText = document.createElement("span");
     pendingText.textContent = canAnalyze
-      ? `Analyze ${playerPossessive("human")} errors with ${playerName("ai")} and learn how to improve:`
+      ? `Analyze ${playerPossessive("human")} errors with ${DECISION_REVIEWER_NAME} and learn how to improve:`
       : `${pending.length} ${playerDisplayName()} decision${pending.length === 1 ? "" : "s"} not analyzed.`;
     pendingBody.append(pendingText);
     if (state.completingReviews && state.reviewProgress) {
@@ -4172,7 +4173,7 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
       const analyze = document.createElement("button");
       analyze.type = "button";
       analyze.className = "decision-review-analyze";
-      analyze.textContent = state.completingReviews ? "Analyzing" : `Analyze with ${playerName("ai")}`;
+      analyze.textContent = state.completingReviews ? "Analyzing" : `Analyze with ${DECISION_REVIEWER_NAME}`;
       analyze.disabled = state.completingReviews || state.pending;
       analyze.addEventListener("click", () => {
         void analyzeCurrentGameDecisionReviews();
@@ -4184,14 +4185,14 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   }
 
   const model = document.createElement("p");
-  model.textContent = `Compared with ${playerName("ai")} decision analysis. Win probability is primary; point EV is supporting context.`;
+  model.textContent = `Compared with ${DECISION_REVIEWER_NAME} decision analysis. Win probability is primary; point EV is supporting context.`;
   const totals = decisionEvTotals(mistakes);
   section.append(model, decisionEvSummary(totals), decisionWinProbabilityImpact(totals));
 
   if (!mistakes.length) {
     const empty = document.createElement("div");
     empty.className = "decision-review-empty";
-    empty.textContent = `No ${playerDisplayName()} discards or peg plays were flagged by ${playerName("ai")} analysis.`;
+    empty.textContent = `No ${playerDisplayName()} discards or peg plays were flagged by ${DECISION_REVIEWER_NAME} analysis.`;
     section.append(empty);
     return section;
   }

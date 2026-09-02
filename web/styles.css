@@ -1608,8 +1608,8 @@ button:disabled {
 }
 
 .report-new-game {
-  width: 100%;
-  justify-self: stretch;
+  width: min(100%, 260px);
+  justify-self: end;
 }
 
 .single-game-report p {
@@ -1841,10 +1841,71 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
 
 .decision-review-analyze {
   width: 100%;
-  min-height: 32px;
-  padding: 5px 10px;
-  font-size: var(--fine-font);
   white-space: normal;
+}
+
+.report-new-game,
+.decision-review-analyze {
+  min-height: max(54px, calc(var(--control-font) * 2.5));
+  padding: 9px 22px;
+  border: 2px solid var(--game-gold, #e8c575);
+  border-radius: 999px;
+  color: var(--game-cream, #fbf8f0);
+  font-size: var(--control-font);
+  font-weight: 900;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+  box-shadow:
+    0 8px 18px rgba(3, 42, 32, 0.22),
+    inset 0 1px 0 rgba(251, 248, 240, 0.12);
+}
+
+.report-new-game {
+  background: var(--game-green, #0b5b43);
+}
+
+.decision-review-analyze {
+  background: var(--game-navy, #071f38);
+}
+
+.report-new-game:focus-visible,
+.decision-review-analyze:focus-visible {
+  outline: 3px solid #8bcbff;
+  outline-offset: 3px;
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .app[data-view="game"] .report-new-game:not(:disabled),
+  .app[data-view="game"] .decision-review-analyze:not(:disabled) {
+    transition:
+      transform 180ms ease,
+      background-color 180ms ease,
+      box-shadow 180ms ease;
+  }
+
+  .app[data-view="game"] .report-new-game:not(:disabled):hover,
+  .app[data-view="game"] .decision-review-analyze:not(:disabled):hover {
+    border-color: var(--game-gold, #e8c575);
+    transform: translateY(-2px);
+    box-shadow:
+      0 12px 24px rgba(3, 42, 32, 0.3),
+      inset 0 1px 0 rgba(251, 248, 240, 0.16);
+  }
+
+  .app[data-view="game"] .report-new-game:not(:disabled):hover {
+    background: var(--game-green-light, #258460);
+  }
+
+  .app[data-view="game"] .decision-review-analyze:not(:disabled):hover {
+    background: #0b3152;
+  }
+}
+
+@media (max-width: 640px) {
+  .report-new-game {
+    width: 100%;
+    justify-self: stretch;
+  }
 }
 
 .decision-review-pending-body {
