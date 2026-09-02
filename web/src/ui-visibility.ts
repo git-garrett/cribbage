@@ -34,6 +34,19 @@ export function shouldShowDecisionSnapshotCut(
   return decisionType === "pegging" && Boolean(cutCard);
 }
 
+export function shouldOfferMasterHint(
+  eligibleOpponent: boolean,
+  phase: string,
+  turn: string | null,
+  legalCardCount: number,
+  peggingResetPending: boolean,
+  interactionBlocked: boolean,
+): boolean {
+  if (!eligibleOpponent || interactionBlocked) return false;
+  if (phase === "discard") return true;
+  return phase === "pegging" && turn === "User" && !peggingResetPending && legalCardCount > 0;
+}
+
 export function turnCutPresentation(stage: TurnCutRevealStage): TurnCutPresentation | null {
   switch (stage) {
     case "user-cut":

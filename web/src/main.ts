@@ -40,6 +40,7 @@ import {
 import {
   type TurnCutRevealStage,
   shouldRevealCribOwner,
+  shouldOfferMasterHint,
   shouldShowDecisionSnapshotCut,
   shouldShowStrategicGuides,
   turnCutPresentation,
@@ -2984,9 +2985,20 @@ function lowerLevelOpponent(opponent: string | undefined): boolean {
 
 function canAskMaster(game: GameState): boolean {
   const opponent = currentSnapshot?.opponent ?? selectedMenuOpponent();
-  if (!lowerLevelOpponent(opponent)) return false;
-  if (game.phase === "discard") return !state.dealAnimation && !state.dealCutRevealStage && !state.turnCutRevealStage;
-  return game.phase === "pegging" && game.turn === "User" && !game.peggingResetPending && game.legalCardIds.length > 0;
+  const interactionBlocked = Boolean(
+    state.dealAnimation ||
+    state.dealCutRevealStage ||
+    state.dealCutResolve ||
+    state.turnCutRevealStage,
+  );
+  return shouldOfferMasterHint(
+    lowerLevelOpponent(opponent),
+    game.phase,
+    game.turn,
+    game.legalCardIds.length,
+    game.peggingResetPending,
+    interactionBlocked,
+  );
 }
 
 async function requestMasterHint(): Promise<void> {

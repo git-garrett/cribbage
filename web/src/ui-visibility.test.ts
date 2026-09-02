@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   shouldRevealCribOwner,
+  shouldOfferMasterHint,
   shouldShowDecisionSnapshotCut,
   shouldShowStrategicGuides,
   turnCutPresentation,
@@ -38,6 +39,16 @@ describe("shouldShowDecisionSnapshotCut", () => {
 
   it("shows the cut area for pegging decisions with a cut card", () => {
     expect(shouldShowDecisionSnapshotCut("pegging", "Jh")).toBe(true);
+  });
+});
+
+describe("shouldOfferMasterHint", () => {
+  it("hides the hint while the cut card is waiting for confirmation", () => {
+    expect(shouldOfferMasterHint(true, "pegging", "User", 4, false, true)).toBe(false);
+  });
+
+  it("shows the hint once a lower-level opponent is waiting for a legal user play", () => {
+    expect(shouldOfferMasterHint(true, "pegging", "User", 4, false, false)).toBe(true);
   });
 });
 
