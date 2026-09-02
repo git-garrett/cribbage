@@ -175,7 +175,7 @@ const EMPTY_LEADERBOARD_SUMMARY: LeaderboardSummarySource = {
 type ServerBusyRetry = () => void | Promise<void>;
 type AppFontSize = "normal" | "large" | "x-large";
 type ScoringTransitionStage = "leaving" | "entering" | null;
-type PathwayView = "home" | "play" | "human" | "tutorial" | "settings";
+type PathwayView = "home" | "play" | "human" | "tutorial" | "settings" | "gameplay";
 type PathwayRoute = PathwayView | "statistics";
 type MyStatsOpponent = "master" | "human" | "easy" | "tough" | "grandmaster" | "dynamic";
 type StatsView = "stats" | "leaderboard" | "game-log";
@@ -191,6 +191,8 @@ const MY_STATS_OPPONENT_LABEL: Record<MyStatsOpponent, string> = {
 
 const FONT_SIZE_STORAGE_KEY = "strong-cribbage.fontSize";
 const FAST_COUNTING_STORAGE_KEY = "strong-cribbage.fastCounting.v1";
+const HINTS_ENABLED_STORAGE_KEY = "strong-cribbage.hintsEnabled.v1";
+const ERROR_NOTICES_ENABLED_STORAGE_KEY = "strong-cribbage.errorNoticesEnabled.v1";
 const DISMISSED_GAME_OVER_STORAGE_KEY = "strong-cribbage.dismissedGameOverId";
 const LEADERBOARD_CACHE_KEY = "strong-cribbage.leaderboard.v1";
 
@@ -255,6 +257,8 @@ const state: {
   parGuides: boolean;
   fontSize: AppFontSize;
   fastCounting: boolean;
+  hintsEnabled: boolean;
+  errorNoticesEnabled: boolean;
   analyticsOpen: boolean;
   analyticsMode: "my" | "full";
   statsView: StatsView;
@@ -315,6 +319,8 @@ const state: {
   parGuides: safeLocalStorageGet("strong-cribbage.admin.parGuides") === "1",
   fontSize: normalizeAppFontSize(safeLocalStorageGet(FONT_SIZE_STORAGE_KEY)),
   fastCounting: safeLocalStorageGet(FAST_COUNTING_STORAGE_KEY) === "1",
+  hintsEnabled: safeLocalStorageGet(HINTS_ENABLED_STORAGE_KEY) !== "0",
+  errorNoticesEnabled: safeLocalStorageGet(ERROR_NOTICES_ENABLED_STORAGE_KEY) !== "0",
   analyticsOpen: false,
   analyticsMode: "my",
   statsView: "stats",
@@ -506,6 +512,8 @@ const els = {
   appBack: document.querySelector("#app-back") as HTMLButtonElement,
   fontSizeSelect: document.querySelector("#font-size-select") as HTMLSelectElement,
   fastCounting: document.querySelector("#fast-counting") as HTMLInputElement,
+  hintsEnabled: document.querySelector("#hints-enabled") as HTMLInputElement,
+  errorNoticesEnabled: document.querySelector("#error-notices-enabled") as HTMLInputElement,
   // The shared header no longer has a hamburger. This inert element keeps the
   // retired menu's developer-only actions safely disconnected for now.
   menuToggle: document.createElement("button"),
@@ -874,6 +882,8 @@ let humanTablePollTimer: number | null = null;
 
 els.parGuidesToggle.checked = state.parGuides;
 els.fastCounting.checked = state.fastCounting;
+els.hintsEnabled.checked = state.hintsEnabled;
+els.errorNoticesEnabled.checked = state.errorNoticesEnabled;
 
 interface AnalyticsStore {
   version: 1;
@@ -2211,7 +2221,7 @@ async function forfeitSavedMasterGame(): Promise<void> {
 
 function pathwayRouteFromLocation(): PathwayRoute {
   const route = new URL(window.location.href).searchParams.get(PATHWAY_VIEW_PARAM);
-  if (route === "play" || route === "human" || route === "tutorial" || route === "settings" || route === "statistics") return route;
+  if (route === "play" || route === "human" || route === "tutorial" || route === "settings" || route === "gameplay" || route === "statistics") return route;
   return "home";
 }
 
@@ -3052,7 +3062,12 @@ function canAskMaster(game: GameState): boolean {
 }
 
 function aceAdvicePreparationKey(game: GameState | null): string | null {
-  if (!game || !currentSnapshot || !canAskMaster(game)) return null;
+  if (
+    !game ||
+    !currentSnapshot ||
+    (!state.hintsEnabled && !state.errorNoticesEnabled) ||
+    !canAskMaster(game)
+  ) return null;
   return aceAdviceDecisionKey(currentSnapshot.gameId, game);
 }
 
@@ -3103,13 +3118,14 @@ function reviewUserChoiceWithAce(
   const preparation = preparedAceAdviceFor(game);
   state.aceAdvicePreparation = null;
   if (!game || !preparation?.advice) return;
+  if (!state.errorNoticesEnabled) return;
   if (!choiceDiffersFromAce(action, selectedCardIds, preparation.advice)) return;
   state.aceMistake = { handNumber: game.handNumber, advice: preparation.advice };
 }
 
 async function requestMasterHint(): Promise<void> {
   const game = state.game;
-  if (!game || state.pending || !canAskMaster(game)) return;
+  if (!state.hintsEnabled || !game || state.pending || !canAskMaster(game)) return;
   const preparation = startAceAdvicePreparation(game);
   if (!preparation) return;
   state.pending = true;
@@ -3920,6 +3936,7 @@ function renderAceMistakeBadge(game: GameState): void {
   if (state.aceMistake && state.aceMistake.handNumber !== game.handNumber) state.aceMistake = null;
   const opponent = currentSnapshot?.opponent ?? selectedMenuOpponent();
   const visible = Boolean(
+    state.errorNoticesEnabled &&
     state.aceMistake &&
     state.masterHint?.mode !== "mistake" &&
     lowerLevelOpponent(opponent) &&
@@ -6528,7 +6545,8 @@ function render(game: GameState | null): void {
   const waitingForTurnCutClick = Boolean(turnCut?.action);
   const waitingForDealCutOk = Boolean(state.dealCutResolve);
   const selectedPlay = selectedPlayableCard(game);
-  const masterAdviceAvailable = canAskMaster(game) && !state.masterHint;
+  const aceAdviceEligible = canAskMaster(game);
+  const masterAdviceAvailable = state.hintsEnabled && aceAdviceEligible && !state.masterHint;
   els.cutForDeal.hidden = !gameActive || !waitingForTurnCutClick;
   els.discard.hidden = !gameActive || Boolean(state.dealAnimation) || Boolean(state.dealCutRevealStage) || waitingForDealCutOk || Boolean(state.turnCutRevealStage) || game.phase !== "discard";
   els.play.hidden = !gameActive || Boolean(state.dealAnimation) || waitingForDealCutOk || Boolean(state.turnCutRevealStage) || game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User");
@@ -6561,7 +6579,11 @@ function render(game: GameState | null): void {
   renderScoringCardEmphasis();
   renderScoreSummaryDialog();
   renderMasterHint();
-  if (!state.pending && masterAdviceAvailable) startAceAdvicePreparation(game);
+  if (
+    !state.pending &&
+    aceAdviceEligible &&
+    (state.hintsEnabled || state.errorNoticesEnabled)
+  ) startAceAdvicePreparation(game);
 }
 
 function shouldAdvancePeggingAi(game: GameState): boolean {
@@ -6815,7 +6837,10 @@ for (const button of els.pathwayTargetButtons) {
 }
 
 for (const button of els.pathwayBackButtons) {
-  button.addEventListener("click", () => navigatePathway("home"));
+  button.addEventListener("click", () => {
+    const destination = button.dataset.pathwayBack as PathwayView | undefined;
+    navigatePathway(destination || "home");
+  });
 }
 
 els.appBack.addEventListener("click", () => {
@@ -6842,6 +6867,10 @@ for (const button of els.pathwayDestinationButtons) {
   }
   if (destination === "size") {
     button.addEventListener("click", openSizeDialog);
+    continue;
+  }
+  if (destination === "gameplay") {
+    button.addEventListener("click", () => navigatePathway("gameplay"));
     continue;
   }
   const opponent = pathwayOpponent(destination);
@@ -7158,6 +7187,31 @@ els.fastCounting.addEventListener("change", () => {
     clearNoticeQueue();
     state.scoringTransitionStage = null;
   }
+  render(state.game);
+});
+
+els.hintsEnabled.addEventListener("change", () => {
+  state.hintsEnabled = els.hintsEnabled.checked;
+  safeLocalStorageSet(HINTS_ENABLED_STORAGE_KEY, state.hintsEnabled ? "1" : "0");
+  if (!state.hintsEnabled && state.masterHint?.mode === "hint") {
+    state.masterHint = null;
+    els.masterHintDialog.hidden = true;
+  }
+  if (!state.hintsEnabled && !state.errorNoticesEnabled) state.aceAdvicePreparation = null;
+  render(state.game);
+});
+
+els.errorNoticesEnabled.addEventListener("change", () => {
+  state.errorNoticesEnabled = els.errorNoticesEnabled.checked;
+  safeLocalStorageSet(ERROR_NOTICES_ENABLED_STORAGE_KEY, state.errorNoticesEnabled ? "1" : "0");
+  if (!state.errorNoticesEnabled) {
+    state.aceMistake = null;
+    if (state.masterHint?.mode === "mistake") {
+      state.masterHint = null;
+      els.masterHintDialog.hidden = true;
+    }
+  }
+  if (!state.hintsEnabled && !state.errorNoticesEnabled) state.aceAdvicePreparation = null;
   render(state.game);
 });
 

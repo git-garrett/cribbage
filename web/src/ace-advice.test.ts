@@ -82,4 +82,14 @@ describe("Ace advice preparation", () => {
     expect(stylesSource).toContain(".ace-mistake:focus-visible");
     expect(stylesSource).toMatch(/\.ace-mistake \{[\s\S]*border-radius: 50%/);
   });
+
+  it("lets players independently disable hints and error notices", () => {
+    expect(htmlSource).toContain('id="hints-enabled"');
+    expect(htmlSource).toContain('id="error-notices-enabled"');
+    expect(mainSource).toContain("HINTS_ENABLED_STORAGE_KEY");
+    expect(mainSource).toContain("ERROR_NOTICES_ENABLED_STORAGE_KEY");
+    expect(mainSource).toMatch(/masterAdviceAvailable = state\.hintsEnabled && aceAdviceEligible/);
+    expect(mainSource).toMatch(/state\.errorNoticesEnabled &&[\s\S]*state\.aceMistake/);
+    expect(mainSource).toMatch(/!state\.hintsEnabled && !state\.errorNoticesEnabled[\s\S]*return null/);
+  });
 });

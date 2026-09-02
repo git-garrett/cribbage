@@ -21,7 +21,12 @@ describe("fast counting", () => {
   });
 
   it("persists an accessible Gameplay setting and opens summaries directly", () => {
-    expect(htmlSource).toContain('class="pathway-settings-card"');
+    const settingsCard = htmlSource.indexOf('data-pathway-destination="gameplay"');
+    const gameplayPage = htmlSource.indexOf('data-pathway-view="gameplay"');
+    expect(settingsCard).toBeGreaterThan(-1);
+    expect(gameplayPage).toBeGreaterThan(settingsCard);
+    expect(htmlSource.slice(settingsCard, gameplayPage)).not.toContain('id="fast-counting"');
+    expect(htmlSource).toContain('class="gameplay-settings-sheet"');
     expect(htmlSource).toContain('id="fast-counting"');
     expect(htmlSource).toContain('role="switch"');
     expect(mainSource).toContain("FAST_COUNTING_STORAGE_KEY");

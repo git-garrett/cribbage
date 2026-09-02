@@ -215,24 +215,49 @@
                 <span>Display</span>
                 <strong>Size</strong>
               </button>
-              <section class="pathway-settings-card" aria-labelledby="gameplay-settings-title">
-                <header>
-                  <span>At the table</span>
-                  <h3 id="gameplay-settings-title">Gameplay</h3>
-                </header>
-                <label class="gameplay-setting" for="fast-counting">
-                  <span>
-                    <strong>Fast counting</strong>
-                    <small>Skip score bubbles and card motion. Open each hand or crib summary immediately.</small>
-                  </span>
-                  <input id="fast-counting" type="checkbox" role="switch">
-                </label>
-              </section>
+              <button class="pathway-choice" type="button" data-pathway-destination="gameplay">
+                <span>At the table</span>
+                <strong>Gameplay</strong>
+              </button>
               <button class="pathway-choice" type="button" data-pathway-destination="sounds" disabled>
                 <span>Audio</span>
                 <strong>Sounds</strong>
                 <em class="pathway-coming-soon">Coming soon</em>
               </button>
+            </div>
+          </section>
+
+          <section class="pathway-view pathway-subview pathway-gameplay" data-pathway-view="gameplay" aria-labelledby="pathway-gameplay-title" hidden>
+            <header class="pathway-subhead">
+              <button class="pathway-back" type="button" data-pathway-back="settings">
+                <span aria-hidden="true">←</span> Settings
+              </button>
+              <p class="pathway-eyebrow">Settings · Gameplay</p>
+              <h2 id="pathway-gameplay-title">Tune the pace and guidance.</h2>
+              <p>Choose how much help appears while you play.</p>
+            </header>
+            <div class="gameplay-settings-sheet" aria-label="Gameplay settings">
+              <label class="gameplay-setting" for="fast-counting">
+                <span>
+                  <strong>Fast counting</strong>
+                  <small>Skip score bubbles and card motion. Open each hand or crib summary immediately.</small>
+                </span>
+                <input id="fast-counting" type="checkbox" role="switch">
+              </label>
+              <label class="gameplay-setting" for="hints-enabled">
+                <span>
+                  <strong>Hints</strong>
+                  <small>Show Ask Ace when advice is available.</small>
+                </span>
+                <input id="hints-enabled" type="checkbox" role="switch" checked>
+              </label>
+              <label class="gameplay-setting" for="error-notices-enabled">
+                <span>
+                  <strong>Error notices</strong>
+                  <small>Show the ! badge when your choice differs from Ace’s recommendation.</small>
+                </span>
+                <input id="error-notices-enabled" type="checkbox" role="switch" checked>
+              </label>
             </div>
           </section>
         </div>

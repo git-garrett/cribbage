@@ -8774,90 +8774,50 @@ body[data-font-size="x-large"] .pathway-choice-grid-play .pathway-choice {
   }
 }
 
-.pathway-settings-card {
-  --pathway-rest-y: 0px;
-  --pathway-rest-rotate: 0deg;
-  --pathway-hover-rotate: 0deg;
+.gameplay-settings-sheet {
   position: relative;
   display: grid;
-  align-content: center;
-  gap: 18px;
   width: 100%;
-  min-height: 156px;
-  padding: 22px 20px;
+  max-width: 720px;
+  margin: 4px auto 0;
   overflow: hidden;
-  border: 1px solid var(--entry-border-strong);
-  border-radius: 22px 22px 12px 12px;
-  background: var(--entry-panel-alt);
+  border: 1px solid var(--entry-border);
+  border-radius: 22px;
+  background: var(--entry-panel-soft);
   color: var(--pathway-ink);
-  box-shadow:
-    0 -2px 0 color-mix(in srgb, var(--entry-accent) 34%, transparent),
-    var(--entry-card-shadow-raised);
-  transform: translateY(var(--pathway-rest-y));
-  rotate: var(--pathway-rest-rotate);
-  transform-origin: 50% 120%;
+  box-shadow: var(--entry-card-shadow-raised);
 }
 
-.pathway-settings-card::before {
+.gameplay-settings-sheet::before {
   position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 5px;
-  background: var(--entry-accent);
+  z-index: 2;
+  top: 18px;
+  bottom: 18px;
+  left: 12px;
+  width: 6px;
+  background: radial-gradient(circle, var(--entry-accent) 0 2px, transparent 2.5px) center top / 6px 18px repeat-y;
   content: "";
-}
-
-.pathway-settings-card::after {
-  position: absolute;
-  top: 19px;
-  right: 20px;
-  color: color-mix(in srgb, var(--pathway-suit-dark) 22%, transparent);
-  content: "♠";
-  font: 700 50px/1 Georgia, serif;
   pointer-events: none;
 }
 
-.pathway-settings-card > header {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  gap: 5px;
-  padding-right: 58px;
-}
-
-.pathway-settings-card > header span {
-  color: var(--pathway-gold-deep);
-  font-size: var(--access-label);
-  font-weight: 900;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
-}
-
-.pathway-settings-card h3 {
-  margin: 0;
-  color: var(--entry-heading);
-  font-family: Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif;
-  font-size: var(--access-card-title);
-  font-weight: 700;
-  line-height: 1;
-}
-
 .gameplay-setting {
-  --fast-switch-height: clamp(30px, calc(var(--access-body) * 1.55), 46px);
-  --fast-switch-width: calc(var(--fast-switch-height) * 1.75);
+  --gameplay-switch-height: clamp(30px, calc(var(--access-body) * 1.55), 46px);
+  --gameplay-switch-width: calc(var(--gameplay-switch-height) * 1.75);
   position: relative;
   z-index: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
   align-items: center;
-  min-height: 82px;
-  padding: 14px;
-  border: 1px solid var(--entry-border);
-  border-radius: 15px;
-  background: var(--entry-panel-soft);
+  min-height: 96px;
+  padding: 18px 22px 18px 32px;
+  background: transparent;
   cursor: pointer;
+  transition: background-color 160ms ease;
+}
+
+.gameplay-setting + .gameplay-setting {
+  border-top: 1px solid var(--entry-border);
 }
 
 .gameplay-setting > span {
@@ -8872,7 +8832,7 @@ body[data-font-size="x-large"] .pathway-choice-grid-play .pathway-choice {
 }
 
 .gameplay-setting small {
-  max-width: 35ch;
+  max-width: 48ch;
   color: var(--entry-muted);
   font-size: var(--access-small);
   line-height: 1.4;
@@ -8880,8 +8840,8 @@ body[data-font-size="x-large"] .pathway-choice-grid-play .pathway-choice {
 
 .gameplay-setting input {
   position: relative;
-  width: var(--fast-switch-width);
-  height: var(--fast-switch-height);
+  width: var(--gameplay-switch-width);
+  height: var(--gameplay-switch-height);
   margin: 0;
   appearance: none;
   border: 2px solid var(--entry-border-strong);
@@ -8895,8 +8855,8 @@ body[data-font-size="x-large"] .pathway-choice-grid-play .pathway-choice {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: calc(var(--fast-switch-height) - 8px);
-  height: calc(var(--fast-switch-height) - 8px);
+  width: calc(var(--gameplay-switch-height) - 8px);
+  height: calc(var(--gameplay-switch-height) - 8px);
   border-radius: 50%;
   background: var(--entry-panel-soft);
   box-shadow: 0 2px 7px rgba(7, 31, 56, 0.24);
@@ -8910,7 +8870,7 @@ body[data-font-size="x-large"] .pathway-choice-grid-play .pathway-choice {
 }
 
 .gameplay-setting input:checked::before {
-  transform: translateX(calc(var(--fast-switch-width) - var(--fast-switch-height)));
+  transform: translateX(calc(var(--gameplay-switch-width) - var(--gameplay-switch-height)));
 }
 
 .gameplay-setting:has(input:focus-visible) {
@@ -8919,43 +8879,26 @@ body[data-font-size="x-large"] .pathway-choice-grid-play .pathway-choice {
 }
 
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-  .pathway-settings-card:hover {
-    border-color: var(--entry-accent);
-    box-shadow: 0 18px 34px color-mix(in srgb, var(--entry-accent) 18%, transparent);
-    transform: translateY(calc(var(--pathway-rest-y) - 4px));
-    rotate: var(--pathway-hover-rotate);
-    transition:
-      transform 600ms cubic-bezier(0.16, 0.74, 0.24, 1),
-      rotate 720ms cubic-bezier(0.16, 0.74, 0.24, 1),
-      border-color 320ms ease,
-      box-shadow 420ms ease;
+  .gameplay-setting:hover {
+    background: color-mix(in srgb, var(--entry-panel-alt) 72%, transparent);
   }
 }
 
 @media (min-width: 850px) {
-  .pathway-choice-grid-settings .pathway-choice,
-  .pathway-choice-grid-settings .pathway-settings-card {
+  .pathway-choice-grid-settings .pathway-choice {
     flex: 0 1 min(29vw, 330px);
-  }
-
-  .pathway-choice-grid-settings .pathway-settings-card {
-    align-content: end;
-    min-width: 0;
-    min-height: 330px;
-    margin: 0 -8px;
-    padding: 34px 22px 30px;
   }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .pathway-view:not([hidden]) .pathway-settings-card {
-    animation: pathway-card-deal 390ms cubic-bezier(0.2, 0.76, 0.28, 1) 80ms both;
+  .pathway-view:not([hidden]) .gameplay-settings-sheet {
+    animation: pathway-card-deal 390ms cubic-bezier(0.2, 0.76, 0.28, 1) both;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pathway-settings-card,
-  .pathway-settings-card:hover,
+  .gameplay-settings-sheet,
+  .gameplay-setting,
   .gameplay-setting input,
   .gameplay-setting input::before {
     animation: none;

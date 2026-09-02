@@ -24,6 +24,7 @@ describe("local pathway navigation", () => {
       "tutorial-intermediate",
       "tutorial-expert",
       "size",
+      "gameplay",
       "sounds",
     ]) {
       expect(html).toContain(`data-pathway-destination="${destination}"`);
@@ -115,7 +116,7 @@ describe("local pathway navigation", () => {
     ]) {
       expect(html).toMatch(new RegExp(`data-pathway-destination="${destination}" disabled[\\s\\S]*?Coming soon`));
     }
-    for (const destination of ["easy", "tough", "master", "human", "size"]) {
+    for (const destination of ["easy", "tough", "master", "human", "size", "gameplay"]) {
       expect(html).not.toMatch(new RegExp(`data-pathway-destination="${destination}" disabled`));
     }
     expect(css).toMatch(/\.pathway-choice:disabled\s*{[\s\S]*background: color-mix[\s\S]*cursor: not-allowed/);
@@ -150,6 +151,13 @@ describe("local pathway navigation", () => {
     expect(source).toContain('"/api/people/preferences"');
     expect(css).toContain('body[data-font-size="large"]');
     expect(css).toContain('body[data-font-size="x-large"]');
+  });
+
+  it("opens Gameplay as a history-backed Settings subpage", () => {
+    expect(html).toContain('data-pathway-view="gameplay"');
+    expect(html).toContain('data-pathway-back="settings"');
+    expect(source).toMatch(/destination === "gameplay"[\s\S]*navigatePathway\("gameplay"\)/);
+    expect(source).toMatch(/dataset\.pathwayBack[\s\S]*destination \|\| "home"/);
   });
 
   it("uses a restrained staggered deal with an explicit reduced-motion fallback", () => {
