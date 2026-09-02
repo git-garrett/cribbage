@@ -21,6 +21,7 @@ const required = [
   "rust/cribbage-shadow-engine/assets/model13-pairwise.bin",
   "rust/cribbage-shadow-engine/assets/model13-hold.bin",
   "rust/cribbage-shadow-engine/assets/model91-discard-ev.bin",
+  "rust/cribbage-shadow-engine/assets/model911-discard-ev.bin",
   "rust/cribbage-shadow-engine/assets/model91-pegging-beliefs.bin",
   "rust/cribbage-shadow-engine/assets/model143-pairwise.bin",
   "rust/cribbage-shadow-engine/assets/model143-crib.bin",

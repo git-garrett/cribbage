@@ -5375,6 +5375,11 @@ body[data-font-size="x-large"] .app[data-view="game"] .circular-track-skunk-labe
   align-items: baseline;
 }
 
+.app[data-view="game"] .user-panel {
+  position: relative;
+  z-index: 8;
+}
+
 .app[data-view="game"] .user-hand-layout {
   padding-top: 10px;
 }
@@ -9296,6 +9301,14 @@ body[data-font-size="x-large"] .pathway-choice-grid-play .pathway-choice {
   color: var(--entry-ink);
 }
 
+.my-stats-table .difference.comparison-good {
+  color: var(--comparison-good);
+}
+
+.my-stats-table .difference.comparison-bad {
+  color: var(--comparison-bad);
+}
+
 .my-stats-scoring-note {
   padding: 13px 15px;
   border-color: var(--entry-border);
@@ -9401,6 +9414,22 @@ body[data-font-size="x-large"] .pathway-choice-grid-play .pathway-choice {
 
   .analytics-row {
     gap: 5px;
+  }
+
+  .my-stats-opponent-tabs {
+    justify-content: flex-start;
+  }
+
+  .my-stats-opponent-tabs::before,
+  .my-stats-opponent-tabs::after {
+    display: none;
+  }
+
+  .my-stats-opponent-tabs button {
+    flex: 0 0 auto;
+    inline-size: max-content;
+    min-inline-size: max-content;
+    white-space: nowrap;
   }
 
   .my-stats-table th,

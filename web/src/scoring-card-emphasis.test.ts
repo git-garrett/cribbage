@@ -43,7 +43,7 @@ describe("scoring card emphasis", () => {
       .toEqual([1, 2, 3]);
   });
 
-  it("marks only the jack responsible for knobs", () => {
+  it("marks the jack responsible for knobs and its matching cut card", () => {
     const hand = [
       card(1, "J", "hearts", 10),
       card(2, "J", "clubs", 10),
@@ -51,7 +51,7 @@ describe("scoring card emphasis", () => {
       card(4, "9", "diamonds", 9),
     ];
     expect(scoringEmphasisCardIds(hand, card(5, "2", "hearts", 2), "hand", "Knobs"))
-      .toEqual([1]);
+      .toEqual([1, 5]);
   });
 
   it("includes a matching cut card in a flush and requires it for a crib flush", () => {

@@ -222,9 +222,13 @@ export function scoringEmphasisCardIds(
   else if (normalizedLabel.startsWith("run")) ids = runCardIds(allCards);
   else if (normalizedLabel.startsWith("pair")) ids = pairCardIds(allCards);
   else if (normalizedLabel === "knobs") {
-    ids = new Set(turnCard
-      ? hand.filter((card) => card.rank === "J" && card.suit === turnCard.suit).map((card) => card.id)
-      : []);
+    const matchingJacks = turnCard
+      ? hand.filter((card) => card.rank === "J" && card.suit === turnCard.suit)
+      : [];
+    ids = new Set([
+      ...matchingJacks.map((card) => card.id),
+      ...(matchingJacks.length && turnCard ? [turnCard.id] : []),
+    ]);
   } else if (normalizedLabel === "flush") ids = flushCardIds(hand, turnCard, category);
   else ids = new Set();
   return allCards.filter((card) => ids.has(card.id)).map((card) => card.id);

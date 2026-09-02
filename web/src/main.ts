@@ -30,6 +30,7 @@ import { myStatsTableRows } from "./my-stats-table";
 import { peggingDisplaySeries, recentPeggingCards } from "./pegging-display";
 import { resolveRemoteAiBase } from "./runtime-config";
 import { scoringEmphasisCardIds } from "./scoring-card-emphasis";
+import { scoringTitle } from "./scoring-title";
 import {
   handScoreNoticeParts,
   peggingScoreNoticeParts,
@@ -59,7 +60,7 @@ const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-13.0";
 const DECISION_REVIEWER_NAME = "Ace";
 const PATHWAY_OPPONENTS = {
   easy: "myrmidon-5",
-  tough: "schell_table-peg_table-9.1",
+  tough: "schell_table-peg_table-9.11",
   master: DEFAULT_OPPONENT,
 } as const satisfies Record<string, Opponent>;
 
@@ -642,6 +643,20 @@ const els = {
   masterSessionForfeit: document.querySelector("#master-session-forfeit") as HTMLButtonElement,
 };
 
+function applyProductionOpponentVisibility(production: boolean): void {
+  if (!production) return;
+  for (const selector of [
+    '[data-pathway-destination="grandmaster"]',
+    '[data-my-stats-opponent="grandmaster"]',
+  ]) {
+    document.querySelectorAll<HTMLElement>(selector).forEach((element) => {
+      element.hidden = true;
+    });
+  }
+}
+
+applyProductionOpponentVisibility(import.meta.env.PROD);
+
 class ApiInteractionError extends Error {
   constructor(message = "Server Busy", options?: ErrorOptions) {
     super(message, options);
@@ -724,6 +739,7 @@ const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-13.0";
 const SIMPLE_NETWORK_PUBLIC_OPPONENTS = new Set<string>([
   "myrmidon-5",
   "schell_table-peg_table-9.1",
+  "schell_table-peg_table-9.11",
   "schell_table-peg_table-13.0",
 ]);
 const SIMPLE_NETWORK_LOCAL_OPPONENTS = new Set<string>([
@@ -3966,7 +3982,11 @@ function renderScoring(scoring: GameState["scoring"]): void {
   } else {
     delete els.scoringReview.dataset.transition;
   }
-  els.scoringTitle.textContent = presentGameText(scoring.title);
+  const owner: PlayerKey = scoring.owner === "AI" ? "ai" : "human";
+  els.scoringTitle.textContent = scoringTitle(
+    playerName(owner),
+    scoring.stage === "crib" ? "crib" : "hand",
+  );
   renderCards(els.scoringCards, scoring.cards);
   els.scoringResult.textContent = "";
 }
@@ -5960,6 +5980,7 @@ function analyticsEngineSortKey(engine: Opponent): number {
   return [
     "myrmidon-5",
     "schell_table-peg_table-9.1",
+    "schell_table-peg_table-9.11",
     "schell_table-peg_table-13.0",
     "schell_table-peg_table-16.3",
     "schell_table-peg_table-16.1",

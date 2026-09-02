@@ -8,7 +8,9 @@ export interface AceRecommendation {
 }
 
 export function isAceAdviceOpponent(opponent: string | undefined): boolean {
-  return opponent === "myrmidon-5" || opponent === "schell_table-peg_table-9.1";
+  return opponent === "myrmidon-5"
+    || opponent === "schell_table-peg_table-9.1"
+    || opponent === "schell_table-peg_table-9.11";
 }
 
 function canonicalCardIds(cardIds: readonly number[]): string {

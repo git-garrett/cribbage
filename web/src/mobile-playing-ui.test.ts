@@ -34,4 +34,9 @@ describe("Concept B mobile playing UI", () => {
     expect(mainSource).toMatch(/els\.play\.disabled = [^;]*game\.phase === "pegging"[^;]*game\.turn === "User" && selectedPlay/);
     expect(mainSource).toMatch(/els\.play\.textContent = selectedPlay \? `Play \$\{selectedPlay\.rank\}\$\{selectedPlay\.symbol\}` : "Play selected"/);
   });
+
+  it("keeps a player's hand above an overlapping crib tray", () => {
+    expect(css).toMatch(/\.app\[data-view="game"\] \.user-panel\s*\{[^}]*position:\s*relative[^}]*z-index:\s*8/s);
+    expect(css).toMatch(/\.crib-tray\s*\{[^}]*z-index:\s*7/s);
+  });
 });

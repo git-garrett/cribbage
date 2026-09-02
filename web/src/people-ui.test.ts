@@ -18,6 +18,18 @@ describe("human clubhouse UI", () => {
     expect(css).toContain(".my-stats-opponent-tabs");
   });
 
+  it("sizes mobile statistics tabs to their text and preserves semantic diff colors", () => {
+    expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*\.my-stats-opponent-tabs button\s*\{[^}]*inline-size:\s*max-content[^}]*white-space:\s*nowrap/s);
+    expect(css).toMatch(/\.my-stats-table \.difference\.comparison-good\s*\{[^}]*color:\s*var\(--comparison-good\)/s);
+    expect(css).toMatch(/\.my-stats-table \.difference\.comparison-bad\s*\{[^}]*color:\s*var\(--comparison-bad\)/s);
+  });
+
+  it("hides Grandmaster surfaces only in production builds", () => {
+    expect(source).toContain("applyProductionOpponentVisibility(import.meta.env.PROD)");
+    expect(source).toContain('[data-pathway-destination="grandmaster"]');
+    expect(source).toContain('[data-my-stats-opponent="grandmaster"]');
+  });
+
   it("puts leaderboard and account actions into the shared statistics and clubhouse surfaces", () => {
     expect(html).toContain('id="stats-view-tabs"');
     expect(html).toContain('data-stats-view="leaderboard"');

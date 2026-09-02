@@ -45,6 +45,7 @@ describe("Ace advice preparation", () => {
   it("is available only against Easy and Tough", () => {
     expect(isAceAdviceOpponent("myrmidon-5")).toBe(true);
     expect(isAceAdviceOpponent("schell_table-peg_table-9.1")).toBe(true);
+    expect(isAceAdviceOpponent("schell_table-peg_table-9.11")).toBe(true);
     expect(isAceAdviceOpponent("schell_table-peg_table-13.0")).toBe(false);
     expect(isAceAdviceOpponent("schell_table-peg_table-16.3")).toBe(false);
     expect(isAceAdviceOpponent(undefined)).toBe(false);
