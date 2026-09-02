@@ -1,0 +1,1582 @@
+{
+  "cardEncoding": "compact rank-major card id: rank = floor(id / 4)",
+  "cohorts": {
+    "exhaustiveModel": {
+      "fourOfAKind": {
+        "accepted": 770,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 608,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 5710,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 5710,
+            "opportunities": 608
+          },
+          "third": {
+            "accepted": 162,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 2691,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 2691,
+            "opportunities": 162
+          }
+        },
+        "declined": 0,
+        "declinesWithCardHeld": 0,
+        "declinesWithoutCardHeld": 8401,
+        "heldGivenDeclinePpm": 0,
+        "multiplierPpm": 0,
+        "observedDeclines": 8401,
+        "opportunities": 770
+      },
+      "fourOfAKindAfterPairRoyal": {
+        "accepted": 770,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 608,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 5710,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 5710,
+            "opportunities": 608
+          },
+          "third": {
+            "accepted": 162,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 2691,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 2691,
+            "opportunities": 162
+          }
+        },
+        "declined": 0,
+        "declinesWithCardHeld": 0,
+        "declinesWithoutCardHeld": 8401,
+        "heldGivenDeclinePpm": 0,
+        "multiplierPpm": 0,
+        "observedDeclines": 8401,
+        "opportunities": 770
+      },
+      "fourPlusCardRun": {
+        "accepted": 13328,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 6329,
+            "declined": 348,
+            "declinesWithCardHeld": 348,
+            "declinesWithoutCardHeld": 4391,
+            "heldGivenDeclinePpm": 73433,
+            "multiplierPpm": 52119,
+            "observedDeclines": 4739,
+            "opportunities": 6677
+          },
+          "third": {
+            "accepted": 6999,
+            "declined": 267,
+            "declinesWithCardHeld": 267,
+            "declinesWithoutCardHeld": 10655,
+            "heldGivenDeclinePpm": 24446,
+            "multiplierPpm": 36746,
+            "observedDeclines": 10922,
+            "opportunities": 7266
+          }
+        },
+        "declined": 615,
+        "declinesWithCardHeld": 615,
+        "declinesWithoutCardHeld": 15046,
+        "heldGivenDeclinePpm": 39270,
+        "multiplierPpm": 44108,
+        "observedDeclines": 15661,
+        "opportunities": 13943
+      },
+      "pair": {
+        "accepted": 102926,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 35823,
+            "declined": 6951,
+            "declinesWithCardHeld": 6951,
+            "declinesWithoutCardHeld": 192491,
+            "heldGivenDeclinePpm": 34852,
+            "multiplierPpm": 162505,
+            "observedDeclines": 199442,
+            "opportunities": 42774
+          },
+          "second": {
+            "accepted": 40555,
+            "declined": 4119,
+            "declinesWithCardHeld": 4119,
+            "declinesWithoutCardHeld": 278585,
+            "heldGivenDeclinePpm": 14570,
+            "multiplierPpm": 92201,
+            "observedDeclines": 282704,
+            "opportunities": 44674
+          },
+          "third": {
+            "accepted": 26548,
+            "declined": 2564,
+            "declinesWithCardHeld": 2564,
+            "declinesWithoutCardHeld": 168392,
+            "heldGivenDeclinePpm": 14998,
+            "multiplierPpm": 88074,
+            "observedDeclines": 170956,
+            "opportunities": 29112
+          }
+        },
+        "declined": 13634,
+        "declinesWithCardHeld": 13634,
+        "declinesWithoutCardHeld": 639468,
+        "heldGivenDeclinePpm": 20876,
+        "multiplierPpm": 116970,
+        "observedDeclines": 653102,
+        "opportunities": 116560
+      },
+      "pairRoyalAfterPair": {
+        "accepted": 19664,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 17573,
+            "declined": 351,
+            "declinesWithCardHeld": 351,
+            "declinesWithoutCardHeld": 30204,
+            "heldGivenDeclinePpm": 11487,
+            "multiplierPpm": 19583,
+            "observedDeclines": 30555,
+            "opportunities": 17924
+          },
+          "third": {
+            "accepted": 2091,
+            "declined": 34,
+            "declinesWithCardHeld": 34,
+            "declinesWithoutCardHeld": 13817,
+            "heldGivenDeclinePpm": 2455,
+            "multiplierPpm": 16000,
+            "observedDeclines": 13851,
+            "opportunities": 2125
+          }
+        },
+        "declined": 385,
+        "declinesWithCardHeld": 385,
+        "declinesWithoutCardHeld": 44021,
+        "heldGivenDeclinePpm": 8670,
+        "multiplierPpm": 19203,
+        "observedDeclines": 44406,
+        "opportunities": 20049
+      },
+      "safePair": {
+        "accepted": 21577,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 311,
+            "declined": 1,
+            "declinesWithCardHeld": 1,
+            "declinesWithoutCardHeld": 28,
+            "heldGivenDeclinePpm": 34483,
+            "multiplierPpm": 3205,
+            "observedDeclines": 29,
+            "opportunities": 312
+          },
+          "second": {
+            "accepted": 11096,
+            "declined": 269,
+            "declinesWithCardHeld": 269,
+            "declinesWithoutCardHeld": 97273,
+            "heldGivenDeclinePpm": 2758,
+            "multiplierPpm": 23669,
+            "observedDeclines": 97542,
+            "opportunities": 11365
+          },
+          "third": {
+            "accepted": 10170,
+            "declined": 83,
+            "declinesWithCardHeld": 83,
+            "declinesWithoutCardHeld": 36211,
+            "heldGivenDeclinePpm": 2287,
+            "multiplierPpm": 8095,
+            "observedDeclines": 36294,
+            "opportunities": 10253
+          }
+        },
+        "declined": 353,
+        "declinesWithCardHeld": 353,
+        "declinesWithoutCardHeld": 133512,
+        "heldGivenDeclinePpm": 2637,
+        "multiplierPpm": 16097,
+        "observedDeclines": 133865,
+        "opportunities": 21930
+      },
+      "safePairRoyal": {
+        "accepted": 8622,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 7696,
+            "declined": 17,
+            "declinesWithCardHeld": 17,
+            "declinesWithoutCardHeld": 9669,
+            "heldGivenDeclinePpm": 1755,
+            "multiplierPpm": 2204,
+            "observedDeclines": 9686,
+            "opportunities": 7713
+          },
+          "third": {
+            "accepted": 926,
+            "declined": 1,
+            "declinesWithCardHeld": 1,
+            "declinesWithoutCardHeld": 2781,
+            "heldGivenDeclinePpm": 359,
+            "multiplierPpm": 1079,
+            "observedDeclines": 2782,
+            "opportunities": 927
+          }
+        },
+        "declined": 18,
+        "declinesWithCardHeld": 18,
+        "declinesWithoutCardHeld": 12450,
+        "heldGivenDeclinePpm": 1444,
+        "multiplierPpm": 2083,
+        "observedDeclines": 12468,
+        "opportunities": 8640
+      },
+      "threeCardRun": {
+        "accepted": 25212,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 16982,
+            "declined": 1591,
+            "declinesWithCardHeld": 1591,
+            "declinesWithoutCardHeld": 29229,
+            "heldGivenDeclinePpm": 51622,
+            "multiplierPpm": 85662,
+            "observedDeclines": 30820,
+            "opportunities": 18573
+          },
+          "third": {
+            "accepted": 8230,
+            "declined": 508,
+            "declinesWithCardHeld": 508,
+            "declinesWithoutCardHeld": 19479,
+            "heldGivenDeclinePpm": 25417,
+            "multiplierPpm": 58137,
+            "observedDeclines": 19987,
+            "opportunities": 8738
+          }
+        },
+        "declined": 2099,
+        "declinesWithCardHeld": 2099,
+        "declinesWithoutCardHeld": 48708,
+        "heldGivenDeclinePpm": 41313,
+        "multiplierPpm": 76855,
+        "observedDeclines": 50807,
+        "opportunities": 27311
+      },
+      "threeOfAKind": {
+        "accepted": 19664,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 17573,
+            "declined": 351,
+            "declinesWithCardHeld": 351,
+            "declinesWithoutCardHeld": 30204,
+            "heldGivenDeclinePpm": 11487,
+            "multiplierPpm": 19583,
+            "observedDeclines": 30555,
+            "opportunities": 17924
+          },
+          "third": {
+            "accepted": 2091,
+            "declined": 34,
+            "declinesWithCardHeld": 34,
+            "declinesWithoutCardHeld": 13817,
+            "heldGivenDeclinePpm": 2455,
+            "multiplierPpm": 16000,
+            "observedDeclines": 13851,
+            "opportunities": 2125
+          }
+        },
+        "declined": 385,
+        "declinesWithCardHeld": 385,
+        "declinesWithoutCardHeld": 44021,
+        "heldGivenDeclinePpm": 8670,
+        "multiplierPpm": 19203,
+        "observedDeclines": 44406,
+        "opportunities": 20049
+      }
+    },
+    "human": {
+      "fourOfAKind": {
+        "accepted": 2,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 1,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 5,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 5,
+            "opportunities": 1
+          },
+          "third": {
+            "accepted": 1,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 3,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 3,
+            "opportunities": 1
+          }
+        },
+        "declined": 0,
+        "declinesWithCardHeld": 0,
+        "declinesWithoutCardHeld": 8,
+        "heldGivenDeclinePpm": 0,
+        "multiplierPpm": 0,
+        "observedDeclines": 8,
+        "opportunities": 2
+      },
+      "fourOfAKindAfterPairRoyal": {
+        "accepted": 2,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 1,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 5,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 5,
+            "opportunities": 1
+          },
+          "third": {
+            "accepted": 1,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 3,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 3,
+            "opportunities": 1
+          }
+        },
+        "declined": 0,
+        "declinesWithCardHeld": 0,
+        "declinesWithoutCardHeld": 8,
+        "heldGivenDeclinePpm": 0,
+        "multiplierPpm": 0,
+        "observedDeclines": 8,
+        "opportunities": 2
+      },
+      "fourPlusCardRun": {
+        "accepted": 17,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 6,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 6,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 6,
+            "opportunities": 6
+          },
+          "third": {
+            "accepted": 11,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 11,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 11,
+            "opportunities": 11
+          }
+        },
+        "declined": 0,
+        "declinesWithCardHeld": 0,
+        "declinesWithoutCardHeld": 17,
+        "heldGivenDeclinePpm": 0,
+        "multiplierPpm": 0,
+        "observedDeclines": 17,
+        "opportunities": 17
+      },
+      "pair": {
+        "accepted": 129,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 45,
+            "declined": 8,
+            "declinesWithCardHeld": 8,
+            "declinesWithoutCardHeld": 247,
+            "heldGivenDeclinePpm": 31373,
+            "multiplierPpm": 150943,
+            "observedDeclines": 255,
+            "opportunities": 53
+          },
+          "second": {
+            "accepted": 52,
+            "declined": 4,
+            "declinesWithCardHeld": 4,
+            "declinesWithoutCardHeld": 349,
+            "heldGivenDeclinePpm": 11331,
+            "multiplierPpm": 71429,
+            "observedDeclines": 353,
+            "opportunities": 56
+          },
+          "third": {
+            "accepted": 32,
+            "declined": 1,
+            "declinesWithCardHeld": 1,
+            "declinesWithoutCardHeld": 187,
+            "heldGivenDeclinePpm": 5319,
+            "multiplierPpm": 30303,
+            "observedDeclines": 188,
+            "opportunities": 33
+          }
+        },
+        "declined": 13,
+        "declinesWithCardHeld": 13,
+        "declinesWithoutCardHeld": 783,
+        "heldGivenDeclinePpm": 16332,
+        "multiplierPpm": 91549,
+        "observedDeclines": 796,
+        "opportunities": 142
+      },
+      "pairRoyalAfterPair": {
+        "accepted": 29,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 27,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 41,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 41,
+            "opportunities": 27
+          },
+          "third": {
+            "accepted": 2,
+            "declined": 1,
+            "declinesWithCardHeld": 1,
+            "declinesWithoutCardHeld": 18,
+            "heldGivenDeclinePpm": 52632,
+            "multiplierPpm": 333333,
+            "observedDeclines": 19,
+            "opportunities": 3
+          }
+        },
+        "declined": 1,
+        "declinesWithCardHeld": 1,
+        "declinesWithoutCardHeld": 59,
+        "heldGivenDeclinePpm": 16667,
+        "multiplierPpm": 33333,
+        "observedDeclines": 60,
+        "opportunities": 30
+      },
+      "safePair": {
+        "accepted": 24,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 11,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 127,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 127,
+            "opportunities": 11
+          },
+          "third": {
+            "accepted": 13,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 36,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 36,
+            "opportunities": 13
+          }
+        },
+        "declined": 0,
+        "declinesWithCardHeld": 0,
+        "declinesWithoutCardHeld": 163,
+        "heldGivenDeclinePpm": 0,
+        "multiplierPpm": 0,
+        "observedDeclines": 163,
+        "opportunities": 24
+      },
+      "safePairRoyal": {
+        "accepted": 12,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 11,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 13,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 13,
+            "opportunities": 11
+          },
+          "third": {
+            "accepted": 1,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 4,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 4,
+            "opportunities": 1
+          }
+        },
+        "declined": 0,
+        "declinesWithCardHeld": 0,
+        "declinesWithoutCardHeld": 17,
+        "heldGivenDeclinePpm": 0,
+        "multiplierPpm": 0,
+        "observedDeclines": 17,
+        "opportunities": 12
+      },
+      "threeCardRun": {
+        "accepted": 39,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 33,
+            "declined": 1,
+            "declinesWithCardHeld": 1,
+            "declinesWithoutCardHeld": 36,
+            "heldGivenDeclinePpm": 27027,
+            "multiplierPpm": 29412,
+            "observedDeclines": 37,
+            "opportunities": 34
+          },
+          "third": {
+            "accepted": 6,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 20,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 20,
+            "opportunities": 6
+          }
+        },
+        "declined": 1,
+        "declinesWithCardHeld": 1,
+        "declinesWithoutCardHeld": 56,
+        "heldGivenDeclinePpm": 17544,
+        "multiplierPpm": 25000,
+        "observedDeclines": 57,
+        "opportunities": 40
+      },
+      "threeOfAKind": {
+        "accepted": 29,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 27,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 41,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 41,
+            "opportunities": 27
+          },
+          "third": {
+            "accepted": 2,
+            "declined": 1,
+            "declinesWithCardHeld": 1,
+            "declinesWithoutCardHeld": 18,
+            "heldGivenDeclinePpm": 52632,
+            "multiplierPpm": 333333,
+            "observedDeclines": 19,
+            "opportunities": 3
+          }
+        },
+        "declined": 1,
+        "declinesWithCardHeld": 1,
+        "declinesWithoutCardHeld": 59,
+        "heldGivenDeclinePpm": 16667,
+        "multiplierPpm": 33333,
+        "observedDeclines": 60,
+        "opportunities": 30
+      }
+    },
+    "pooled": {
+      "fourOfAKind": {
+        "accepted": 772,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 609,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 5715,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 5715,
+            "opportunities": 609
+          },
+          "third": {
+            "accepted": 163,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 2694,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 2694,
+            "opportunities": 163
+          }
+        },
+        "declined": 0,
+        "declinesWithCardHeld": 0,
+        "declinesWithoutCardHeld": 8409,
+        "heldGivenDeclinePpm": 0,
+        "multiplierPpm": 0,
+        "observedDeclines": 8409,
+        "opportunities": 772
+      },
+      "fourOfAKindAfterPairRoyal": {
+        "accepted": 772,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 609,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 5715,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 5715,
+            "opportunities": 609
+          },
+          "third": {
+            "accepted": 163,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 2694,
+            "heldGivenDeclinePpm": 0,
+            "multiplierPpm": 0,
+            "observedDeclines": 2694,
+            "opportunities": 163
+          }
+        },
+        "declined": 0,
+        "declinesWithCardHeld": 0,
+        "declinesWithoutCardHeld": 8409,
+        "heldGivenDeclinePpm": 0,
+        "multiplierPpm": 0,
+        "observedDeclines": 8409,
+        "opportunities": 772
+      },
+      "fourPlusCardRun": {
+        "accepted": 13345,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 6335,
+            "declined": 348,
+            "declinesWithCardHeld": 348,
+            "declinesWithoutCardHeld": 4397,
+            "heldGivenDeclinePpm": 73340,
+            "multiplierPpm": 52072,
+            "observedDeclines": 4745,
+            "opportunities": 6683
+          },
+          "third": {
+            "accepted": 7010,
+            "declined": 267,
+            "declinesWithCardHeld": 267,
+            "declinesWithoutCardHeld": 10666,
+            "heldGivenDeclinePpm": 24421,
+            "multiplierPpm": 36691,
+            "observedDeclines": 10933,
+            "opportunities": 7277
+          }
+        },
+        "declined": 615,
+        "declinesWithCardHeld": 615,
+        "declinesWithoutCardHeld": 15063,
+        "heldGivenDeclinePpm": 39227,
+        "multiplierPpm": 44054,
+        "observedDeclines": 15678,
+        "opportunities": 13960
+      },
+      "pair": {
+        "accepted": 103055,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 35868,
+            "declined": 6959,
+            "declinesWithCardHeld": 6959,
+            "declinesWithoutCardHeld": 192738,
+            "heldGivenDeclinePpm": 34848,
+            "multiplierPpm": 162491,
+            "observedDeclines": 199697,
+            "opportunities": 42827
+          },
+          "second": {
+            "accepted": 40607,
+            "declined": 4123,
+            "declinesWithCardHeld": 4123,
+            "declinesWithoutCardHeld": 278934,
+            "heldGivenDeclinePpm": 14566,
+            "multiplierPpm": 92175,
+            "observedDeclines": 283057,
+            "opportunities": 44730
+          },
+          "third": {
+            "accepted": 26580,
+            "declined": 2565,
+            "declinesWithCardHeld": 2565,
+            "declinesWithoutCardHeld": 168579,
+            "heldGivenDeclinePpm": 14987,
+            "multiplierPpm": 88008,
+            "observedDeclines": 171144,
+            "opportunities": 29145
+          }
+        },
+        "declined": 13647,
+        "declinesWithCardHeld": 13647,
+        "declinesWithoutCardHeld": 640251,
+        "heldGivenDeclinePpm": 20870,
+        "multiplierPpm": 116939,
+        "observedDeclines": 653898,
+        "opportunities": 116702
+      },
+      "pairRoyalAfterPair": {
+        "accepted": 19693,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 17600,
+            "declined": 351,
+            "declinesWithCardHeld": 351,
+            "declinesWithoutCardHeld": 30245,
+            "heldGivenDeclinePpm": 11472,
+            "multiplierPpm": 19553,
+            "observedDeclines": 30596,
+            "opportunities": 17951
+          },
+          "third": {
+            "accepted": 2093,
+            "declined": 35,
+            "declinesWithCardHeld": 35,
+            "declinesWithoutCardHeld": 13835,
+            "heldGivenDeclinePpm": 2523,
+            "multiplierPpm": 16447,
+            "observedDeclines": 13870,
+            "opportunities": 2128
+          }
+        },
+        "declined": 386,
+        "declinesWithCardHeld": 386,
+        "declinesWithoutCardHeld": 44080,
+        "heldGivenDeclinePpm": 8681,
+        "multiplierPpm": 19224,
+        "observedDeclines": 44466,
+        "opportunities": 20079
+      },
+      "safePair": {
+        "accepted": 21601,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 311,
+            "declined": 1,
+            "declinesWithCardHeld": 1,
+            "declinesWithoutCardHeld": 28,
+            "heldGivenDeclinePpm": 34483,
+            "multiplierPpm": 3205,
+            "observedDeclines": 29,
+            "opportunities": 312
+          },
+          "second": {
+            "accepted": 11107,
+            "declined": 269,
+            "declinesWithCardHeld": 269,
+            "declinesWithoutCardHeld": 97400,
+            "heldGivenDeclinePpm": 2754,
+            "multiplierPpm": 23646,
+            "observedDeclines": 97669,
+            "opportunities": 11376
+          },
+          "third": {
+            "accepted": 10183,
+            "declined": 83,
+            "declinesWithCardHeld": 83,
+            "declinesWithoutCardHeld": 36247,
+            "heldGivenDeclinePpm": 2285,
+            "multiplierPpm": 8085,
+            "observedDeclines": 36330,
+            "opportunities": 10266
+          }
+        },
+        "declined": 353,
+        "declinesWithCardHeld": 353,
+        "declinesWithoutCardHeld": 133675,
+        "heldGivenDeclinePpm": 2634,
+        "multiplierPpm": 16079,
+        "observedDeclines": 134028,
+        "opportunities": 21954
+      },
+      "safePairRoyal": {
+        "accepted": 8634,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 7707,
+            "declined": 17,
+            "declinesWithCardHeld": 17,
+            "declinesWithoutCardHeld": 9682,
+            "heldGivenDeclinePpm": 1753,
+            "multiplierPpm": 2201,
+            "observedDeclines": 9699,
+            "opportunities": 7724
+          },
+          "third": {
+            "accepted": 927,
+            "declined": 1,
+            "declinesWithCardHeld": 1,
+            "declinesWithoutCardHeld": 2785,
+            "heldGivenDeclinePpm": 359,
+            "multiplierPpm": 1078,
+            "observedDeclines": 2786,
+            "opportunities": 928
+          }
+        },
+        "declined": 18,
+        "declinesWithCardHeld": 18,
+        "declinesWithoutCardHeld": 12467,
+        "heldGivenDeclinePpm": 1442,
+        "multiplierPpm": 2080,
+        "observedDeclines": 12485,
+        "opportunities": 8652
+      },
+      "threeCardRun": {
+        "accepted": 25251,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 17015,
+            "declined": 1592,
+            "declinesWithCardHeld": 1592,
+            "declinesWithoutCardHeld": 29265,
+            "heldGivenDeclinePpm": 51593,
+            "multiplierPpm": 85559,
+            "observedDeclines": 30857,
+            "opportunities": 18607
+          },
+          "third": {
+            "accepted": 8236,
+            "declined": 508,
+            "declinesWithCardHeld": 508,
+            "declinesWithoutCardHeld": 19499,
+            "heldGivenDeclinePpm": 25391,
+            "multiplierPpm": 58097,
+            "observedDeclines": 20007,
+            "opportunities": 8744
+          }
+        },
+        "declined": 2100,
+        "declinesWithCardHeld": 2100,
+        "declinesWithoutCardHeld": 48764,
+        "heldGivenDeclinePpm": 41287,
+        "multiplierPpm": 76780,
+        "observedDeclines": 50864,
+        "opportunities": 27351
+      },
+      "threeOfAKind": {
+        "accepted": 19693,
+        "byCardOrdinal": {
+          "first": {
+            "accepted": 0,
+            "declined": 0,
+            "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0,
+            "heldGivenDeclinePpm": null,
+            "multiplierPpm": null,
+            "observedDeclines": 0,
+            "opportunities": 0
+          },
+          "second": {
+            "accepted": 17600,
+            "declined": 351,
+            "declinesWithCardHeld": 351,
+            "declinesWithoutCardHeld": 30245,
+            "heldGivenDeclinePpm": 11472,
+            "multiplierPpm": 19553,
+            "observedDeclines": 30596,
+            "opportunities": 17951
+          },
+          "third": {
+            "accepted": 2093,
+            "declined": 35,
+            "declinesWithCardHeld": 35,
+            "declinesWithoutCardHeld": 13835,
+            "heldGivenDeclinePpm": 2523,
+            "multiplierPpm": 16447,
+            "observedDeclines": 13870,
+            "opportunities": 2128
+          }
+        },
+        "declined": 386,
+        "declinesWithCardHeld": 386,
+        "declinesWithoutCardHeld": 44080,
+        "heldGivenDeclinePpm": 8681,
+        "multiplierPpm": 19224,
+        "observedDeclines": 44466,
+        "opportunities": 20079
+      }
+    }
+  },
+  "combination": "independent held-card likelihood multipliers across distinct public decline events",
+  "factors": {
+    "fourOfAKind": {
+      "accepted": 772,
+      "byCardOrdinal": {
+        "first": {
+          "accepted": 0,
+          "declined": 0,
+          "declinesWithCardHeld": 0,
+          "declinesWithoutCardHeld": 0,
+          "heldGivenDeclinePpm": null,
+          "multiplierPpm": null,
+          "observedDeclines": 0,
+          "opportunities": 0
+        },
+        "second": {
+          "accepted": 609,
+          "declined": 0,
+          "declinesWithCardHeld": 0,
+          "declinesWithoutCardHeld": 5715,
+          "heldGivenDeclinePpm": 0,
+          "multiplierPpm": 0,
+          "observedDeclines": 5715,
+          "opportunities": 609
+        },
+        "third": {
+          "accepted": 163,
+          "declined": 0,
+          "declinesWithCardHeld": 0,
+          "declinesWithoutCardHeld": 2694,
+          "heldGivenDeclinePpm": 0,
+          "multiplierPpm": 0,
+          "observedDeclines": 2694,
+          "opportunities": 163
+        }
+      },
+      "declined": 0,
+      "declinesWithCardHeld": 0,
+      "declinesWithoutCardHeld": 8409,
+      "heldGivenDeclinePpm": 0,
+      "multiplierPpm": 0,
+      "observedDeclines": 8409,
+      "opportunities": 772
+    },
+    "fourOfAKindAfterPairRoyal": {
+      "accepted": 772,
+      "byCardOrdinal": {
+        "first": {
+          "accepted": 0,
+          "declined": 0,
+          "declinesWithCardHeld": 0,
+          "declinesWithoutCardHeld": 0,
+          "heldGivenDeclinePpm": null,
+          "multiplierPpm": null,
+          "observedDeclines": 0,
+          "opportunities": 0
+        },
+        "second": {
+          "accepted": 609,
+          "declined": 0,
+          "declinesWithCardHeld": 0,
+          "declinesWithoutCardHeld": 5715,
+          "heldGivenDeclinePpm": 0,
+          "multiplierPpm": 0,
+          "observedDeclines": 5715,
+          "opportunities": 609
+        },
+        "third": {
+          "accepted": 163,
+          "declined": 0,
+          "declinesWithCardHeld": 0,
+          "declinesWithoutCardHeld": 2694,
+          "heldGivenDeclinePpm": 0,
+          "multiplierPpm": 0,
+          "observedDeclines": 2694,
+          "opportunities": 163
+        }
+      },
+      "declined": 0,
+      "declinesWithCardHeld": 0,
+      "declinesWithoutCardHeld": 8409,
+      "heldGivenDeclinePpm": 0,
+      "multiplierPpm": 0,
+      "observedDeclines": 8409,
+      "opportunities": 772
+    },
+    "fourPlusCardRun": {
+      "accepted": 13345,
+      "byCardOrdinal": {
+        "first": {
+          "accepted": 0,
+          "declined": 0,
+          "declinesWithCardHeld": 0,
+          "declinesWithoutCardHeld": 0,
+          "heldGivenDeclinePpm": null,
+          "multiplierPpm": null,
+          "observedDeclines": 0,
+          "opportunities": 0
+        },
+        "second": {
+          "accepted": 6335,
+          "declined": 348,
+          "declinesWithCardHeld": 348,
+          "declinesWithoutCardHeld": 4397,
+          "heldGivenDeclinePpm": 73340,
+          "multiplierPpm": 52072,
+          "observedDeclines": 4745,
+          "opportunities": 6683
+        },
+        "third": {
+          "accepted": 7010,
+          "declined": 267,
+          "declinesWithCardHeld": 267,
+          "declinesWithoutCardHeld": 10666,
+          "heldGivenDeclinePpm": 24421,
+          "multiplierPpm": 36691,
+          "observedDeclines": 10933,
+          "opportunities": 7277
+        }
+      },
+      "declined": 615,
+      "declinesWithCardHeld": 615,
+      "declinesWithoutCardHeld": 15063,
+      "heldGivenDeclinePpm": 39227,
+      "multiplierPpm": 44054,
+      "observedDeclines": 15678,
+      "opportunities": 13960
+    },
+    "pair": {
+      "accepted": 103055,
+      "byCardOrdinal": {
+        "first": {
+          "accepted": 35868,
+          "declined": 6959,
+          "declinesWithCardHeld": 6959,
+          "declinesWithoutCardHeld": 192738,
+          "heldGivenDeclinePpm": 34848,
+          "multiplierPpm": 162491,
+          "observedDeclines": 199697,
+          "opportunities": 42827
+        },
+        "second": {
+          "accepted": 40607,
+          "declined": 4123,
+          "declinesWithCardHeld": 4123,
+          "declinesWithoutCardHeld": 278934,
+          "heldGivenDeclinePpm": 14566,
+          "multiplierPpm": 92175,
+          "observedDeclines": 283057,
+          "opportunities": 44730
+        },
+        "third": {
+          "accepted": 26580,
+          "declined": 2565,
+          "declinesWithCardHeld": 2565,
+          "declinesWithoutCardHeld": 168579,
+          "heldGivenDeclinePpm": 14987,
+          "multiplierPpm": 88008,
+          "observedDeclines": 171144,
+          "opportunities": 29145
+        }
+      },
+      "declined": 13647,
+      "declinesWithCardHeld": 13647,
+      "declinesWithoutCardHeld": 640251,
+      "heldGivenDeclinePpm": 20870,
+      "multiplierPpm": 116939,
+      "observedDeclines": 653898,
+      "opportunities": 116702
+    },
+    "pairRoyalAfterPair": {
+      "accepted": 19693,
+      "byCardOrdinal": {
+        "first": {
+          "accepted": 0,
+          "declined": 0,
+          "declinesWithCardHeld": 0,
+          "declinesWithoutCardHeld": 0,
+          "heldGivenDeclinePpm": null,
+          "multiplierPpm": null,
+          "observedDeclines": 0,
+          "opportunities": 0
+        },
+        "second": {
+          "accepted": 17600,
+          "declined": 351,
+          "declinesWithCardHeld": 351,
+          "declinesWithoutCardHeld": 30245,
+          "heldGivenDeclinePpm": 11472,
+          "multiplierPpm": 19553,
+          "observedDeclines": 30596,
+          "opportunities": 17951
+        },
+        "third": {
+          "accepted": 2093,
+          "declined": 35,
+          "declinesWithCardHeld": 35,
+          "declinesWithoutCardHeld": 13835,
+          "heldGivenDeclinePpm": 2523,
+          "multiplierPpm": 16447,
+          "observedDeclines": 13870,
+          "opportunities": 2128
+        }
+      },
+      "declined": 386,
+      "declinesWithCardHeld": 386,
+      "declinesWithoutCardHeld": 44080,
+      "heldGivenDeclinePpm": 8681,
+      "multiplierPpm": 19224,
+      "observedDeclines": 44466,
+      "opportunities": 20079
+    },
+    "safePair": {
+      "accepted": 21601,
+      "byCardOrdinal": {
+        "first": {
+          "accepted": 311,
+          "declined": 1,
+          "declinesWithCardHeld": 1,
+          "declinesWithoutCardHeld": 28,
+          "heldGivenDeclinePpm": 34483,
+          "multiplierPpm": 3205,
+          "observedDeclines": 29,
+          "opportunities": 312
+        },
+        "second": {
+          "accepted": 11107,
+          "declined": 269,
+          "declinesWithCardHeld": 269,
+          "declinesWithoutCardHeld": 97400,
+          "heldGivenDeclinePpm": 2754,
+          "multiplierPpm": 23646,
+          "observedDeclines": 97669,
+          "opportunities": 11376
+        },
+        "third": {
+          "accepted": 10183,
+          "declined": 83,
+          "declinesWithCardHeld": 83,
+          "declinesWithoutCardHeld": 36247,
+          "heldGivenDeclinePpm": 2285,
+          "multiplierPpm": 8085,
+          "observedDeclines": 36330,
+          "opportunities": 10266
+        }
+      },
+      "declined": 353,
+      "declinesWithCardHeld": 353,
+      "declinesWithoutCardHeld": 133675,
+      "heldGivenDeclinePpm": 2634,
+      "multiplierPpm": 16079,
+      "observedDeclines": 134028,
+      "opportunities": 21954
+    },
+    "safePairRoyal": {
+      "accepted": 8634,
+      "byCardOrdinal": {
+        "first": {
+          "accepted": 0,
+          "declined": 0,
+          "declinesWithCardHeld": 0,
+          "declinesWithoutCardHeld": 0,
+          "heldGivenDeclinePpm": null,
+          "multiplierPpm": null,
+          "observedDeclines": 0,
+          "opportunities": 0
+        },
+        "second": {
+          "accepted": 7707,
+          "declined": 17,
+          "declinesWithCardHeld": 17,
+          "declinesWithoutCardHeld": 9682,
+          "heldGivenDeclinePpm": 1753,
+          "multiplierPpm": 2201,
+          "observedDeclines": 9699,
+          "opportunities": 7724
+        },
+        "third": {
+          "accepted": 927,
+          "declined": 1,
+          "declinesWithCardHeld": 1,
+          "declinesWithoutCardHeld": 2785,
+          "heldGivenDeclinePpm": 359,
+          "multiplierPpm": 1078,
+          "observedDeclines": 2786,
+          "opportunities": 928
+        }
+      },
+      "declined": 18,
+      "declinesWithCardHeld": 18,
+      "declinesWithoutCardHeld": 12467,
+      "heldGivenDeclinePpm": 1442,
+      "multiplierPpm": 2080,
+      "observedDeclines": 12485,
+      "opportunities": 8652
+    },
+    "threeCardRun": {
+      "accepted": 25251,
+      "byCardOrdinal": {
+        "first": {
+          "accepted": 0,
+          "declined": 0,
+          "declinesWithCardHeld": 0,
+          "declinesWithoutCardHeld": 0,
+          "heldGivenDeclinePpm": null,
+          "multiplierPpm": null,
+          "observedDeclines": 0,
+          "opportunities": 0
+        },
+        "second": {
+          "accepted": 17015,
+          "declined": 1592,
+          "declinesWithCardHeld": 1592,
+          "declinesWithoutCardHeld": 29265,
+          "heldGivenDeclinePpm": 51593,
+          "multiplierPpm": 85559,
+          "observedDeclines": 30857,
+          "opportunities": 18607
+        },
+        "third": {
+          "accepted": 8236,
+          "declined": 508,
+          "declinesWithCardHeld": 508,
+          "declinesWithoutCardHeld": 19499,
+          "heldGivenDeclinePpm": 25391,
+          "multiplierPpm": 58097,
+          "observedDeclines": 20007,
+          "opportunities": 8744
+        }
+      },
+      "declined": 2100,
+      "declinesWithCardHeld": 2100,
+      "declinesWithoutCardHeld": 48764,
+      "heldGivenDeclinePpm": 41287,
+      "multiplierPpm": 76780,
+      "observedDeclines": 50864,
+      "opportunities": 27351
+    },
+    "threeOfAKind": {
+      "accepted": 19693,
+      "byCardOrdinal": {
+        "first": {
+          "accepted": 0,
+          "declined": 0,
+          "declinesWithCardHeld": 0,
+          "declinesWithoutCardHeld": 0,
+          "heldGivenDeclinePpm": null,
+          "multiplierPpm": null,
+          "observedDeclines": 0,
+          "opportunities": 0
+        },
+        "second": {
+          "accepted": 17600,
+          "declined": 351,
+          "declinesWithCardHeld": 351,
+          "declinesWithoutCardHeld": 30245,
+          "heldGivenDeclinePpm": 11472,
+          "multiplierPpm": 19553,
+          "observedDeclines": 30596,
+          "opportunities": 17951
+        },
+        "third": {
+          "accepted": 2093,
+          "declined": 35,
+          "declinesWithCardHeld": 35,
+          "declinesWithoutCardHeld": 13835,
+          "heldGivenDeclinePpm": 2523,
+          "multiplierPpm": 16447,
+          "observedDeclines": 13870,
+          "opportunities": 2128
+        }
+      },
+      "declined": 386,
+      "declinesWithCardHeld": 386,
+      "declinesWithoutCardHeld": 44080,
+      "heldGivenDeclinePpm": 8681,
+      "multiplierPpm": 19224,
+      "observedDeclines": 44466,
+      "opportunities": 20079
+    }
+  },
+  "inference": "heldGivenDeclinePpm is P(card held | observed decline); multiplierPpm is P(decline | card held) and reweights card-holding worlds against no-card worlds, for which a noncompeting decline is certain",
+  "modelCohort": {
+    "includedModels": [
+      "schell_table-peg_table-13.0",
+      "schell_table-peg_table-13.1",
+      "schell_table-peg_table-13.2",
+      "schell_table-peg_table-13.21",
+      "schell_table-peg_table-14.3",
+      "schell_table-peg_table-14.8",
+      "schell_table-peg_table-14.8.1",
+      "schell_table-peg_table-15.0",
+      "schell_table-peg_table-15.1",
+      "schell_table-peg_table-15.2"
+    ],
+    "includedPeggingStrategy": "exhaustive"
+  },
+  "modelVersion": "13.22",
+  "schemaVersion": 3,
+  "semantics": "Candidate-level evidence for a non-scoring decline when the scoring rank was structurally legal, the opponent still held at least one card, and category/card-ordinal conditions were satisfied; competing scoring plays are excluded",
+  "sources": [
+    {
+      "kind": "exhaustiveModel",
+      "path": "benchmarks/ai-db/rust-13.0-vs-15.2-10k-20260716.sqlite",
+      "sha256": "f804f3bea8b10eacd1951b34ab70822664b789886e0081de68284872c4debeb1"
+    },
+    {
+      "kind": "exhaustiveModel",
+      "path": "benchmarks/model131/evaluation-20260828/13.0-vs-13.1-discard-only-legal-leads-10k/13.1-left/games.db",
+      "sha256": "e233acd82e00fd361712a8953556dd768205d0a6effbea2d9adec4cd17a59409"
+    },
+    {
+      "kind": "exhaustiveModel",
+      "path": "benchmarks/model131/evaluation-20260828/13.0-vs-13.1-discard-only-legal-leads-10k/13.0-left/games.db",
+      "sha256": "b69daf6e0dc1037d67c08af07250a5b267f5013b31fce8e06fc2030af404a755"
+    },
+    {
+      "kind": "exhaustiveModel",
+      "path": "/private/tmp/cribbage-model132-benchmark-output-20260830-v2/benchmark/13.2-left/games.db",
+      "sha256": "43d66936bb04f7127627906ce3d99e540e8fad78730b26d7933dd64d1a191c37"
+    },
+    {
+      "kind": "exhaustiveModel",
+      "path": "/private/tmp/cribbage-model132-benchmark-output-20260830-v2/benchmark/13.0-left/games.db",
+      "sha256": "e919e6718d25c1c2fb756a5a3cf47227f7b5999d9ab9a8124eb7b13f2065383d"
+    },
+    {
+      "kind": "human",
+      "path": "production-pulls/20260831-141155/cribbage-server.sqlite",
+      "sha256": "9c550f4d98a3d0172efb98e45b16d4049a0957c9866c923dfbde1fc07e20469a"
+    },
+    {
+      "kind": "human",
+      "path": "data/cribbage-server.sqlite",
+      "sha256": "2c08d124d9f376df26e1ecca7f6bac9e75aa084813e1e9ba48b4bd4f5f991318"
+    }
+  ]
+}

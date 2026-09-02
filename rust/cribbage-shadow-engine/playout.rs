@@ -1,10 +1,10 @@
 use crate::board::Role;
-use crate::cards::{score_count, score_hand, Card};
+use crate::cards::{score_hand, Card};
 use crate::game::{CribbageGame, Phase, Side};
 use crate::information_set::perspective_history;
 use crate::model::{
-    evaluate_decision, Decision, DecisionInput, DecisionKind, Model16PolicyDecision,
-    Model16PolicyMode, PlayerKey,
+    evaluate_decision, evaluate_decision_with_model911_cache, Decision, DecisionInput,
+    DecisionKind, Model16PolicyDecision, Model16PolicyMode, Model911HandCache, PlayerKey,
 };
 use crate::model_id::ModelId;
 use std::time::Instant;
@@ -100,6 +100,7 @@ pub struct ModelPlayout {
     pub record: CompactPlayoutRecord,
     model16_policy_mode: Model16PolicyMode,
     model16_policy_seed: u64,
+    model911_hand_caches: [Model911HandCache; 2],
 }
 
 impl ModelPlayout {
@@ -130,6 +131,7 @@ impl ModelPlayout {
             record: CompactPlayoutRecord::default(),
             model16_policy_mode: Model16PolicyMode::Argmax,
             model16_policy_seed: u64::from(seed),
+            model911_hand_caches: [Model911HandCache::new(), Model911HandCache::new()],
         };
         playout.start_hand_record();
         Ok(playout)
@@ -146,6 +148,7 @@ impl ModelPlayout {
                 Phase::Pegging => self.play_pegging_step(root)?,
                 Phase::PeggingComplete => {
                     let hand_number = self.game.hand_number;
+                    self.clear_model911_hand_caches();
                     self.finalize_scoring_for_current_hand();
                     self.game.score_after_pegging()?;
                     self.finish_current_hand_record();
@@ -158,6 +161,7 @@ impl ModelPlayout {
                     self.game.continue_scoring()?;
                 }
                 Phase::GameOver => {
+                    self.clear_model911_hand_caches();
                     let left_score = self.game.player(Side::Left).score;
                     let right_score = self.game.player(Side::Right).score;
                     return Ok(PlayoutResult {
@@ -300,9 +304,6 @@ impl ModelPlayout {
         let right_before = self.game.player(Side::Right).score;
         if legal.len() == 1 {
             let card = legal[0];
-            let mut plays = self.game.plays.clone();
-            plays.push(card);
-            let ev = score_count(&plays) as f64;
             let points = self.game.play_card(side, card.id)?;
             let left_after = self.game.player(Side::Left).score;
             let right_after = self.game.player(Side::Right).score;
@@ -317,7 +318,7 @@ impl ModelPlayout {
                 player: Some(side),
                 role: Some(self.role(side)),
                 model: Some(self.model(side)),
-                selected_ev: Some(ev),
+                selected_ev: None,
                 selected_win_probability: None,
                 model16_policy: None,
                 decision_elapsed_us: None,
@@ -336,7 +337,11 @@ impl ModelPlayout {
         }
         let input = self.decision_input(side, DecisionKind::Peg);
         let decision_started = Instant::now();
-        let decision = evaluate_decision(&input, root)?;
+        let decision = evaluate_decision_with_model911_cache(
+            &input,
+            root,
+            Some(&self.model911_hand_caches[side.index()]),
+        )?;
         let decision_elapsed_us = elapsed_micros(decision_started);
         match decision {
             Decision::Peg { action, .. } if action == "go" => {
@@ -454,6 +459,12 @@ impl ModelPlayout {
             model16_policy_mode: self.model16_policy_mode,
             model16_policy_sample: self.model16_policy_sample(side),
             decision_seed: self.decision_seed(side, kind),
+        }
+    }
+
+    fn clear_model911_hand_caches(&self) {
+        for cache in &self.model911_hand_caches {
+            cache.clear();
         }
     }
 

@@ -24,9 +24,11 @@ use std::process;
 use std::time::{Duration, Instant};
 
 const PAIR_MAGIC: &[u8; 8] = b"M91PR001";
+const MODEL911_PAIR_MAGIC: &[u8; 8] = b"M911PR01";
 const PAIR_VERSION: u32 = 1;
 const PAIR_RECORD_BYTES: usize = 2;
 const PAIR_HEADER_BYTES: usize = 40;
+const MODEL911_PAIR_HEADER_BYTES: usize = 56;
 const PAIR_FILE: &str = "pair-outcomes.bin";
 const LEAD_FILE: &str = "pone-leads.bin";
 const LEAD_MAGIC: &[u8; 8] = b"M91LD001";
@@ -108,6 +110,7 @@ struct AggregateCheckpoint {
 
 #[derive(Clone, Debug)]
 struct PairMatrix {
+    model: &'static str,
     keep_count: usize,
     values: Vec<u16>,
 }
@@ -1113,6 +1116,7 @@ fn build_aggregate(config: &AggregateConfig) -> Result<(), String> {
     write_aggregate_manifest(
         config,
         &checkpoint,
+        pair_matrix.model,
         elapsed,
         ev_checksum,
         hist_checksum,
@@ -1150,11 +1154,21 @@ impl PairMatrix {
 fn load_pair_matrix(path: &Path) -> Result<PairMatrix, String> {
     let bytes = fs::read(path)
         .map_err(|error| format!("read pair matrix {} failed: {}", path.display(), error))?;
-    if bytes.len() < PAIR_HEADER_BYTES || &bytes[..8] != PAIR_MAGIC {
-        return Err("invalid Model 9.1 pair matrix header".to_string());
+    let magic = bytes
+        .get(..8)
+        .ok_or_else(|| "invalid Model 9.x pair matrix header".to_string())?;
+    let (model, header_bytes) = if magic == PAIR_MAGIC {
+        ("schell_table-peg_table-9.1", PAIR_HEADER_BYTES)
+    } else if magic == MODEL911_PAIR_MAGIC {
+        ("schell_table-peg_table-9.11", MODEL911_PAIR_HEADER_BYTES)
+    } else {
+        return Err("invalid Model 9.x pair matrix header".to_string());
+    };
+    if bytes.len() < header_bytes {
+        return Err("truncated Model 9.x pair matrix header".to_string());
     }
     if read_u32(&bytes, 8)? != PAIR_VERSION {
-        return Err("unsupported Model 9.1 pair matrix version".to_string());
+        return Err("unsupported Model 9.x pair matrix version".to_string());
     }
     let keep_count = read_u32(&bytes, 12)? as usize;
     let dealer_start = read_u32(&bytes, 16)? as usize;
@@ -1166,21 +1180,30 @@ fn load_pair_matrix(path: &Path) -> Result<PairMatrix, String> {
         || dealer_count != keep_count
         || pone_count != keep_count
     {
-        return Err("aggregate requires a complete Model 9.1 pair matrix".to_string());
+        return Err("aggregate requires a complete Model 9.x pair matrix".to_string());
     }
-    let expected = PAIR_HEADER_BYTES + keep_count * keep_count * PAIR_RECORD_BYTES;
+    if model == "schell_table-peg_table-9.11"
+        && (read_u32(&bytes, 32)? as usize != PAIR_RECORD_BYTES || read_u32(&bytes, 36)? != 0)
+    {
+        return Err("unsupported Model 9.11 pair matrix record format".to_string());
+    }
+    let expected = header_bytes + keep_count * keep_count * PAIR_RECORD_BYTES;
     if bytes.len() != expected {
         return Err(format!(
-            "Model 9.1 pair matrix has {} bytes; expected {}",
+            "Model 9.x pair matrix has {} bytes; expected {}",
             bytes.len(),
             expected
         ));
     }
-    let values = bytes[PAIR_HEADER_BYTES..]
+    let values = bytes[header_bytes..]
         .chunks_exact(2)
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
         .collect();
-    Ok(PairMatrix { keep_count, values })
+    Ok(PairMatrix {
+        model,
+        keep_count,
+        values,
+    })
 }
 
 fn load_pone_leads(path: &Path, expected_keep_count: usize) -> Result<Vec<u8>, String> {
@@ -1600,6 +1623,7 @@ fn write_aggregate_status(
 fn write_aggregate_manifest(
     config: &AggregateConfig,
     checkpoint: &AggregateCheckpoint,
+    model: &str,
     elapsed: Duration,
     ev_checksum: u64,
     hist_checksum: u64,
@@ -1607,7 +1631,7 @@ fn write_aggregate_manifest(
 ) -> Result<(), String> {
     let manifest = json!({
         "version": 1,
-        "model": "schell_table-peg_table-9.1",
+        "model": model,
         "phase": "aggregate",
         "weighting": "compatible opponent four-card rank keeps reweighted after removing all six visible actor cards",
         "evMagic": "M91EV001",

@@ -11,12 +11,14 @@
 
 use crate::board::Role;
 use crate::cards::{
-    enumerate_rank_hands, peg_card_for_rank, rank_count_total, score_count, VALUES,
+    enumerate_rank_hands, peg_card_for_rank, rank_combination_count, rank_count_total, score_count,
+    VALUES,
 };
 use crate::information_set::{PegSeat, RankPegAction, RankPegEvent, RankPegState};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::{Arc, OnceLock};
 
 const RANKS: usize = 13;
 const MAX_SERIES: usize = 8;
@@ -24,6 +26,8 @@ const BELIEF_MAGIC: &[u8; 8] = b"M91BL001";
 const BELIEF_HEADER_BYTES: usize = 28;
 const BELIEF_ENTRY_BYTES: usize = 22;
 const BELIEF_RECORD_BYTES: usize = 21;
+const MAX_RANK_HANDS: usize = 1_820;
+const MAX_RANK_HAND_WORDS: usize = MAX_RANK_HANDS.div_ceil(64);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Model91Actor {
@@ -359,18 +363,175 @@ fn read_u64(bytes: &[u8], offset: usize) -> Result<u64, String> {
     ]))
 }
 
+/// Immutable rank-hand index shared by every policy instance. Compatibility
+/// is represented as one small bitset per rank/copy limit, so a legal dead-card
+/// vector is applied by thirteen intersections instead of rebuilding the
+/// combinatorial hand universe.
+struct RankHandIndex {
+    buckets: [RankHandBucket; 5],
+}
+
+struct RankHandBucket {
+    hands: Vec<[u8; RANKS]>,
+    compatible: Vec<[u64; MAX_RANK_HAND_WORDS]>,
+    word_count: usize,
+}
+
+impl RankHandIndex {
+    fn shared() -> &'static Self {
+        static INDEX: OnceLock<RankHandIndex> = OnceLock::new();
+        INDEX.get_or_init(Self::new)
+    }
+
+    fn new() -> Self {
+        let buckets = std::array::from_fn(|size| {
+            let hands = enumerate_rank_hands(&[4_u8; RANKS], size as u8)
+                .into_iter()
+                .map(|(hand, _)| hand)
+                .collect::<Vec<_>>();
+            let word_count = hands.len().div_ceil(64);
+            let compatible = (0..RANKS * 5)
+                .map(|slot| {
+                    let rank = slot / 5;
+                    let limit = (slot % 5) as u8;
+                    let mut words = [0_u64; MAX_RANK_HAND_WORDS];
+                    for (index, hand) in hands.iter().enumerate() {
+                        if hand[rank] <= limit {
+                            words[index / 64] |= 1_u64 << (index % 64);
+                        }
+                    }
+                    words
+                })
+                .collect();
+            RankHandBucket {
+                hands,
+                compatible,
+                word_count,
+            }
+        });
+        Self { buckets }
+    }
+
+    fn compatible_hands(
+        &self,
+        available: &[u8; RANKS],
+        size: u8,
+    ) -> Result<Vec<([u8; RANKS], f64)>, String> {
+        let bucket = self
+            .buckets
+            .get(size as usize)
+            .ok_or_else(|| format!("Model 9.1 opponent hand size {size} exceeds four"))?;
+        if let Some((rank, copies)) = available
+            .iter()
+            .copied()
+            .enumerate()
+            .find(|(_, copies)| *copies > 4)
+        {
+            return Err(format!(
+                "Model 9.1 rank {rank} has invalid availability {copies}"
+            ));
+        }
+        let mut selected = [u64::MAX; MAX_RANK_HAND_WORDS];
+        if let Some(last) = bucket.word_count.checked_sub(1) {
+            let used = bucket.hands.len() % 64;
+            if used != 0 {
+                selected[last] = (1_u64 << used) - 1;
+            }
+        }
+        for (rank, copies) in available.iter().copied().enumerate() {
+            let allowed = &bucket.compatible[rank * 5 + copies as usize];
+            for word in 0..bucket.word_count {
+                selected[word] &= allowed[word];
+            }
+        }
+        let mut result = Vec::new();
+        for (word_index, mut word) in selected.iter().copied().take(bucket.word_count).enumerate() {
+            while word != 0 {
+                let bit = word.trailing_zeros() as usize;
+                let index = word_index * 64 + bit;
+                let hand = bucket.hands[index];
+                result.push((hand, rank_combination_count(&hand, available)));
+                word &= word - 1;
+            }
+        }
+        Ok(result)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Model91PolicyStats {
     pub decision_requests: u64,
     pub decision_cache_hits: u64,
+    pub decision_cache_capacity_clears: u64,
+    pub decision_cache_peak_entries: u64,
     pub evaluated_decisions: u64,
     pub random_future_states: u64,
+    pub future_cache_hits: u64,
+    pub future_cache_entries: u64,
+    pub future_cache_capacity_clears: u64,
+    pub future_cache_peak_entries: u64,
+    pub posterior_requests: u64,
+    pub posterior_hands_generated: u64,
+    pub evidence_cache_requests: u64,
+    pub evidence_cache_hits: u64,
+    pub evidence_cache_capacity_clears: u64,
+    pub evidence_cache_entries: u64,
+    pub evidence_cache_outcomes: u64,
+    pub evidence_cache_peak_outcomes: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct Model91DecisionKey {
+    observation: Model91Observation,
+    opponent_rank_likelihood_ppm: [u32; RANKS],
+}
+
+type WeightedOpponentHands = Vec<([u8; RANKS], f64)>;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Model91EvidenceWeightMode {
+    Physical,
+    Empirical,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Model91EvidenceHand {
+    ranks: [u8; RANKS],
+    base_weight: f64,
+}
+
+/// Builder-local response surface for one legal observation after removing
+/// actor-owned dead cards. Continuation outcomes are invariant to those dead
+/// cards; only the compatible hidden-hand weights change. This is memoization
+/// for an edit pass and is never a durable observation-to-action asset.
+struct Model91ActionEvidence {
+    legal: Vec<u8>,
+    hands: Vec<Model91EvidenceHand>,
+    outcomes: Vec<WeightedPoints>,
+    weight_mode: Model91EvidenceWeightMode,
+}
+
+impl Model91ActionEvidence {
+    fn outcome(&self, action_index: usize, hand_index: usize) -> WeightedPoints {
+        self.outcomes[action_index * self.hands.len() + hand_index]
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Model91Choice {
+    pub action: RankPegAction,
+    pub net_ev: Option<f64>,
 }
 
 pub struct Model91Policy {
     empirical: Option<Model91EmpiricalBeliefs>,
-    decision_cache: HashMap<Model91Observation, RankPegAction>,
+    decision_cache: HashMap<Model91DecisionKey, Model91Choice>,
     cache_limit: usize,
+    future_cache: HashMap<AverageState, WeightedPoints>,
+    future_cache_limit: usize,
+    evidence_cache: HashMap<Model91Observation, Arc<Model91ActionEvidence>>,
+    evidence_cache_outcome_limit: usize,
+    evidence_cache_outcomes: usize,
     stats: Model91PolicyStats,
 }
 
@@ -380,33 +541,155 @@ impl Model91Policy {
             empirical,
             decision_cache: HashMap::new(),
             cache_limit,
+            future_cache: HashMap::new(),
+            future_cache_limit: 0,
+            evidence_cache: HashMap::new(),
+            evidence_cache_outcome_limit: 0,
+            evidence_cache_outcomes: 0,
             stats: Model91PolicyStats::default(),
         }
+    }
+
+    /// Construct a policy with both the historical cross-decision action
+    /// cache and an optional cache of evaluated continuation outcomes.  The
+    /// continuation cache contains no observation-to-action mapping and is
+    /// intended to be scoped to one builder worker or live hand.
+    pub fn new_with_caches(
+        empirical: Option<Model91EmpiricalBeliefs>,
+        cache_limit: usize,
+        future_cache_limit: usize,
+    ) -> Self {
+        let mut policy = Self::new(empirical, cache_limit);
+        policy.future_cache_limit = future_cache_limit;
+        policy
+    }
+
+    /// Construct a builder policy that can reuse candidate continuation
+    /// outcomes across observations differing only in legally known discards,
+    /// cut rank, or go/decline likelihoods. Capacity is measured in stored
+    /// action-by-hidden-hand outcomes rather than cache entries.
+    pub fn new_with_evidence_cache(
+        empirical: Option<Model91EmpiricalBeliefs>,
+        cache_limit: usize,
+        evidence_cache_outcome_limit: usize,
+        future_cache_limit: usize,
+    ) -> Self {
+        let mut policy = Self::new_with_caches(empirical, cache_limit, future_cache_limit);
+        policy.evidence_cache_outcome_limit = evidence_cache_outcome_limit;
+        policy
     }
 
     pub fn choose_action(
         &mut self,
         observation: &Model91Observation,
     ) -> Result<RankPegAction, String> {
+        self.choose_action_with_opponent_likelihood(observation, &[1_000_000_u32; RANKS])
+    }
+
+    pub fn choose_action_with_net_ev(
+        &mut self,
+        observation: &Model91Observation,
+    ) -> Result<Model91Choice, String> {
+        self.choose_with_opponent_likelihood(observation, &[1_000_000_u32; RANKS])
+    }
+
+    /// Choose from the legal observation after applying likelihood evidence
+    /// to each possible rank in the opponent's hidden remaining hand.  Zero
+    /// makes a rank impossible; 1,000,000 is neutral.
+    pub fn choose_action_with_opponent_likelihood(
+        &mut self,
+        observation: &Model91Observation,
+        opponent_rank_likelihood_ppm: &[u32; RANKS],
+    ) -> Result<RankPegAction, String> {
+        Ok(self
+            .choose_with_opponent_likelihood(observation, opponent_rank_likelihood_ppm)?
+            .action)
+    }
+
+    pub fn choose_action_with_opponent_likelihood_and_net_ev(
+        &mut self,
+        observation: &Model91Observation,
+        opponent_rank_likelihood_ppm: &[u32; RANKS],
+    ) -> Result<Model91Choice, String> {
+        self.choose_with_opponent_likelihood(observation, opponent_rank_likelihood_ppm)
+    }
+
+    fn choose_with_opponent_likelihood(
+        &mut self,
+        observation: &Model91Observation,
+        opponent_rank_likelihood_ppm: &[u32; RANKS],
+    ) -> Result<Model91Choice, String> {
         observation.validate()?;
         self.stats.decision_requests = self.stats.decision_requests.saturating_add(1);
-        if let Some(action) = self.decision_cache.get(observation).copied() {
+        let key = Model91DecisionKey {
+            observation: *observation,
+            opponent_rank_likelihood_ppm: *opponent_rank_likelihood_ppm,
+        };
+        if let Some(choice) = self.decision_cache.get(&key).copied() {
             self.stats.decision_cache_hits = self.stats.decision_cache_hits.saturating_add(1);
-            return Ok(action);
+            return Ok(choice);
         }
         let legal = legal_ranks(&observation.own_remaining, observation.count);
-        let action = match legal.as_slice() {
-            [] => RankPegAction::Go,
-            [rank] => RankPegAction::Play(*rank),
-            _ => RankPegAction::Play(self.best_rank(observation, &legal)?),
+        let choice = match legal.as_slice() {
+            [] => Model91Choice {
+                action: RankPegAction::Go,
+                net_ev: None,
+            },
+            [rank] => Model91Choice {
+                action: RankPegAction::Play(*rank),
+                net_ev: None,
+            },
+            _ => {
+                let (rank, net_ev) =
+                    self.best_rank(observation, &legal, opponent_rank_likelihood_ppm)?;
+                Model91Choice {
+                    action: RankPegAction::Play(rank),
+                    net_ev: Some(net_ev),
+                }
+            }
         };
         self.stats.evaluated_decisions = self.stats.evaluated_decisions.saturating_add(1);
         if self.cache_limit > 0 {
             if self.decision_cache.len() >= self.cache_limit {
                 self.decision_cache.clear();
+                self.stats.decision_cache_capacity_clears =
+                    self.stats.decision_cache_capacity_clears.saturating_add(1);
             }
-            self.decision_cache.insert(*observation, action);
+            self.decision_cache.insert(key, choice);
+            self.stats.decision_cache_peak_entries = self
+                .stats
+                .decision_cache_peak_entries
+                .max(self.decision_cache.len() as u64);
         }
+        Ok(choice)
+    }
+
+    /// Choose one action for an offline information set whose compatible
+    /// hidden opponent hands have already been enumerated by the caller. The
+    /// supplied hands are aggregated before the action is chosen; no action
+    /// may depend on which hidden hand is the real one.
+    pub fn choose_action_for_weighted_opponent_hands(
+        &mut self,
+        observation: &Model91Observation,
+        opponent_hands: Vec<([u8; RANKS], f64)>,
+        opponent_rank_likelihood_ppm: &[u32; RANKS],
+    ) -> Result<RankPegAction, String> {
+        observation.validate()?;
+        self.stats.decision_requests = self.stats.decision_requests.saturating_add(1);
+        let legal = legal_ranks(&observation.own_remaining, observation.count);
+        let action = match legal.as_slice() {
+            [] => RankPegAction::Go,
+            [rank] => RankPegAction::Play(*rank),
+            _ => {
+                let opponent_hands =
+                    reweight_opponent_hands(opponent_hands, opponent_rank_likelihood_ppm);
+                RankPegAction::Play(
+                    self.best_rank_for_hands(observation, &legal, &opponent_hands)?
+                        .0,
+                )
+            }
+        };
+        self.stats.evaluated_decisions = self.stats.evaluated_decisions.saturating_add(1);
         Ok(action)
     }
 
@@ -422,14 +705,90 @@ impl Model91Policy {
         self.decision_cache.clear();
     }
 
-    fn best_rank(&mut self, observation: &Model91Observation, legal: &[u8]) -> Result<u8, String> {
-        let opponent_hands = self.opponent_hands(observation)?;
-        let mut memo = HashMap::new();
+    pub fn clear_future_cache(&mut self) {
+        self.future_cache.clear();
+        self.stats.future_cache_entries = 0;
+    }
+
+    pub fn clear_evidence_cache(&mut self) {
+        self.evidence_cache.clear();
+        self.evidence_cache_outcomes = 0;
+        self.stats.evidence_cache_entries = 0;
+        self.stats.evidence_cache_outcomes = 0;
+    }
+
+    fn best_rank(
+        &mut self,
+        observation: &Model91Observation,
+        legal: &[u8],
+        opponent_rank_likelihood_ppm: &[u32; RANKS],
+    ) -> Result<(u8, f64), String> {
+        if self.evidence_cache_outcome_limit > 0 {
+            return self.best_rank_from_evidence(observation, legal, opponent_rank_likelihood_ppm);
+        }
+        let opponent_hands = self.opponent_hands(observation, opponent_rank_likelihood_ppm)?;
+        self.best_rank_for_hands(observation, legal, &opponent_hands)
+    }
+
+    fn best_rank_from_evidence(
+        &mut self,
+        observation: &Model91Observation,
+        legal: &[u8],
+        opponent_rank_likelihood_ppm: &[u32; RANKS],
+    ) -> Result<(u8, f64), String> {
+        let mut evidence_observation = *observation;
+        evidence_observation.own_discards = [0_u8; RANKS];
+        evidence_observation.turn_rank = None;
+        self.stats.evidence_cache_requests = self.stats.evidence_cache_requests.saturating_add(1);
+        let evidence = if let Some(evidence) = self.evidence_cache.get(&evidence_observation) {
+            self.stats.evidence_cache_hits = self.stats.evidence_cache_hits.saturating_add(1);
+            Arc::clone(evidence)
+        } else {
+            self.build_action_evidence(&evidence_observation, legal)?
+        };
+        if evidence.legal != legal {
+            return Err("Model 9.11 evidence cache legal actions are inconsistent".to_string());
+        }
+        let available = opponent_available(observation)?;
         let mut best = legal[0];
         let mut best_net = f64::NEG_INFINITY;
         let mut best_immediate = 0_u8;
-        for rank in legal.iter().copied() {
-            let (net, immediate) = candidate_net_ev(observation, rank, &opponent_hands, &mut memo)?;
+        let mut generated = 0_u64;
+        for (action_index, rank) in legal.iter().copied().enumerate() {
+            let immediate = score_count_for_ranks(
+                &observation
+                    .series()
+                    .iter()
+                    .copied()
+                    .chain(std::iter::once(rank))
+                    .collect::<Vec<_>>(),
+            );
+            let mut own_weighted = 0.0;
+            let mut opponent_weighted = 0.0;
+            let mut total_weight = 0.0;
+            for (hand_index, hand) in evidence.hands.iter().enumerate() {
+                let weight = evidence_hand_weight(
+                    hand,
+                    evidence.weight_mode,
+                    &available,
+                    opponent_rank_likelihood_ppm,
+                );
+                if weight <= 0.0 {
+                    continue;
+                }
+                if action_index == 0 {
+                    generated = generated.saturating_add(1);
+                }
+                let outcome = evidence.outcome(action_index, hand_index);
+                own_weighted += outcome.points[0] * weight;
+                opponent_weighted += outcome.points[1] * weight;
+                total_weight += outcome.weight * weight;
+            }
+            let net = if total_weight > 0.0 {
+                (own_weighted - opponent_weighted) / total_weight
+            } else {
+                f64::from(immediate)
+            };
             let replace = net > best_net
                 || (net == best_net && immediate > best_immediate)
                 || (net == best_net && immediate == best_immediate && rank > best);
@@ -439,42 +798,247 @@ impl Model91Policy {
                 best_immediate = immediate;
             }
         }
-        self.stats.random_future_states = self
+        self.stats.posterior_requests = self.stats.posterior_requests.saturating_add(1);
+        self.stats.posterior_hands_generated = self
             .stats
-            .random_future_states
-            .saturating_add(memo.len() as u64);
-        Ok(best)
+            .posterior_hands_generated
+            .saturating_add(generated);
+        Ok((best, best_net))
     }
 
-    fn opponent_hands(
-        &self,
+    fn build_action_evidence(
+        &mut self,
         observation: &Model91Observation,
-    ) -> Result<Vec<([u8; RANKS], f64)>, String> {
-        let own_initial = observation.own_initial_keep();
-        let mut available = [4_u8; RANKS];
-        for rank in 0..RANKS {
-            let known = own_initial[rank]
-                .saturating_add(observation.own_discards[rank])
-                .saturating_add(observation.opponent_played[rank])
-                .saturating_add(u8::from(observation.turn_rank == Some(rank as u8)));
-            available[rank] = available[rank]
-                .checked_sub(known)
-                .ok_or_else(|| format!("Model 9.1 known rank {} exceeds four cards", rank))?;
-        }
+        legal: &[u8],
+    ) -> Result<Arc<Model91ActionEvidence>, String> {
+        let available = opponent_available(observation)?;
         let size = observation.opponent_remaining_count()?;
         let opponent_role = match observation.role {
             Role::Dealer => Role::Pone,
             Role::Pone => Role::Dealer,
         };
-        if rank_count_total(&observation.opponent_played) > 0 {
-            if let Some(empirical) = self.empirical.as_ref().and_then(|beliefs| {
+        let (hands, weight_mode) = if rank_count_total(&observation.opponent_played) > 0 {
+            if let Some(hands) = self.empirical.as_ref().and_then(|beliefs| {
                 beliefs.hands(opponent_role, observation.opponent_played, &available, size)
             }) {
-                return Ok(empirical);
+                (hands, Model91EvidenceWeightMode::Empirical)
+            } else {
+                (
+                    RankHandIndex::shared().compatible_hands(&available, size)?,
+                    Model91EvidenceWeightMode::Physical,
+                )
+            }
+        } else {
+            (
+                RankHandIndex::shared().compatible_hands(&available, size)?,
+                Model91EvidenceWeightMode::Physical,
+            )
+        };
+        let hands = hands
+            .into_iter()
+            .map(|(ranks, base_weight)| Model91EvidenceHand { ranks, base_weight })
+            .collect::<Vec<_>>();
+        let mut local_memo = HashMap::new();
+        let memo = if self.future_cache_limit == 0 {
+            &mut local_memo
+        } else {
+            &mut self.future_cache
+        };
+        let entries_before = memo.len();
+        let mut cache_hits = 0_u64;
+        let mut outcomes = Vec::with_capacity(legal.len() * hands.len());
+        for rank in legal.iter().copied() {
+            for hand in &hands {
+                let state = AverageState::new(
+                    [observation.own_remaining, hand.ranks],
+                    observation.series(),
+                    observation.count,
+                    0,
+                    relative_index(observation.go_player),
+                    relative_index(observation.last_player),
+                )?;
+                outcomes.push(average_forced_play(&state, rank, memo, &mut cache_hits)?);
             }
         }
-        Ok(enumerate_rank_hands(&available, size))
+        let entries_after = memo.len();
+        self.record_continuation_stats(entries_before, entries_after, cache_hits);
+        let evidence = Arc::new(Model91ActionEvidence {
+            legal: legal.to_vec(),
+            hands,
+            outcomes,
+            weight_mode,
+        });
+        let outcome_count = evidence.outcomes.len();
+        if outcome_count <= self.evidence_cache_outcome_limit {
+            if self.evidence_cache_outcomes.saturating_add(outcome_count)
+                > self.evidence_cache_outcome_limit
+            {
+                self.evidence_cache.clear();
+                self.evidence_cache_outcomes = 0;
+                self.stats.evidence_cache_capacity_clears =
+                    self.stats.evidence_cache_capacity_clears.saturating_add(1);
+            }
+            self.evidence_cache_outcomes += outcome_count;
+            self.evidence_cache
+                .insert(*observation, Arc::clone(&evidence));
+            self.stats.evidence_cache_entries = self.evidence_cache.len() as u64;
+            self.stats.evidence_cache_outcomes = self.evidence_cache_outcomes as u64;
+            self.stats.evidence_cache_peak_outcomes = self
+                .stats
+                .evidence_cache_peak_outcomes
+                .max(self.evidence_cache_outcomes as u64);
+        }
+        Ok(evidence)
     }
+
+    fn record_continuation_stats(
+        &mut self,
+        entries_before: usize,
+        entries_after: usize,
+        cache_hits: u64,
+    ) {
+        self.stats.random_future_states = self
+            .stats
+            .random_future_states
+            .saturating_add(entries_after.saturating_sub(entries_before) as u64);
+        self.stats.future_cache_hits = self.stats.future_cache_hits.saturating_add(cache_hits);
+        self.stats.future_cache_peak_entries = self
+            .stats
+            .future_cache_peak_entries
+            .max(self.future_cache.len() as u64);
+        if self.future_cache_limit > 0 && self.future_cache.len() > self.future_cache_limit {
+            self.future_cache.clear();
+            self.stats.future_cache_capacity_clears =
+                self.stats.future_cache_capacity_clears.saturating_add(1);
+        }
+        self.stats.future_cache_entries = self.future_cache.len() as u64;
+    }
+
+    fn best_rank_for_hands(
+        &mut self,
+        observation: &Model91Observation,
+        legal: &[u8],
+        opponent_hands: &[([u8; RANKS], f64)],
+    ) -> Result<(u8, f64), String> {
+        let mut local_memo = HashMap::new();
+        let memo = if self.future_cache_limit == 0 {
+            &mut local_memo
+        } else {
+            &mut self.future_cache
+        };
+        let entries_before = memo.len();
+        let mut cache_hits = 0_u64;
+        let mut best = legal[0];
+        let mut best_net = f64::NEG_INFINITY;
+        let mut best_immediate = 0_u8;
+        for rank in legal.iter().copied() {
+            let (net, immediate) =
+                candidate_net_ev(observation, rank, opponent_hands, memo, &mut cache_hits)?;
+            let replace = net > best_net
+                || (net == best_net && immediate > best_immediate)
+                || (net == best_net && immediate == best_immediate && rank > best);
+            if replace {
+                best = rank;
+                best_net = net;
+                best_immediate = immediate;
+            }
+        }
+        let entries_after = memo.len();
+        self.record_continuation_stats(entries_before, entries_after, cache_hits);
+        Ok((best, best_net))
+    }
+
+    fn opponent_hands(
+        &mut self,
+        observation: &Model91Observation,
+        opponent_rank_likelihood_ppm: &[u32; RANKS],
+    ) -> Result<WeightedOpponentHands, String> {
+        let available = opponent_available(observation)?;
+        let size = observation.opponent_remaining_count()?;
+        let opponent_role = match observation.role {
+            Role::Dealer => Role::Pone,
+            Role::Pone => Role::Dealer,
+        };
+        self.stats.posterior_requests = self.stats.posterior_requests.saturating_add(1);
+        let base = if rank_count_total(&observation.opponent_played) > 0 {
+            self.empirical
+                .as_ref()
+                .and_then(|beliefs| {
+                    beliefs.hands(opponent_role, observation.opponent_played, &available, size)
+                })
+                .map(Ok)
+                .unwrap_or_else(|| RankHandIndex::shared().compatible_hands(&available, size))?
+        } else {
+            RankHandIndex::shared().compatible_hands(&available, size)?
+        };
+        let hands = reweight_opponent_hands(base, opponent_rank_likelihood_ppm);
+        self.stats.posterior_hands_generated = self
+            .stats
+            .posterior_hands_generated
+            .saturating_add(hands.len() as u64);
+        Ok(hands)
+    }
+}
+
+fn opponent_available(observation: &Model91Observation) -> Result<[u8; RANKS], String> {
+    let own_initial = observation.own_initial_keep();
+    let mut available = [4_u8; RANKS];
+    for rank in 0..RANKS {
+        let known = own_initial[rank]
+            .saturating_add(observation.own_discards[rank])
+            .saturating_add(observation.opponent_played[rank])
+            .saturating_add(u8::from(observation.turn_rank == Some(rank as u8)));
+        available[rank] = available[rank]
+            .checked_sub(known)
+            .ok_or_else(|| format!("Model 9.1 known rank {} exceeds four cards", rank))?;
+    }
+    Ok(available)
+}
+
+fn evidence_hand_weight(
+    hand: &Model91EvidenceHand,
+    weight_mode: Model91EvidenceWeightMode,
+    available: &[u8; RANKS],
+    rank_likelihood_ppm: &[u32; RANKS],
+) -> f64 {
+    if hand
+        .ranks
+        .iter()
+        .zip(available)
+        .any(|(needed, remaining)| needed > remaining)
+    {
+        return 0.0;
+    }
+    let base = match weight_mode {
+        Model91EvidenceWeightMode::Physical => rank_combination_count(&hand.ranks, available),
+        Model91EvidenceWeightMode::Empirical => hand.base_weight,
+    };
+    hand.ranks
+        .iter()
+        .enumerate()
+        .filter(|(_, copies)| **copies > 0)
+        .fold(base, |current, (rank, _)| {
+            current * f64::from(rank_likelihood_ppm[rank]) / 1_000_000.0
+        })
+}
+
+fn reweight_opponent_hands(
+    hands: Vec<([u8; RANKS], f64)>,
+    rank_likelihood_ppm: &[u32; RANKS],
+) -> Vec<([u8; RANKS], f64)> {
+    hands
+        .into_iter()
+        .filter_map(|(hand, weight)| {
+            let adjusted = hand
+                .iter()
+                .enumerate()
+                .filter(|(_, copies)| **copies > 0)
+                .fold(weight, |current, (rank, _)| {
+                    current * f64::from(rank_likelihood_ppm[rank]) / 1_000_000.0
+                });
+            (adjusted > 0.0).then_some((hand, adjusted))
+        })
+        .collect()
 }
 
 pub fn rollout_model91_pair(
@@ -565,14 +1129,63 @@ pub fn model91_initial_pone_lead(
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct AverageState {
     hands: [[u8; RANKS]; 2],
-    plays: Vec<u8>,
+    plays: [u8; MAX_SERIES],
+    plays_len: u8,
     count: u8,
     current: u8,
     go_player: Option<u8>,
     last_player: Option<u8>,
+}
+
+impl AverageState {
+    fn new(
+        hands: [[u8; RANKS]; 2],
+        series: &[u8],
+        count: u8,
+        current: u8,
+        go_player: Option<u8>,
+        last_player: Option<u8>,
+    ) -> Result<Self, String> {
+        if series.len() > MAX_SERIES {
+            return Err(format!(
+                "Model 9.1 average series has {} cards; maximum is {MAX_SERIES}",
+                series.len()
+            ));
+        }
+        let mut plays = [0_u8; MAX_SERIES];
+        plays[..series.len()].copy_from_slice(series);
+        Ok(Self {
+            hands,
+            plays,
+            plays_len: series.len() as u8,
+            count,
+            current,
+            go_player,
+            last_player,
+        })
+    }
+
+    fn series(&self) -> &[u8] {
+        &self.plays[..self.plays_len as usize]
+    }
+
+    fn push(&mut self, rank: u8) -> Result<(), String> {
+        let index = self.plays_len as usize;
+        let slot = self
+            .plays
+            .get_mut(index)
+            .ok_or_else(|| "Model 9.1 average series exceeds eight cards".to_string())?;
+        *slot = rank;
+        self.plays_len += 1;
+        Ok(())
+    }
+
+    fn clear_series(&mut self) {
+        self.plays_len = 0;
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -586,6 +1199,7 @@ fn candidate_net_ev(
     rank: u8,
     opponent_hands: &[([u8; RANKS], f64)],
     memo: &mut HashMap<AverageState, WeightedPoints>,
+    cache_hits: &mut u64,
 ) -> Result<(f64, u8), String> {
     let immediate = score_count_for_ranks(
         &observation
@@ -602,15 +1216,15 @@ fn candidate_net_ev(
         if *opponent_weight <= 0.0 {
             continue;
         }
-        let state = AverageState {
-            hands: [observation.own_remaining, *opponent_hand],
-            plays: observation.series().to_vec(),
-            count: observation.count,
-            current: 0,
-            go_player: relative_index(observation.go_player),
-            last_player: relative_index(observation.last_player),
-        };
-        let result = average_forced_play(&state, rank, memo)?;
+        let state = AverageState::new(
+            [observation.own_remaining, *opponent_hand],
+            observation.series(),
+            observation.count,
+            0,
+            relative_index(observation.go_player),
+            relative_index(observation.last_player),
+        )?;
+        let result = average_forced_play(&state, rank, memo, cache_hits)?;
         own_weighted += result.points[0] * *opponent_weight;
         opponent_weighted += result.points[1] * *opponent_weight;
         total_weight += result.weight * *opponent_weight;
@@ -624,8 +1238,10 @@ fn candidate_net_ev(
 fn average_future(
     state: &AverageState,
     memo: &mut HashMap<AverageState, WeightedPoints>,
+    cache_hits: &mut u64,
 ) -> Result<WeightedPoints, String> {
     if let Some(cached) = memo.get(state).copied() {
+        *cache_hits = cache_hits.saturating_add(1);
         return Ok(cached);
     }
     if state.hands.iter().flatten().all(|count| *count == 0) {
@@ -638,24 +1254,24 @@ fn average_future(
                 terminal.points[last as usize] = 1.0;
             }
         }
-        memo.insert(state.clone(), terminal);
+        memo.insert(*state, terminal);
         return Ok(terminal);
     }
     let legal = legal_ranks(&state.hands[state.current as usize], state.count);
     let result = if legal.is_empty() {
-        average_go(state, memo)?
+        average_go(state, memo, cache_hits)?
     } else {
         let mut total = WeightedPoints::default();
         for rank in legal {
             let branch_weight = f64::from(state.hands[state.current as usize][rank as usize]);
-            let branch = average_forced_play(state, rank, memo)?;
+            let branch = average_forced_play(state, rank, memo, cache_hits)?;
             total.points[0] += branch.points[0] * branch_weight;
             total.points[1] += branch.points[1] * branch_weight;
             total.weight += branch.weight * branch_weight;
         }
         total
     };
-    memo.insert(state.clone(), result);
+    memo.insert(*state, result);
     Ok(result)
 }
 
@@ -663,6 +1279,7 @@ fn average_forced_play(
     state: &AverageState,
     rank: u8,
     memo: &mut HashMap<AverageState, WeightedPoints>,
+    cache_hits: &mut u64,
 ) -> Result<WeightedPoints, String> {
     let player = state.current as usize;
     if rank as usize >= RANKS || state.hands[player][rank as usize] == 0 {
@@ -672,12 +1289,12 @@ fn average_forced_play(
     if next_count > 31 {
         return Err("Model 9.1 average continuation exceeded 31".to_string());
     }
-    let mut next = state.clone();
+    let mut next = *state;
     next.hands[player][rank as usize] -= 1;
-    next.plays.push(rank);
-    let points = score_count_for_ranks(&next.plays);
+    next.push(rank)?;
+    let points = score_count_for_ranks(next.series());
     if next_count == 31 {
-        next.plays.clear();
+        next.clear_series();
         next.count = 0;
         next.current = 1 - state.current;
         next.go_player = None;
@@ -689,7 +1306,7 @@ fn average_forced_play(
             next.current = 1 - state.current;
         }
     }
-    let mut future = average_future(&next, memo)?;
+    let mut future = average_future(&next, memo, cache_hits)?;
     future.points[player] += f64::from(points) * future.weight;
     Ok(future)
 }
@@ -697,16 +1314,17 @@ fn average_forced_play(
 fn average_go(
     state: &AverageState,
     memo: &mut HashMap<AverageState, WeightedPoints>,
+    cache_hits: &mut u64,
 ) -> Result<WeightedPoints, String> {
-    let mut next = state.clone();
+    let mut next = *state;
     if state.go_player.is_some() {
         let scorer = state.last_player;
-        next.plays.clear();
+        next.clear_series();
         next.count = 0;
         next.current = 1 - state.current;
         next.go_player = None;
         next.last_player = None;
-        let mut future = average_future(&next, memo)?;
+        let mut future = average_future(&next, memo, cache_hits)?;
         if let Some(scorer) = scorer {
             future.points[scorer as usize] += future.weight;
         }
@@ -714,7 +1332,7 @@ fn average_go(
     } else {
         next.go_player = Some(state.current);
         next.current = 1 - state.current;
-        average_future(&next, memo)
+        average_future(&next, memo, cache_hits)
     }
 }
 
@@ -823,11 +1441,128 @@ mod tests {
         known.own_discards[PegSeat::Zero.index()] = hand(&[(0, 2)]);
         known.turn_rank = 0;
         let observation = Model91Observation::from_state(&known, PegSeat::Zero).unwrap();
-        let policy = Model91Policy::new(None, 0);
-        let opponent_hands = policy.opponent_hands(&observation).unwrap();
+        let mut policy = Model91Policy::new(None, 0);
+        let opponent_hands = policy
+            .opponent_hands(&observation, &[1_000_000_u32; RANKS])
+            .unwrap();
 
         assert!(!opponent_hands.is_empty());
         assert!(opponent_hands.iter().all(|(opponent, _)| opponent[0] == 0));
+    }
+
+    #[test]
+    fn indexed_rank_hands_match_recursive_enumeration() {
+        let mut paired_dead = [4_u8; RANKS];
+        paired_dead[0] = 0;
+        paired_dead[1] = 1;
+        paired_dead[2] = 2;
+        paired_dead[3] = 3;
+        let mut spread_dead = [4_u8; RANKS];
+        for rank in 0..7 {
+            spread_dead[rank] = 3;
+        }
+
+        for available in [[4_u8; RANKS], paired_dead, spread_dead] {
+            for size in 0..=4 {
+                assert_eq!(
+                    RankHandIndex::shared()
+                        .compatible_hands(&available, size)
+                        .unwrap(),
+                    enumerate_rank_hands(&available, size)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn indexed_posterior_preserves_likelihood_evidence() {
+        let state = state(hand(&[(1, 1), (2, 1), (3, 1), (7, 1)]));
+        let observation = Model91Observation::from_state(&state, PegSeat::Zero).unwrap();
+        let neutral = [1_000_000_u32; RANKS];
+        let mut exclude_five = neutral;
+        exclude_five[4] = 0;
+        let mut policy = Model91Policy::new(None, 0);
+
+        let first = policy.opponent_hands(&observation, &neutral).unwrap();
+        let excluded = policy.opponent_hands(&observation, &exclude_five).unwrap();
+        assert!(excluded.iter().all(|(hand, _)| hand[4] == 0));
+        assert_ne!(first, excluded);
+
+        let stats = policy.stats();
+        assert_eq!(stats.posterior_requests, 2);
+        assert_eq!(
+            stats.posterior_hands_generated,
+            (first.len() + excluded.len()) as u64
+        );
+    }
+
+    #[test]
+    fn action_evidence_cache_reweights_dead_cards_without_changing_policy() {
+        let base_state = state(hand(&[(1, 1), (2, 1), (3, 1), (7, 1)]));
+        let mut baseline = Model91Observation::from_state(&base_state, PegSeat::Zero).unwrap();
+        baseline.own_discards = [0_u8; RANKS];
+        baseline.turn_rank = None;
+        let mut corrected = baseline;
+        corrected.own_discards = hand(&[(4, 1), (9, 1)]);
+        corrected.turn_rank = Some(12);
+        let mut likelihoods = [1_000_000_u32; RANKS];
+        likelihoods[6] = 250_000;
+
+        let expected = Model91Policy::new(None, 0)
+            .choose_action_with_opponent_likelihood(&corrected, &likelihoods)
+            .unwrap();
+        let mut cached = Model91Policy::new_with_evidence_cache(None, 0, 100_000, 0);
+        cached.choose_action(&baseline).unwrap();
+        let actual = cached
+            .choose_action_with_opponent_likelihood(&corrected, &likelihoods)
+            .unwrap();
+
+        assert_eq!(actual, expected);
+        assert_eq!(cached.stats().evidence_cache_requests, 2);
+        assert_eq!(cached.stats().evidence_cache_hits, 1);
+        assert!(cached.stats().evidence_cache_outcomes > 0);
+    }
+
+    #[test]
+    fn preenumerated_hidden_hands_choose_the_same_shared_action() {
+        let state = state(hand(&[(1, 1), (2, 1), (3, 1), (7, 1)]));
+        let observation = Model91Observation::from_state(&state, PegSeat::Zero).unwrap();
+        let ordinary_hands = Model91Policy::new(None, 0)
+            .opponent_hands(&observation, &[1_000_000_u32; RANKS])
+            .unwrap();
+        let ordinary = Model91Policy::new(None, 0)
+            .choose_action(&observation)
+            .unwrap();
+        let enumerated = Model91Policy::new(None, 0)
+            .choose_action_for_weighted_opponent_hands(
+                &observation,
+                ordinary_hands,
+                &[1_000_000_u32; RANKS],
+            )
+            .unwrap();
+        assert_eq!(enumerated, ordinary);
+    }
+
+    #[test]
+    fn selected_action_exposes_its_future_net_ev() {
+        let state = state(hand(&[(1, 1), (2, 1), (3, 1), (7, 1)]));
+        let observation = Model91Observation::from_state(&state, PegSeat::Zero).unwrap();
+        let mut policy = Model91Policy::new(None, 0);
+        let choice = policy.choose_action_with_net_ev(&observation).unwrap();
+        let RankPegAction::Play(rank) = choice.action else {
+            panic!("expected a legal play");
+        };
+        let immediate = score_count_for_ranks(
+            &observation
+                .series()
+                .iter()
+                .copied()
+                .chain(std::iter::once(rank))
+                .collect::<Vec<_>>(),
+        );
+
+        assert!(choice.net_ev.is_some());
+        assert_ne!(choice.net_ev, Some(f64::from(immediate)));
     }
 
     #[test]
@@ -845,15 +1580,16 @@ mod tests {
     #[test]
     fn average_continuation_handles_go_and_last_card() {
         let mut memo = HashMap::new();
-        let state = AverageState {
-            hands: [hand(&[(9, 1)]), hand(&[(8, 1)])],
-            plays: vec![9, 9, 4],
-            count: 25,
-            current: 0,
-            go_player: None,
-            last_player: Some(1),
-        };
-        let result = average_future(&state, &mut memo).unwrap();
+        let state = AverageState::new(
+            [hand(&[(9, 1)]), hand(&[(8, 1)])],
+            &[9, 9, 4],
+            25,
+            0,
+            None,
+            Some(1),
+        )
+        .unwrap();
+        let result = average_future(&state, &mut memo, &mut 0).unwrap();
         assert_eq!(result.weight, 1.0);
         assert!(result.points.iter().sum::<f64>() >= 1.0);
     }

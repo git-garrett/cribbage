@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::artifacts::{
     CribRankDiscardTables, CribTripolicyTable, EmpiricalDiscardKeepTable, EmpiricalEntry,
@@ -24,14 +24,17 @@ use crate::information_set::{
     InfoActor, PegInformationSetKey, PegObservation, PegSeat, PolicyInformationSetKey,
     PolicyRankObservation, PublicPegEvent, RankPegAction, RankPegEvent, RankPegState,
 };
-use crate::model132::Model132KeepPairTable;
+use crate::model132::{
+    Model1322DeclineFactors, Model132KeepPairTable, Model132Observation, Model911Policy,
+};
 use crate::model162::Model162ActionScorer;
 use crate::model90::Model90DiscardTable;
 use crate::model91::{Model91Actor, Model91EmpiricalBeliefs, Model91Observation, Model91Policy};
 use crate::model91_discard::model91_schell_crib_ev;
 use crate::model_id::{
-    MODEL_13_0, MODEL_13_1, MODEL_13_2, MODEL_14_3, MODEL_14_8, MODEL_14_8_1, MODEL_15_0,
-    MODEL_15_1, MODEL_15_2, MODEL_16_0, MODEL_16_1, MODEL_16_3, MODEL_9_0, MODEL_9_1, MYRMIDON_5,
+    MODEL_13_0, MODEL_13_1, MODEL_13_2, MODEL_13_21, MODEL_14_3, MODEL_14_8, MODEL_14_8_1,
+    MODEL_15_0, MODEL_15_1, MODEL_15_2, MODEL_16_0, MODEL_16_1, MODEL_16_3, MODEL_9_0, MODEL_9_1,
+    MODEL_9_11, MYRMIDON_5,
 };
 use crate::policy::PolicyArtifact;
 
@@ -222,9 +225,11 @@ struct RuntimeTables {
     root: String,
     discard90: OnceLock<Model90DiscardTable>,
     discard91: OnceLock<Model91DiscardEvTable>,
+    discard911: OnceLock<Model91DiscardEvTable>,
     discard_hist131: OnceLock<Model131DiscardHistogramTable>,
     discard_pairs132: OnceLock<Model132KeepPairTable>,
     beliefs91: OnceLock<Model91EmpiricalBeliefs>,
+    decline_factors1322: OnceLock<Model1322DeclineFactors>,
     empirical: OnceLock<EmpiricalDiscardKeepTable>,
     pairwise: OnceLock<PairwiseTable>,
     pairwise14: OnceLock<PairwiseTable>,
@@ -247,6 +252,71 @@ static MODEL16_POLICY_HITS: AtomicU64 = AtomicU64::new(0);
 pub struct Model16PolicyStats {
     pub lookups: u64,
     pub hits: u64,
+}
+
+/// Ephemeral continuation outcomes for one Model 9.11 actor in one live
+/// pegging hand. It stores no observation-to-action mapping and is cleared
+/// when pegging ends. A later model turn can therefore reuse exact states
+/// below the branch actually selected by the human opponent.
+#[derive(Clone, Default)]
+pub struct Model911HandCache {
+    policy: Arc<Mutex<Option<Model911Policy>>>,
+}
+
+impl std::fmt::Debug for Model911HandCache {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let initialized = self
+            .policy
+            .lock()
+            .map(|policy| policy.is_some())
+            .unwrap_or(true);
+        formatter
+            .debug_struct("Model911HandCache")
+            .field("initialized", &initialized)
+            .finish()
+    }
+}
+
+impl Model911HandCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn clear(&self) {
+        let mut policy = self
+            .policy
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *policy = None;
+    }
+
+    fn with_policy<T>(
+        &self,
+        empirical: &Model91EmpiricalBeliefs,
+        factors: Model1322DeclineFactors,
+        use_policy: impl FnOnce(&Model911Policy) -> Result<T, String>,
+    ) -> Result<T, String> {
+        const ACTION_CACHE_LIMIT: usize = 0;
+        const CONTINUATION_CACHE_LIMIT: usize = 1_000_000;
+
+        let mut policy = self
+            .policy
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if policy.is_none() {
+            *policy = Some(Model911Policy::new(
+                Some(empirical.clone()),
+                factors,
+                ACTION_CACHE_LIMIT,
+                CONTINUATION_CACHE_LIMIT,
+            )?);
+        }
+        use_policy(
+            policy
+                .as_ref()
+                .ok_or_else(|| "Model 9.11 hand cache was not initialized".to_string())?,
+        )
+    }
 }
 
 /// A rank-level Model 16 policy result for offline compilers.  The input state
@@ -434,9 +504,17 @@ pub fn parse_decision_input(input_text: &str) -> Result<DecisionInput, String> {
 }
 
 pub fn evaluate_decision(input: &DecisionInput, root: &str) -> Result<Decision, String> {
+    evaluate_decision_with_model911_cache(input, root, None)
+}
+
+pub fn evaluate_decision_with_model911_cache(
+    input: &DecisionInput,
+    root: &str,
+    model911_cache: Option<&Model911HandCache>,
+) -> Result<Decision, String> {
     match input.kind {
         DecisionKind::Discard => recommend_discard(input, root),
-        DecisionKind::Peg => recommend_peg(input, root),
+        DecisionKind::Peg => recommend_peg(input, root, model911_cache),
     }
 }
 
@@ -465,9 +543,11 @@ pub fn review_decision(
 fn is_supported_rust_model(model: &str) -> bool {
     model == MODEL_9_0
         || model == MODEL_9_1
+        || model == MODEL_9_11
         || model == MODEL_13_0
         || model == MODEL_13_1
         || model == MODEL_13_2
+        || model == MODEL_13_21
         || model == MODEL_14_3
         || model == MODEL_14_8
         || model == MODEL_14_8_1
@@ -584,11 +664,21 @@ fn recommend_discard(input: &DecisionInput, root: &str) -> Result<Decision, Stri
     if input.model == MODEL_13_2 {
         return recommend_discard_model132(input, root);
     }
+    if input.model == MODEL_13_21 {
+        return if model1321_uses_keep_pair_forecast(input.role) {
+            recommend_discard_model132(input, root)
+        } else {
+            recommend_discard_model13(input, root)
+        };
+    }
     if input.model == MODEL_9_0 {
         return recommend_discard_model90(input, root);
     }
     if input.model == MODEL_9_1 {
         return recommend_discard_model91(input, root);
+    }
+    if input.model == MODEL_9_11 {
+        return recommend_discard_model911(input, root);
     }
     if input.model == MYRMIDON_5 {
         let cards =
@@ -680,7 +770,11 @@ fn recommend_discard(input: &DecisionInput, root: &str) -> Result<Decision, Stri
     })
 }
 
-fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> {
+fn recommend_peg(
+    input: &DecisionInput,
+    root: &str,
+    model911_cache: Option<&Model911HandCache>,
+) -> Result<Decision, String> {
     if !is_supported_rust_model(&input.model) {
         return Err(format!(
             "unsupported model for Rust pegging: {}",
@@ -725,6 +819,9 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
     if input.model == MODEL_9_0 || input.model == MODEL_9_1 {
         return recommend_peg_model91(input, &legal, tables);
     }
+    if input.model == MODEL_9_11 {
+        return recommend_peg_model911(input, &legal, tables, model911_cache);
+    }
     if input.model == MYRMIDON_5 {
         let card_id = crate::myrmidon::recommend_peg(&input.ai_hand, &input.plays, input.count)?;
         return Ok(Decision::Peg {
@@ -754,7 +851,11 @@ fn recommend_peg(input: &DecisionInput, root: &str) -> Result<Decision, String> 
     if input.model == MODEL_16_3 {
         return recommend_peg_model163(input, &legal, tables.scorer163()?, tables);
     }
-    if input.model == MODEL_13_0 || input.model == MODEL_13_1 || input.model == MODEL_13_2 {
+    if input.model == MODEL_13_0
+        || input.model == MODEL_13_1
+        || input.model == MODEL_13_2
+        || input.model == MODEL_13_21
+    {
         return recommend_peg_model13(input, tables);
     }
     let hold = tables.hold()?;
@@ -1338,6 +1439,19 @@ fn recommend_discard_model90(input: &DecisionInput, root: &str) -> Result<Decisi
 
 fn recommend_discard_model91(input: &DecisionInput, root: &str) -> Result<Decision, String> {
     let table = runtime_tables(root)?.discard91()?;
+    recommend_discard_model9_ev(input, table, "Model 9.1")
+}
+
+fn recommend_discard_model911(input: &DecisionInput, root: &str) -> Result<Decision, String> {
+    let table = runtime_tables(root)?.discard911()?;
+    recommend_discard_model9_ev(input, table, "Model 9.11")
+}
+
+fn recommend_discard_model9_ev(
+    input: &DecisionInput,
+    table: &Model91DiscardEvTable,
+    model_label: &str,
+) -> Result<Decision, String> {
     let six = rank_counts(&input.ai_hand);
     let mut deck = full_deck();
     deck.retain(|card| !input.ai_hand.iter().any(|held| held.id == card.id));
@@ -1365,7 +1479,7 @@ fn recommend_discard_model91(input: &DecisionInput, root: &str) -> Result<Decisi
         // requested direct lookup rather than a scan of opponent keeps.
         let pegging = table
             .record_for(&six, &rank_counts(&discard), input.role)
-            .ok_or_else(|| "Model 9.1 discard EV row is missing".to_string())?;
+            .ok_or_else(|| format!("{model_label} discard EV row is missing"))?;
         let total_ev = hand_ev
             + match input.role {
                 Role::Dealer => crib_ev,
@@ -1381,7 +1495,7 @@ fn recommend_discard_model91(input: &DecisionInput, root: &str) -> Result<Decisi
         }
     }
     let (discard, total_ev, _precomputed_best_lead) =
-        recommended.ok_or_else(|| "no Model 9.1 discard candidate evaluated".to_string())?;
+        recommended.ok_or_else(|| format!("no {model_label} discard candidate evaluated"))?;
     Ok(Decision::Discard {
         card_ids: discard.iter().map(|card| card.id).collect(),
         // The cut is not known until after both discards. Recompute the lead
@@ -1417,8 +1531,8 @@ fn recommend_peg_model91(
         input.go_player.map(relative_actor),
         input.last_player.map(relative_actor),
     )?;
-    let action = tables.with_policy91(|policy| policy.choose_action(&observation))?;
-    let rank = match action {
+    let choice = tables.with_policy91(|policy| policy.choose_action_with_net_ev(&observation))?;
+    let rank = match choice.action {
         RankPegAction::Play(rank) => rank,
         RankPegAction::Go => {
             return Err("Model 9.1 policy returned go when legal cards exist".to_string())
@@ -1429,12 +1543,60 @@ fn recommend_peg_model91(
         .copied()
         .find(|card| card.rank == rank)
         .ok_or_else(|| "Model 9.1 policy selected an unavailable rank".to_string())?;
-    let mut plays = input.plays.clone();
-    plays.push(card);
     Ok(Decision::Peg {
         action: "play".to_string(),
         card_id: Some(card.id),
-        ev: Some(f64::from(score_count(&plays))),
+        ev: choice.net_ev,
+        win_probability: None,
+        model16_policy: None,
+    })
+}
+
+fn recommend_peg_model911(
+    input: &DecisionInput,
+    legal: &[Card],
+    tables: &RuntimeTables,
+    hand_cache: Option<&Model911HandCache>,
+) -> Result<Decision, String> {
+    let relative_actor = |player: PlayerKey| {
+        if player == PlayerKey::Ai {
+            InfoActor::SelfPlayer
+        } else {
+            InfoActor::Opponent
+        }
+    };
+    let observation = Model132Observation {
+        role: input.role,
+        my_score: input.ai_score,
+        opponent_score: input.human_score,
+        own_remaining: rank_counts(&input.ai_hand),
+        own_played: rank_counts(&input.ai_table),
+        opponent_played: rank_counts(&input.human_table),
+        own_discards: rank_counts(&input.own_discards),
+        turn_rank: input.turn_card.rank,
+        current_series: input.plays.iter().map(|card| card.rank).collect(),
+        count: input.count,
+        go_player: input.go_player.map(relative_actor),
+        last_player: input.last_player.map(relative_actor),
+        public_history: input.public_history.clone(),
+    };
+    let choice =
+        tables.with_policy911(hand_cache, |policy| policy.choose_action_with_net_ev(&observation))?;
+    let rank = match choice.action {
+        RankPegAction::Play(rank) => rank,
+        RankPegAction::Go => {
+            return Err("Model 9.11 policy returned go when legal cards exist".to_string())
+        }
+    };
+    let card = legal
+        .iter()
+        .copied()
+        .find(|card| card.rank == rank)
+        .ok_or_else(|| "Model 9.11 policy selected an unavailable rank".to_string())?;
+    Ok(Decision::Peg {
+        action: "play".to_string(),
+        card_id: Some(card.id),
+        ev: choice.net_ev,
         win_probability: None,
         model16_policy: None,
     })
@@ -1670,6 +1832,10 @@ fn recommend_discard_model132(input: &DecisionInput, root: &str) -> Result<Decis
         ev: Some(evaluation.total_ev),
         win_probability: Some(evaluation.win_probability),
     })
+}
+
+fn model1321_uses_keep_pair_forecast(role: Role) -> bool {
+    role == Role::Dealer
 }
 
 fn review_discard_model13(
@@ -4982,9 +5148,11 @@ impl RuntimeTables {
             root: root.to_string(),
             discard90: OnceLock::new(),
             discard91: OnceLock::new(),
+            discard911: OnceLock::new(),
             discard_hist131: OnceLock::new(),
             discard_pairs132: OnceLock::new(),
             beliefs91: OnceLock::new(),
+            decline_factors1322: OnceLock::new(),
             empirical: OnceLock::new(),
             pairwise: OnceLock::new(),
             pairwise14: OnceLock::new(),
@@ -5008,6 +5176,12 @@ impl RuntimeTables {
         })
     }
 
+    fn discard911(&self) -> Result<&Model91DiscardEvTable, String> {
+        load_cached(&self.discard911, "discard911", || {
+            Model91DiscardEvTable::load(self.asset_path("model911-discard-ev.bin"))
+        })
+    }
+
     fn discard_hist131(&self) -> Result<&Model131DiscardHistogramTable, String> {
         load_cached(&self.discard_hist131, "discard_hist131", || {
             Model131DiscardHistogramTable::load(self.asset_path("model131-discard-histograms.bin"))
@@ -5026,6 +5200,12 @@ impl RuntimeTables {
         })
     }
 
+    fn decline_factors1322(&self) -> Result<&Model1322DeclineFactors, String> {
+        load_cached(&self.decline_factors1322, "decline_factors1322", || {
+            Model1322DeclineFactors::load(self.asset_path("model1322-decline-factors.json"))
+        })
+    }
+
     fn with_policy91<T>(
         &self,
         use_policy: impl FnOnce(&mut Model91Policy) -> Result<T, String>,
@@ -5038,6 +5218,28 @@ impl RuntimeTables {
                 .or_insert_with(|| Model91Policy::new(Some(beliefs.clone()), 100_000));
             use_policy(policy)
         })
+    }
+
+    fn with_policy911<T>(
+        &self,
+        hand_cache: Option<&Model911HandCache>,
+        use_policy: impl FnOnce(&Model911Policy) -> Result<T, String>,
+    ) -> Result<T, String> {
+        const ACTION_CACHE_LIMIT: usize = 0;
+        const CONTINUATION_CACHE_LIMIT: usize = 1_000_000;
+
+        let beliefs = self.beliefs91()?;
+        let factors = *self.decline_factors1322()?;
+        if let Some(hand_cache) = hand_cache {
+            return hand_cache.with_policy(beliefs, factors, use_policy);
+        }
+        let policy = Model911Policy::new(
+            Some(beliefs.clone()),
+            factors,
+            ACTION_CACHE_LIMIT,
+            CONTINUATION_CACHE_LIMIT,
+        )?;
+        use_policy(&policy)
     }
 
     fn empirical(&self) -> Result<&EmpiricalDiscardKeepTable, String> {
@@ -5303,6 +5505,7 @@ fn round_ev(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model132::Model132PeggingPolicy;
     use crate::model162::Model162ActionAdvantageEntry;
     use crate::policy::{PolicyArtifactMetadata, QuantizedPolicyEntry, POLICY_WEIGHT_TOTAL};
 
@@ -5894,13 +6097,18 @@ mod tests {
             .to_path_buf();
         let mut model13_input = model16_peg_input();
         model13_input.model = MODEL_13_0.to_string();
-        let expected =
-            recommend_peg(&model13_input, root.to_str().expect("workspace root utf-8")).unwrap();
+        let expected = recommend_peg(
+            &model13_input,
+            root.to_str().expect("workspace root utf-8"),
+            None,
+        )
+        .unwrap();
         let mut model131_input = model13_input.clone();
         model131_input.model = MODEL_13_1.to_string();
         let actual = recommend_peg(
             &model131_input,
             root.to_str().expect("workspace root utf-8"),
+            None,
         )
         .unwrap();
 
@@ -6083,5 +6291,92 @@ mod tests {
         assert!(uses_ordered_current_hand_scoring(&model16));
         model16.model = MODEL_16_1.to_string();
         assert!(uses_ordered_current_hand_scoring(&model16));
+    }
+
+    #[test]
+    fn model911_hand_cache_follows_a_session_across_request_threads() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|path| path.parent())
+            .expect("workspace root")
+            .to_path_buf();
+        let beliefs = Model91EmpiricalBeliefs::load(
+            root.join("rust/cribbage-shadow-engine/assets/model91-pegging-beliefs.bin"),
+        )
+        .unwrap();
+        let factors = Model1322DeclineFactors::load(
+            root.join("rust/cribbage-shadow-engine/assets/model1322-decline-factors.json"),
+        )
+        .unwrap();
+        let cache = Model911HandCache::new();
+        let mut first = Model132Observation {
+            role: Role::Dealer,
+            my_score: 20,
+            opponent_score: 18,
+            own_remaining: [0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0],
+            own_played: [0; 13],
+            opponent_played: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            own_discards: [0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            turn_rank: 12,
+            current_series: vec![0],
+            count: 1,
+            go_player: None,
+            last_player: Some(InfoActor::Opponent),
+            public_history: vec![PublicPegEvent::OpponentPlay(0)],
+        };
+        let first_cache = cache.clone();
+        let first_beliefs = beliefs.clone();
+        let first_observation = first.clone();
+        let first_action = std::thread::spawn(move || {
+            first_cache.with_policy(&first_beliefs, factors, |policy| {
+                policy.choose_action(&first_observation)
+            })
+        })
+        .join()
+        .unwrap()
+        .unwrap();
+        let RankPegAction::Play(first_rank) = first_action else {
+            panic!("Model 9.11 returned go with four legal cards");
+        };
+        let before = cache
+            .policy
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .stats();
+
+        first.own_remaining[first_rank as usize] -= 1;
+        first.own_played[first_rank as usize] += 1;
+        first.opponent_played[1] += 1;
+        first.current_series.extend([first_rank, 1]);
+        first.count +=
+            crate::cards::VALUES[first_rank as usize] + crate::cards::VALUES[1];
+        first.last_player = Some(InfoActor::Opponent);
+        first.public_history.extend([
+            PublicPegEvent::SelfPlay(first_rank),
+            PublicPegEvent::OpponentPlay(1),
+        ]);
+
+        let second_cache = cache.clone();
+        std::thread::spawn(move || {
+            second_cache.with_policy(&beliefs, factors, |policy| policy.choose_action(&first))
+        })
+        .join()
+        .unwrap()
+        .unwrap();
+        let after = cache
+            .policy
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .stats();
+        assert!(before.future_cache_entries > 0);
+        assert!(after.future_cache_hits > before.future_cache_hits);
+        assert_eq!(after.decision_cache_peak_entries, 0);
+
+        cache.clear();
+        assert!(cache.policy.lock().unwrap().is_none());
     }
 }

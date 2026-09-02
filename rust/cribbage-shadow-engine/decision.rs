@@ -1,7 +1,9 @@
 use crate::board::Role;
 use crate::game::{CribbageGame, Side};
 use crate::information_set::perspective_history;
-use crate::model::{self, Decision, DecisionInput, DecisionKind, Model16PolicyMode, PlayerKey};
+use crate::model::{
+    self, Decision, DecisionInput, DecisionKind, Model16PolicyMode, Model911HandCache, PlayerKey,
+};
 use crate::model_id::ModelId;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -57,9 +59,20 @@ pub fn recommend_peg_for_side(
     peg_lead: Option<u8>,
     root: &str,
 ) -> Result<PegDecision, String> {
+    recommend_peg_for_side_with_model911_cache(game, side, model_id, peg_lead, root, None)
+}
+
+pub fn recommend_peg_for_side_with_model911_cache(
+    game: &CribbageGame,
+    side: Side,
+    model_id: ModelId,
+    peg_lead: Option<u8>,
+    root: &str,
+    model911_cache: Option<&Model911HandCache>,
+) -> Result<PegDecision, String> {
     ensure_native_model(model_id)?;
     let input = decision_input(game, side, model_id, DecisionKind::Peg, peg_lead);
-    match model::evaluate_decision(&input, root)? {
+    match model::evaluate_decision_with_model911_cache(&input, root, model911_cache)? {
         Decision::Peg {
             action,
             card_id: _,
@@ -299,6 +312,35 @@ mod tests {
         .unwrap();
 
         assert_eq!(model132, model13);
+
+        let model1321 = recommend_peg_for_side(
+            &game,
+            pone,
+            ModelId::Schell1321,
+            None,
+            root.to_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(model1321, model13);
+    }
+
+    #[test]
+    fn model1321_pone_discard_is_frozen_model13() {
+        let game = CribbageGame::new_with_seed(0x9e3779b9, Side::Left);
+        let pone = game.pone;
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+
+        let model13 =
+            recommend_discard_for_side(&game, pone, ModelId::Schell13, root.to_str().unwrap())
+                .unwrap();
+        let model1321 =
+            recommend_discard_for_side(&game, pone, ModelId::Schell1321, root.to_str().unwrap())
+                .unwrap();
+
+        assert_eq!(model1321, model13);
     }
 
     #[test]

@@ -14,11 +14,13 @@ use cribbage_shadow_engine::cards::{
     PeggingScoreComponents, RANKS, SUIT_NAMES, VALUES,
 };
 use cribbage_shadow_engine::decision::{
-    recommend_discard_for_side, recommend_peg_for_side, review_discard_for_side,
-    review_peg_for_side, DecisionReview as EngineDecisionReview, PegDecision,
+    recommend_discard_for_side, recommend_peg_for_side,
+    recommend_peg_for_side_with_model911_cache, review_discard_for_side, review_peg_for_side,
+    DecisionReview as EngineDecisionReview, PegDecision,
 };
 use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
-use cribbage_shadow_engine::model_id::{ModelId, MODEL_13_0, MODEL_9_1, MYRMIDON_5};
+use cribbage_shadow_engine::model::Model911HandCache;
+use cribbage_shadow_engine::model_id::{ModelId, MODEL_13_0, MODEL_9_1, MODEL_9_11, MYRMIDON_5};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -54,6 +56,7 @@ struct Session {
     next_review_id: u32,
     event_sequence: u64,
     pending_final_scoring: Option<FinalScoring>,
+    model911_hand_cache: Model911HandCache,
 }
 
 enum DeferredRecommendation {
@@ -479,8 +482,8 @@ fn health_json() -> String {
 
 fn model_json() -> String {
     format!(
-        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"{}\",\"{}\",\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\"]}}",
-        APP_VERSION, MODEL_13_0, MYRMIDON_5, MODEL_9_1
+        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"{}\",\"{}\",\"{}\",\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\"]}}",
+        APP_VERSION, MODEL_13_0, MYRMIDON_5, MODEL_9_1, MODEL_9_11
     )
 }
 
@@ -572,6 +575,9 @@ fn game_action(server: &Server, body: &str) -> Response {
             *session = before;
             return Err(error);
         }
+        if session.game.phase != Phase::Pegging {
+            session.model911_hand_cache.clear();
+        }
         if session.game.phase == Phase::GameOver
             && session.pending_final_scoring.is_none()
             && session.completed_at.is_none()
@@ -659,6 +665,7 @@ fn new_session_from_seed(model: ModelId, tag: Option<String>, seed: u32, counter
         next_review_id: 1,
         event_sequence: 0,
         pending_final_scoring: None,
+        model911_hand_cache: Model911HandCache::new(),
     }
 }
 
@@ -767,6 +774,7 @@ fn restore_persisted_session(stored: PersistedSession) -> Result<Session, String
         next_review_id: stored.next_review_id,
         event_sequence: stored.event_sequence,
         pending_final_scoring: stored.pending_final_scoring,
+        model911_hand_cache: Model911HandCache::new(),
     })
 }
 
@@ -1328,13 +1336,15 @@ fn apply_action(
                 return Ok(());
             }
             let score_before = score_snapshot(&session.game);
-            let (reason, cards, score_components) = match recommend_peg_for_side(
-                &session.game,
-                AI,
-                session.model,
-                None,
-                model_root,
-            )? {
+            let (reason, cards, score_components) =
+                match recommend_peg_for_side_with_model911_cache(
+                    &session.game,
+                    AI,
+                    session.model,
+                    None,
+                    model_root,
+                    Some(&session.model911_hand_cache),
+                )? {
                 PegDecision::Go => {
                     session.game.say_go(AI)?;
                     ("Go", Vec::new(), None)
@@ -3176,6 +3186,7 @@ mod tests {
     fn model_metadata_includes_pathway_and_experimental_models() {
         assert!(model_json().contains(MYRMIDON_5));
         assert!(model_json().contains(MODEL_9_1));
+        assert!(model_json().contains(MODEL_9_11));
         assert!(model_json().contains("schell_table-peg_table-13.1"));
         assert!(model_json().contains("schell_table-peg_table-16.0"));
         assert!(model_json().contains("schell_table-peg_table-16.1"));
@@ -3184,7 +3195,12 @@ mod tests {
 
     #[test]
     fn pathway_models_are_preserved_in_new_server_sessions() {
-        for model in [ModelId::Myrmidon5, ModelId::Schell91, ModelId::Schell13] {
+        for model in [
+            ModelId::Myrmidon5,
+            ModelId::Schell91,
+            ModelId::Schell911,
+            ModelId::Schell13,
+        ] {
             let session = new_session_from_seed(model, Some("Player".to_string()), 0x1234_5678, 1);
             assert_eq!(session.model, model);
             assert!(

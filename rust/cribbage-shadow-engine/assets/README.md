@@ -84,3 +84,55 @@ opponent-hand availability, reweights compatible opponent keeps, and passes
 the resulting score distribution into Model 13.0's unchanged board objective.
 The initial Model 13.2 comparison deliberately retains Model 13.0 live pegging
 and all non-asset discard logic.
+
+Model 13.22 calibration uses `model1322-decline-factors.json`, a schema-3
+empirical evidence asset derived from human server play and compact benchmark
+logs. For every observed non-scoring decline it records whether the player
+actually held the legally playable scoring rank. `heldGivenDeclinePpm` exposes
+that posterior probability directly; `multiplierPpm` retains the corresponding
+held-card likelihood update so the policy can reweight its own current prior
+rather than replacing it with the corpus-wide prior. Model rows are accepted
+only for the explicit 13.x–15.x exhaustive
+pegging-policy cohort. Human, exhaustive-model, and pooled counts are retained
+separately. Every opportunity requires the scoring rank to be held and legal,
+and is excluded when the opponent has no cards left or the chosen alternative
+itself scores. Rates are split by whether the choice is the player's first,
+second, or third card. In addition to pair/run completion rates, the asset
+distinguishes declining a pair royal after a pair, declining four of a kind
+after a pair royal, and declining a pair or pair royal when retaliation was
+known to be impossible from dead/held/played cards, the 31 limit, or the
+opponent having already said go in that round. Runtime uses the pooled
+parts-per-million likelihoods; source hashes and raw counts make later
+regeneration auditable.
+
+`model1322-opponent-discard-histograms.json` stores the role-specific
+conditional distribution of an opponent's two private discard ranks given
+their four-card keep. Model 9.x and Model 13.x source cohorts are normalized
+independently within every role/keep before blending. The calibration removes
+histogram entries made impossible by the actor's six known cards, reweights
+the remaining entries for physical rank availability, and removes the
+opponent's modeled private discards before enumerating cuts. The JSON form is
+kept for provenance and future strength updates; a production build may pack
+the same integer weights without changing their semantics.
+
+Model 9.11 is the reusable context-free four-keep by four-keep baseline for
+Model 13.22. It retains Model 9.1's complete-opponent-hand EV evaluation but
+uses Model 13.22's go and scoring-decline logic at every non-forced decision.
+Its durable pair asset stores terminal pegging totals only. Model 13.22 applies
+the actor's two known discards and the cut as a sparse correction: cached
+action-by-hidden-hand continuation evidence is reweighted, unchanged actions
+reuse the 9.11 terminal cell, and only the suffix after the first changed
+action is replayed. Action traces and evidence caches are builder-local and
+are not runtime assets. See `docs/model-9.11-13.22-sparse-build.md`.
+
+The selectable Model 9.11 runtime uses `model911-discard-ev.bin`, an exact
+six-card aggregation of that completed keep-pair matrix. Live pegging executes
+the same legal-information policy with the actor's own discards, cut, public
+go evidence, and scoring-decline likelihoods. Because deployment has a human
+on the other side, every later model decision retains the same actor-relative
+perspective: exact continuation states calculated on the model's earlier move
+are cached in memory and reused after the human's play narrows or reweights the
+possible opponent hands. The cache belongs to that game session rather than an
+HTTP worker thread, so reconnecting requests resume the same analysis. It is
+cleared when pegging ends and contains no observation-to-action table or
+durable pegging-path graph.
