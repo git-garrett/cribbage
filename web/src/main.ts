@@ -22,6 +22,7 @@ import { maybeLoadAdSense } from "./adsense";
 import { circularTurnCutPresentation, createCircularBoard, updateCircularBoard } from "./circular-board";
 import { comparisonTone, type ComparisonTone } from "./comparison-difference";
 import { endGameAds } from "./end-game-ad";
+import { shouldAnimateScoringCards, shouldShowScoreBubble } from "./fast-counting-policy";
 import { singleGameReportRows } from "./game-report";
 import { rankLeaderboardWins } from "./leaderboard";
 import { mergedLifetimeResults, type LifetimeScoringStats } from "./my-stats";
@@ -188,6 +189,7 @@ const MY_STATS_OPPONENT_LABEL: Record<MyStatsOpponent, string> = {
 };
 
 const FONT_SIZE_STORAGE_KEY = "strong-cribbage.fontSize";
+const FAST_COUNTING_STORAGE_KEY = "strong-cribbage.fastCounting.v1";
 const DISMISSED_GAME_OVER_STORAGE_KEY = "strong-cribbage.dismissedGameOverId";
 const LEADERBOARD_CACHE_KEY = "strong-cribbage.leaderboard.v1";
 
@@ -251,6 +253,7 @@ const state: {
   serverBusy: { retry: ServerBusyRetry | null } | null;
   parGuides: boolean;
   fontSize: AppFontSize;
+  fastCounting: boolean;
   analyticsOpen: boolean;
   analyticsMode: "my" | "full";
   statsView: StatsView;
@@ -309,6 +312,7 @@ const state: {
   serverBusy: null,
   parGuides: safeLocalStorageGet("strong-cribbage.admin.parGuides") === "1",
   fontSize: normalizeAppFontSize(safeLocalStorageGet(FONT_SIZE_STORAGE_KEY)),
+  fastCounting: safeLocalStorageGet(FAST_COUNTING_STORAGE_KEY) === "1",
   analyticsOpen: false,
   analyticsMode: "my",
   statsView: "stats",
@@ -497,6 +501,7 @@ const els = {
   board: document.querySelector("#board") as HTMLElement,
   appBack: document.querySelector("#app-back") as HTMLButtonElement,
   fontSizeSelect: document.querySelector("#font-size-select") as HTMLSelectElement,
+  fastCounting: document.querySelector("#fast-counting") as HTMLInputElement,
   // The shared header no longer has a hamburger. This inert element keeps the
   // retired menu's developer-only actions safely disconnected for now.
   menuToggle: document.createElement("button"),
@@ -864,6 +869,7 @@ let peoplePollTimer: number | null = null;
 let humanTablePollTimer: number | null = null;
 
 els.parGuidesToggle.checked = state.parGuides;
+els.fastCounting.checked = state.fastCounting;
 
 interface AnalyticsStore {
   version: 1;
@@ -3624,7 +3630,7 @@ function tableMotionDisabled(): boolean {
 }
 
 async function playScoringStageTransition(action: () => Promise<GameState>): Promise<GameState> {
-  const animateOutgoing = Boolean(state.game?.scoring) && !tableMotionDisabled();
+  const animateOutgoing = Boolean(state.game?.scoring) && shouldAnimateScoringCards(state.fastCounting, tableMotionDisabled());
   if (animateOutgoing) {
     state.scoringTransitionStage = "leaving";
     render(state.game);
@@ -3636,7 +3642,9 @@ async function playScoringStageTransition(action: () => Promise<GameState>): Pro
       action(),
       animateOutgoing ? waitMs(SCORING_RACK_LEAVE_MS) : Promise.resolve(),
     ]);
-    state.scoringTransitionStage = next.scoring && !tableMotionDisabled() ? "entering" : null;
+    state.scoringTransitionStage = next.scoring && shouldAnimateScoringCards(state.fastCounting, tableMotionDisabled())
+      ? "entering"
+      : null;
     render(next);
     if (state.scoringTransitionStage === "entering") {
       await waitForPaint();
@@ -4004,6 +4012,7 @@ function newScoreNotices(game: GameState): GameNotice[] {
     if (!shouldAnnounceScoreEvent(event, events)) continue;
     const summary = scoreSummaryForEvent(event, game);
     if (summary) state.scoreSummaryQueue.push(summary);
+    if (!shouldShowScoreBubble(state.fastCounting, event.category)) continue;
     const player = event.player === "human" ? playerDisplayName() : playerName("ai");
     const parts = handScoreNoticeParts(event, game.scoring?.cards, game.turnCard)
       ?? peggingScoreNoticeParts(event)
@@ -4148,6 +4157,7 @@ function clearScoringCardEmphasis(): void {
 
 function renderScoringCardEmphasis(): void {
   clearScoringCardEmphasis();
+  if (state.fastCounting) return;
   const notice = state.activeNotice;
   if (!notice?.emphasizedCardIds.length) return;
   void els.scoringCards.offsetWidth;
@@ -6380,6 +6390,7 @@ function render(game: GameState | null): void {
   els.splashNameRow.hidden = Boolean(playerFirstName);
   els.splashFirstName.value = playerFirstName || els.splashFirstName.value;
   els.app.dataset.phase = game.phase;
+  els.app.dataset.fastCounting = state.fastCounting ? "true" : "false";
   const showingDealCut = Boolean(state.dealCutRevealStage) || game.phase === "cut_for_deal";
   els.app.dataset.dealCutActive = showingDealCut ? "true" : "false";
   els.app.dataset.dealAnimationActive = state.dealAnimation ? "true" : "false";
@@ -7100,6 +7111,16 @@ els.gameLogMatchType.addEventListener("change", () => {
 els.parGuidesToggle.addEventListener("change", () => {
   state.parGuides = els.parGuidesToggle.checked;
   safeLocalStorageSet("strong-cribbage.admin.parGuides", state.parGuides ? "1" : "0");
+  render(state.game);
+});
+
+els.fastCounting.addEventListener("change", () => {
+  state.fastCounting = els.fastCounting.checked;
+  safeLocalStorageSet(FAST_COUNTING_STORAGE_KEY, state.fastCounting ? "1" : "0");
+  if (state.fastCounting && state.game?.scoring) {
+    clearNoticeQueue();
+    state.scoringTransitionStage = null;
+  }
   render(state.game);
 });
 

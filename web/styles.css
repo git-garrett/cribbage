@@ -8690,6 +8690,195 @@ body[data-font-size="x-large"] .pathway-choice-grid-play .pathway-choice {
   }
 }
 
+.pathway-settings-card {
+  --pathway-rest-y: 0px;
+  --pathway-rest-rotate: 0deg;
+  --pathway-hover-rotate: 0deg;
+  position: relative;
+  display: grid;
+  align-content: center;
+  gap: 18px;
+  width: 100%;
+  min-height: 156px;
+  padding: 22px 20px;
+  overflow: hidden;
+  border: 1px solid var(--entry-border-strong);
+  border-radius: 22px 22px 12px 12px;
+  background: var(--entry-panel-alt);
+  color: var(--pathway-ink);
+  box-shadow:
+    0 -2px 0 color-mix(in srgb, var(--entry-accent) 34%, transparent),
+    var(--entry-card-shadow-raised);
+  transform: translateY(var(--pathway-rest-y));
+  rotate: var(--pathway-rest-rotate);
+  transform-origin: 50% 120%;
+}
+
+.pathway-settings-card::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 5px;
+  background: var(--entry-accent);
+  content: "";
+}
+
+.pathway-settings-card::after {
+  position: absolute;
+  top: 19px;
+  right: 20px;
+  color: color-mix(in srgb, var(--pathway-suit-dark) 22%, transparent);
+  content: "♠";
+  font: 700 50px/1 Georgia, serif;
+  pointer-events: none;
+}
+
+.pathway-settings-card > header {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 5px;
+  padding-right: 58px;
+}
+
+.pathway-settings-card > header span {
+  color: var(--pathway-gold-deep);
+  font-size: var(--access-label);
+  font-weight: 900;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.pathway-settings-card h3 {
+  margin: 0;
+  color: var(--entry-heading);
+  font-family: Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-size: var(--access-card-title);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.gameplay-setting {
+  --fast-switch-height: clamp(30px, calc(var(--access-body) * 1.55), 46px);
+  --fast-switch-width: calc(var(--fast-switch-height) * 1.75);
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  min-height: 82px;
+  padding: 14px;
+  border: 1px solid var(--entry-border);
+  border-radius: 15px;
+  background: var(--entry-panel-soft);
+  cursor: pointer;
+}
+
+.gameplay-setting > span {
+  display: grid;
+  gap: 4px;
+}
+
+.gameplay-setting strong {
+  color: var(--entry-heading);
+  font-size: var(--access-body);
+  line-height: 1.2;
+}
+
+.gameplay-setting small {
+  max-width: 35ch;
+  color: var(--entry-muted);
+  font-size: var(--access-small);
+  line-height: 1.4;
+}
+
+.gameplay-setting input {
+  position: relative;
+  width: var(--fast-switch-width);
+  height: var(--fast-switch-height);
+  margin: 0;
+  appearance: none;
+  border: 2px solid var(--entry-border-strong);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--entry-muted) 35%, var(--entry-panel));
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.gameplay-setting input::before {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(var(--fast-switch-height) - 8px);
+  height: calc(var(--fast-switch-height) - 8px);
+  border-radius: 50%;
+  background: var(--entry-panel-soft);
+  box-shadow: 0 2px 7px rgba(7, 31, 56, 0.24);
+  content: "";
+  transition: transform 180ms cubic-bezier(0.2, 0.76, 0.28, 1);
+}
+
+.gameplay-setting input:checked {
+  border-color: var(--entry-accent);
+  background: #0b5b43;
+}
+
+.gameplay-setting input:checked::before {
+  transform: translateX(calc(var(--fast-switch-width) - var(--fast-switch-height)));
+}
+
+.gameplay-setting:has(input:focus-visible) {
+  outline: 3px solid var(--entry-focus);
+  outline-offset: 3px;
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .pathway-settings-card:hover {
+    border-color: var(--entry-accent);
+    box-shadow: 0 18px 34px color-mix(in srgb, var(--entry-accent) 18%, transparent);
+    transform: translateY(calc(var(--pathway-rest-y) - 4px));
+    rotate: var(--pathway-hover-rotate);
+    transition:
+      transform 600ms cubic-bezier(0.16, 0.74, 0.24, 1),
+      rotate 720ms cubic-bezier(0.16, 0.74, 0.24, 1),
+      border-color 320ms ease,
+      box-shadow 420ms ease;
+  }
+}
+
+@media (min-width: 850px) {
+  .pathway-choice-grid-settings .pathway-choice,
+  .pathway-choice-grid-settings .pathway-settings-card {
+    flex: 0 1 min(29vw, 330px);
+  }
+
+  .pathway-choice-grid-settings .pathway-settings-card {
+    align-content: end;
+    min-width: 0;
+    min-height: 330px;
+    margin: 0 -8px;
+    padding: 34px 22px 30px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pathway-view:not([hidden]) .pathway-settings-card {
+    animation: pathway-card-deal 390ms cubic-bezier(0.2, 0.76, 0.28, 1) 80ms both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pathway-settings-card,
+  .pathway-settings-card:hover,
+  .gameplay-setting input,
+  .gameplay-setting input::before {
+    animation: none;
+    transition-duration: 0.01ms;
+  }
+}
+
 /* Branded utility pages. Statistics, history, leaderboard, model notes, and
    decision review now use the same clubhouse materials and cribbage-track
    structure as the pathway and playing-table surfaces. */
