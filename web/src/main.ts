@@ -40,6 +40,7 @@ import {
   collectNewScoreEvents,
   createScoreNoticeCursor,
   currentScoringScoreEvent,
+  scoreboardStateForScoringConfirmation,
   scoreEventsForGame,
   type ScoreEvent,
   type ScoreNoticeCursor,
@@ -287,6 +288,7 @@ const state: {
   dealCutResolve: (() => void) | null;
   scoreSummaryQueue: ScoreSummary[];
   activeScoreSummary: ScoreSummary | null;
+  confirmedScoreSummaryKey: string | null;
   scoringTransitionStage: ScoringTransitionStage;
   dealAnimation: { key: string; dealer: string; pone: string } | null;
   animatedDealKeys: Set<string>;
@@ -346,6 +348,7 @@ const state: {
   dealCutResolve: null,
   scoreSummaryQueue: [],
   activeScoreSummary: null,
+  confirmedScoreSummaryKey: null,
   scoringTransitionStage: null,
   dealAnimation: null,
   animatedDealKeys: new Set(),
@@ -391,6 +394,7 @@ function resetTransientGameUi(): void {
   state.dealCutResolve = null;
   state.scoreSummaryQueue = [];
   state.activeScoreSummary = null;
+  state.confirmedScoreSummaryKey = null;
   state.scoringTransitionStage = null;
   state.dealAnimation = null;
   state.animatedDealKeys = new Set();
@@ -4045,6 +4049,17 @@ function scoreNoticeGameId(game: GameState): string | null {
   return null;
 }
 
+function gameForScoreboard(game: GameState): GameState {
+  const event = currentScoringScoreEvent(scoreNoticeGameId(game), game);
+  const display = scoreboardStateForScoringConfirmation(
+    game,
+    event,
+    state.confirmedScoreSummaryKey,
+  );
+  if (display.scores === game.scores) return game;
+  return { ...game, ...display };
+}
+
 function scoreNoticeLabel(event: ScoreEvent): string {
   if (event.reason === "Heels") return "Heels";
   if (event.reason === "Go") return "Go point";
@@ -6399,10 +6414,11 @@ function render(game: GameState | null): void {
   els.app.dataset.inlineResult = shouldInlineResult(game) ? "true" : "false";
   const showParGuides = shouldShowStrategicGuides(state.parGuides, SIMPLE_NETWORK_MODE);
   els.app.dataset.parGuides = showParGuides ? "true" : "false";
-  els.humanScore.textContent = String(game.scores.human);
-  els.aiScore.textContent = String(game.scores.ai);
+  const scoreboardGame = gameForScoreboard(game);
+  els.humanScore.textContent = String(scoreboardGame.scores.human);
+  els.aiScore.textContent = String(scoreboardGame.scores.ai);
   els.currentModel.textContent = engineName(currentSnapshot?.opponent ?? els.opponent.value ?? DEFAULT_OPPONENT);
-  renderScorePace(game);
+  renderScorePace(scoreboardGame);
   const revealCribOwner = shouldRevealCribOwner(game.phase, state.dealCutRevealStage);
   els.humanName.firstChild!.textContent = `${revealCribOwner && game.dealer === "User" ? playerPossessive("human") : playerDisplayName()} `;
   els.aiName.firstChild!.textContent = `${revealCribOwner && game.dealer === "AI" ? playerPossessive("ai") : playerName("ai")} `;
@@ -6426,7 +6442,7 @@ function render(game: GameState | null): void {
   renderAceMistakeBadge(game);
   renderScoring(game.scoring);
   renderGameOver(game);
-  renderBoard(game);
+  renderBoard(scoreboardGame);
   renderCribTray(game);
   const hideHandsForInterstitial = Boolean(
     state.dealAnimation ||
@@ -7404,6 +7420,8 @@ els.acknowledgePeggingReset.addEventListener("click", async () => {
 els.continueScoring.addEventListener("click", async () => {
   if (state.pending) return;
   const dismissedSummary = state.activeScoreSummary;
+  const previouslyConfirmedSummaryKey = state.confirmedScoreSummaryKey;
+  state.confirmedScoreSummaryKey = dismissedSummary?.key ?? null;
   state.activeScoreSummary = null;
   renderScoreSummaryDialog();
   state.pending = true;
@@ -7415,6 +7433,7 @@ els.continueScoring.addEventListener("click", async () => {
     await playDealAnimationIfNeeded(next);
   } catch (error) {
     state.scoringTransitionStage = null;
+    state.confirmedScoreSummaryKey = previouslyConfirmedSummaryKey;
     state.activeScoreSummary = dismissedSummary;
     showServerBusy(error, () => els.continueScoring.click());
   } finally {

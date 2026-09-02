@@ -5,6 +5,7 @@ import {
   collectNewScoreEvents,
   createScoreNoticeCursor,
   currentScoringScoreEvent,
+  scoreboardStateForScoringConfirmation,
 } from "./score-notice-cursor";
 
 function score(id: string, gameId: string): Extract<AnalyticsEvent, { type: "score" }> {
@@ -99,5 +100,35 @@ describe("score notification cursor", () => {
       scoring: { stage: "crib", owner: "User", points: 2 },
       analyticsEvents: events,
     })).toBeNull();
+  });
+
+  it("matches a game-winning hand event even when only the points needed to win were pegged", () => {
+    const winningScore = score("winning-hand", "game-a");
+    winningScore.category = "hand";
+    winningScore.points = 2;
+    winningScore.totalScore = 121;
+    winningScore.scores.human = 121;
+
+    expect(currentScoringScoreEvent("game-a", {
+      handNumber: 1,
+      scoring: { stage: "pone", owner: "User", points: 8 },
+      analyticsEvents: [winningScore],
+    })).toEqual(winningScore);
+  });
+
+  it("holds the current hand score and pegs until its summary is confirmed", () => {
+    const handScore = score("hand-1", "game-a");
+    handScore.category = "hand";
+    handScore.points = 8;
+    const game: Pick<import("./api-types").GameState, "scores" | "pegPositions"> = {
+      scores: { human: 38, ai: 31 },
+      pegPositions: { human: [38, 38], ai: [31, 31] },
+    };
+
+    expect(scoreboardStateForScoringConfirmation(game, handScore, null)).toEqual({
+      scores: { human: 30, ai: 31 },
+      pegPositions: { human: [30, 30], ai: [31, 31] },
+    });
+    expect(scoreboardStateForScoringConfirmation(game, handScore, "hand-1")).toEqual(game);
   });
 });

@@ -1,4 +1,4 @@
-import type { AnalyticsEvent } from "./api-types";
+import type { AnalyticsEvent, GameState } from "./api-types";
 
 export type ScoreEvent = Extract<AnalyticsEvent, { type: "score" }>;
 
@@ -76,11 +76,29 @@ export function currentScoringScoreEvent(
     if (
       event.handNumber === game.handNumber &&
       event.category === category &&
-      event.player === player &&
-      event.points === scoring.points
+      event.player === player
     ) {
       return event;
     }
   }
   return null;
+}
+
+export function scoreboardStateForScoringConfirmation(
+  game: Pick<GameState, "scores" | "pegPositions">,
+  event: ScoreEvent | null,
+  confirmedSummaryKey: string | null,
+): Pick<GameState, "scores" | "pegPositions"> {
+  if (!event || event.id === confirmedSummaryKey) {
+    return { scores: game.scores, pegPositions: game.pegPositions };
+  }
+  const player = event.player;
+  const scoreBeforeCount = Math.max(0, game.scores[player] - event.points);
+  return {
+    scores: { ...game.scores, [player]: scoreBeforeCount },
+    pegPositions: {
+      ...game.pegPositions,
+      [player]: [scoreBeforeCount, scoreBeforeCount],
+    },
+  };
 }
