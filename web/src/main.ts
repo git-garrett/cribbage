@@ -32,6 +32,7 @@ import {
   baselineScoreEvents,
   collectNewScoreEvents,
   createScoreNoticeCursor,
+  currentScoringScoreEvent,
   scoreEventsForGame,
   type ScoreEvent,
   type ScoreNoticeCursor,
@@ -3775,7 +3776,10 @@ function renderResult(game: GameState): void {
     els.resultInline.innerHTML = "";
     return;
   }
-  enqueueNotices(newScoreNotices(game));
+  const notices = newScoreNotices(game);
+  ensureCurrentScoreSummary(game);
+  enqueueNotices(notices);
+  maybeOpenScoreSummary();
   state.noticeResultLines = [];
   els.resultInline.innerHTML = "";
   if (!game.scoring) els.scoringResult.innerHTML = "";
@@ -3805,6 +3809,16 @@ function scoreSummaryForEvent(event: ScoreEvent, game: GameState): ScoreSummary 
     items,
     nextLabel: scoreSummaryNextLabel(game),
   };
+}
+
+function ensureCurrentScoreSummary(game: GameState): void {
+  if (!game.scoring || state.pending) return;
+  const event = currentScoringScoreEvent(scoreNoticeGameId(game), game);
+  if (!event) return;
+  if (state.activeScoreSummary?.key === event.id) return;
+  if (state.scoreSummaryQueue.some((summary) => summary.key === event.id)) return;
+  const summary = scoreSummaryForEvent(event, game);
+  if (summary) state.scoreSummaryQueue.push(summary);
 }
 
 function newScoreNotices(game: GameState): GameNotice[] {

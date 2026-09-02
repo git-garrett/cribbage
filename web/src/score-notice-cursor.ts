@@ -50,3 +50,37 @@ export function collectNewScoreEvents(
   }
   return unseen;
 }
+
+export interface CurrentScoringContext {
+  handNumber: number;
+  scoring: {
+    stage: "pone" | "dealer" | "crib";
+    owner: string;
+    points: number;
+  } | null;
+  analyticsEvents: readonly AnalyticsEvent[];
+}
+
+export function currentScoringScoreEvent(
+  gameId: string | null,
+  game: CurrentScoringContext,
+): ScoreEvent | null {
+  const scoring = game.scoring;
+  if (!scoring) return null;
+  const category = scoring.stage === "crib" ? "crib" : "hand";
+  const player = scoring.owner === "User" ? "human" : scoring.owner === "AI" ? "ai" : null;
+  if (!player) return null;
+  const events = scoreEventsForGame(gameId, game.analyticsEvents);
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (
+      event.handNumber === game.handNumber &&
+      event.category === category &&
+      event.player === player &&
+      event.points === scoring.points
+    ) {
+      return event;
+    }
+  }
+  return null;
+}

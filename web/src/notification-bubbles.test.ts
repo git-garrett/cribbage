@@ -34,7 +34,8 @@ describe("contextual game notifications", () => {
   });
 
   it("does not turn general game status copy into transient bubbles", () => {
-    expect(renderResultSource).toContain("enqueueNotices(newScoreNotices(game))");
+    expect(renderResultSource).toContain("const notices = newScoreNotices(game)");
+    expect(renderResultSource).toContain("enqueueNotices(notices)");
     expect(renderResultSource).not.toContain('kind: "status"');
     expect(renderResultSource).not.toContain("game.result");
     expect(renderResultSource).not.toContain("game.message");
@@ -46,6 +47,11 @@ describe("contextual game notifications", () => {
     expect(html).toMatch(/id="continue-scoring"[^>]*>Next</);
     expect(mainSource).toMatch(/if \(!notice\) \{\s*maybeOpenScoreSummary\(\);/s);
     expect(mainSource).toMatch(/scoreSummaryQueue\.push\(summary\)/);
+  });
+
+  it("rebuilds the current hand or crib summary after restoring a game", () => {
+    expect(renderResultSource).toContain("ensureCurrentScoreSummary(game)");
+    expect(mainSource).toMatch(/function ensureCurrentScoreSummary[\s\S]*currentScoringScoreEvent[\s\S]*scoreSummaryQueue\.push\(summary\)/s);
   });
 
   it("names the next dealer hand and crib on scoring-summary actions", () => {

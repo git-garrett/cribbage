@@ -4,6 +4,7 @@ import {
   baselineScoreEvents,
   collectNewScoreEvents,
   createScoreNoticeCursor,
+  currentScoringScoreEvent,
 } from "./score-notice-cursor";
 
 function score(id: string, gameId: string): Extract<AnalyticsEvent, { type: "score" }> {
@@ -63,5 +64,40 @@ describe("score notification cursor", () => {
       score("a-2", "game-a"),
       score("a-3", "game-a"),
     ])).toEqual([score("a-3", "game-a")]);
+  });
+
+  it("recovers the current crib score after restore without treating it as a new notice", () => {
+    const cursor = createScoreNoticeCursor();
+    const cribScore = score("crib-1", "game-a");
+    cribScore.category = "crib";
+    cribScore.points = 4;
+    cribScore.player = "human";
+
+    expect(collectNewScoreEvents(cursor, "game-a", [cribScore])).toEqual([]);
+    expect(currentScoringScoreEvent("game-a", {
+      handNumber: 1,
+      scoring: { stage: "crib", owner: "User", points: 4 },
+      analyticsEvents: [cribScore],
+    })).toEqual(cribScore);
+  });
+
+  it("does not recover a stale score from another scoring stage, player, hand, or game", () => {
+    const events = [
+      score("other-game", "game-b"),
+      score("prior-hand", "game-a"),
+      score("opponent-crib", "game-a"),
+      score("dealer-hand", "game-a"),
+    ];
+    events[1].handNumber = 0;
+    events[1].category = "crib";
+    events[2].category = "crib";
+    events[2].player = "ai";
+    events[3].category = "hand";
+
+    expect(currentScoringScoreEvent("game-a", {
+      handNumber: 1,
+      scoring: { stage: "crib", owner: "User", points: 2 },
+      analyticsEvents: events,
+    })).toBeNull();
   });
 });
