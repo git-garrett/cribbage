@@ -75,6 +75,16 @@ describe("Concept B mobile playing UI", () => {
     expect(css).toMatch(/\.score\.ai\s*\{[^}]*justify-self:\s*stretch[^}]*justify-items:\s*end[^}]*text-align:\s*right/s);
   });
 
+  it("uses a separate Crib marker while leaving the dealer names unpossessive", () => {
+    expect(html).toMatch(/id="human-name" class="player-name">Player<\/span><\/span>\s*<span id="human-dealer" class="dealer-button score-crib-marker"/s);
+    expect(html).toMatch(/id="ai-name" class="player-name">Ace<\/span><\/span>\s*<span id="ai-dealer" class="dealer-button score-crib-marker"/s);
+    expect(mainSource).toContain("els.humanName.textContent = playerDisplayName();");
+    expect(mainSource).toContain('els.aiName.textContent = playerName("ai");');
+    expect(css).toMatch(/\.app\[data-view="game"\] \.score-crib-marker\s*\{[^}]*position:\s*absolute[^}]*top:\s*calc\(100% \+ 9px\)/s);
+    expect(css).toMatch(/\.score:first-child > \.score-crib-marker\s*\{[^}]*left:\s*0/s);
+    expect(css).toMatch(/\.score\.ai > \.score-crib-marker\s*\{[^}]*right:\s*0/s);
+  });
+
   it("uses one centered header system for pathway and gameplay views", () => {
     expect(html).toMatch(/id="pathway-header-home"[^>]*>[\s\S]*Home/);
     expect(html).toMatch(/id="mobile-header-reveal"[^>]*aria-label="Show navigation"/);

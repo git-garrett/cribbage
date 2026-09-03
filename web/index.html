@@ -123,45 +123,49 @@
               <h2 id="pathway-play-title">Who’s across the board?</h2>
               <p>Choose the kind of game you want to play.</p>
             </header>
-            <div class="pathway-choice-grid pathway-choice-grid-play" role="group" aria-label="Play options">
-              <button class="pathway-choice" type="button" data-pathway-destination="easy">
-                <span>AI opponent</span>
-                <strong>Easy</strong>
-                <small>Good for Learners</small>
-                <em class="pathway-resume-status" hidden>Resume</em>
-              </button>
-              <button class="pathway-choice" type="button" data-pathway-destination="tough">
-                <span>AI opponent</span>
-                <strong>Tough</strong>
-                <small>Challenges Most Players</small>
-                <em class="pathway-resume-status" hidden>Resume</em>
-              </button>
-              <button class="pathway-choice" type="button" data-pathway-destination="master">
-                <span>AI opponent</span>
-                <strong>Ace</strong>
-                <small>Challenges the Best Players</small>
-                <em class="pathway-resume-status" hidden>Resume</em>
-                <em class="pathway-login-note">Sign in required</em>
-              </button>
-              <button class="pathway-choice pathway-choice-human" type="button" data-pathway-destination="human">
-                <span>Human match</span>
-                <strong>Find a Human Opponent</strong>
-                <small>See who’s online and ready to play.</small>
-                <em class="pathway-resume-status" hidden>Resume</em>
-                <em class="pathway-login-note">Sign in required</em>
-              </button>
-              <button class="pathway-choice pathway-choice-dynamic" type="button" data-pathway-destination="dynamic" disabled>
-                <span>Adaptive opponent</span>
-                <strong>Dynamic</strong>
-                <small>Adapts to your play and plays back at your skill.</small>
-                <em class="pathway-coming-soon">Coming soon</em>
-              </button>
-              <button class="pathway-choice" type="button" data-pathway-destination="grandmaster" disabled>
-                <span>AI opponent</span>
-                <strong>Legend</strong>
-                <small>Better than Most Humans</small>
-                <em class="pathway-coming-soon">Coming soon</em>
-              </button>
+            <div class="pathway-choice-hands">
+              <div class="pathway-choice-grid pathway-choice-grid-play pathway-choice-grid-play-ai" role="group" aria-label="AI opponents">
+                <button class="pathway-choice" type="button" data-pathway-destination="easy">
+                  <span>AI opponent</span>
+                  <strong>Easy</strong>
+                  <small>Good for Learners</small>
+                  <em class="pathway-resume-status" hidden>Resume</em>
+                </button>
+                <button class="pathway-choice" type="button" data-pathway-destination="tough">
+                  <span>AI opponent</span>
+                  <strong>Tough</strong>
+                  <small>Challenges Most Players</small>
+                  <em class="pathway-resume-status" hidden>Resume</em>
+                </button>
+                <button class="pathway-choice" type="button" data-pathway-destination="master">
+                  <span>AI opponent</span>
+                  <strong>Ace</strong>
+                  <small>Challenges the Best Players</small>
+                  <em class="pathway-resume-status" hidden>Resume</em>
+                  <em class="pathway-login-note">Sign in required</em>
+                </button>
+              </div>
+              <div class="pathway-choice-grid pathway-choice-grid-play pathway-choice-grid-play-secondary" role="group" aria-label="Other ways to play">
+                <button class="pathway-choice pathway-choice-human" type="button" data-pathway-destination="human">
+                  <span>Human match</span>
+                  <strong>Find a Human Opponent</strong>
+                  <small>See who’s online and ready to play.</small>
+                  <em class="pathway-resume-status" hidden>Resume</em>
+                  <em class="pathway-login-note">Sign in required</em>
+                </button>
+                <button class="pathway-choice pathway-choice-dynamic" type="button" data-pathway-destination="dynamic" disabled>
+                  <span>Adaptive opponent</span>
+                  <strong>Dynamic</strong>
+                  <small>Adapts to your play and plays back at your skill.</small>
+                  <em class="pathway-coming-soon">Coming soon</em>
+                </button>
+                <button class="pathway-choice" type="button" data-pathway-destination="grandmaster" disabled>
+                  <span>AI opponent</span>
+                  <strong>Legend</strong>
+                  <small>Better than Most Humans</small>
+                  <em class="pathway-coming-soon">Coming soon</em>
+                </button>
+              </div>
             </div>
           </section>
 
@@ -514,13 +518,15 @@
 
       <section class="scoreboard">
         <div class="score">
-          <span class="score-label"><span id="human-name" class="player-name">Player <span id="human-dealer" class="dealer-button" hidden>Crib</span></span></span>
+          <span class="score-label"><span id="human-name" class="player-name">Player</span></span>
+          <span id="human-dealer" class="dealer-button score-crib-marker" hidden>Crib</span>
           <strong id="human-score">0</strong>
           <span id="human-pace" class="score-pace"></span>
           <span id="human-final" class="score-final"></span>
         </div>
         <div class="score ai">
-          <span class="score-label"><span id="ai-name" class="player-name">Ace <span id="ai-dealer" class="dealer-button" hidden>Crib</span></span></span>
+          <span class="score-label"><span id="ai-name" class="player-name">Ace</span></span>
+          <span id="ai-dealer" class="dealer-button score-crib-marker" hidden>Crib</span>
           <strong id="ai-score">0</strong>
           <span id="ai-pace" class="score-pace"></span>
           <span id="ai-final" class="score-final"></span>

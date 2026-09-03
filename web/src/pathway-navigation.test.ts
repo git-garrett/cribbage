@@ -101,10 +101,16 @@ describe("local pathway navigation", () => {
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)/);
   });
 
-  it("uses the same vertical card stack for the Play hand", () => {
-    expect(html).toContain('class="pathway-choice-grid pathway-choice-grid-play" role="group" aria-label="Play options"');
+  it("keeps Play stacked on mobile and uses separate AI and alternate desktop fans", () => {
+    expect(html).toContain('class="pathway-choice-hands"');
+    expect(html).toContain('class="pathway-choice-grid pathway-choice-grid-play pathway-choice-grid-play-ai" role="group" aria-label="AI opponents"');
+    expect(html).toContain('class="pathway-choice-grid pathway-choice-grid-play pathway-choice-grid-play-secondary" role="group" aria-label="Other ways to play"');
+    expect(html).toMatch(/data-pathway-destination="master"[\s\S]*?<\/button>\s*<\/div>\s*<div class="pathway-choice-grid pathway-choice-grid-play pathway-choice-grid-play-secondary"[\s\S]*data-pathway-destination="human"/);
     expect(css).toMatch(/\.pathway-primary-grid,\s*\.pathway-choice-grid\s*{[\s\S]*display: flex;[\s\S]*flex-direction: column/);
     expect(css).toMatch(/\.pathway-choice-grid-play\s*{[\s\S]*width: min\(100%, 620px\);[\s\S]*margin-right: auto;[\s\S]*margin-left: auto/);
+    expect(css).toMatch(/@media \(min-width: 1000px\)[\s\S]*\.pathway-choice-hands\s*{[\s\S]*display: grid[\s\S]*width: min\(100%, 1040px\)[\s\S]*padding-bottom: 24px/s);
+    expect(css).toMatch(/@media \(min-width: 1000px\)[\s\S]*\.pathway-choice-grid-play\s*{[\s\S]*flex-direction: row[\s\S]*min-height: 216px/s);
+    expect(css).toMatch(/\.pathway-choice-grid-play > :nth-child\(1\)\s*{[\s\S]*--pathway-rest-rotate: -5\.5deg/s);
     expect(css).not.toContain("grid-auto-flow: column");
     expect(css).not.toContain("scroll-snap-type: inline mandatory");
   });
@@ -138,6 +144,7 @@ describe("local pathway navigation", () => {
     expect(html.match(/class="pathway-resume-status" hidden>Resume<\/em>/g)).toHaveLength(4);
     expect(source).toContain("syncPathwayResumePresentation()");
     expect(source).toContain('button.classList.toggle("pathway-choice-resumable", active)');
+    expect(css).toMatch(/@media \(min-width: 1000px\)[\s\S]*\.pathway-choice-grid-play \.pathway-resume-status\s*{[\s\S]*top: 50%;[\s\S]*right: 78px/s);
     expect(source).toMatch(/button\.dataset\.resumable === "true"[\s\S]*resumeGameFromSplash\(\)/);
     expect(css).toMatch(/\.pathway-choice-resumable\s*\{[^}]*border-color:\s*var\(--pathway-gold-deep\)/s);
     expect(css).toMatch(/\.pathway-resume-status\s*\{[^}]*top:\s*18px[^}]*right:\s*20px[^}]*left:\s*auto/s);

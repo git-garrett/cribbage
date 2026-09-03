@@ -164,6 +164,7 @@ type GameNoticeBase = {
 type GameNotice = GameNoticeBase & (
   | { kind: "score"; points: number }
   | { kind: "go"; callout: "GO"; playerText: string }
+  | { kind: "start"; callout: string; playerText: string }
 );
 
 interface ScoreSummary {
@@ -4411,6 +4412,31 @@ function newOpponentGoNotice(game: GameState): GameNotice | null {
   };
 }
 
+function gameEntryOpponentName(): string {
+  if (activeHumanTable) {
+    return activeHumanTable.viewerSeat === "challenger"
+      ? activeHumanTable.challenged.displayName
+      : activeHumanTable.challenger.displayName;
+  }
+  return engineName(currentSnapshot?.opponent ?? els.opponent.value);
+}
+
+function announceGameEntry(game: GameState): void {
+  clearNoticeQueue();
+  const opponent = gameEntryOpponentName();
+  enqueueNotices([{
+    key: `playing:${currentSnapshot?.gameId ?? game.handNumber}`,
+    kind: "start",
+    text: `Playing ${opponent}.`,
+    label: "Playing",
+    callout: opponent,
+    player: "ai",
+    playerText: "Game started",
+    anchor: "play",
+    emphasizedCardIds: [],
+  }]);
+}
+
 function newScoreNotices(game: GameState): GameNotice[] {
   const gameId = scoreNoticeGameId(game);
   const events = scoreEventsForGame(gameId, game.analyticsEvents);
@@ -4547,7 +4573,7 @@ function maybeOpenScoreSummary(): void {
 function showNoticeBubble(notice: GameNotice): void {
   els.result.innerHTML = "";
   const bubble = document.createElement("div");
-  bubble.className = `game-notification game-notification-score${notice.kind === "go" ? " game-notification-go" : ""}`;
+  bubble.className = `game-notification game-notification-score${notice.kind === "go" ? " game-notification-go" : notice.kind === "start" ? " game-notification-start" : ""}`;
   bubble.dataset.noticeKey = notice.key;
   bubble.setAttribute("aria-label", notice.text);
   bubble.dataset.player = notice.player;
@@ -6943,8 +6969,8 @@ function render(game: GameState | null): void {
   els.currentModel.textContent = engineName(currentSnapshot?.opponent ?? els.opponent.value ?? DEFAULT_OPPONENT);
   renderScorePace(scoreboardGame);
   const revealCribOwner = shouldRevealCribOwner(game.phase, state.dealCutRevealStage);
-  els.humanName.firstChild!.textContent = `${revealCribOwner && game.dealer === "User" ? playerPossessive("human") : playerDisplayName()} `;
-  els.aiName.firstChild!.textContent = `${revealCribOwner && game.dealer === "AI" ? playerPossessive("ai") : playerName("ai")} `;
+  els.humanName.textContent = playerDisplayName();
+  els.aiName.textContent = playerName("ai");
   els.aiHandTitle.textContent = `${playerPossessive("ai")} hand`;
   els.humanDealer.hidden = !revealCribOwner || game.dealer !== "User";
   els.aiDealer.hidden = !revealCribOwner || game.dealer !== "AI";
@@ -8145,6 +8171,7 @@ async function startNewGameFromUi(
       els.settingsPanel.hidden = true;
       els.menuToggle.setAttribute("aria-expanded", "false");
       render(remoteGame);
+      announceGameEntry(remoteGame);
       if (await resumeReconciledGame(remoteGame)) return;
       await continuePeggingAfterRender(remoteGame);
       return;
@@ -8155,6 +8182,7 @@ async function startNewGameFromUi(
     els.settingsPanel.hidden = true;
     els.menuToggle.setAttribute("aria-expanded", "false");
     render(next);
+    announceGameEntry(next);
     if (!(await resumeReconciledGame(next))) await continuePeggingAfterRender(next);
   } catch (error) {
     showServerBusy(error, () => startNewGameFromUi());
@@ -8174,6 +8202,7 @@ async function resumeGameFromSplash(): Promise<void> {
     const game = await reconcileRemoteGameState() ?? state.game ?? await loadRemoteActiveGameSession();
     if (!game) return;
     render(game);
+    announceGameEntry(game);
     if (await resumeReconciledGame(game)) return;
     await continuePeggingAfterRender(game);
   } catch (error) {

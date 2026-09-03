@@ -1388,7 +1388,9 @@ button:disabled {
   justify-content: center;
   gap: 7px;
   min-width: 0;
-  padding: 0 0 13px;
+  /* This rail scrolls horizontally, which also clips raised children. Keep
+     enough room above the tabs for their hover and focus lift. */
+  padding: 5px 0 13px;
   overflow-x: auto;
   scrollbar-width: thin;
   border-bottom: 1px solid var(--entry-border);
@@ -5241,6 +5243,21 @@ body[data-font-size="x-large"] .app[data-view="game"] .circular-track-skunk-labe
 
 .game-notification-score[data-player="ai"] {
   --notice-accent: #ff777d;
+}
+
+/* Game entry uses the same familiar bubble language as scoring, while the
+   player's name is allowed a little more horizontal room. */
+.game-notification-start {
+  --notice-accent: var(--game-gold) !important;
+}
+
+.game-notification-start .game-notification-points {
+  max-width: 88%;
+  overflow: hidden;
+  font-size: clamp(28px, calc(var(--notice-font) * 2.25), 42px);
+  letter-spacing: -0.025em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .game-notification-score::before {
@@ -9881,6 +9898,103 @@ body[data-font-size="x-large"] .pathway-choice {
 
 .pathway-choice-resumable::after {
   color: color-mix(in srgb, var(--pathway-gold) 72%, var(--pathway-suit-dark)) !important;
+}
+
+.pathway-choice-hands {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Each desktop hand has just three cards, so the player can scan the AI line
+   first, then the alternate ways to play below it. On smaller screens the
+   base vertical stacks remain in charge. */
+@media (min-width: 1000px) {
+  .pathway-choice-hands {
+    display: grid;
+    gap: 2px;
+    width: min(100%, 1040px);
+    margin-right: auto;
+    margin-left: auto;
+    padding-bottom: 24px;
+  }
+
+  .pathway-choice-grid-play {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: center;
+    width: 100%;
+    min-height: 216px;
+    margin: 0;
+    padding: 16px 34px 0;
+  }
+
+  .pathway-choice-grid-play > .pathway-choice {
+    flex: 1 1 0;
+    align-content: end;
+    min-width: 0;
+    min-height: 192px;
+    margin-right: -22px;
+    margin-left: -22px;
+    padding: 26px 28px 28px;
+    border-radius: 22px;
+  }
+
+  .pathway-choice-grid-play > :nth-child(1) {
+    --pathway-rest-y: 18px;
+    --pathway-rest-rotate: -5.5deg;
+    --pathway-hover-rotate: -4deg;
+  }
+
+  .pathway-choice-grid-play > :nth-child(2) {
+    --pathway-rest-y: 1px;
+    --pathway-rest-rotate: 0deg;
+    --pathway-hover-rotate: 0.7deg;
+  }
+
+  .pathway-choice-grid-play > :nth-child(3) {
+    --pathway-rest-y: 18px;
+    --pathway-rest-rotate: 5.5deg;
+    --pathway-hover-rotate: 4deg;
+  }
+
+  /* The card's suit medallion remains at its right edge; use the open space
+     immediately beside it for the resumable-game signal. */
+  .pathway-choice-grid-play .pathway-resume-status {
+    top: 50%;
+    right: 78px;
+    transform: translateY(-50%);
+  }
+}
+
+/* Crib is a distinct ownership token, not a grammatical suffix on a name.
+   It changes sides with the deal and lives on its own row below that score. */
+.app[data-view="game"] .score-crib-marker {
+  position: absolute;
+  top: calc(100% + 9px);
+  z-index: 5;
+  min-height: 20px;
+  padding: 3px 8px;
+  border-color: color-mix(in srgb, var(--game-gold) 78%, #493511);
+  background: linear-gradient(135deg, #f9e399, #d5a83e);
+  box-shadow: 0 3px 9px rgba(3, 25, 19, 0.24);
+  letter-spacing: 0.08em;
+}
+
+.app[data-view="game"] .score:first-child > .score-crib-marker {
+  left: 0;
+}
+
+.app[data-view="game"] .score.ai > .score-crib-marker {
+  right: 0;
+}
+
+@media (max-width: 640px) {
+  .app[data-view="game"] .score-crib-marker {
+    top: calc(100% + 8px);
+    min-height: 18px;
+    padding: 2px 7px;
+  }
 }
 
 .ace-tools,

@@ -46,6 +46,15 @@ describe("contextual game notifications", () => {
     expect(css).toMatch(/\.game-notification-go\s*\{[^}]*--notice-accent:\s*#70bdff/s);
   });
 
+  it("announces the opponent whenever a new or saved game is entered", () => {
+    expect(mainSource).toMatch(/function gameEntryOpponentName\(\)[\s\S]*activeHumanTable[\s\S]*engineName\(/s);
+    expect(mainSource).toMatch(/function announceGameEntry\(game: GameState\)[\s\S]*clearNoticeQueue\(\)[\s\S]*kind: "start"[\s\S]*label: "Playing"[\s\S]*playerText: "Game started"/s);
+    expect(mainSource).toMatch(/render\(remoteGame\);\s*announceGameEntry\(remoteGame\);/s);
+    expect(mainSource).toMatch(/render\(next\);\s*announceGameEntry\(next\);/s);
+    expect(mainSource).toMatch(/render\(game\);\s*announceGameEntry\(game\);/s);
+    expect(css).toMatch(/\.game-notification-start\s*\{[^}]*--notice-accent: var\(--game-gold\) !important/s);
+  });
+
   it("does not turn general game status copy into transient bubbles", () => {
     expect(renderResultSource).toContain("const notices = newScoreNotices(game)");
     expect(renderResultSource).toContain("enqueueNotices(notices)");

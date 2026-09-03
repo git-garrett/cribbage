@@ -32,6 +32,10 @@ describe("human clubhouse UI", () => {
     expect(css).toMatch(/\.my-stats-table \.difference\.comparison-bad\s*\{[^}]*color:\s*var\(--comparison-bad\)/s);
   });
 
+  it("leaves room above the scrolling stats tabs for their hover lift", () => {
+    expect(css).toMatch(/\.my-stats-opponent-tabs\s*\{[^}]*padding:\s*5px 0 13px[^}]*overflow-x:\s*auto/s);
+  });
+
   it("hides Grandmaster surfaces only in production builds", () => {
     expect(source).toContain("applyProductionOpponentVisibility(import.meta.env.PROD)");
     expect(source).toContain('[data-pathway-destination="grandmaster"]');
