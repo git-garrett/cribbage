@@ -2615,7 +2615,7 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
 .master-session-dialog {
   position: fixed;
   inset: 0;
-  z-index: 96;
+  z-index: 7000;
   display: grid;
   place-items: center;
   padding: 20px;
@@ -2789,7 +2789,7 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
 .server-busy-alert {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  z-index: 7000;
   display: grid;
   place-items: center;
   padding: 20px;

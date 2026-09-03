@@ -168,6 +168,14 @@ describe("local pathway navigation", () => {
     expect(css).toContain(".master-session-dialog");
   });
 
+  it("keeps Play Now blocking dialogs above the pathway surface", () => {
+    const pathwayZ = Number(css.match(/\.pathway-page\s*\{[^}]*z-index:\s*(\d+)/s)?.[1]);
+    const sessionDialogZ = Number(css.match(/\.master-session-dialog\s*\{[^}]*z-index:\s*(\d+)/s)?.[1]);
+    const serverBusyZ = Number(css.match(/\.server-busy-alert\s*\{[^}]*z-index:\s*(\d+)/s)?.[1]);
+    expect(sessionDialogZ).toBeGreaterThan(pathwayZ);
+    expect(serverBusyZ).toBeGreaterThan(pathwayZ);
+  });
+
   it("opens a persistent accessibility size chooser from Settings", () => {
     expect(html).toContain('id="size-dialog"');
     for (const size of ["normal", "large", "x-large"]) {
