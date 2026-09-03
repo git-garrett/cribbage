@@ -55,13 +55,15 @@ describe("Concept B mobile playing UI", () => {
     expect(css).toMatch(/\.scoreboard > \.board\s*\{[^}]*z-index:\s*2/s);
     expect(css).toMatch(/\.scoreboard > \.score-cut\s*\{[^}]*left:\s*max\(8px, calc\(25% - var\(--game-track-half-radius\) - 24\.5px\)\)[^}]*z-index:\s*1[^}]*width:\s*49px[^}]*height:\s*70px/s);
     expect(css).toMatch(/\.scoreboard > \.score-cut > span:first-child\s*\{[^}]*grid-row:\s*2/s);
+    expect(css).toMatch(/body\[data-font-size="normal"\][\s\S]*\.scoreboard > \.score-cut \.card:not\(\.back\)[\s\S]*grid-template-rows:\s*auto auto[\s\S]*align-content:\s*center/s);
   });
 
   it("balances labeled Hint and Error medallions to the right of the track", () => {
     expect(html).toMatch(/id="ask-master"[\s\S]*board-tool-symbol[^>]*>\?<[^]*board-tool-label[^>]*>Hint</);
     expect(html).toMatch(/id="ace-mistake"[\s\S]*board-tool-symbol[^>]*>!<[^]*board-tool-label[^>]*>Error</);
     expect(mainSource).toContain("const hintParent = usesMobileGameplayLayout() ? els.aceTools : els.actions;");
-    expect(mainSource).toContain("const mistakeParent = usesMobileGameplayLayout() ? els.aceTools : els.scoreCut;");
+    expect(mainSource).toContain("const mistakeParent = isDiscardMistakeOnTurnCut()");
+    expect(mainSource).toContain(": usesMobileGameplayLayout() ? els.aceTools : els.scoreCut;");
     expect(css).toMatch(/\.scoreboard > \.ace-tools\s*\{[^}]*right:\s*max\(8px, calc\(25% - var\(--game-track-half-radius\) - 24\.5px\)\)[^}]*display:\s*grid/s);
     expect(css).toMatch(/\.scoreboard > \.board\s*\{[^}]*pointer-events:\s*none/s);
     expect(css).toMatch(/\.scoreboard > \.ace-tools \.board-tool-symbol\s*\{[^}]*width:\s*var\(--board-tool-size\)[^}]*border-radius:\s*50%/s);
@@ -101,6 +103,9 @@ describe("Concept B mobile playing UI", () => {
     expect(css).toMatch(/\.card\[data-owner="human"\]\s*\{[^}]*translateY\(7px\)/s);
     expect(css).toMatch(/\.card\[data-owner="ai"\]\s*\{[^}]*translateY\(-7px\)/s);
     expect(css).toMatch(/\.played-active\.pegging-row \.card \.corner\s*\{[^}]*display:\s*grid\s*!important/s);
+    expect(mainSource).toMatch(/for \(const \[index, card\] of compact\.visible\.entries\(\)\)[\s\S]*index === compact\.visible\.length - 1[\s\S]*"pegging-card-exposed"[\s\S]*"pegging-card-covered"/s);
+    expect(css).toMatch(/\.card\.pegging-card-exposed:not\(\.back\)[\s\S]*grid-template-rows:\s*auto auto[\s\S]*align-content:\s*center/s);
+    expect(css).toMatch(/\.card\.pegging-card-exposed > \.rank,[\s\S]*display:\s*block !important/s);
   });
 
   it("does not clip a lifted discard card at the top of the play area", () => {

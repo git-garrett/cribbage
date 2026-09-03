@@ -33,6 +33,11 @@ describe("contextual game notifications", () => {
     expect(css).toMatch(/\.game-notification-player\s*\{[^}]*font-size:\s*max\(12px,/s);
   });
 
+  it("waits for a pegging card flight to arrive before showing its score bubble", () => {
+    expect(mainSource).toMatch(/function renderPeggingPlayWithMotion[\s\S]*state\.peggingScoreNoticeHeld = true[\s\S]*render\(next\)[\s\S]*await animatePeggingPlay[\s\S]*state\.peggingScoreNoticeHeld = false[\s\S]*drainNoticeQueue\(\)/s);
+    expect(mainSource).toMatch(/function drainNoticeQueue\(\)[\s\S]*state\.peggingScoreNoticeHeld/s);
+  });
+
   it("returns the action to the player with a Go bubble when the opponent cannot continue", () => {
     expect(mainSource).toMatch(/function newOpponentGoNotice[\s\S]*opponentGoEvent\(game\)/s);
     expect(mainSource).toContain('kind: "go"');

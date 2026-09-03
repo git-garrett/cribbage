@@ -101,16 +101,12 @@ describe("local pathway navigation", () => {
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)/);
   });
 
-  it("keeps the dense Play hand swipeable on touch and fully visible without swiping elsewhere", () => {
-    expect(html).toContain('class="pathway-choice-grid pathway-choice-grid-play" tabindex="0" role="group" aria-label="Play options"');
-    expect(css).toMatch(/\.pathway-choice-grid:not\(\.pathway-choice-grid-play\)\s*{[\s\S]*flex-direction: column/);
-    expect(css).toMatch(/\.pathway-choice-grid-play\s*{[\s\S]*grid-auto-flow: column;[\s\S]*overflow-x: auto;[\s\S]*scroll-snap-type: inline mandatory/);
-    expect(css).toMatch(/\.pathway-choice-grid-play \.pathway-choice\s*{[\s\S]*scroll-snap-align: start/);
-    expect(css).toMatch(/@media \(min-width: 600px\) and \(max-width: 849px\)[\s\S]*grid-auto-columns: min\(39vw, 300px\)/);
-    expect(css).toMatch(/@media \(min-width: 850px\), \(any-hover: hover\) and \(any-pointer: fine\)[\s\S]*grid-auto-flow: row;[\s\S]*overflow: visible;[\s\S]*scroll-snap-type: none/);
-    expect(css).toMatch(/@media \(min-width: 720px\) and \(any-hover: hover\) and \(any-pointer: fine\),[\s\S]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
-    expect(css).not.toMatch(/@media \(min-width: 1180px\)[\s\S]*grid-template-columns: repeat\(6/);
-    expect(source).toMatch(/pathwayView\.dataset\.pathwayView === view[\s\S]*\.pathway-choice-grid[\s\S]*scrollTo\(\{ left: 0 \}\)/);
+  it("uses the same vertical card stack for the Play hand", () => {
+    expect(html).toContain('class="pathway-choice-grid pathway-choice-grid-play" role="group" aria-label="Play options"');
+    expect(css).toMatch(/\.pathway-primary-grid,\s*\.pathway-choice-grid\s*{[\s\S]*display: flex;[\s\S]*flex-direction: column/);
+    expect(css).toMatch(/\.pathway-choice-grid-play\s*{[\s\S]*width: min\(100%, 620px\);[\s\S]*margin-right: auto;[\s\S]*margin-left: auto/);
+    expect(css).not.toContain("grid-auto-flow: column");
+    expect(css).not.toContain("scroll-snap-type: inline mandatory");
   });
 
   it("keeps suit marks legible over the brass hover medallion", () => {
@@ -144,6 +140,7 @@ describe("local pathway navigation", () => {
     expect(source).toContain('button.classList.toggle("pathway-choice-resumable", active)');
     expect(source).toMatch(/button\.dataset\.resumable === "true"[\s\S]*resumeGameFromSplash\(\)/);
     expect(css).toMatch(/\.pathway-choice-resumable\s*\{[^}]*border-color:\s*var\(--pathway-gold-deep\)/s);
+    expect(css).toMatch(/\.pathway-resume-status\s*\{[^}]*top:\s*18px[^}]*right:\s*20px[^}]*left:\s*auto/s);
   });
 
   it("requires an account for Statistics, human games, and Ace", () => {

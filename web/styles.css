@@ -2559,6 +2559,18 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   outline-offset: 3px;
 }
 
+.turn-cut-row .turn-cut-error-slot {
+  pointer-events: auto;
+}
+
+.turn-cut-row .turn-cut-error-slot .ace-mistake {
+  position: relative;
+  top: auto;
+  left: auto;
+  transform: none;
+  animation-name: ace-mistake-arrive-on-cut;
+}
+
 @keyframes ace-mistake-arrive {
   from {
     opacity: 0;
@@ -2568,6 +2580,18 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   to {
     opacity: 1;
     transform: translateX(-50%) scale(1);
+  }
+}
+
+@keyframes ace-mistake-arrive-on-cut {
+  from {
+    opacity: 0;
+    transform: translateY(-7px) scale(0.72);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
@@ -2747,6 +2771,10 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
     border-color: #fff1b5;
     background: #bd433b;
     transform: translate(-50%, -2px);
+  }
+
+  .app[data-view="game"] .turn-cut-row .turn-cut-error-slot .ace-mistake:not(:disabled):hover {
+    transform: translateY(-2px);
   }
 }
 
@@ -5902,6 +5930,12 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
     pointer-events: none;
   }
 
+  .app[data-view="game"] .turn-cut-row .turn-cut-error-slot {
+    z-index: 3;
+    right: calc(120px + max(var(--game-card-width), 82px) + 16px);
+    pointer-events: auto;
+  }
+
   .app[data-view="game"] .turn-cut-row .turn-cut-deck {
     z-index: 1;
   }
@@ -7087,8 +7121,8 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   }
 }
 
-/* Dealt-hand pathway system. Sparse hands remain fully visible; the denser
-   Play hand becomes a snap-scrolling tray with the next card left in view. */
+/* Dealt-hand pathway system. Choice pages use the same overlapping vertical
+   stack, with wider layouts reserved for the shorter non-Play hands. */
 .pathway-page {
   --pathway-view-inline: clamp(18px, 6vw, 56px);
   --pathway-suit-dark: color-mix(in srgb, var(--entry-accent) 44%, transparent);
@@ -7160,7 +7194,7 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 }
 
 .pathway-primary-grid,
-.pathway-choice-grid:not(.pathway-choice-grid-play) {
+.pathway-choice-grid {
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -7322,67 +7356,9 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 }
 
 .pathway-choice-grid-play {
-  display: grid;
-  grid-template-columns: none;
-  grid-auto-flow: column;
-  grid-auto-columns: min(78vw, 300px);
-  gap: 14px;
-  margin-right: calc(-1 * var(--pathway-view-inline));
-  margin-left: calc(-1 * var(--pathway-view-inline));
-  padding: 12px var(--pathway-view-inline) 18px;
-  overflow-x: auto;
-  overflow-y: visible;
-  overscroll-behavior-x: contain;
-  scroll-padding-inline: var(--pathway-view-inline);
-  scroll-snap-type: inline mandatory;
-  scrollbar-color: color-mix(in srgb, var(--entry-accent) 72%, transparent) transparent;
-  scrollbar-width: thin;
-  touch-action: pan-x pan-y;
-  -webkit-overflow-scrolling: touch;
-}
-
-.pathway-choice-grid-play::-webkit-scrollbar {
-  height: 6px;
-}
-
-.pathway-choice-grid-play::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.pathway-choice-grid-play::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--entry-accent) 72%, transparent);
-}
-
-.pathway-choice-grid-play:focus-visible {
-  outline: 3px solid var(--entry-focus);
-  outline-offset: 3px;
-  border-radius: 18px;
-}
-
-.pathway-choice-grid-play .pathway-choice {
-  align-content: end;
-  min-height: clamp(286px, 43vh, 340px);
-  margin-top: 0;
-  padding: 32px 24px 34px;
-  border-radius: 22px;
-  scroll-snap-align: start;
-  scroll-snap-stop: normal;
-}
-
-.pathway-choice-grid-play .pathway-choice::after {
-  top: 28%;
-  right: 24px;
-  font-size: 68px;
-}
-
-.pathway-choice-grid-play .pathway-choice strong {
-  font-size: clamp(25px, 7vw, 34px);
-}
-
-.pathway-choice-grid-play .pathway-choice small {
-  max-width: 23ch;
-  font-size: 13px;
+  width: min(100%, 620px);
+  margin-right: auto;
+  margin-left: auto;
 }
 
 @media (hover: hover) {
@@ -7428,12 +7404,6 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
     background:
       radial-gradient(circle at 100% 0, rgba(232, 197, 117, 0.16), transparent 54%),
       color-mix(in srgb, var(--pathway-featured) 90%, var(--entry-link));
-  }
-}
-
-@media (min-width: 600px) and (max-width: 849px) {
-  .pathway-choice-grid-play {
-    grid-auto-columns: min(39vw, 300px);
   }
 }
 
@@ -7499,17 +7469,6 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
     flex-grow: 0;
     flex-basis: min(34vw, 360px);
   }
-
-  .pathway-choice-grid-play {
-    grid-auto-columns: clamp(245px, 27%, 305px);
-    min-height: 365px;
-    padding-top: 24px;
-    padding-bottom: 28px;
-  }
-
-  .pathway-choice-grid-play .pathway-choice {
-    min-height: 330px;
-  }
 }
 
 @media (max-width: 430px) {
@@ -7522,52 +7481,6 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   .pathway-choice {
     padding-right: 58px;
     padding-left: 20px;
-  }
-
-  .pathway-choice-grid-play {
-    scrollbar-width: none;
-  }
-
-  .pathway-choice-grid-play::-webkit-scrollbar {
-    display: none;
-  }
-}
-
-/* A swipeable hand is useful on touch screens. At desktop widths, or whenever
-   a fine pointer is present, deal the full Play hand into the available width
-   so every opponent remains reachable without horizontal scrolling. */
-@media (min-width: 850px), (any-hover: hover) and (any-pointer: fine) {
-  .pathway-choice-grid-play {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-auto-flow: row;
-    grid-auto-columns: unset;
-    gap: 14px;
-    min-height: 0;
-    margin-right: 0;
-    margin-left: 0;
-    padding: 12px 2px 18px;
-    overflow: visible;
-    scroll-padding-inline: 0;
-    scroll-snap-type: none;
-    scrollbar-width: auto;
-    touch-action: manipulation;
-  }
-
-  .pathway-choice-grid-play::-webkit-scrollbar {
-    display: none;
-  }
-
-  .pathway-choice-grid-play .pathway-choice {
-    min-height: 190px;
-    padding: 27px 22px 25px;
-    scroll-snap-align: none;
-  }
-}
-
-@media (min-width: 720px) and (any-hover: hover) and (any-pointer: fine),
-  (min-width: 850px) {
-  .pathway-choice-grid-play {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -8705,14 +8618,6 @@ body[data-font-size="large"] .pathway-choice {
 body[data-font-size="x-large"] .pathway-card,
 body[data-font-size="x-large"] .pathway-choice {
   min-height: 230px;
-}
-
-body[data-font-size="large"] .pathway-choice-grid-play .pathway-choice {
-  min-height: 250px;
-}
-
-body[data-font-size="x-large"] .pathway-choice-grid-play .pathway-choice {
-  min-height: 340px;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -9893,6 +9798,51 @@ body[data-font-size="x-large"] .pathway-choice-grid-play .pathway-choice {
   .app[data-view="game"] #plays .played-active.pegging-row .card > .suit {
     display: none;
   }
+
+  /* Keep the live pegging sequence compact, but make its tiny card marks
+     readable at Normal size. The turn cut is a full-size card in motion, so
+     it uses the same centered face as the cut card once it settles. */
+  body[data-font-size="normal"] .app[data-view="game"] #plays .played-active.pegging-row:not(.turn-cut-row) .card .corner > span:first-child {
+    font-size: 14px;
+  }
+
+  body[data-font-size="normal"] .app[data-view="game"] #plays .played-active.pegging-row:not(.turn-cut-row) .card .corner > span:last-child {
+    font-size: 13px;
+  }
+
+  .app[data-view="game"] #plays .turn-cut-row .turn-card-reveal .card .corner {
+    display: none !important;
+  }
+
+  .app[data-view="game"] #plays .turn-cut-row .turn-card-reveal .card > .rank,
+  .app[data-view="game"] #plays .turn-cut-row .turn-card-reveal .card > .suit {
+    display: block !important;
+  }
+
+  /* A settled cut and the newest pegging card are fully exposed. Treat both
+     as a centered rank-and-suit unit; only cards obscured by a later play use
+     the compact corner notation. */
+  body[data-font-size="normal"] .app[data-view="game"] > .scoreboard > .score-cut .card:not(.back),
+  body[data-font-size="normal"] .app[data-view="game"] #plays .played-active.pegging-row .card.pegging-card-exposed:not(.back) {
+    display: grid;
+    grid-template-rows: auto auto;
+    place-items: center;
+    align-content: center;
+    gap: 2px;
+  }
+
+  body[data-font-size="normal"] .app[data-view="game"] > .scoreboard > .score-cut .card .corner,
+  body[data-font-size="normal"] .app[data-view="game"] #plays .played-active.pegging-row .card.pegging-card-exposed .corner {
+    display: none !important;
+  }
+
+  body[data-font-size="normal"] .app[data-view="game"] > .scoreboard > .score-cut .card > .rank,
+  body[data-font-size="normal"] .app[data-view="game"] > .scoreboard > .score-cut .card > .suit,
+  body[data-font-size="normal"] .app[data-view="game"] #plays .played-active.pegging-row .card.pegging-card-exposed > .rank,
+  body[data-font-size="normal"] .app[data-view="game"] #plays .played-active.pegging-row .card.pegging-card-exposed > .suit {
+    display: block !important;
+    line-height: 0.86;
+  }
 }
 
 /* Active seats remain visible from Play Now instead of looking like a new
@@ -9900,7 +9850,8 @@ body[data-font-size="x-large"] .pathway-choice-grid-play .pathway-choice {
 .pathway-resume-status {
   position: absolute;
   top: 18px;
-  left: 20px;
+  right: 20px;
+  left: auto;
   z-index: 3;
   width: fit-content;
   padding: 5px 9px 4px;

@@ -119,11 +119,15 @@ describe("Ace advice preparation", () => {
     expect(mainSource).toMatch(/mistakeAdviceForChoice\([\s\S]*\(\) => aceMistakeChoiceRevision === choiceRevision/s);
   });
 
-  it("places an accessible review badge with the cut card", () => {
+  it("places an accessible review badge on the cut interface as soon as a discard error is known", () => {
     expect(htmlSource).toMatch(/id="turn-card"[\s\S]*id="ace-mistake"/);
     expect(htmlSource).toContain('aria-label="Error: review your last choice with Ace"');
     expect(stylesSource).toContain(".ace-mistake:focus-visible");
     expect(stylesSource).toMatch(/\.ace-mistake \{[\s\S]*border-radius: 50%/);
+    expect(mainSource).toMatch(/function isDiscardMistakeOnTurnCut\(\)[\s\S]*state\.turnCutRevealStage[\s\S]*advice\.kind === "discard"/s);
+    expect(mainSource).toMatch(/function renderAceMistakeBadge[\s\S]*isDiscardMistakeOnTurnCut\(\)/s);
+    expect(mainSource).toMatch(/function renderTurnCut[\s\S]*turn-cut-error-slot[\s\S]*append\(els\.aceMistake\)/s);
+    expect(stylesSource).toMatch(/\.turn-cut-row \.turn-cut-error-slot \.ace-mistake\s*\{[\s\S]*position: relative/);
   });
 
   it("lets players independently disable hints and error notices", () => {

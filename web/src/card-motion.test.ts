@@ -38,8 +38,8 @@ describe("physical card motion", () => {
   it("flies each pegging play from its hand position into the active series", () => {
     expect(mainSource).toMatch(/function capturePeggingPlaySource[\s\S]*els\.humanHand[\s\S]*els\.aiHand/s);
     expect(mainSource).toMatch(/function animatePeggingPlay[\s\S]*pegging-play-flight-layer[\s\S]*pegging-card-arriving/s);
-    expect(mainSource).toMatch(/animatePeggingPlay\(previous, current, "ai", source\)/);
-    expect(mainSource).toMatch(/const playSource = capturePeggingPlaySource\("human", card\.id\)[\s\S]*animatePeggingPlay\(previous, next, "human", playSource\)/s);
+    expect(mainSource).toMatch(/renderPeggingPlayWithMotion\(previous, current, "ai", source\)/);
+    expect(mainSource).toMatch(/const playSource = capturePeggingPlaySource\("human", card\.id\)[\s\S]*renderPeggingPlayWithMotion\(previous, next, "human", playSource\)/s);
     expect(css).toMatch(/\.pegging-play-flight-layer\s*\{[^}]*position:\s*fixed[^}]*pointer-events:\s*none/s);
   });
 
@@ -58,5 +58,12 @@ describe("physical card motion", () => {
     expect(mainSource).toMatch(/function prepareTurnCardReveal[\s\S]*deckRect\.bottom - cardRect\.bottom[\s\S]*turn-card-reveal-ready/s);
     expect(css).toMatch(/\.turn-card-reveal-animated \.card[^}]*transform-origin:\s*center bottom/s);
     expect(css).toMatch(/@keyframes turn-card-from-bottom[\s\S]*var\(--turn-card-from-x\)[\s\S]*rotateX\(-88deg\)[\s\S]*rotateX\(0deg\)/s);
+    expect(css).toMatch(/#plays \.turn-cut-row \.turn-card-reveal \.card \.corner\s*\{[^}]*display:\s*none !important/s);
+    expect(css).toMatch(/#plays \.turn-cut-row \.turn-card-reveal \.card > \.rank,[\s\S]*display:\s*block !important/s);
+  });
+
+  it("keeps normal-mobile pegging marks readable without expanding the card row", () => {
+    expect(css).toMatch(/body\[data-font-size="normal"\][\s\S]*pegging-row:not\(\.turn-cut-row\)[\s\S]*\.corner > span:first-child\s*\{[^}]*font-size:\s*14px/s);
+    expect(css).toMatch(/body\[data-font-size="normal"\][\s\S]*pegging-row:not\(\.turn-cut-row\)[\s\S]*\.corner > span:last-child\s*\{[^}]*font-size:\s*13px/s);
   });
 });

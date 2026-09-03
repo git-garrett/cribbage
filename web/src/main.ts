@@ -301,6 +301,7 @@ const state: {
   noticeResultLines: string[];
   noticeTimer: number | null;
   activeNotice: GameNotice | null;
+  peggingScoreNoticeHeld: boolean;
   scoreNoticeCursor: ScoreNoticeCursor;
   announcedGoNoticeKeys: Set<string>;
   dealCutRevealStage: "cutting" | "human" | "ai" | null;
@@ -365,6 +366,7 @@ const state: {
   noticeResultLines: [],
   noticeTimer: null,
   activeNotice: null,
+  peggingScoreNoticeHeld: false,
   scoreNoticeCursor: createScoreNoticeCursor(),
   announcedGoNoticeKeys: new Set(),
   dealCutRevealStage: null,
@@ -2175,9 +2177,6 @@ function showPathwayView(view: PathwayView): void {
   syncPathwayResumePresentation();
   for (const pathwayView of els.pathwayViews) {
     pathwayView.hidden = pathwayView.dataset.pathwayView !== view;
-    if (pathwayView.dataset.pathwayView === view) {
-      pathwayView.querySelector<HTMLElement>(".pathway-choice-grid")?.scrollTo({ left: 0 });
-    }
   }
   els.pathwayPage.scrollTo({ top: 0, left: 0 });
   if (authenticatedUser) void refreshPeople({ heartbeat: true });
@@ -3569,7 +3568,13 @@ function renderPlayedCards(game: GameState): void {
       element.classList.add("pegging-overflow-card");
       row.append(element);
     }
-    for (const card of compact.visible) row.append(cardElement(card));
+    for (const [index, card] of compact.visible.entries()) {
+      const element = cardElement(card);
+      element.classList.add(index === compact.visible.length - 1
+        ? "pegging-card-exposed"
+        : "pegging-card-covered");
+      row.append(element);
+    }
     els.plays.append(row);
   }
 }
@@ -3742,6 +3747,10 @@ function renderTurnCut(game: GameState): void {
   const showCutCard = state.turnCutRevealStage === "ai-turn" ||
     state.turnCutRevealStage === "revealed";
   let animatedCutCard: HTMLElement | null = null;
+  if (isDiscardMistakeOnTurnCut() && !els.aceMistake.hidden) {
+    emptySlot.classList.add("turn-cut-error-slot");
+    emptySlot.append(els.aceMistake);
+  }
   if (showCutCard && game.turnCard) {
     const cut = document.createElement("div");
     const animateCutCard = shouldAnimateTurnCutCard(game);
@@ -3979,6 +3988,34 @@ async function animatePeggingPlay(
   }
 }
 
+function shouldHoldPeggingScoreNotice(
+  previous: GameState,
+  next: GameState,
+  player: PlayerKey,
+  source: PeggingPlaySource | null,
+): boolean {
+  return Boolean(newlyPlayedCard(previous, next, player) && source && !tableMotionDisabled());
+}
+
+async function renderPeggingPlayWithMotion(
+  previous: GameState,
+  next: GameState,
+  player: PlayerKey,
+  source: PeggingPlaySource | null,
+): Promise<void> {
+  const holdScoreNotice = shouldHoldPeggingScoreNotice(previous, next, player, source);
+  if (holdScoreNotice) state.peggingScoreNoticeHeld = true;
+  render(next);
+  try {
+    await animatePeggingPlay(previous, next, player, source);
+  } finally {
+    if (holdScoreNotice) {
+      state.peggingScoreNoticeHeld = false;
+      drainNoticeQueue();
+    }
+  }
+}
+
 interface DiscardFlightSource {
   element: HTMLElement | null;
   rect: CardFlightRect;
@@ -4141,7 +4178,9 @@ function syncGameplayArtifactPlacement(game: GameState): void {
     : els.table;
   const cutParent = usesMobileGameplayLayout() ? els.scoreboard : els.played;
   const hintParent = usesMobileGameplayLayout() ? els.aceTools : els.actions;
-  const mistakeParent = usesMobileGameplayLayout() ? els.aceTools : els.scoreCut;
+  const mistakeParent = isDiscardMistakeOnTurnCut()
+    ? els.plays
+    : usesMobileGameplayLayout() ? els.aceTools : els.scoreCut;
   if (els.cribTray.parentElement !== cribParent) cribParent.append(els.cribTray);
   if (els.scoreCut.parentElement !== cutParent) cutParent.append(els.scoreCut);
   if (els.askMaster.parentElement !== hintParent) hintParent.append(els.askMaster);
@@ -4227,6 +4266,10 @@ function renderCutCard(card: GameState["turnCard"]): void {
   if (card) els.turnCard.append(cardElement(card));
 }
 
+function isDiscardMistakeOnTurnCut(): boolean {
+  return Boolean(state.turnCutRevealStage && state.aceMistake?.advice.kind === "discard");
+}
+
 function renderAceMistakeBadge(game: GameState): void {
   if (state.aceMistake && state.aceMistake.handNumber !== game.handNumber) state.aceMistake = null;
   const opponent = currentSnapshot?.opponent ?? selectedMenuOpponent();
@@ -4235,9 +4278,14 @@ function renderAceMistakeBadge(game: GameState): void {
     state.aceMistake &&
     state.masterHint?.mode !== "mistake" &&
     lowerLevelOpponent(opponent) &&
-    game.turnCardRevealed &&
-    game.turnCard &&
-    (game.phase === "pegging" || game.phase === "pegging_complete"),
+    (
+      isDiscardMistakeOnTurnCut() ||
+      (
+        game.turnCardRevealed &&
+        game.turnCard &&
+        (game.phase === "pegging" || game.phase === "pegging_complete")
+      )
+    ),
   );
   els.aceMistake.hidden = !visible;
 }
@@ -4446,7 +4494,7 @@ function enqueueNotices(notices: GameNotice[]): void {
 }
 
 function drainNoticeQueue(): void {
-  if (state.noticeTimer !== null) return;
+  if (state.noticeTimer !== null || state.peggingScoreNoticeHeld) return;
   const notice = state.noticeQueue.shift();
   if (!notice) {
     maybeOpenScoreSummary();
@@ -7234,8 +7282,7 @@ async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
       const previous = current;
       const source = capturePeggingPlaySource("ai");
       current = await withDelayedAiThinking(current, () => api("/api/advance-pegging", {}));
-      render(current);
-      await animatePeggingPlay(previous, current, "ai", source);
+      await renderPeggingPlayWithMotion(previous, current, "ai", source);
       continue;
     }
     return current;
@@ -7981,8 +8028,7 @@ els.play.addEventListener("click", async () => {
     state.resultOverride = null;
     const next = await api("/api/play-human", { id: card.id });
     state.selected.clear();
-    render(next);
-    await animatePeggingPlay(previous, next, "human", playSource);
+    await renderPeggingPlayWithMotion(previous, next, "human", playSource);
     await continuePeggingAfterRender(next);
   } catch (error) {
     state.selected = new Set([card.id]);
