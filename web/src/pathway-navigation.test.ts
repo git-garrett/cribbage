@@ -145,7 +145,7 @@ describe("local pathway navigation", () => {
     expect(source).toContain("syncPathwayResumePresentation()");
     expect(source).toContain('button.classList.toggle("pathway-choice-resumable", active)');
     expect(css).toMatch(/@media \(min-width: 1000px\)[\s\S]*\.pathway-choice-grid-play \.pathway-resume-status\s*{[\s\S]*top: 50%;[\s\S]*right: 78px/s);
-    expect(source).toMatch(/button\.dataset\.resumable === "true"[\s\S]*resumeGameFromSplash\(\)/);
+    expect(source).toMatch(/button\.dataset\.resumable === "true"[\s\S]*resumeGameFromSplash\(opponent\)/);
     expect(css).toMatch(/\.pathway-choice-resumable\s*\{[^}]*border-color:\s*var\(--pathway-gold-deep\)/s);
     expect(css).toMatch(/\.pathway-resume-status\s*\{[^}]*top:\s*18px[^}]*right:\s*20px[^}]*left:\s*auto/s);
   });

@@ -8,6 +8,7 @@ import type {
   GameSnapshot,
   GameState,
   Opponent,
+  Phase,
   PlayerKey,
   ScorePhase,
 } from "./api-types";
@@ -925,6 +926,8 @@ let authenticatedUser: AuthUser | null = null;
 let pendingAuthEmail = "";
 let pathwayStatsReturn = false;
 let selectedPathwayOpponent: Opponent | null = null;
+let remoteResumableModelGames = new Map<Opponent, Phase>();
+let pathwayResumeRefreshGeneration = 0;
 let pendingAuthDestination: PendingAuthDestination | null = null;
 let peopleDirectory: PeopleDirectoryResponse = {
   onlineCount: 0,
@@ -2181,13 +2184,20 @@ function showPathwayView(view: PathwayView): void {
   }
   els.pathwayPage.scrollTo({ top: 0, left: 0 });
   if (authenticatedUser) void refreshPeople({ heartbeat: true });
+  if (view === "play") void refreshPathwayResumeSessions();
 }
 
 function syncPathwayResumePresentation(): void {
+  const modelGames = Array.from(remoteResumableModelGames, ([opponent, phase]) => ({ opponent, phase }));
+  const localGameState = state.game;
+  if (state.hasResumableGame && localGameState && localGameState.phase !== "game_over" && currentSnapshot?.opponent) {
+    const localIndex = modelGames.findIndex((game) => game.opponent === currentSnapshot?.opponent);
+    const localGame = { opponent: currentSnapshot.opponent, phase: localGameState.phase };
+    if (localIndex >= 0) modelGames[localIndex] = localGame;
+    else modelGames.push(localGame);
+  }
   const resumable = new Set(resumablePathwayDestinations({
-    opponent: currentSnapshot?.opponent,
-    phase: state.game?.phase,
-    modelGameActive: state.hasResumableGame,
+    modelGames,
     humanGameActive: activeHumanTable !== null,
   }));
   for (const button of els.pathwayDestinationButtons) {
@@ -3298,6 +3308,30 @@ async function findRemoteActiveGameSession(opponent?: Opponent): Promise<RemoteG
   const session = response.session;
   if (!session || session.state.phase === "game_over") return null;
   return session;
+}
+
+async function refreshPathwayResumeSessions(): Promise<void> {
+  const generation = ++pathwayResumeRefreshGeneration;
+  if (!usesRemoteAi() || !authenticatedUser) {
+    remoteResumableModelGames = new Map();
+    syncPathwayResumePresentation();
+    return;
+  }
+  try {
+    const sessions = await Promise.all(
+      Object.values(PATHWAY_OPPONENTS).map(async (opponent) => ({
+        opponent,
+        session: await findRemoteActiveGameSession(opponent),
+      })),
+    );
+    if (generation !== pathwayResumeRefreshGeneration) return;
+    remoteResumableModelGames = new Map(
+      sessions.flatMap(({ opponent, session }) => session ? [[opponent, session.state.phase] as const] : []),
+    );
+    syncPathwayResumePresentation();
+  } catch {
+    // Keep the last known presentation when a passive refresh cannot reach the server.
+  }
 }
 
 async function loadRemoteActiveGameSession(opponent?: Opponent): Promise<GameState | null> {
@@ -7463,7 +7497,7 @@ for (const button of els.pathwayDestinationButtons) {
       els.pathwayPage.hidden = true;
       state.splashOpen = false;
       document.body.dataset.splash = "false";
-      void resumeGameFromSplash();
+      void resumeGameFromSplash(opponent);
       return;
     }
     void launchPathwayOpponent(opponent);
@@ -8192,21 +8226,31 @@ async function startNewGameFromUi(
   }
 }
 
-async function resumeGameFromSplash(): Promise<void> {
-  if (state.pending || !state.hasResumableGame) return;
+async function resumeGameFromSplash(opponent?: Opponent): Promise<void> {
+  const localGameMatches = state.hasResumableGame
+    && state.game?.phase !== "game_over"
+    && (!opponent || currentSnapshot?.opponent === opponent);
+  if (state.pending || (!localGameMatches && (!opponent || !remoteResumableModelGames.has(opponent)))) return;
   if (!saveSplashName()) return;
+  if (opponent) {
+    selectedPathwayOpponent = opponent;
+    els.opponent.value = opponent;
+    syncPathwayOpponentPresentation(opponent);
+  }
   state.pending = true;
   state.splashOpen = false;
   render(state.game);
   try {
-    const game = await reconcileRemoteGameState() ?? state.game ?? await loadRemoteActiveGameSession();
+    const game = localGameMatches
+      ? await reconcileRemoteGameState() ?? state.game ?? await loadRemoteActiveGameSession(opponent)
+      : await loadRemoteActiveGameSession(opponent);
     if (!game) return;
     render(game);
     announceGameEntry(game);
     if (await resumeReconciledGame(game)) return;
     await continuePeggingAfterRender(game);
   } catch (error) {
-    showServerBusy(error, () => resumeGameFromSplash());
+    showServerBusy(error, () => resumeGameFromSplash(opponent));
   } finally {
     state.pending = false;
     render(state.game);

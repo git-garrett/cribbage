@@ -2,6 +2,11 @@ import type { Opponent, Phase } from "./api-types";
 
 export type ResumablePathwayDestination = "easy" | "tough" | "master" | "human";
 
+export interface ResumableModelGame {
+  opponent?: Opponent;
+  phase?: Phase;
+}
+
 function modelDestination(opponent: Opponent | undefined): ResumablePathwayDestination | null {
   if (opponent === "myrmidon-5") return "easy";
   if (opponent === "schell_table-peg_table-9.1" || opponent === "schell_table-peg_table-9.11") return "tough";
@@ -10,15 +15,14 @@ function modelDestination(opponent: Opponent | undefined): ResumablePathwayDesti
 }
 
 export function resumablePathwayDestinations(options: {
-  opponent?: Opponent;
-  phase?: Phase;
-  modelGameActive: boolean;
+  modelGames: ResumableModelGame[];
   humanGameActive: boolean;
 }): ResumablePathwayDestination[] {
   const destinations: ResumablePathwayDestination[] = [];
-  if (options.modelGameActive && options.phase !== "game_over") {
-    const destination = modelDestination(options.opponent);
-    if (destination) destinations.push(destination);
+  for (const game of options.modelGames) {
+    if (game.phase === "game_over") continue;
+    const destination = modelDestination(game.opponent);
+    if (destination && !destinations.includes(destination)) destinations.push(destination);
   }
   if (options.humanGameActive) destinations.push("human");
   return destinations;
