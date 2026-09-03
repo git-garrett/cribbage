@@ -19,7 +19,7 @@ describe("human clubhouse UI", () => {
   });
 
   it("makes unavailable opponent tabs genuinely non-interactive", () => {
-    for (const opponent of ["grandmaster", "dynamic"]) {
+    for (const opponent of ["grandmaster"]) {
       expect(html).toMatch(new RegExp(`data-my-stats-opponent="${opponent}"[^>]*disabled`));
     }
     expect(source).toMatch(/button\.dataset\.statsAvailable === "false"[\s\S]*return/);

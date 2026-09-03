@@ -73,6 +73,7 @@ const PATHWAY_OPPONENTS = {
   easy: "myrmidon-5",
   tough: "schell_table-peg_table-9.11",
   master: DEFAULT_OPPONENT,
+  dynamic: "dynamic",
 } as const satisfies Record<string, Opponent>;
 
 type BaselineScoreTotals = Pick<
@@ -781,6 +782,7 @@ const PHONE_GAME_DB_VERSION = 1;
 const NOTICE_VISIBLE_MS = 2_200;
 const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-13.0";
 const SIMPLE_NETWORK_PUBLIC_OPPONENTS = new Set<string>([
+  "dynamic",
   "myrmidon-5",
   "schell_table-peg_table-9.1",
   "schell_table-peg_table-9.11",
@@ -906,6 +908,7 @@ interface HumanTableResponse {
 
 type PendingAuthDestination =
   | { kind: "master" }
+  | { kind: "dynamic" }
   | { kind: "statistics" }
   | { kind: "human" }
   | { kind: "table"; tableId: string }
@@ -1842,6 +1845,8 @@ async function resumeAuthenticatedDestination(): Promise<void> {
   }
   if (destination.kind === "master") {
     await launchPathwayOpponent(DEFAULT_OPPONENT);
+  } else if (destination.kind === "dynamic") {
+    await launchPathwayOpponent(PATHWAY_OPPONENTS.dynamic);
   } else if (destination.kind === "statistics") {
     if (pathwayRouteFromLocation() === "statistics") applyPathwayRoute("statistics");
     else navigatePathway("statistics");
@@ -2201,7 +2206,7 @@ function syncPathwayResumePresentation(): void {
     humanGameActive: activeHumanTable !== null,
   }));
   for (const button of els.pathwayDestinationButtons) {
-    const destination = button.dataset.pathwayDestination as "easy" | "tough" | "master" | "human";
+    const destination = button.dataset.pathwayDestination as "easy" | "tough" | "master" | "dynamic" | "human";
     const active = resumable.has(destination);
     button.classList.toggle("pathway-choice-resumable", active);
     button.dataset.resumable = active ? "true" : "false";
@@ -2212,9 +2217,10 @@ function syncPathwayResumePresentation(): void {
   }
 }
 
-function pathwayOpponentLabel(opponent: Opponent): "Easy" | "Tough" | "Ace" {
+function pathwayOpponentLabel(opponent: Opponent): "Easy" | "Tough" | "Ace" | "Dynamic" {
   if (opponent === PATHWAY_OPPONENTS.easy) return "Easy";
   if (opponent === PATHWAY_OPPONENTS.tough) return "Tough";
+  if (opponent === PATHWAY_OPPONENTS.dynamic) return "Dynamic";
   return "Ace";
 }
 
@@ -2230,6 +2236,10 @@ function beginPathwayOpponent(opponent: Opponent): void {
   els.masterSessionDialog.hidden = true;
   if (opponent === DEFAULT_OPPONENT && !authenticatedUser) {
     requestAuthentication({ kind: "master" }, "Sign in to play Ace.");
+    return;
+  }
+  if (opponent === PATHWAY_OPPONENTS.dynamic && !authenticatedUser) {
+    requestAuthentication({ kind: "dynamic" }, "Sign in so Dynamic can adapt to your play over time.");
     return;
   }
   selectedPathwayOpponent = opponent;
@@ -2256,7 +2266,7 @@ function beginPathwayOpponent(opponent: Opponent): void {
 }
 
 async function launchPathwayOpponent(opponent: Opponent): Promise<void> {
-  if (opponent === DEFAULT_OPPONENT && !authenticatedUser) {
+  if ((opponent === DEFAULT_OPPONENT || opponent === PATHWAY_OPPONENTS.dynamic) && !authenticatedUser) {
     beginPathwayOpponent(opponent);
     return;
   }

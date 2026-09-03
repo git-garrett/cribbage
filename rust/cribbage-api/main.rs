@@ -18,9 +18,12 @@ use cribbage_shadow_engine::decision::{
     recommend_peg_for_side_with_model911_cache, review_discard_for_side, review_peg_for_side,
     DecisionReview as EngineDecisionReview, PegDecision,
 };
+use cribbage_shadow_engine::dynamic::{DynamicProfile, DynamicState};
 use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
 use cribbage_shadow_engine::model::Model911HandCache;
-use cribbage_shadow_engine::model_id::{ModelId, MODEL_13_0, MODEL_9_1, MODEL_9_11, MYRMIDON_5};
+use cribbage_shadow_engine::model_id::{
+    ModelId, DYNAMIC, MODEL_13_0, MODEL_9_1, MODEL_9_11, MYRMIDON_5,
+};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -58,6 +61,24 @@ struct Session {
     event_sequence: u64,
     pending_final_scoring: Option<FinalScoring>,
     model911_hand_cache: Model911HandCache,
+    dynamic: Option<DynamicState>,
+}
+
+impl Session {
+    fn decision_model(&self) -> ModelId {
+        self.dynamic
+            .as_ref()
+            .map(DynamicState::decision_model)
+            .unwrap_or(self.model)
+    }
+
+    fn use_dynamic_profile(&mut self, profile: DynamicProfile) {
+        self.dynamic = Some(DynamicState::new(
+            profile,
+            self.seed,
+            score_snapshot(&self.game),
+        ));
+    }
 }
 
 enum DeferredRecommendation {
@@ -166,6 +187,8 @@ struct PersistedSession {
     next_review_id: u32,
     event_sequence: u64,
     pending_final_scoring: Option<FinalScoring>,
+    #[serde(default)]
+    dynamic: Option<DynamicState>,
 }
 
 #[derive(Clone)]
@@ -494,8 +517,8 @@ fn health_json() -> String {
 
 fn model_json() -> String {
     format!(
-        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"{}\",\"{}\",\"{}\",\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\"]}}",
-        APP_VERSION, MODEL_13_0, MYRMIDON_5, MODEL_9_1, MODEL_9_11
+        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"{}\",\"{}\",\"{}\",\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\",\"{}\"]}}",
+        APP_VERSION, MODEL_13_0, MYRMIDON_5, MODEL_9_1, MODEL_9_11, DYNAMIC
     )
 }
 
@@ -560,7 +583,18 @@ fn game_action(server: &Server, body: &str) -> Response {
             }) {
                 return response_for_session(existing).map(|response| (response, None));
             }
+            let inherited_dynamic_profile = if model == ModelId::Dynamic {
+                tag.as_deref()
+                    .map(|tag| load_latest_dynamic_profile(&server.data_dir, tag))
+                    .transpose()?
+                    .flatten()
+            } else {
+                None
+            };
             let mut session = new_session(model, tag);
+            if let Some(profile) = inherited_dynamic_profile {
+                session.use_dynamic_profile(profile);
+            }
             session.event_sequence = 1;
             if let Err(error) = persist_session_event(&server.data_dir, &session, "new", body) {
                 return Err(error);
@@ -621,7 +655,10 @@ fn game_action(server: &Server, body: &str) -> Response {
             && !session.waiting_for_deal_cut
             && session.game.phase == Phase::Discard
         {
-            Some(DeferredRecommendation::AiDiscard(session.game.clone(), session.model))
+            Some(DeferredRecommendation::AiDiscard(
+                session.game.clone(),
+                session.decision_model(),
+            ))
         } else {
             None
         };
@@ -736,6 +773,8 @@ fn new_session_from_seed(model: ModelId, tag: Option<String>, seed: u32, counter
     let first_deal =
         first_dealer_for_deal_cuts(deal_cuts).expect("deal-cut generator must resolve tied ranks");
     let game = CribbageGame::new_with_seed(seed, first_deal);
+    let dynamic = (model == ModelId::Dynamic)
+        .then(|| DynamicState::new(DynamicProfile::default(), seed, score_snapshot(&game)));
     Session {
         id: format!("rust-{:x}-{:x}", unix_millis(), counter),
         tag,
@@ -758,6 +797,7 @@ fn new_session_from_seed(model: ModelId, tag: Option<String>, seed: u32, counter
         event_sequence: 0,
         pending_final_scoring: None,
         model911_hand_cache: Model911HandCache::new(),
+        dynamic,
     }
 }
 
@@ -839,6 +879,7 @@ fn persisted_session(session: &Session) -> PersistedSession {
         next_review_id: session.next_review_id,
         event_sequence: session.event_sequence,
         pending_final_scoring: session.pending_final_scoring.clone(),
+        dynamic: session.dynamic.clone(),
     }
 }
 
@@ -869,6 +910,7 @@ fn restore_persisted_session(stored: PersistedSession) -> Result<Session, String
         event_sequence: stored.event_sequence,
         pending_final_scoring: stored.pending_final_scoring,
         model911_hand_cache: Model911HandCache::new(),
+        dynamic: stored.dynamic,
     })
 }
 
@@ -1051,6 +1093,30 @@ fn load_session_by_tag(
             restore_persisted_session(stored)
         })
         .transpose()
+}
+
+fn load_latest_dynamic_profile(
+    data_dir: &Path,
+    tag: &str,
+) -> Result<Option<DynamicProfile>, String> {
+    let connection = open_game_database(data_dir)?;
+    let saved = connection
+        .query_row(
+            "SELECT session_json FROM cribbage_game_sessions
+             WHERE tag = ?1 AND model = ?2 ORDER BY updated_at DESC LIMIT 1",
+            params![tag, DYNAMIC],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| format!("find Dynamic profile by tag: {}", error))?;
+    saved
+        .map(|text| {
+            let stored = serde_json::from_str::<PersistedSession>(&text)
+                .map_err(|error| format!("parse saved Dynamic session: {}", error))?;
+            Ok(stored.dynamic.map(|state| state.profile().clone()))
+        })
+        .transpose()
+        .map(Option::flatten)
 }
 
 fn persist_completed_game_upload(data_dir: &Path, game_id: &str, body: &str) -> Result<(), String> {
@@ -1356,8 +1422,12 @@ fn apply_action(
             let ids = if supplied.len() == 2 {
                 [supplied[0] as u8, supplied[1] as u8]
             } else {
-                let decision =
-                    recommend_discard_for_side(&session.game, AI, session.model, model_root)?;
+                let decision = recommend_discard_for_side(
+                    &session.game,
+                    AI,
+                    session.decision_model(),
+                    model_root,
+                )?;
                 if decision.card_ids.len() != 2 {
                     return Err("Rust AI discard did not select two cards.".to_string());
                 }
@@ -1448,11 +1518,12 @@ fn apply_action(
                 return Ok(());
             }
             let score_before = score_snapshot(&session.game);
+            let decision_model = session.decision_model();
             let (reason, cards, score_components) =
                 match recommend_peg_for_side_with_model911_cache(
                     &session.game,
                     AI,
-                    session.model,
+                    decision_model,
                     None,
                     model_root,
                     Some(&session.model911_hand_cache),
@@ -1495,6 +1566,8 @@ fn apply_action(
                 return Ok(());
             }
             let hand_number = session.game.hand_number;
+            let completed_hand_dealer =
+                (session.game.phase == Phase::ScoreDealer).then_some(session.game.dealer);
             let score_before = score_snapshot(&session.game);
             let score_stage = match session.game.phase {
                 Phase::PeggingComplete => Some((
@@ -1556,6 +1629,11 @@ fn apply_action(
                     None,
                     None,
                 );
+            }
+            if let (Some(dealer), Some(dynamic)) =
+                (completed_hand_dealer, session.dynamic.as_mut())
+            {
+                dynamic.complete_hand(dealer, score_snapshot(&session.game), session.seed);
             }
             if session.game.phase == Phase::GameOver {
                 session.pending_final_scoring = final_stage.map(|stage| FinalScoring { stage });
@@ -3319,6 +3397,7 @@ mod tests {
         assert!(model_json().contains("schell_table-peg_table-16.0"));
         assert!(model_json().contains("schell_table-peg_table-16.1"));
         assert!(model_json().contains("schell_table-peg_table-16.3"));
+        assert!(model_json().contains(DYNAMIC));
     }
 
     #[test]
@@ -3328,6 +3407,7 @@ mod tests {
             ModelId::Schell91,
             ModelId::Schell911,
             ModelId::Schell13,
+            ModelId::Dynamic,
         ] {
             let session = new_session_from_seed(model, Some("Player".to_string()), 0x1234_5678, 1);
             assert_eq!(session.model, model);
@@ -3414,6 +3494,22 @@ mod tests {
             &server,
             &json!({"action": "new", "payload": {"opponent": MODEL_13_0}}).to_string(),
         ));
+        assert!(game_action_requires_auth(
+            &server,
+            &json!({"action": "new", "payload": {"opponent": DYNAMIC}}).to_string(),
+        ));
+    }
+
+    #[test]
+    fn dynamic_uses_easy_until_complete_cycle_evidence_changes_its_profile() {
+        let mut session = new_session_from_seed(ModelId::Dynamic, None, 0x1234_5678, 1);
+        assert_eq!(session.decision_model(), ModelId::Myrmidon5);
+
+        let dynamic = session.dynamic.as_mut().expect("dynamic state");
+        assert!(!dynamic.complete_hand(HUMAN, [14, 10], session.seed));
+        assert!(dynamic.complete_hand(AI, [28, 20], session.seed));
+        assert_eq!(dynamic.profile().complete_cycles, 1);
+        assert_eq!(dynamic.profile().strength, 0);
     }
 
     #[test]
@@ -3422,7 +3518,12 @@ mod tests {
             .join("../..")
             .canonicalize()
             .unwrap();
-        for model in [ModelId::Myrmidon5, ModelId::Schell91, ModelId::Schell13] {
+        for model in [
+            ModelId::Myrmidon5,
+            ModelId::Schell91,
+            ModelId::Schell13,
+            ModelId::Dynamic,
+        ] {
             let mut session = new_session_from_seed(model, None, 0x1234_5678, 1);
             session.waiting_for_deal_cut = false;
             let human_discards = [
@@ -3923,6 +4024,36 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_counts_a_hand_only_after_its_crib_and_pairs_opposite_roles() {
+        let mut session = new_session_from_seed(ModelId::Dynamic, None, 0x1234_5678, 1);
+        session.waiting_for_deal_cut = false;
+        session.turn_card_revealed = true;
+        session.game.turn_card = Card::new(8).unwrap();
+        session.game.phase = Phase::ScorePone;
+
+        apply_action(&mut session, "continue-scoring", "{}", ".").unwrap();
+        assert_eq!(
+            session.dynamic.as_ref().unwrap().profile().complete_cycles,
+            0
+        );
+
+        apply_action(&mut session, "continue-scoring", "{}", ".").unwrap();
+        assert_eq!(
+            session.dynamic.as_ref().unwrap().profile().complete_cycles,
+            0
+        );
+
+        session.game.dealer = session.game.dealer.other();
+        session.game.pone = session.game.dealer.other();
+        session.game.phase = Phase::ScoreDealer;
+        apply_action(&mut session, "continue-scoring", "{}", ".").unwrap();
+        assert_eq!(
+            session.dynamic.as_ref().unwrap().profile().complete_cycles,
+            1
+        );
+    }
+
+    #[test]
     fn analytics_include_score_events_for_completed_scoring_stages() {
         let mut session = new_session(ModelId::Schell13, None);
         session.waiting_for_deal_cut = false;
@@ -4036,6 +4167,56 @@ mod tests {
             )
             .unwrap();
         assert_eq!(events, 1);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn completed_dynamic_profile_is_inherited_without_partial_cycle_state() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-dynamic-profile-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let mut prior = new_session_from_seed(
+            ModelId::Dynamic,
+            Some("Travis".to_string()),
+            0x1234_5678,
+            1,
+        );
+        let mut scores = [0, 0];
+        for _ in 0..6 {
+            scores[HUMAN.index()] += 24;
+            scores[AI.index()] += 20;
+            let dynamic = prior.dynamic.as_mut().unwrap();
+            assert!(!dynamic.complete_hand(HUMAN, scores, prior.seed));
+            assert!(dynamic.complete_hand(AI, scores, prior.seed));
+        }
+        prior.forfeited = true;
+        prior.event_sequence = 1;
+        persist_session_event(&data_dir, &prior, "test-complete", "{}").unwrap();
+
+        let server = Server {
+            state: Mutex::new(AppState::default()),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+        let response = game_action(
+            &server,
+            &json!({"action": "new", "opponent": DYNAMIC, "tag": "Travis"}).to_string(),
+        );
+        assert_eq!(response.status, 200);
+        let app = server.state.lock().unwrap();
+        let current = app
+            .sessions
+            .values()
+            .find(|session| !session.forfeited)
+            .unwrap();
+        let state = current.dynamic.as_ref().unwrap();
+        assert_eq!(state.profile().complete_cycles, 6);
+        assert_eq!(state.profile().strength, 5);
+
+        drop(app);
         std::fs::remove_dir_all(data_dir).unwrap();
     }
 

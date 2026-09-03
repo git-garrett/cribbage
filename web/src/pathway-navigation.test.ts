@@ -124,7 +124,6 @@ describe("local pathway navigation", () => {
 
   it("leads with playable opponents and marks future modes as unavailable", () => {
     for (const destination of [
-      "dynamic",
       "grandmaster",
       "tutorial-beginner",
       "tutorial-intermediate",
@@ -133,7 +132,7 @@ describe("local pathway navigation", () => {
     ]) {
       expect(html).toMatch(new RegExp(`data-pathway-destination="${destination}" disabled[\\s\\S]*?Coming soon`));
     }
-    for (const destination of ["easy", "tough", "master", "human", "size", "gameplay"]) {
+    for (const destination of ["easy", "tough", "master", "dynamic", "human", "size", "gameplay"]) {
       expect(html).not.toMatch(new RegExp(`data-pathway-destination="${destination}" disabled`));
     }
     expect(css).toMatch(/\.pathway-choice:disabled\s*{[\s\S]*background: color-mix[\s\S]*cursor: not-allowed/);
@@ -141,7 +140,7 @@ describe("local pathway navigation", () => {
   });
 
   it("highlights the active opponent card as a resumable seat", () => {
-    expect(html.match(/class="pathway-resume-status" hidden>Resume<\/em>/g)).toHaveLength(4);
+    expect(html.match(/class="pathway-resume-status" hidden>Resume<\/em>/g)).toHaveLength(5);
     expect(source).toContain("syncPathwayResumePresentation()");
     expect(source).toContain('button.classList.toggle("pathway-choice-resumable", active)');
     expect(css).toMatch(/@media \(min-width: 1000px\)[\s\S]*\.pathway-choice-grid-play \.pathway-resume-status\s*{[\s\S]*top: 50%;[\s\S]*right: 78px/s);
@@ -150,9 +149,10 @@ describe("local pathway navigation", () => {
     expect(css).toMatch(/\.pathway-resume-status\s*\{[^}]*top:\s*18px[^}]*right:\s*20px[^}]*left:\s*auto/s);
   });
 
-  it("requires an account for Statistics, human games, and Ace", () => {
-    expect(html.match(/Sign in required/g)).toHaveLength(3);
+  it("requires an account for Statistics, human games, Ace, and Dynamic", () => {
+    expect(html.match(/Sign in required/g)).toHaveLength(4);
     expect(source).toMatch(/opponent === DEFAULT_OPPONENT && !authenticatedUser[\s\S]*kind: "master"/);
+    expect(source).toMatch(/opponent === PATHWAY_OPPONENTS\.dynamic && !authenticatedUser[\s\S]*kind: "dynamic"/);
     expect(source).toMatch(/destination === "human"[\s\S]*kind: "human"/);
     expect(source).toMatch(/pathwayStatistics\.addEventListener\("click"[\s\S]*kind: "statistics"/);
   });

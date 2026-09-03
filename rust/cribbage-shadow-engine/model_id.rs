@@ -37,6 +37,9 @@ pub const MODEL_16_3: &str = "schell_table-peg_table-16.3";
 /// Five-sample Myrmidon agent from the Moulton cribbage RL framework. Strong
 /// Cribbage exposes it as the Easy opponent and also retains it for benchmarks.
 pub const MYRMIDON_5: &str = "myrmidon-5";
+/// Server-side adaptive opponent which delegates each complete two-hand cycle
+/// to Easy, Tough, or Ace. Dynamic itself is not a decision engine.
+pub const DYNAMIC: &str = "dynamic";
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ModelId {
@@ -57,6 +60,7 @@ pub enum ModelId {
     Schell161,
     Schell163,
     Myrmidon5,
+    Dynamic,
 }
 
 impl ModelId {
@@ -79,6 +83,7 @@ impl ModelId {
             ModelId::Schell161 => MODEL_16_1,
             ModelId::Schell163 => MODEL_16_3,
             ModelId::Myrmidon5 => MYRMIDON_5,
+            ModelId::Dynamic => DYNAMIC,
         }
     }
 
@@ -101,6 +106,7 @@ impl ModelId {
             ModelId::Schell161 => "Schell Table + Peg Table 16.1",
             ModelId::Schell163 => "Schell Table + Peg Table 16.3",
             ModelId::Myrmidon5 => "Myrmidon (5 simulations)",
+            ModelId::Dynamic => "Dynamic",
         }
     }
 
@@ -168,6 +174,7 @@ impl FromStr for ModelId {
             MODEL_16_1 => Ok(ModelId::Schell161),
             MODEL_16_3 => Ok(ModelId::Schell163),
             MYRMIDON_5 => Ok(ModelId::Myrmidon5),
+            DYNAMIC => Ok(ModelId::Dynamic),
             other => Err(format!("unsupported model id: {}", other)),
         }
     }
@@ -220,5 +227,9 @@ mod tests {
         assert_eq!(MYRMIDON_5.parse::<ModelId>().unwrap(), ModelId::Myrmidon5);
         assert!(ModelId::Myrmidon5.has_native_rust_decisions());
         assert!(!ModelId::Myrmidon5.is_strength_model());
+        assert_eq!(DYNAMIC.parse::<ModelId>().unwrap(), ModelId::Dynamic);
+        assert_eq!(ModelId::Dynamic.as_str(), DYNAMIC);
+        assert!(!ModelId::Dynamic.has_native_rust_decisions());
+        assert!(!ModelId::Dynamic.is_strength_model());
     }
 }

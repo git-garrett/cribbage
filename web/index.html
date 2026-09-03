@@ -153,11 +153,12 @@
                   <em class="pathway-resume-status" hidden>Resume</em>
                   <em class="pathway-login-note">Sign in required</em>
                 </button>
-                <button class="pathway-choice pathway-choice-dynamic" type="button" data-pathway-destination="dynamic" disabled>
+                <button class="pathway-choice pathway-choice-dynamic" type="button" data-pathway-destination="dynamic">
                   <span>Adaptive opponent</span>
                   <strong>Dynamic</strong>
                   <small>Adapts to your play and plays back at your skill.</small>
-                  <em class="pathway-coming-soon">Coming soon</em>
+                  <em class="pathway-resume-status" hidden>Resume</em>
+                  <em class="pathway-login-note">Sign in required</em>
                 </button>
                 <button class="pathway-choice" type="button" data-pathway-destination="grandmaster" disabled>
                   <span>AI opponent</span>
@@ -476,6 +477,7 @@
           <label class="opponent-control" hidden>
             AI
             <select id="opponent" disabled>
+              <option value="dynamic">Dynamic</option>
               <option value="schell_table-peg_table-16.3">Experimental Ace</option>
               <option value="schell_table-peg_table-16.1">Experimental Ace</option>
               <option value="schell_table-peg_table-16.0">Experimental Ace</option>
@@ -671,7 +673,7 @@
           <button type="button" role="tab" data-my-stats-opponent="easy" aria-selected="false">Easy</button>
           <button type="button" role="tab" data-my-stats-opponent="tough" aria-selected="false">Tough</button>
           <button type="button" role="tab" data-my-stats-opponent="grandmaster" data-stats-available="false" aria-selected="false" disabled>Legend</button>
-          <button type="button" role="tab" data-my-stats-opponent="dynamic" data-stats-available="false" aria-selected="false" disabled>Dynamic</button>
+          <button type="button" role="tab" data-my-stats-opponent="dynamic" aria-selected="false">Dynamic</button>
         </div>
         <section id="stats-leaderboard" class="stats-leaderboard" aria-labelledby="stats-leaderboard-title" hidden>
           <header>
