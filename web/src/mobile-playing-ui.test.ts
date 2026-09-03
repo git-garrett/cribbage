@@ -7,6 +7,12 @@ const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const mainSource = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 
 describe("Concept B mobile playing UI", () => {
+  it("does not surface an AI-thinking bubble during normal play", () => {
+    expect(mainSource).toContain("els.modelThinking.hidden = !showModelLoadingUi");
+    expect(mainSource).toContain("els.thinkingOverlay.hidden = !showModelLoadingUi");
+    expect(mainSource).not.toContain("els.thinkingOverlay.hidden = !state.aiThinking");
+  });
+
   it("uses the scalable dark lockup and a pathway-style home control in the header", () => {
     expect(html).toMatch(/class="app-brand-logo" src="\/brand\/strong-cribbage-lockup-dark\.svg"/);
     expect(html).toMatch(/<picture class="splash-logo">[\s\S]*?lockup-dark\.svg[\s\S]*?lockup-light\.svg[\s\S]*?<\/picture>/);

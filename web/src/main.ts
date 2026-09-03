@@ -7022,13 +7022,13 @@ function render(game: GameState | null): void {
   els.turn.textContent = gameParticipantName(game.turn);
   els.count.textContent = String(game.count);
   const showModelLoadingUi = state.modelLoading && !SIMPLE_NETWORK_MODE;
-  els.modelThinking.hidden = !state.aiThinking && !showModelLoadingUi;
+  els.modelThinking.hidden = !showModelLoadingUi;
   const thinkingLabel = els.modelThinking.querySelector(".thinking-label");
   if (thinkingLabel) {
-    thinkingLabel.textContent = showModelLoadingUi ? "Loading opponent" : `${engineName(currentSnapshot?.opponent ?? els.opponent.value)} thinking`;
+    thinkingLabel.textContent = "Loading opponent";
   }
-  els.thinkingOverlay.hidden = !state.aiThinking && !showModelLoadingUi;
-  els.thinkingOverlayLabel.textContent = showModelLoadingUi ? "Loading opponent" : `${engineName(currentSnapshot?.opponent ?? els.opponent.value)} thinking`;
+  els.thinkingOverlay.hidden = !showModelLoadingUi;
+  els.thinkingOverlayLabel.textContent = "Loading opponent";
   els.modelLoading.hidden = !showModelLoadingUi;
   renderServerBusy();
   renderCutCard(state.turnCutRevealStage || !game.turnCardRevealed ? null : game.turnCard);
