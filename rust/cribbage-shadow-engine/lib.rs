@@ -1,5 +1,6 @@
 pub mod artifacts;
 pub mod board;
+pub mod board_matrix;
 pub mod cards;
 pub mod decision;
 pub mod dynamic;

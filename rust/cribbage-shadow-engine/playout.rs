@@ -3,8 +3,8 @@ use crate::cards::{score_hand, Card};
 use crate::game::{CribbageGame, Phase, Side};
 use crate::information_set::perspective_history;
 use crate::model::{
-    evaluate_decision, evaluate_decision_with_model911_cache, Decision, DecisionInput,
-    DecisionKind, Model16PolicyDecision, Model16PolicyMode, Model911HandCache, PlayerKey,
+    evaluate_decision, evaluate_decision_with_caches, Decision, DecisionInput, DecisionKind,
+    Model13HandCache, Model16PolicyDecision, Model16PolicyMode, Model911HandCache, PlayerKey,
 };
 use crate::model_id::ModelId;
 use std::time::Instant;
@@ -110,6 +110,8 @@ pub struct ModelPlayout {
     model16_policy_mode: Model16PolicyMode,
     model16_policy_seed: u64,
     model911_hand_caches: [Model911HandCache; 2],
+    model13_hand_caches: [Model13HandCache; 2],
+    model13_hand_cache_enabled: bool,
 }
 
 impl ModelPlayout {
@@ -141,6 +143,8 @@ impl ModelPlayout {
             model16_policy_mode: Model16PolicyMode::Argmax,
             model16_policy_seed: u64::from(seed),
             model911_hand_caches: [Model911HandCache::new(), Model911HandCache::new()],
+            model13_hand_caches: [Model13HandCache::new(), Model13HandCache::new()],
+            model13_hand_cache_enabled: true,
         };
         playout.start_hand_record();
         Ok(playout)
@@ -199,7 +203,7 @@ impl ModelPlayout {
                 Phase::Pegging => self.play_pegging_step(root)?,
                 Phase::PeggingComplete => {
                     let hand_number = self.game.hand_number;
-                    self.clear_model911_hand_caches();
+                    self.clear_pegging_hand_caches();
                     self.finalize_scoring_for_current_hand();
                     self.game.score_after_pegging()?;
                     self.finish_current_hand_record();
@@ -218,7 +222,7 @@ impl ModelPlayout {
             let left_score = self.game.player(Side::Left).score;
             let right_score = self.game.player(Side::Right).score;
             if left_score >= left_target && right_score >= right_target {
-                self.clear_model911_hand_caches();
+                self.clear_pegging_hand_caches();
                 return Ok(TrajectoryResult {
                     left_score,
                     right_score,
@@ -241,7 +245,7 @@ impl ModelPlayout {
                 Phase::Pegging => self.play_pegging_step(root)?,
                 Phase::PeggingComplete => {
                     let hand_number = self.game.hand_number;
-                    self.clear_model911_hand_caches();
+                    self.clear_pegging_hand_caches();
                     self.finalize_scoring_for_current_hand();
                     self.game.score_after_pegging()?;
                     self.finish_current_hand_record();
@@ -254,7 +258,7 @@ impl ModelPlayout {
                     self.game.continue_scoring()?;
                 }
                 Phase::GameOver => {
-                    self.clear_model911_hand_caches();
+                    self.clear_pegging_hand_caches();
                     let left_score = self.game.player(Side::Left).score;
                     let right_score = self.game.player(Side::Right).score;
                     return Ok(PlayoutResult {
@@ -430,10 +434,14 @@ impl ModelPlayout {
         }
         let input = self.decision_input(side, DecisionKind::Peg);
         let decision_started = Instant::now();
-        let decision = evaluate_decision_with_model911_cache(
+        let model13_cache = self
+            .model13_hand_cache_enabled
+            .then_some(&self.model13_hand_caches[side.index()]);
+        let decision = evaluate_decision_with_caches(
             &input,
             root,
             Some(&self.model911_hand_caches[side.index()]),
+            model13_cache,
         )?;
         let decision_elapsed_us = elapsed_micros(decision_started);
         match decision {
@@ -555,8 +563,11 @@ impl ModelPlayout {
         }
     }
 
-    fn clear_model911_hand_caches(&self) {
+    fn clear_pegging_hand_caches(&self) {
         for cache in &self.model911_hand_caches {
+            cache.clear();
+        }
+        for cache in &self.model13_hand_caches {
             cache.clear();
         }
     }
@@ -935,5 +946,84 @@ mod tests {
             different.model16_policy_sample(Side::Left)
         );
         assert_eq!(first.game.rng_state, second.game.rng_state);
+    }
+
+    #[test]
+    fn model13_cached_playout_preserves_both_models_decisions() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|path| path.parent())
+            .expect("workspace root")
+            .to_path_buf();
+        let mut cached = ModelPlayout::new_at_hand(
+            0x1320_1300,
+            Side::Left,
+            1,
+            100,
+            100,
+            ModelId::Schell13215,
+            ModelId::Schell13,
+        )
+        .unwrap();
+        let mut uncached = cached.clone();
+        uncached.model13_hand_cache_enabled = false;
+
+        let cached_result = cached.play_to_end(root.to_str().unwrap(), 10_000).unwrap();
+        let uncached_result = uncached
+            .play_to_end(root.to_str().unwrap(), 10_000)
+            .unwrap();
+        let decisions = |result: &PlayoutResult| {
+            let discards = result
+                .record
+                .discards
+                .iter()
+                .map(|decision| {
+                    (
+                        decision.player,
+                        decision
+                            .cards
+                            .iter()
+                            .map(|card| card.id)
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let pegs = result
+                .record
+                .peg_plays
+                .iter()
+                .map(|decision| {
+                    (
+                        decision.player,
+                        decision.action,
+                        decision.card.map(|card| card.id),
+                        decision.points,
+                    )
+                })
+                .collect::<Vec<_>>();
+            (discards, pegs)
+        };
+
+        assert_eq!(cached_result.winner, uncached_result.winner);
+        assert_eq!(cached_result.left_score, uncached_result.left_score);
+        assert_eq!(cached_result.right_score, uncached_result.right_score);
+        assert_eq!(cached_result.hands, uncached_result.hands);
+        assert_eq!(cached_result.steps, uncached_result.steps);
+        assert_eq!(decisions(&cached_result), decisions(&uncached_result));
+        for model in [ModelId::Schell13, ModelId::Schell13215] {
+            assert!(
+                cached_result
+                    .record
+                    .peg_plays
+                    .iter()
+                    .filter(|decision| {
+                        decision.model == Some(model)
+                            && decision.decision_elapsed_us.is_some()
+                            && decision.legal_count.is_some_and(|count| count > 1)
+                    })
+                    .count()
+                    > 1
+            );
+        }
     }
 }
