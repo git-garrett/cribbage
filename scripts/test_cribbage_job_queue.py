@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import importlib.util
+import io
 import json
 import plistlib
 import tempfile
@@ -133,6 +134,81 @@ class CribbageJobQueueTests(unittest.TestCase):
                 database.execute("INSERT INTO compact_games VALUES (2)")
             passed, _ = queue.check_completion(check)
             self.assertTrue(passed)
+
+    def test_summary_reports_database_progress_without_reading_logs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database_path = root / "games.db"
+            import sqlite3
+
+            with sqlite3.connect(database_path) as database:
+                database.execute("CREATE TABLE compact_games (id INTEGER)")
+                database.executemany(
+                    "INSERT INTO compact_games VALUES (?)", [(1,), (2,)]
+                )
+            spec = self.spec(
+                root,
+                [
+                    {
+                        "name": "benchmark",
+                        "command": ["/usr/bin/true"],
+                        "completionChecks": [
+                            {
+                                "type": "sqlite_count",
+                                "path": str(database_path),
+                                "table": "compact_games",
+                                "equals": 10,
+                            }
+                        ],
+                    }
+                ],
+            )
+            status = {
+                "state": "running",
+                "stages": [{"name": "benchmark", "state": "running"}],
+                "updatedAt": "2026-09-04T12:00:00Z",
+            }
+
+            summary = queue.summary_text(spec, status)
+
+            self.assertEqual(
+                summary,
+                "test-job running stage=benchmark rows=2/10 (20.0%) "
+                "updated=2026-09-04T12:00:00Z",
+            )
+
+    def test_summary_only_names_a_log_for_a_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            spec = self.spec(
+                root,
+                [{"name": "benchmark", "command": ["/usr/bin/false"]}],
+            )
+            path = self.write_spec(root, spec)
+            status = queue.read_status(spec)
+            status.update(
+                {
+                    "state": "failed",
+                    "stages": [
+                        {
+                            "name": "benchmark",
+                            "state": "failed",
+                            "logPath": str(root / "benchmark.log"),
+                        }
+                    ],
+                }
+            )
+            queue.atomic_json(queue.status_path(spec), status)
+
+            output = io.StringIO()
+            with mock.patch("sys.stdout", output):
+                self.assertEqual(queue.print_summary(path), 0)
+
+            self.assertEqual(
+                output.getvalue().strip(),
+                f"test-job failed stage=benchmark stages=0/1 "
+                f"log={root / 'benchmark.log'}",
+            )
 
     def test_changed_spec_cannot_reuse_status(self):
         with tempfile.TemporaryDirectory() as temporary:

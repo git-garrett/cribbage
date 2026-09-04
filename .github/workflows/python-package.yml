@@ -28,9 +28,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: npm ci
       - run: pip install -e '.[dev]'
-      - run: flake8 src tests scripts webapp.py --count --select=E9,F63,F7,F82 --show-source --statistics
-      - run: pytest
-      - run: npm run typecheck
-      - run: npm run test:web
-      - run: npm test
-      - run: npm run build
+      - run: scripts/run-quiet.sh "Python lint" flake8 src tests scripts webapp.py --count --select=E9,F63,F7,F82 --show-source --statistics
+      - run: scripts/run-quiet.sh "Python tests" pytest
+      - run: npm run --silent test:quiet-wrapper
+      - run: npm run --silent typecheck
+      - run: npm run --silent test:web
+      - run: npm test --silent
+      - run: npm run --silent build

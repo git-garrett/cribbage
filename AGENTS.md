@@ -4,4 +4,4 @@
 - For starting, resuming, stopping, or queuing long cribbage benchmarks and builds, use the `cribbage-benchmark-runner` skill and its one-shot job supervisor.
 - For local web/API listeners or LAN/iOS testing, use `scripts/local-runtime.sh`; it owns the shared ports and launchd services for every Codex client.
 - For unrelated implementation work or production deployment, read `docs/production-workflow.md` and follow its branch-to-PR-to-review-to-merge-to-deploy sequence.
-- Run the full Rust suite with `npm test`; it emits one success summary and expands the complete log only on failure.
+- For tests, builds, job monitoring, structured-data inspection, and review reporting, follow `docs/compact-output.md`.
