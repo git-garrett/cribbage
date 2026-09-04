@@ -2,11 +2,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+GIT_COMMON_DIR="$(git -C "$ROOT_DIR" rev-parse --path-format=absolute --git-common-dir)"
+REPOSITORY_ROOT="$(dirname "$GIT_COMMON_DIR")"
 VERSION="$(node -p "require('${ROOT_DIR}/package.json').version")"
 REMOTE_HOST="${REMOTE_HOST:-172.239.170.10}"
 REMOTE_USER="${REMOTE_USER:-root}"
 REMOTE_PORT="${REMOTE_PORT:-22}"
-SSH_KEY="${SSH_KEY:-${ROOT_DIR}/../../keys/strongcribbage_admin_ed25519}"
+SSH_KEY="${SSH_KEY:-${REPOSITORY_ROOT}/../../keys/strongcribbage_admin_ed25519}"
 REMOTE_APP_DIR="${REMOTE_APP_DIR:-/opt/cribbage}"
 REMOTE_DATA_DIR="${REMOTE_DATA_DIR:-/var/lib/cribbage}"
 REMOTE_PORT_APP="${REMOTE_PORT_APP:-8787}"
@@ -91,6 +93,10 @@ check_archive_identity() {
 deploy() {
   [[ $# -eq 0 ]] || { echo "deploy does not accept options." >&2; usage; exit 2; }
   check_production_checkout
+  [[ -r "$SSH_KEY" ]] || {
+    echo "Production SSH key is not readable: ${SSH_KEY}" >&2
+    exit 1
+  }
 
   (cd "$ROOT_DIR" && npm run qa:predeploy)
   check_production_checkout

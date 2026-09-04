@@ -41,7 +41,9 @@ scripts/deploy-nanode.sh check
 scripts/deploy-nanode.sh deploy
 ```
 
-The deploy command enforces the branch, clean-tree, and remote-synchronization
-checks, runs the Python/TypeScript/Rust test and build suite, compiles the exact
-Git commit into the server binary, and accepts production health only when both
-the host-local and public APIs report that commit.
+The deploy command resolves local credentials relative to the repository's main
+checkout, even when run from a linked worktree. It then enforces the branch,
+clean-tree, and remote-synchronization checks, runs the Python/TypeScript/Rust
+test and build suite, compiles the exact Git commit into the server binary, and
+accepts production health only when both the host-local and public APIs report
+that commit.
