@@ -386,6 +386,104 @@ def print_status(spec_path: Path) -> int:
     return 0
 
 
+def database_progress(stage: dict) -> tuple[int, int] | None:
+    checks: dict[tuple[object, ...], dict] = {}
+    for check in stage.get("completionChecks", []):
+        if check["type"] not in ("sqlite_count", "sqlite_contiguous_indices"):
+            continue
+        key = (check["path"], check["table"])
+        prior = checks.get(key)
+        expected_field = "equals" if check["type"] == "sqlite_count" else "count"
+        prior_expected = None
+        if prior is not None:
+            prior_expected_field = (
+                "equals" if prior["type"] == "sqlite_count" else "count"
+            )
+            prior_expected = prior[prior_expected_field]
+        if prior_expected is None or check[expected_field] > prior_expected:
+            checks[key] = check
+
+    if not checks:
+        return None
+
+    actual_total = 0
+    expected_total = 0
+    for check in checks.values():
+        path = Path(check["path"])
+        expected = check["equals"] if check["type"] == "sqlite_count" else check["count"]
+        expected_total += expected
+        if not path.is_file():
+            continue
+        try:
+            with sqlite3.connect(path, timeout=1) as database:
+                if check["type"] == "sqlite_count":
+                    actual = database.execute(
+                        f"SELECT COUNT(*) FROM {check['table']}"
+                    ).fetchone()[0]
+                else:
+                    end = check["start"] + check["count"]
+                    actual = database.execute(
+                        f"SELECT COUNT(DISTINCT {check['column']}) "
+                        f"FROM {check['table']} WHERE {check['column']} >= ? "
+                        f"AND {check['column']} < ?",
+                        (check["start"], end),
+                    ).fetchone()[0]
+        except sqlite3.Error:
+            continue
+        actual_total += min(actual, expected)
+    return actual_total, expected_total
+
+
+def summary_text(spec: dict, status: dict) -> str:
+    state = status["state"]
+    fields = [spec["jobId"], state]
+    stages = status.get("stages", [])
+    active = next(
+        (stage for stage in reversed(stages) if stage.get("state") == "running"),
+        None,
+    )
+    failed = next(
+        (stage for stage in reversed(stages) if stage.get("state") == "failed"),
+        None,
+    )
+    current = failed or active
+    if current:
+        fields.append(f"stage={current['name']}")
+
+    configured_stage = next(
+        (
+            stage
+            for stage in spec["stages"]
+            if current and stage["name"] == current["name"]
+        ),
+        None,
+    )
+    progress = (
+        database_progress(configured_stage)
+        if configured_stage is not None and state != "complete"
+        else None
+    )
+    if progress:
+        actual, expected = progress
+        percentage = 100 * actual / expected if expected else 100.0
+        fields.append(f"rows={actual}/{expected} ({percentage:.1f}%)")
+    elif stages:
+        complete = sum(stage.get("state") == "complete" for stage in stages)
+        fields.append(f"stages={complete}/{len(spec['stages'])}")
+
+    if status.get("updatedAt"):
+        fields.append(f"updated={status['updatedAt']}")
+    if failed and failed.get("logPath"):
+        fields.append(f"log={failed['logPath']}")
+    return " ".join(fields)
+
+
+def print_summary(spec_path: Path) -> int:
+    spec = load_spec(spec_path)
+    print(summary_text(spec, read_status(spec)))
+    return 0
+
+
 def stop_job(spec_path: Path) -> int:
     spec = load_spec(spec_path)
     service = f"gui/{os.getuid()}/{launch_label(spec)}"
@@ -426,7 +524,7 @@ def validate_command(spec_path: Path) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for command in ("validate", "run", "install", "status", "stop"):
+    for command in ("validate", "run", "install", "status", "summary", "stop"):
         subparser = subparsers.add_parser(command)
         subparser.add_argument("spec", type=Path)
     return parser.parse_args()
@@ -443,6 +541,8 @@ def main() -> int:
             return install_job(args.spec)
         if args.command == "stop":
             return stop_job(args.spec)
+        if args.command == "summary":
+            return print_summary(args.spec)
         return print_status(args.spec)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"error: {error}", file=sys.stderr)
