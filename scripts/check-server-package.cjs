@@ -8,6 +8,7 @@ const root = join(__dirname, "..");
 const { version } = require("../package.json");
 const archive = join(root, `cribbage-server-${version}.tgz`);
 const required = [
+  "deployment.json",
   "rust/Cargo.toml",
   "rust/Cargo.lock",
   "rust/cribbage-api/Cargo.toml",
@@ -49,4 +50,19 @@ if (missing.length) {
   process.exit(1);
 }
 
-console.log("Rust server package check passed: API source and runtime assets included.");
+const deployment = JSON.parse(
+  execFileSync("tar", ["-xOzf", archive, "deployment.json"], { encoding: "utf8" }),
+);
+const gitCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+  cwd: root,
+  encoding: "utf8",
+}).trim();
+if (deployment.version !== version || deployment.gitCommit !== gitCommit) {
+  console.error(
+    `Server package identity mismatch: expected ${version} at ${gitCommit}, `
+      + `found ${deployment.version || "unknown"} at ${deployment.gitCommit || "unknown"}.`,
+  );
+  process.exit(1);
+}
+
+console.log(`Rust server package check passed: ${version} at ${gitCommit}.`);

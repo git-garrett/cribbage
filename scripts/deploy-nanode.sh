@@ -14,6 +14,9 @@ REMOTE_BIND_HOST="${REMOTE_BIND_HOST:-127.0.0.1}"
 GAME_DOMAIN="${GAME_DOMAIN:-cribbage.strongcribbage.com}"
 MARKETING_DOMAIN="${MARKETING_DOMAIN:-strongcribbage.com}"
 ARCHIVE="${ROOT_DIR}/cribbage-server-${VERSION}.tgz"
+PRODUCTION_BRANCH="master"
+PRODUCTION_REMOTE="origin"
+GIT_COMMIT=""
 
 SSH_BASE=(ssh -p "$REMOTE_PORT" -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
 SCP_BASE=(scp -P "$REMOTE_PORT" -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
@@ -22,7 +25,8 @@ REMOTE="${REMOTE_USER}@${REMOTE_HOST}"
 usage() {
   cat <<USAGE
 Usage:
-  scripts/deploy-nanode.sh deploy [--skip-build]
+  scripts/deploy-nanode.sh check
+  scripts/deploy-nanode.sh deploy
   scripts/deploy-nanode.sh pull
   scripts/deploy-nanode.sh health
 
@@ -41,23 +45,56 @@ remote_exec() {
   "${SSH_BASE[@]}" "$REMOTE" "$@"
 }
 
-deploy() {
-  local skip_build=0
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --skip-build) skip_build=1 ;;
-      *) echo "Unknown deploy option: $1" >&2; usage; exit 2 ;;
-    esac
-    shift
-  done
+fail_checkout() {
+  echo "Production checkout rejected: $1" >&2
+  exit 1
+}
 
-  if [[ "$skip_build" -eq 0 ]]; then
-    (cd "$ROOT_DIR" && npm run build:deploy && npm run package:server)
-  elif [[ ! -f "$ARCHIVE" ]]; then
-    echo "Missing archive: $ARCHIVE" >&2
-    echo "Run without --skip-build first." >&2
-    exit 1
+check_production_checkout() {
+  local branch remote_ref remote_commit
+  branch="$(git -C "$ROOT_DIR" symbolic-ref --quiet --short HEAD)" \
+    || fail_checkout "HEAD is detached; use ${PRODUCTION_BRANCH}."
+  [[ "$branch" == "$PRODUCTION_BRANCH" ]] \
+    || fail_checkout "branch is ${branch}; use ${PRODUCTION_BRANCH}."
+
+  if [[ -n "$(git -C "$ROOT_DIR" status --porcelain --untracked-files=normal)" ]]; then
+    git -C "$ROOT_DIR" status --short >&2
+    fail_checkout "the working tree or index is not clean."
   fi
+
+  git -C "$ROOT_DIR" fetch --quiet "$PRODUCTION_REMOTE" \
+    "${PRODUCTION_BRANCH}:refs/remotes/${PRODUCTION_REMOTE}/${PRODUCTION_BRANCH}" \
+    || fail_checkout "could not refresh ${PRODUCTION_REMOTE}/${PRODUCTION_BRANCH}."
+  remote_ref="refs/remotes/${PRODUCTION_REMOTE}/${PRODUCTION_BRANCH}"
+  git -C "$ROOT_DIR" show-ref --verify --quiet "$remote_ref" \
+    || fail_checkout "${remote_ref} does not exist."
+  GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+  remote_commit="$(git -C "$ROOT_DIR" rev-parse "$remote_ref")"
+  [[ "$GIT_COMMIT" == "$remote_commit" ]] \
+    || fail_checkout "HEAD ${GIT_COMMIT} does not match ${PRODUCTION_REMOTE}/${PRODUCTION_BRANCH} ${remote_commit}."
+
+  echo "Production checkout verified: ${PRODUCTION_BRANCH} at ${GIT_COMMIT}."
+}
+
+check_archive_identity() {
+  local archive_commit archive_version
+  read -r archive_version archive_commit < <(
+    tar -xOzf "$ARCHIVE" deployment.json | node -e \
+      'let input=""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => { const value = JSON.parse(input); process.stdout.write(`${value.version || ""} ${value.gitCommit || ""}\n`); });'
+  )
+  [[ "$archive_commit" == "$GIT_COMMIT" ]] \
+    || fail_checkout "archive commit ${archive_commit:-unknown} does not match ${GIT_COMMIT}."
+  [[ "$archive_version" == "$VERSION" ]] \
+    || fail_checkout "archive version ${archive_version:-unknown} does not match ${VERSION}."
+}
+
+deploy() {
+  [[ $# -eq 0 ]] || { echo "deploy does not accept options." >&2; usage; exit 2; }
+  check_production_checkout
+
+  (cd "$ROOT_DIR" && npm run qa:predeploy)
+  check_production_checkout
+  check_archive_identity
 
   echo "Uploading $ARCHIVE to $REMOTE..."
   "${SCP_BASE[@]}" "$ARCHIVE" "$REMOTE:/tmp/$(basename "$ARCHIVE")"
@@ -68,7 +105,7 @@ deploy() {
     chmod 700 /etc/cribbage && \
     rm -rf '$REMOTE_APP_DIR/server-dist' '$REMOTE_APP_DIR/package.json' '$REMOTE_APP_DIR/docs' '$REMOTE_APP_DIR/rust' && \
     tar -xzf '/tmp/$(basename "$ARCHIVE")' -C '$REMOTE_APP_DIR' && \
-    cd '$REMOTE_APP_DIR/rust' && cargo build --locked --release --manifest-path cribbage-api/Cargo.toml && \
+    cd '$REMOTE_APP_DIR/rust' && CRIBBAGE_BUILD_GIT_COMMIT='$GIT_COMMIT' cargo build --locked --release --manifest-path cribbage-api/Cargo.toml && \
     chown -R root:root '$REMOTE_APP_DIR' && \
     chown -R cribbage:cribbage '$REMOTE_DATA_DIR' && \
     chmod 755 '$REMOTE_APP_DIR' && \
@@ -162,7 +199,7 @@ CADDY
     systemctl enable --now caddy && \
     systemctl reload caddy"
 
-  health
+  health "$GIT_COMMIT"
   (cd "$ROOT_DIR" && node scripts/check-client-cache-contract.cjs "https://${GAME_DOMAIN}")
 }
 
@@ -186,19 +223,44 @@ pull() {
 
 health() {
   echo "Checking remote health..."
-  local attempt
+  local expected_commit="${1:-}" attempt response="" response_commit=""
   for attempt in {1..20}; do
-    if remote_exec "curl -fsS http://${REMOTE_BIND_HOST}:${REMOTE_PORT_APP}/health && echo"; then
-      echo "Public URL: http://${REMOTE_HOST}/"
-      return 0
+    if response="$(remote_exec "curl -fsS http://${REMOTE_BIND_HOST}:${REMOTE_PORT_APP}/health")"; then
+      response_commit="$(printf '%s' "$response" | node -e \
+        'let input=""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => { try { process.stdout.write(JSON.parse(input).gitCommit || ""); } catch {} });')"
+      if [[ -n "$expected_commit" && "$response_commit" != "$expected_commit" ]]; then
+        sleep 1
+        continue
+      fi
+      echo "$response"
+      break
     fi
     sleep 1
   done
-  echo "Remote health check failed after waiting for the app to start." >&2
+  [[ -n "${response:-}" && ( -z "$expected_commit" || "$response_commit" == "$expected_commit" ) ]] || {
+    echo "Remote health check failed after waiting for the app to start." >&2
+    return 1
+  }
+
+  echo "Checking public health..."
+  for attempt in {1..20}; do
+    if response="$(curl -fsS "https://${GAME_DOMAIN}/health")"; then
+      response_commit="$(printf '%s' "$response" | node -e \
+        'let input=""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => { try { process.stdout.write(JSON.parse(input).gitCommit || ""); } catch {} });')"
+      if [[ -z "$expected_commit" || "$response_commit" == "$expected_commit" ]]; then
+        echo "$response"
+        echo "Public URL: https://${GAME_DOMAIN}/"
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+  echo "Public health check failed after waiting for the deployed commit." >&2
   return 1
 }
 
 case "${1:-}" in
+  check) shift; [[ $# -eq 0 ]] || { usage; exit 2; }; check_production_checkout ;;
   deploy) shift; deploy "$@" ;;
   pull) shift; pull "$@" ;;
   health) shift; health "$@" ;;
