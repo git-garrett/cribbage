@@ -21,11 +21,13 @@ describe("game log decision analysis", () => {
     expect(source).not.toContain("canAnalyzeCurrentGameDecisionReviews");
   });
 
-  it("stores live reviews and Ace help instead of repeating completed work", () => {
+  it("stores model-versioned live analysis and backfills only missing work", () => {
     expect(source.match(/storeLiveDecisionReview\(currentSnapshot\.gameId\)/g)).toHaveLength(3);
     expect(source).toContain('await api("/api/record-help", { decisionKey: preparation.key })');
     expect(apiSource).toContain('"record-help" =>');
-    expect(apiSource).toMatch(/find\(\|review\| review\.completed\.is_none\(\)\)/);
+    expect(apiSource).toContain('persist_session_event(&server.data_dir, session, "analyze-decision"');
+    expect(apiSource).toContain("fn saved_decision_analysis");
+    expect(apiSource).toContain("completed.evaluator_model");
   });
 
   it("adds a browsable error ledger beneath the Game Log tab", () => {

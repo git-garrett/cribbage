@@ -22,3 +22,16 @@ The distribution of terminal pegging scores expected after a discard, aggregated
 
 **Forecast histogram**:
 A stored distribution of terminal paired pegging scores for a finite discard context. It contains outcomes, not pegging actions or future paths.
+
+**Handicap**:
+The estimated percentage-point loss in eventual game win probability per game relative to Ace-level choices. It is normalized from interchangeable, role-balanced cycle evidence by the expected number of cycles in a game.
+_Avoid_: Per-decision handicap, average decision regret
+
+**Provisional handicap**:
+The handicap estimate before the player has supplied the minimum number of reviewed cycles.
+
+**Unassisted cycle**:
+A completed two-hand cycle in which the player did not receive an Ace tip before any decision. Only unassisted cycles may affect Dynamic calibration or handicap; proactive analysis and post-choice error notices do not make a cycle assisted.
+
+**Decision analysis**:
+A model-versioned evaluation of a player's choice and the model's recommendation at the same legal observation. The analysis is reusable regardless of whether a tip, error notice, handicap calculation, or explicit review first requested it.

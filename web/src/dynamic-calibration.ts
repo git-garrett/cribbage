@@ -3,7 +3,7 @@ export interface DynamicCalibration {
   completeCycles: number;
   minimumCycles: number;
   complete: boolean;
-  provisionalHandicap?: number | null;
+  provisionalHandicapPerGame?: number | null;
 }
 
 export const DYNAMIC_CALIBRATION_INVITE = "Calibrate and get a handicap!";
@@ -30,9 +30,9 @@ export function dynamicCardCopy(
 export function dynamicProvisionalHandicapCopy(
   calibration: DynamicCalibration | null | undefined,
 ): string | null {
-  const handicap = calibration?.provisionalHandicap;
+  const handicap = calibration?.provisionalHandicapPerGame;
   if (typeof handicap !== "number" || !Number.isFinite(handicap)) return null;
-  return `Provisional Handicap: ${dynamicHandicapPointsCopy(handicap)}`;
+  return `Provisional Handicap: ${dynamicHandicapPointsCopy(handicap)} WP pts/game`;
 }
 
 export function dynamicHandicapPointsCopy(handicap: number): string {
@@ -40,8 +40,8 @@ export function dynamicHandicapPointsCopy(handicap: number): string {
 }
 
 export function playerHandicapCopy(
-  handicap: { wpPerDecision: number } | null | undefined,
+  handicap: { wpPerGame: number } | null | undefined,
 ): string | null {
-  if (!handicap || !Number.isFinite(handicap.wpPerDecision)) return null;
-  return `(${dynamicHandicapPointsCopy(handicap.wpPerDecision)})`;
+  if (!handicap || !Number.isFinite(handicap.wpPerGame)) return null;
+  return `(${dynamicHandicapPointsCopy(handicap.wpPerGame)})`;
 }

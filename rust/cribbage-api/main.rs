@@ -15,8 +15,8 @@ use cribbage_shadow_engine::cards::{
 };
 use cribbage_shadow_engine::decision::{
     recommend_discard_for_side, recommend_peg_for_side, recommend_peg_for_side_with_model911_cache,
-    review_discard_for_side, review_peg_for_side, DecisionReview as EngineDecisionReview,
-    PegDecision,
+    review_discard_for_side_with_recommendation, review_peg_for_side_with_recommendation,
+    DecisionReview as EngineDecisionReview, PegDecision, ReviewedDecisionValue,
 };
 use cribbage_shadow_engine::dynamic::{
     DynamicCycleSample, DynamicProfile, DynamicState, DYNAMIC_EVALUATOR_VERSION,
@@ -59,6 +59,7 @@ struct Session {
     completed_at: Option<String>,
     forfeited: bool,
     decision_reviews: Vec<SavedDecisionReview>,
+    prepared_decision_analyses: Vec<PreparedDecisionAnalysis>,
     help_events: Vec<SavedHelpEvent>,
     score_events: Vec<SavedScoreEvent>,
     next_review_id: u32,
@@ -87,7 +88,11 @@ impl Session {
 
 enum DeferredRecommendation {
     AiDiscard(CribbageGame, ModelId),
-    MasterHint(CribbageGame),
+    MasterHint {
+        session_id: String,
+        game: CribbageGame,
+        cached: Option<PreparedDecisionAnalysis>,
+    },
 }
 
 #[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
@@ -104,6 +109,25 @@ struct SavedDecisionReview {
     game: CribbageGame,
     selected_card_ids: Vec<u8>,
     completed: Option<CompletedDecisionReview>,
+    #[serde(default)]
+    prior_analyses: Vec<CompletedDecisionReview>,
+    #[serde(default)]
+    prepared_analysis: Option<PreparedDecisionAnalysis>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct SavedDecisionValue {
+    card_ids: Vec<u8>,
+    ev: Option<f64>,
+    win_probability: Option<f64>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct PreparedDecisionAnalysis {
+    decision_key: String,
+    evaluator_model: String,
+    kind: ReviewKind,
+    recommended: SavedDecisionValue,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -116,6 +140,8 @@ struct SavedHelpEvent {
 
 #[derive(Clone, Deserialize, Serialize)]
 struct CompletedDecisionReview {
+    #[serde(default = "default_analysis_model")]
+    evaluator_model: String,
     selected_card_ids: Vec<u8>,
     recommended_card_ids: Vec<u8>,
     selected_ev: f64,
@@ -184,6 +210,8 @@ struct PersistedSession {
     #[serde(default)]
     forfeited: bool,
     decision_reviews: Vec<SavedDecisionReview>,
+    #[serde(default)]
+    prepared_decision_analyses: Vec<PreparedDecisionAnalysis>,
     #[serde(default)]
     help_events: Vec<SavedHelpEvent>,
     #[serde(default)]
@@ -694,7 +722,25 @@ fn game_action(
         }
         let response = response_for_session(session)?;
         let recommendation_game = if action == "master-hint" {
-            Some(DeferredRecommendation::MasterHint(session.game.clone()))
+            let kind = match session.game.phase {
+                Phase::Discard => ReviewKind::Discard,
+                Phase::Pegging => ReviewKind::Peg,
+                _ => return Err("Ace advice is not available for this decision.".to_string()),
+            };
+            let decision_key = decision_analysis_key(kind, &session.game);
+            let cached = session
+                .prepared_decision_analyses
+                .iter()
+                .find(|analysis| {
+                    analysis.decision_key == decision_key
+                        && analysis.evaluator_model == DYNAMIC_EVALUATOR_VERSION
+                })
+                .cloned();
+            Some(DeferredRecommendation::MasterHint {
+                session_id: session.id.clone(),
+                game: session.game.clone(),
+                cached,
+            })
         } else if matches!(
             action.as_str(),
             "prepare-cut-for-deal" | "prepare-ai-discard"
@@ -719,8 +765,24 @@ fn game_action(
                 }
             }
         }
-        Ok((response, Some(DeferredRecommendation::MasterHint(game)))) => {
-            match response_with_master_hint(response, &game, &server.model_root) {
+        Ok((
+            response,
+            Some(DeferredRecommendation::MasterHint {
+                session_id,
+                game,
+                cached,
+            }),
+        )) => {
+            let evaluated =
+                evaluate_master_hint(&game, cached, &server.model_root).and_then(|hint| {
+                    let response = if let Some(analysis) = hint.analysis.as_ref() {
+                        store_prepared_decision_analysis(server, &session_id, analysis.clone())?
+                    } else {
+                        response
+                    };
+                    response_with_master_hint(response, &hint)
+                });
+            match evaluated {
                 Ok(json) => Response::json(200, json),
                 Err(error) => {
                     Response::json(400, format!("{{\"error\":\"{}\"}}", json_escape(&error)))
@@ -764,7 +826,7 @@ fn review_game(
             session
                 .decision_reviews
                 .iter()
-                .find(|review| review.completed.is_none())
+                .find(|review| saved_decision_analysis(review, DYNAMIC_EVALUATOR_VERSION).is_none())
                 .cloned()
         };
 
@@ -779,12 +841,11 @@ fn review_game(
                 .get_mut(&game_id)
                 .ok_or_else(|| "The saved game is no longer available.".to_string())?;
             let before = session.clone();
-            if let Some(saved) = session
-                .decision_reviews
-                .iter_mut()
-                .find(|review| review.id == pending.id && review.completed.is_none())
-            {
-                saved.completed = Some(completed);
+            if let Some(saved) = session.decision_reviews.iter_mut().find(|review| {
+                review.id == pending.id
+                    && saved_decision_analysis(review, DYNAMIC_EVALUATOR_VERSION).is_none()
+            }) {
+                save_completed_decision_analysis(saved, completed);
                 session.updated_at = isoish_now();
                 session.event_sequence += 1;
                 if let Err(error) =
@@ -859,6 +920,7 @@ fn new_session_from_seed(model: ModelId, tag: Option<String>, seed: u32, counter
         completed_at: None,
         forfeited: false,
         decision_reviews: Vec::new(),
+        prepared_decision_analyses: Vec::new(),
         help_events: Vec::new(),
         score_events: Vec::new(),
         next_review_id: 1,
@@ -935,6 +997,14 @@ fn initialize_game_database(data_dir: &Path) -> Result<(), String> {
                sample_json TEXT NOT NULL,
                applied_at TEXT NOT NULL,
                PRIMARY KEY(user_id, evaluator_version, session_id, first_hand_number)
+             );
+             CREATE TABLE IF NOT EXISTS dynamic_profile_games (
+               user_id INTEGER NOT NULL,
+               evaluator_version TEXT NOT NULL,
+               session_id TEXT NOT NULL,
+               sample_json TEXT NOT NULL,
+               applied_at TEXT NOT NULL,
+               PRIMARY KEY(user_id, evaluator_version, session_id)
              );",
         )
         .map_err(|error| format!("create game tables: {}", error))
@@ -958,6 +1028,7 @@ fn persisted_session(session: &Session) -> PersistedSession {
         completed_at: session.completed_at.clone(),
         forfeited: session.forfeited,
         decision_reviews: session.decision_reviews.clone(),
+        prepared_decision_analyses: session.prepared_decision_analyses.clone(),
         help_events: session.help_events.clone(),
         score_events: session.score_events.clone(),
         next_review_id: session.next_review_id,
@@ -988,6 +1059,7 @@ fn restore_persisted_session(stored: PersistedSession) -> Result<Session, String
         completed_at: stored.completed_at,
         forfeited: stored.forfeited,
         decision_reviews: stored.decision_reviews,
+        prepared_decision_analyses: stored.prepared_decision_analyses,
         help_events: stored.help_events,
         score_events: stored.score_events,
         next_review_id: stored.next_review_id,
@@ -1202,7 +1274,7 @@ fn load_dynamic_profile(data_dir: &Path, user_id: i64) -> Result<Option<DynamicP
         .map(|text| {
             let profile = serde_json::from_str::<DynamicProfile>(&text)
                 .map_err(|error| format!("parse Dynamic player profile: {}", error))?;
-            Ok(profile.is_current().then_some(profile))
+            Ok(Some(profile.into_current()))
         })
         .transpose()
         .map(Option::flatten)
@@ -1243,12 +1315,13 @@ impl CycleRegretAccumulators {
         }
     }
 
-    fn sample(self) -> Option<DynamicCycleSample> {
+    fn sample(self, total_regret: f64) -> Option<DynamicCycleSample> {
         Some(DynamicCycleSample {
             dealer_discard_regret: self.dealer_discard.mean()?,
             dealer_pegging_regret: self.dealer_pegging.mean()?,
             pone_discard_regret: self.pone_discard.mean()?,
             pone_pegging_regret: self.pone_pegging.mean()?,
+            total_regret,
         })
     }
 }
@@ -1266,7 +1339,7 @@ fn reviewed_decision_regret(review: &SavedDecisionReview) -> Option<f64> {
         }
     }
 
-    let completed = review.completed.as_ref()?;
+    let completed = saved_decision_analysis(review, DYNAMIC_EVALUATOR_VERSION)?;
     let selected = completed.selected_win_probability?;
     let recommended = completed.recommended_win_probability?;
     if !selected.is_finite()
@@ -1280,7 +1353,15 @@ fn reviewed_decision_regret(review: &SavedDecisionReview) -> Option<f64> {
     Some(recommended - selected)
 }
 
-fn eligible_dynamic_cycle_samples(session: &Session) -> Vec<(u32, DynamicCycleSample)> {
+#[derive(Clone, Copy, Debug)]
+struct EligibleDynamicCycle {
+    first_hand: u32,
+    strength_sample: DynamicCycleSample,
+}
+
+/// Collect only fully scored, fully reviewed two-hand cycles. Model evaluation
+/// happens when each choice is saved; this aggregation is deliberately cheap.
+fn eligible_dynamic_cycle_samples(session: &Session) -> Vec<EligibleDynamicCycle> {
     let completed_hands = session
         .score_events
         .iter()
@@ -1294,6 +1375,13 @@ fn eligible_dynamic_cycle_samples(session: &Session) -> Vec<(u32, DynamicCycleSa
         if !completed_hands.contains(&first_hand) || !completed_hands.contains(&second_hand) {
             continue;
         }
+        if session
+            .help_events
+            .iter()
+            .any(|event| event.hand_number == first_hand || event.hand_number == second_hand)
+        {
+            continue;
+        }
         let reviews = session
             .decision_reviews
             .iter()
@@ -1301,21 +1389,37 @@ fn eligible_dynamic_cycle_samples(session: &Session) -> Vec<(u32, DynamicCycleSa
                 review.game.hand_number == first_hand || review.game.hand_number == second_hand
             })
             .collect::<Vec<_>>();
-        if reviews.is_empty() || reviews.iter().any(|review| review.completed.is_none()) {
+        if reviews.is_empty()
+            || reviews
+                .iter()
+                .any(|review| saved_decision_analysis(review, DYNAMIC_EVALUATOR_VERSION).is_none())
+        {
             continue;
         }
 
         let mut buckets = CycleRegretAccumulators::default();
+        let mut total_regret = 0.0;
         for review in reviews {
             if let Some(regret) = reviewed_decision_regret(review) {
                 buckets.add(review.kind, review.game.dealer == HUMAN, regret);
+                total_regret += regret;
             }
         }
-        if let Some(sample) = buckets.sample() {
-            samples.push((first_hand, sample));
+        if let Some(sample) = buckets.sample(total_regret) {
+            samples.push(EligibleDynamicCycle {
+                first_hand,
+                strength_sample: sample,
+            });
         }
     }
     samples
+}
+
+fn eligible_dynamic_game_length(session: &Session) -> Option<f64> {
+    (session.game.phase == Phase::GameOver
+        && session.pending_final_scoring.is_none()
+        && !session.forfeited)
+        .then(|| f64::from(session.game.hand_number) / 2.0)
 }
 
 fn sync_dynamic_player_profile(
@@ -1324,6 +1428,7 @@ fn sync_dynamic_player_profile(
     session: &Session,
 ) -> Result<Option<DynamicProfile>, String> {
     let samples = eligible_dynamic_cycle_samples(session);
+    let game_length = eligible_dynamic_game_length(session);
     let mut connection = open_game_database(data_dir)?;
     let transaction = connection
         .transaction()
@@ -1347,16 +1452,16 @@ fn sync_dynamic_player_profile(
         .as_ref()
         .map(|profile| !profile.is_current())
         .unwrap_or(true);
-    let mut profile = parsed
-        .filter(DynamicProfile::is_current)
-        .unwrap_or_default();
+    let mut profile = parsed.map(DynamicProfile::into_current).unwrap_or_default();
     let mut changed = false;
     if session.model == ModelId::Dynamic && !profile.started_dynamic {
         profile.started_dynamic = true;
         changed = true;
     }
 
-    for (first_hand, sample) in samples {
+    for cycle in samples {
+        let first_hand = cycle.first_hand;
+        let sample = cycle.strength_sample;
         let sample_json = serde_json::to_string(&sample)
             .map_err(|error| format!("serialize Dynamic cycle sample: {}", error))?;
         let inserted = transaction
@@ -1376,6 +1481,28 @@ fn sync_dynamic_player_profile(
             .map_err(|error| format!("save Dynamic cycle sample: {}", error))?;
         if inserted > 0 {
             profile.observe_cycle(sample);
+            changed = true;
+        }
+    }
+
+    if let Some(cycles_per_game) = game_length {
+        let sample_json = json!({"cyclesPerGame": cycles_per_game}).to_string();
+        let inserted = transaction
+            .execute(
+                "INSERT OR IGNORE INTO dynamic_profile_games
+                 (user_id, evaluator_version, session_id, sample_json, applied_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    user_id,
+                    DYNAMIC_EVALUATOR_VERSION,
+                    session.id,
+                    sample_json,
+                    isoish_now(),
+                ],
+            )
+            .map_err(|error| format!("save Dynamic game length: {}", error))?;
+        if inserted > 0 {
+            profile.observe_game_length(cycles_per_game);
             changed = true;
         }
     }
@@ -1955,14 +2082,107 @@ fn queue_decision_review(
 ) {
     let id = format!("{}-review-{}", session.id, session.next_review_id);
     session.next_review_id += 1;
+    let decision_key = decision_analysis_key(kind, &game);
+    let prepared_analysis = session
+        .prepared_decision_analyses
+        .iter()
+        .position(|analysis| {
+            analysis.decision_key == decision_key
+                && analysis.evaluator_model == DYNAMIC_EVALUATOR_VERSION
+        })
+        .map(|index| session.prepared_decision_analyses.remove(index));
+    let completed = prepared_analysis.as_ref().and_then(|analysis| {
+        same_card_selection(&selected_card_ids, &analysis.recommended.card_ids).then(|| {
+            completed_review_from_saved_values(
+                &analysis.evaluator_model,
+                analysis.recommended.clone(),
+                analysis.recommended.clone(),
+            )
+        })
+    });
+    let prepared_analysis = if completed.is_some() {
+        None
+    } else {
+        prepared_analysis
+    };
     session.decision_reviews.push(SavedDecisionReview {
         id,
         at: isoish_now(),
         kind,
         game,
         selected_card_ids,
-        completed: None,
+        completed,
+        prior_analyses: Vec::new(),
+        prepared_analysis,
     });
+}
+
+fn default_analysis_model() -> String {
+    DYNAMIC_EVALUATOR_VERSION.to_string()
+}
+
+fn saved_decision_analysis<'a>(
+    review: &'a SavedDecisionReview,
+    evaluator_model: &str,
+) -> Option<&'a CompletedDecisionReview> {
+    review
+        .completed
+        .as_ref()
+        .filter(|analysis| analysis.evaluator_model == evaluator_model)
+        .or_else(|| {
+            review
+                .prior_analyses
+                .iter()
+                .find(|analysis| analysis.evaluator_model == evaluator_model)
+        })
+}
+
+fn save_completed_decision_analysis(
+    review: &mut SavedDecisionReview,
+    completed: CompletedDecisionReview,
+) {
+    review.prepared_analysis = None;
+    if let Some(index) = review
+        .prior_analyses
+        .iter()
+        .position(|analysis| analysis.evaluator_model == completed.evaluator_model)
+    {
+        review.prior_analyses.remove(index);
+    }
+    if let Some(previous) = review.completed.replace(completed) {
+        if previous.evaluator_model
+            != review
+                .completed
+                .as_ref()
+                .expect("completed analysis was just stored")
+                .evaluator_model
+        {
+            review.prior_analyses.push(previous);
+        }
+    }
+}
+
+fn same_card_selection(left: &[u8], right: &[u8]) -> bool {
+    let mut left = left.to_vec();
+    let mut right = right.to_vec();
+    left.sort_unstable();
+    right.sort_unstable();
+    left == right
+}
+
+fn decision_analysis_key(kind: ReviewKind, game: &CribbageGame) -> String {
+    let kind = match kind {
+        ReviewKind::Discard => "discard",
+        ReviewKind::Peg => "peg",
+    };
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    if let Ok(encoded) = serde_json::to_vec(game) {
+        for byte in encoded {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    format!("{kind}:{hash:016x}")
 }
 
 fn score_category_label(category: SavedScoreCategory) -> &'static str {
@@ -2064,10 +2284,13 @@ fn complete_decision_reviews(
     }
     let mut completed = 0;
     for pending in &mut session.decision_reviews {
-        if completed >= limit || pending.completed.is_some() {
+        if completed >= limit
+            || saved_decision_analysis(pending, DYNAMIC_EVALUATOR_VERSION).is_some()
+        {
             continue;
         }
-        pending.completed = Some(evaluate_saved_decision_review(pending, model_root)?);
+        let analysis = evaluate_saved_decision_review(pending, model_root)?;
+        save_completed_decision_analysis(pending, analysis);
         completed += 1;
     }
     Ok(())
@@ -2077,16 +2300,26 @@ fn evaluate_saved_decision_review(
     pending: &SavedDecisionReview,
     model_root: &str,
 ) -> Result<CompletedDecisionReview, String> {
+    let prepared = pending
+        .prepared_analysis
+        .as_ref()
+        .filter(|analysis| analysis.evaluator_model == DYNAMIC_EVALUATOR_VERSION)
+        .map(|analysis| ReviewedDecisionValue {
+            card_ids: analysis.recommended.card_ids.clone(),
+            ev: analysis.recommended.ev,
+            win_probability: analysis.recommended.win_probability,
+        });
     let review = match pending.kind {
         ReviewKind::Discard => {
             if pending.selected_card_ids.len() != 2 {
                 return Err("saved discard review is malformed".to_string());
             }
-            review_discard_for_side(
+            review_discard_for_side_with_recommendation(
                 &pending.game,
                 HUMAN,
                 ModelId::Schell13,
                 [pending.selected_card_ids[0], pending.selected_card_ids[1]],
+                prepared,
                 model_root,
             )?
         }
@@ -2094,11 +2327,12 @@ fn evaluate_saved_decision_review(
             let Some(selected) = pending.selected_card_ids.first().copied() else {
                 return Err("saved pegging review is malformed".to_string());
             };
-            review_peg_for_side(
+            review_peg_for_side_with_recommendation(
                 &pending.game,
                 HUMAN,
                 ModelId::Schell13,
                 selected,
+                prepared,
                 model_root,
             )?
         }
@@ -2108,12 +2342,29 @@ fn evaluate_saved_decision_review(
 
 fn completed_review(review: EngineDecisionReview) -> CompletedDecisionReview {
     CompletedDecisionReview {
+        evaluator_model: DYNAMIC_EVALUATOR_VERSION.to_string(),
         selected_card_ids: review.selected.card_ids,
         recommended_card_ids: review.recommended.card_ids,
         selected_ev: review.selected.ev.unwrap_or(0.0),
         recommended_ev: review.recommended.ev.unwrap_or(0.0),
         selected_win_probability: review.selected.win_probability,
         recommended_win_probability: review.recommended.win_probability,
+    }
+}
+
+fn completed_review_from_saved_values(
+    evaluator_model: &str,
+    selected: SavedDecisionValue,
+    recommended: SavedDecisionValue,
+) -> CompletedDecisionReview {
+    CompletedDecisionReview {
+        evaluator_model: evaluator_model.to_string(),
+        selected_card_ids: selected.card_ids,
+        recommended_card_ids: recommended.card_ids,
+        selected_ev: selected.ev.unwrap_or(0.0),
+        recommended_ev: recommended.ev.unwrap_or(0.0),
+        selected_win_probability: selected.win_probability,
+        recommended_win_probability: recommended.win_probability,
     }
 }
 
@@ -2159,24 +2410,136 @@ fn response_with_discard_recommendation(
     Ok(response)
 }
 
-fn response_with_master_hint(
-    mut response: String,
+struct MasterHintEvaluation {
+    kind: &'static str,
+    card_ids: Vec<u8>,
+    analysis: Option<PreparedDecisionAnalysis>,
+}
+
+fn evaluate_master_hint(
     game: &CribbageGame,
+    cached: Option<PreparedDecisionAnalysis>,
     model_root: &str,
-) -> Result<String, String> {
-    let (kind, card_ids) = match game.phase {
+) -> Result<MasterHintEvaluation, String> {
+    if let Some(analysis) = cached {
+        let kind = match analysis.kind {
+            ReviewKind::Discard => "discard",
+            ReviewKind::Peg => "play",
+        };
+        return Ok(MasterHintEvaluation {
+            kind,
+            card_ids: analysis.recommended.card_ids.clone(),
+            analysis: Some(analysis),
+        });
+    }
+
+    let (kind, review_kind, recommended) = match game.phase {
         Phase::Discard => {
             let decision = recommend_discard_for_side(game, HUMAN, ModelId::Schell13, model_root)?;
-            ("discard", decision.card_ids)
+            (
+                "discard",
+                ReviewKind::Discard,
+                Some(SavedDecisionValue {
+                    card_ids: decision.card_ids,
+                    ev: decision.ev,
+                    win_probability: decision.win_probability,
+                }),
+            )
         }
         Phase::Pegging => {
             match recommend_peg_for_side(game, HUMAN, ModelId::Schell13, None, model_root)? {
-                PegDecision::Play { card_id, .. } => ("play", vec![card_id]),
-                PegDecision::Go => ("go", Vec::new()),
+                PegDecision::Play {
+                    card_id,
+                    ev,
+                    win_probability,
+                } => (
+                    "play",
+                    ReviewKind::Peg,
+                    Some(SavedDecisionValue {
+                        card_ids: vec![card_id],
+                        ev,
+                        win_probability,
+                    }),
+                ),
+                PegDecision::Go => ("go", ReviewKind::Peg, None),
             }
         }
         _ => return Err("Ace advice is not available for this decision.".to_string()),
     };
+    let analysis = recommended.map(|recommended| PreparedDecisionAnalysis {
+        decision_key: decision_analysis_key(review_kind, game),
+        evaluator_model: DYNAMIC_EVALUATOR_VERSION.to_string(),
+        kind: review_kind,
+        recommended,
+    });
+    let card_ids = analysis
+        .as_ref()
+        .map(|analysis| analysis.recommended.card_ids.clone())
+        .unwrap_or_default();
+    Ok(MasterHintEvaluation {
+        kind,
+        card_ids,
+        analysis,
+    })
+}
+
+fn store_prepared_decision_analysis(
+    server: &Server,
+    session_id: &str,
+    analysis: PreparedDecisionAnalysis,
+) -> Result<String, String> {
+    let mut app = server
+        .state
+        .lock()
+        .map_err(|_| "server state lock poisoned".to_string())?;
+    let session = app
+        .sessions
+        .get_mut(session_id)
+        .ok_or_else(|| "The saved game is no longer available.".to_string())?;
+    let already_completed = session.decision_reviews.iter().any(|review| {
+        decision_analysis_key(review.kind, &review.game) == analysis.decision_key
+            && saved_decision_analysis(review, &analysis.evaluator_model).is_some()
+    });
+    let mut changed = false;
+    if !already_completed {
+        if let Some(review) = session.decision_reviews.iter_mut().find(|review| {
+            decision_analysis_key(review.kind, &review.game) == analysis.decision_key
+                && saved_decision_analysis(review, &analysis.evaluator_model).is_none()
+        }) {
+            if review.prepared_analysis.is_none() {
+                review.prepared_analysis = Some(analysis.clone());
+                changed = true;
+            }
+        } else if !session.prepared_decision_analyses.iter().any(|saved| {
+            saved.decision_key == analysis.decision_key
+                && saved.evaluator_model == analysis.evaluator_model
+        }) {
+            session.prepared_decision_analyses.push(analysis.clone());
+            changed = true;
+        }
+    }
+    if changed {
+        session.updated_at = isoish_now();
+        session.event_sequence += 1;
+        let body = json!({
+            "payload": {
+                "decisionKey": analysis.decision_key,
+                "evaluatorModel": analysis.evaluator_model,
+                "recommendedCardIds": analysis.recommended.card_ids,
+                "recommendedEv": analysis.recommended.ev,
+                "recommendedWinProbability": analysis.recommended.win_probability,
+            }
+        })
+        .to_string();
+        persist_session_event(&server.data_dir, session, "analyze-decision", &body)?;
+    }
+    response_for_session(session)
+}
+
+fn response_with_master_hint(
+    mut response: String,
+    hint: &MasterHintEvaluation,
+) -> Result<String, String> {
     let Some(body) = response.strip_suffix('}').map(str::to_string) else {
         return Err("could not append Ace hint".to_string());
     };
@@ -2184,8 +2547,8 @@ fn response_with_master_hint(
     write!(
         response,
         ",\"hint\":{{\"kind\":\"{}\",\"cardIds\":{}}}}}",
-        kind,
-        number_array_json(&card_ids),
+        hint.kind,
+        number_array_json(&hint.card_ids),
     )
     .map_err(|error| error.to_string())?;
     Ok(response)
@@ -2245,9 +2608,13 @@ fn game_state_json(session: &Session) -> String {
         .as_ref()
         .map(|dynamic| {
             let complete_cycles = dynamic.profile().complete_cycles;
-            let provisional_handicap = dynamic.profile().ewma_handicap;
+            let provisional_handicap = dynamic
+                .profile()
+                .handicap_per_game()
+                .map(json_f64)
+                .unwrap_or_else(|| "null".to_string());
             format!(
-                "{{\"started\":true,\"completeCycles\":{},\"minimumCycles\":{},\"complete\":{},\"provisionalHandicap\":{}}}",
+                "{{\"started\":true,\"completeCycles\":{},\"minimumCycles\":{},\"complete\":{},\"provisionalHandicapPerGame\":{}}}",
                 complete_cycles,
                 MIN_COMPLETE_CYCLES,
                 complete_cycles >= MIN_COMPLETE_CYCLES,
@@ -2657,7 +3024,10 @@ fn pending_reviews_json(session: &Session, kind: ReviewKind) -> String {
     let pending = session
         .decision_reviews
         .iter()
-        .filter(|review| review.kind == kind && review.completed.is_none())
+        .filter(|review| {
+            review.kind == kind
+                && saved_decision_analysis(review, DYNAMIC_EVALUATOR_VERSION).is_none()
+        })
         .map(|review| format!("{{\"id\":\"{}\"}}", json_escape(&review.id)))
         .collect::<Vec<_>>();
     format!("[{}]", pending.join(","))
@@ -2670,9 +3040,7 @@ fn decision_review_event_json(session: &Session, review: &SavedDecisionReview) -
     } else {
         "pone"
     };
-    let review_json = review
-        .completed
-        .as_ref()
+    let review_json = saved_decision_analysis(review, DYNAMIC_EVALUATOR_VERSION)
         .map(|completed| format!(",\"review\":{}", completed_review_json(completed)))
         .unwrap_or_default();
     match review.kind {
@@ -2740,7 +3108,7 @@ fn decision_review_event_json(session: &Session, review: &SavedDecisionReview) -
 
 fn completed_review_json(review: &CompletedDecisionReview) -> String {
     let mut fields = vec![
-        format!("\"model\":\"{}\"", MODEL_13_0),
+        format!("\"model\":\"{}\"", json_escape(&review.evaluator_model)),
         format!(
             "\"selected\":{}",
             string_array_json(&card_labels_for_ids(&review.selected_card_ids))
@@ -4065,8 +4433,9 @@ mod tests {
         let handicaps = HashMap::from([(
             "Garrett".to_string(),
             json!({
-                "wpPerDecision": -0.0125,
+                "wpPerGame": -0.125,
                 "cycles": 8,
+                "cyclesPerGame": 5.0,
                 "evaluatorVersion": "ace-13.0",
             }),
         )]);
@@ -4080,10 +4449,7 @@ mod tests {
         assert_eq!(summary["playerStatsByOpponent"]["easy"][0]["games"], 1);
         assert_eq!(summary["playerStatsByOpponent"]["easy"][0]["wins"], 1);
         assert_eq!(summary["playerStatsByOpponent"]["easy"][0]["skunks"], 1);
-        assert_eq!(
-            summary["playerHandicaps"]["Garrett"]["wpPerDecision"],
-            -0.0125
-        );
+        assert_eq!(summary["playerHandicaps"]["Garrett"]["wpPerGame"], -0.125);
     }
 
     #[test]
@@ -4651,6 +5017,7 @@ mod tests {
 
     fn completed_review(selected: f64, recommended: f64) -> CompletedDecisionReview {
         CompletedDecisionReview {
+            evaluator_model: DYNAMIC_EVALUATOR_VERSION.to_string(),
             selected_card_ids: vec![0],
             recommended_card_ids: vec![1],
             selected_ev: 0.0,
@@ -4695,6 +5062,8 @@ mod tests {
             game,
             selected_card_ids,
             completed: Some(completed_review(selected, recommended)),
+            prior_analyses: Vec::new(),
+            prepared_analysis: None,
         }
     }
 
@@ -4721,7 +5090,10 @@ mod tests {
         let mut session = new_session_from_seed(model, Some("Travis".to_string()), 17, 1);
         session.id = id.to_string();
         session.game.hand_number = 3;
+        session.game.phase = Phase::GameOver;
         session.score_events = vec![completed_hand_event(1, HUMAN), completed_hand_event(2, AI)];
+        session.score_events[0].scores = [12, 10];
+        session.score_events[1].scores = [24, 22];
         session.decision_reviews = vec![
             calibration_review("dealer-discard", 1, true, ReviewKind::Discard, 0.46, 0.50),
             calibration_review("dealer-peg-1", 1, true, ReviewKind::Peg, 0.48, 0.50),
@@ -4738,12 +5110,73 @@ mod tests {
         let samples = eligible_dynamic_cycle_samples(&session);
 
         assert_eq!(samples.len(), 1);
-        let sample = samples[0].1;
+        let sample = samples[0].strength_sample;
         assert!((sample.dealer_discard_regret - 0.04).abs() < 1e-12);
         assert!((sample.dealer_pegging_regret - 0.02).abs() < 1e-12);
         assert!((sample.pone_discard_regret - 0.01).abs() < 1e-12);
         assert_eq!(sample.pone_pegging_regret, 0.0);
-        assert!((sample.handicap() - -0.0175).abs() < 1e-12);
+        assert!((sample.mean_regret() - 0.0175).abs() < 1e-12);
+        assert!((sample.total_regret - 0.09).abs() < 1e-12);
+    }
+
+    #[test]
+    fn handicap_cycle_requires_every_saved_decision_review() {
+        let mut session = reviewed_cycle_session(ModelId::Myrmidon5, "incomplete-cycle");
+        session.decision_reviews[0].completed = None;
+        assert!(eligible_dynamic_cycle_samples(&session).is_empty());
+
+        session.decision_reviews[0].completed = Some(completed_review(0.46, 0.50));
+        assert_eq!(eligible_dynamic_cycle_samples(&session).len(), 1);
+    }
+
+    #[test]
+    fn a_received_ace_tip_disqualifies_the_entire_cycle() {
+        let mut session = reviewed_cycle_session(ModelId::Myrmidon5, "helped-cycle");
+        session.help_events.push(SavedHelpEvent {
+            id: "helped-cycle-help-1".to_string(),
+            at: isoish_now(),
+            hand_number: 2,
+            decision_key: "helped-cycle:hand-2:discard".to_string(),
+        });
+
+        assert!(eligible_dynamic_cycle_samples(&session).is_empty());
+    }
+
+    #[test]
+    fn proactive_ace_analysis_does_not_disqualify_a_cycle() {
+        let mut session = reviewed_cycle_session(ModelId::Myrmidon5, "analyzed-cycle");
+        let game = session.decision_reviews[0].game.clone();
+        session
+            .prepared_decision_analyses
+            .push(PreparedDecisionAnalysis {
+                decision_key: decision_analysis_key(ReviewKind::Discard, &game),
+                evaluator_model: DYNAMIC_EVALUATOR_VERSION.to_string(),
+                kind: ReviewKind::Discard,
+                recommended: SavedDecisionValue {
+                    card_ids: vec![0, 1],
+                    ev: Some(0.0),
+                    win_probability: Some(0.50),
+                },
+            });
+
+        assert_eq!(eligible_dynamic_cycle_samples(&session).len(), 1);
+    }
+
+    #[test]
+    fn in_progress_dynamic_handicap_uses_completed_cycle_regret() {
+        let mut session = reviewed_cycle_session(ModelId::Dynamic, "live-cycle-handicap");
+        session.game.phase = Phase::ScoreCrib;
+        let sample = eligible_dynamic_cycle_samples(&session)[0].strength_sample;
+        let mut profile = DynamicProfile::default();
+        profile.observe_cycle(sample);
+        let dynamic = session.dynamic.as_mut().unwrap();
+        dynamic.use_profile(profile, session.seed);
+
+        let state = serde_json::from_str::<Value>(&game_state_json(&session)).unwrap();
+        let handicap = state["dynamicCalibration"]["provisionalHandicapPerGame"]
+            .as_f64()
+            .unwrap();
+        assert!((handicap - (-0.09 * 4.516)).abs() < 1e-12);
     }
 
     #[test]
@@ -4769,8 +5202,9 @@ mod tests {
             .decision_reviews
             .extend([forced, unreliable, terminal]);
 
-        let sample = eligible_dynamic_cycle_samples(&session)[0].1;
+        let sample = eligible_dynamic_cycle_samples(&session)[0].strength_sample;
         assert!((sample.dealer_pegging_regret - 0.02).abs() < 1e-12);
+        assert!((sample.total_regret - 0.09).abs() < 1e-12);
     }
 
     #[test]
@@ -4798,6 +5232,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(first.complete_cycles, 1);
+        assert_eq!(first.handicap_cycles, 1);
+        assert!((first.ewma_cycle_handicap - -0.09).abs() < 1e-12);
         assert!(sync_dynamic_player_profile(&data_dir, travis.id, &easy)
             .unwrap()
             .is_none());
@@ -4805,6 +5241,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(second.complete_cycles, 2);
+        assert_eq!(second.handicap_cycles, 2);
+        assert!((second.ewma_cycle_handicap - -0.09).abs() < 1e-12);
         assert_eq!(
             load_dynamic_profile(&data_dir, travis.id).unwrap(),
             Some(second.clone())
@@ -4838,10 +5276,11 @@ mod tests {
             response_json["state"]["dynamicCalibration"]["complete"],
             false
         );
-        assert_eq!(
-            response_json["state"]["dynamicCalibration"]["provisionalHandicap"].as_f64(),
-            Some(second.ewma_handicap)
-        );
+        let provisional = response_json["state"]["dynamicCalibration"]
+            ["provisionalHandicapPerGame"]
+            .as_f64()
+            .unwrap();
+        assert!((provisional - second.handicap_per_game().unwrap()).abs() < 1e-12);
         let app = server.state.lock().unwrap();
         let inherited = app
             .sessions
@@ -4853,7 +5292,11 @@ mod tests {
             .unwrap();
         assert!(inherited.profile().started_dynamic);
         assert_eq!(inherited.profile().complete_cycles, second.complete_cycles);
-        assert_eq!(inherited.profile().ewma_handicap, second.ewma_handicap);
+        assert_eq!(inherited.profile().handicap_cycles, second.handicap_cycles);
+        assert_eq!(
+            inherited.profile().ewma_cycle_handicap,
+            second.ewma_cycle_handicap
+        );
         drop(app);
 
         let connection = open_game_database(&data_dir).unwrap();
@@ -4912,7 +5355,7 @@ mod tests {
         let calibration = &response_json["state"]["dynamicCalibration"];
         assert_eq!(calibration["completeCycles"], 0);
         assert_eq!(calibration["minimumCycles"], MIN_COMPLETE_CYCLES);
-        assert_eq!(calibration["provisionalHandicap"], 0.0);
+        assert!(calibration["provisionalHandicapPerGame"].is_null());
         let saved = load_dynamic_profile(&data_dir, travis.id).unwrap().unwrap();
         assert!(saved.started_dynamic);
         assert_eq!(saved.complete_cycles, 0);
@@ -4931,6 +5374,103 @@ mod tests {
         let analytics = analytics_events_json(&session);
         assert!(analytics.contains("\"type\":\"help\""));
         assert!(analytics.contains("\"advisor\":\"Ace\""));
+    }
+
+    #[test]
+    fn prepared_ace_analysis_is_logged_once_and_reused_by_the_saved_choice() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-prepared-analysis-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let session = new_session_from_seed(ModelId::Myrmidon5, None, 17, 1);
+        let session_id = session.id.clone();
+        let game = session.game.clone();
+        let selected = vec![game.player(HUMAN).hand[0].id, game.player(HUMAN).hand[1].id];
+        let analysis = PreparedDecisionAnalysis {
+            decision_key: decision_analysis_key(ReviewKind::Discard, &game),
+            evaluator_model: DYNAMIC_EVALUATOR_VERSION.to_string(),
+            kind: ReviewKind::Discard,
+            recommended: SavedDecisionValue {
+                card_ids: selected.clone(),
+                ev: Some(1.25),
+                win_probability: Some(0.55),
+            },
+        };
+        let server = Server {
+            state: Mutex::new(AppState {
+                sessions: HashMap::from([(session_id.clone(), session)]),
+                ..AppState::default()
+            }),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+
+        store_prepared_decision_analysis(&server, &session_id, analysis.clone()).unwrap();
+        store_prepared_decision_analysis(&server, &session_id, analysis).unwrap();
+
+        let restored = load_session_by_id(&data_dir, &session_id).unwrap().unwrap();
+        assert_eq!(restored.prepared_decision_analyses.len(), 1);
+        let mut app = server.state.lock().unwrap();
+        let saved = app.sessions.get_mut(&session_id).unwrap();
+        queue_decision_review(saved, ReviewKind::Discard, game, selected);
+        let completed = saved.decision_reviews[0].completed.as_ref().unwrap();
+        assert_eq!(completed.evaluator_model, DYNAMIC_EVALUATOR_VERSION);
+        assert_eq!(completed.selected_win_probability, Some(0.55));
+        drop(app);
+
+        let connection = open_game_database(&data_dir).unwrap();
+        let analysis_events: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM cribbage_game_events
+                 WHERE session_id = ?1 AND action = 'analyze-decision'",
+                [session_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(analysis_events, 1);
+        let logged_model: String = connection
+            .query_row(
+                "SELECT json_extract(request_json, '$.payload.evaluatorModel')
+                 FROM cribbage_game_events
+                 WHERE session_id = ?1 AND action = 'analyze-decision'",
+                [session_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(logged_model, DYNAMIC_EVALUATOR_VERSION);
+        let logged_win_probability: f64 = connection
+            .query_row(
+                "SELECT json_extract(request_json, '$.payload.recommendedWinProbability')
+                 FROM cribbage_game_events
+                 WHERE session_id = ?1 AND action = 'analyze-decision'",
+                [session_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(logged_win_probability, 0.55);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn a_new_evaluator_keeps_prior_analysis_and_backfills_only_its_version() {
+        let mut review = calibration_review(
+            "versioned-analysis",
+            1,
+            true,
+            ReviewKind::Discard,
+            0.46,
+            0.50,
+        );
+        review.completed.as_mut().unwrap().evaluator_model = "ace-older".to_string();
+        assert!(saved_decision_analysis(&review, DYNAMIC_EVALUATOR_VERSION).is_none());
+
+        save_completed_decision_analysis(&mut review, completed_review(0.48, 0.50));
+
+        assert!(saved_decision_analysis(&review, DYNAMIC_EVALUATOR_VERSION).is_some());
+        assert!(saved_decision_analysis(&review, "ace-older").is_some());
+        assert_eq!(review.prior_analyses.len(), 1);
     }
 
     #[test]

@@ -3,7 +3,9 @@ use std::path::Path;
 
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine as _;
-use cribbage_shadow_engine::dynamic::MIN_COMPLETE_CYCLES;
+use cribbage_shadow_engine::dynamic::{
+    MIN_COMPLETE_CYCLES, MIN_COMPLETE_GAMES_FOR_PERSONAL_LENGTH, UNIVERSAL_CYCLES_PER_GAME,
+};
 use rand_core::{OsRng, RngCore};
 use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
@@ -17,14 +19,32 @@ const TABLE_SECONDS: i64 = 12 * 60 * 60;
 const MAX_AVATAR_BYTES: usize = 420_000;
 
 fn dynamic_handicap_value(evaluator_version: &str, profile: &Value) -> Option<Value> {
-    let cycles = profile["complete_cycles"].as_u64().unwrap_or_default();
-    let wp_per_decision = profile["ewma_handicap"].as_f64()?;
-    if cycles < u64::from(MIN_COMPLETE_CYCLES) || !wp_per_decision.is_finite() {
+    let mut cycles = profile["handicap_cycles"].as_u64().unwrap_or_default();
+    if cycles == 0 && profile["complete_games"].as_u64().unwrap_or_default() > 0 {
+        cycles = profile["complete_cycles"].as_u64().unwrap_or_default();
+    }
+    let legacy_wp_per_game = profile["ewma_game_handicap"].as_f64();
+    let wp_per_cycle = profile["ewma_cycle_handicap"]
+        .as_f64()
+        .or_else(|| legacy_wp_per_game.map(|value| value / UNIVERSAL_CYCLES_PER_GAME))?;
+    let length_games = profile["length_games"].as_u64().unwrap_or_default();
+    let personal_cycles_per_game = profile["ewma_cycles_per_game"].as_f64().unwrap_or_default();
+    if cycles < u64::from(MIN_COMPLETE_CYCLES) || !wp_per_cycle.is_finite() {
         return None;
     }
+    let cycles_per_game = if length_games >= u64::from(MIN_COMPLETE_GAMES_FOR_PERSONAL_LENGTH)
+        && personal_cycles_per_game.is_finite()
+        && personal_cycles_per_game > 0.0
+    {
+        personal_cycles_per_game
+    } else {
+        UNIVERSAL_CYCLES_PER_GAME
+    };
+    let wp_per_game = legacy_wp_per_game.unwrap_or(wp_per_cycle * cycles_per_game);
     Some(json!({
-        "wpPerDecision": wp_per_decision,
+        "wpPerGame": wp_per_game,
         "cycles": cycles,
+        "cyclesPerGame": cycles_per_game,
         "evaluatorVersion": evaluator_version,
     }))
 }
@@ -1244,7 +1264,7 @@ mod tests {
                  VALUES (?1, 'ace-13.0', ?2, '2026-09-02T00:00:00.000Z')",
                 params![
                     garrett.id,
-                    json!({"started_dynamic": true, "complete_cycles": 8, "ewma_handicap": -0.0125}).to_string(),
+                    json!({"started_dynamic": true, "complete_cycles": 8, "handicap_cycles": 8, "ewma_cycle_handicap": -0.025, "length_games": 6, "ewma_cycles_per_game": 5.0}).to_string(),
                 ],
             )
             .unwrap();
@@ -1258,10 +1278,7 @@ mod tests {
             MIN_COMPLETE_CYCLES
         );
         assert_eq!(value["profile"]["dynamicCalibration"]["complete"], true);
-        assert_eq!(
-            value["profile"]["dynamicHandicap"]["wpPerDecision"],
-            -0.0125
-        );
+        assert_eq!(value["profile"]["dynamicHandicap"]["wpPerGame"], -0.125);
         assert_eq!(
             value["profile"]["dynamicHandicap"]["evaluatorVersion"],
             "ace-13.0"
@@ -1281,7 +1298,7 @@ mod tests {
                  VALUES (?1, 'ace-13.0', ?2, '2026-09-02T00:00:00.000Z')",
                 params![
                     garrett.id,
-                    json!({"started_dynamic": true, "complete_cycles": 5, "ewma_handicap": -0.0125}).to_string(),
+                    json!({"started_dynamic": true, "complete_cycles": 5, "handicap_cycles": 5, "ewma_cycle_handicap": -0.025, "length_games": 6, "ewma_cycles_per_game": 5.0}).to_string(),
                 ],
             )
             .unwrap();
@@ -1307,7 +1324,7 @@ mod tests {
                  VALUES (?1, 'ace-13.0', ?2, '2026-09-02T00:00:00.000Z')",
                 params![
                     vince.id,
-                    json!({"started_dynamic": true, "complete_cycles": 8, "ewma_handicap": -0.0125}).to_string(),
+                    json!({"started_dynamic": true, "complete_cycles": 8, "handicap_cycles": 8, "ewma_cycle_handicap": -0.025, "length_games": 6, "ewma_cycles_per_game": 5.0}).to_string(),
                 ],
             )
             .unwrap();
@@ -1324,10 +1341,7 @@ mod tests {
         assert_eq!(value["onlineCount"], 3);
         assert_eq!(value["players"][0]["username"], "Vince");
         assert_eq!(value["players"][0]["lookingForGame"], true);
-        assert_eq!(
-            value["players"][0]["dynamicHandicap"]["wpPerDecision"],
-            -0.0125
-        );
+        assert_eq!(value["players"][0]["dynamicHandicap"]["wpPerGame"], -0.125);
         assert_eq!(value["players"][1]["username"], "Kurt");
         std::fs::remove_dir_all(server.data_dir).unwrap();
     }

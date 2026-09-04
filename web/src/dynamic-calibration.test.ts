@@ -42,21 +42,21 @@ describe("Dynamic calibration presentation", () => {
     expect(dynamicCardCopy(calibration, true)).toBe(DYNAMIC_CALIBRATED_COPY);
   });
 
-  it("formats the live provisional handicap in percentage points", () => {
+  it("formats the live provisional handicap as a per-game total", () => {
     expect(dynamicProvisionalHandicapCopy({
       started: true,
       completeCycles: 2,
       minimumCycles: 6,
       complete: false,
-      provisionalHandicap: -0.0125,
-    })).toBe("Provisional Handicap: 1.25");
+      provisionalHandicapPerGame: -0.125,
+    })).toBe("Provisional Handicap: 12.50 WP pts/game");
     expect(dynamicProvisionalHandicapCopy({
       started: true,
       completeCycles: 0,
       minimumCycles: 6,
       complete: false,
-      provisionalHandicap: 0,
-    })).toBe("Provisional Handicap: 0.00");
-    expect(playerHandicapCopy({ wpPerDecision: -0.0125 })).toBe("(1.25)");
+      provisionalHandicapPerGame: 0,
+    })).toBe("Provisional Handicap: 0.00 WP pts/game");
+    expect(playerHandicapCopy({ wpPerGame: -0.125 })).toBe("(12.50)");
   });
 });

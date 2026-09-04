@@ -128,7 +128,8 @@ pub enum Decision {
 }
 
 /// The selected action and the model's recommendation for the same decision
-/// point. This is used by post-game review rather than live play.
+/// point. Saved reviews are normally produced during play and may be
+/// backfilled after the game when a live review did not complete.
 #[derive(Clone, Debug)]
 pub struct DecisionReview {
     pub selected: Decision,
@@ -526,18 +527,27 @@ pub fn review_decision(
     selected_card_ids: &[u8],
     root: &str,
 ) -> Result<DecisionReview, String> {
-    if input.model != MODEL_13_0 {
-        return Err("post-game review currently supports model 13.0 only".to_string());
-    }
-    let selected = match input.kind {
-        DecisionKind::Discard => review_discard_model13(input, selected_card_ids, root)?,
-        DecisionKind::Peg => review_peg_model13(input, selected_card_ids, root)?,
-    };
+    let selected = evaluate_selected_decision(input, selected_card_ids, root)?;
     let recommended = evaluate_decision(input, root)?;
     Ok(DecisionReview {
         selected,
         recommended,
     })
+}
+
+pub fn evaluate_selected_decision(
+    input: &DecisionInput,
+    selected_card_ids: &[u8],
+    root: &str,
+) -> Result<Decision, String> {
+    if input.model != MODEL_13_0 {
+        return Err("saved decision review currently supports model 13.0 only".to_string());
+    }
+    let selected = match input.kind {
+        DecisionKind::Discard => review_discard_model13(input, selected_card_ids, root)?,
+        DecisionKind::Peg => review_peg_model13(input, selected_card_ids, root)?,
+    };
+    Ok(selected)
 }
 
 fn is_supported_rust_model(model: &str) -> bool {
@@ -1580,8 +1590,9 @@ fn recommend_peg_model911(
         last_player: input.last_player.map(relative_actor),
         public_history: input.public_history.clone(),
     };
-    let choice =
-        tables.with_policy911(hand_cache, |policy| policy.choose_action_with_net_ev(&observation))?;
+    let choice = tables.with_policy911(hand_cache, |policy| {
+        policy.choose_action_with_net_ev(&observation)
+    })?;
     let rank = match choice.action {
         RankPegAction::Play(rank) => rank,
         RankPegAction::Go => {
@@ -6338,20 +6349,13 @@ mod tests {
         let RankPegAction::Play(first_rank) = first_action else {
             panic!("Model 9.11 returned go with four legal cards");
         };
-        let before = cache
-            .policy
-            .lock()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .stats();
+        let before = cache.policy.lock().unwrap().as_ref().unwrap().stats();
 
         first.own_remaining[first_rank as usize] -= 1;
         first.own_played[first_rank as usize] += 1;
         first.opponent_played[1] += 1;
         first.current_series.extend([first_rank, 1]);
-        first.count +=
-            crate::cards::VALUES[first_rank as usize] + crate::cards::VALUES[1];
+        first.count += crate::cards::VALUES[first_rank as usize] + crate::cards::VALUES[1];
         first.last_player = Some(InfoActor::Opponent);
         first.public_history.extend([
             PublicPegEvent::SelfPlay(first_rank),
@@ -6365,13 +6369,7 @@ mod tests {
         .join()
         .unwrap()
         .unwrap();
-        let after = cache
-            .policy
-            .lock()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .stats();
+        let after = cache.policy.lock().unwrap().as_ref().unwrap().stats();
         assert!(before.future_cache_entries > 0);
         assert!(after.future_cache_hits > before.future_cache_hits);
         assert_eq!(after.decision_cache_peak_entries, 0);

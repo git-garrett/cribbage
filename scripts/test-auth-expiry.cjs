@@ -55,7 +55,7 @@ async function main() {
               isSelf: true,
               textSize: "normal",
               dynamicCalibration: { started: true, completeCycles: 8, minimumCycles: 6, complete: true },
-              dynamicHandicap: { wpPerDecision: -0.0125, cycles: 8, evaluatorVersion: "qa" },
+              dynamicHandicap: { wpPerGame: -0.125, cycles: 8, cyclesPerGame: 4.516, evaluatorVersion: "qa" },
             },
           },
         });

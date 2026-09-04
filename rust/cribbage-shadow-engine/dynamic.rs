@@ -8,16 +8,22 @@ use crate::game::Side;
 use crate::model_id::{ModelId, MODEL_13_0};
 use serde::{Deserialize, Serialize};
 
-pub const DYNAMIC_PROFILE_VERSION: u8 = 2;
+pub const DYNAMIC_PROFILE_VERSION: u8 = 4;
 pub const DYNAMIC_EVALUATOR_VERSION: &str = MODEL_13_0;
 pub const MIN_COMPLETE_CYCLES: u32 = 6;
+pub const MIN_COMPLETE_GAMES_FOR_PERSONAL_LENGTH: u32 = 6;
 pub const MOVING_AVERAGE_HALF_LIFE_CYCLES: f64 = 18.0;
+pub const GAME_LENGTH_HALF_LIFE_GAMES: f64 = 18.0;
+/// Mean hand count / 2 across 94 completed, non-forfeited production games.
+pub const UNIVERSAL_CYCLES_PER_GAME: f64 = 4.516;
+/// Preserve the former eighteen-game handicap half-life while observing cycles.
+pub const HANDICAP_HALF_LIFE_CYCLES: f64 = 18.0 * UNIVERSAL_CYCLES_PER_GAME;
 /// Half a tenth of a percentage point of win probability per decision.
-pub const HANDICAP_DEADBAND: f64 = 0.0005;
+pub const REGRET_DEADBAND: f64 = 0.0005;
 pub const STRENGTH_STEP: u16 = 5;
-pub const EASY_CALIBRATED_REGRET: f64 = 0.020;
-pub const TOUGH_CALIBRATED_REGRET: f64 = 0.006;
-pub const ACE_CALIBRATED_REGRET: f64 = 0.0;
+pub const EASY_CALIBRATED_REGRET_PER_DECISION: f64 = 0.020;
+pub const TOUGH_CALIBRATED_REGRET_PER_DECISION: f64 = 0.006;
+pub const ACE_CALIBRATED_REGRET_PER_DECISION: f64 = 0.0;
 const TOUGH_STRENGTH: u16 = 100;
 const ACE_STRENGTH: u16 = 200;
 
@@ -41,6 +47,9 @@ pub struct DynamicCycleSample {
     pub dealer_pegging_regret: f64,
     pub pone_discard_regret: f64,
     pub pone_pegging_regret: f64,
+    /// Sum of eligible Ace-reviewed WP regret across this two-hand cycle.
+    #[serde(default)]
+    pub total_regret: f64,
 }
 
 impl DynamicCycleSample {
@@ -53,8 +62,8 @@ impl DynamicCycleSample {
         }
     }
 
-    pub fn handicap(self) -> f64 {
-        -self.buckets().mean()
+    pub fn mean_regret(self) -> f64 {
+        self.buckets().mean()
     }
 }
 
@@ -68,13 +77,27 @@ pub struct DynamicProfile {
     /// Ace-reviewed games may calibrate this profile without setting it.
     #[serde(default)]
     pub started_dynamic: bool,
+    /// Complete role-balanced two-hand samples used to adapt Dynamic.
     pub complete_cycles: u32,
     #[serde(default)]
     pub regret: DynamicRegretBuckets,
-    /// Moving average of user WP minus Ace WP, balanced equally across roles
-    /// and decision types. Negative values are the user's WP handicap to Ace.
+    /// Complete cycles with usable total-regret and scoring evidence.
     #[serde(default)]
-    pub ewma_handicap: f64,
+    pub handicap_cycles: u32,
+    /// Moving average of the user's summed cycle WP minus Ace's summed cycle WP.
+    #[serde(default)]
+    pub ewma_cycle_handicap: f64,
+    /// Complete games used only to personalize the cycles-per-game multiplier.
+    #[serde(default)]
+    pub length_games: u32,
+    /// Moving average of observed two-hand cycle equivalents per game.
+    #[serde(default)]
+    pub ewma_cycles_per_game: f64,
+    /// Version 3 migration inputs. New profiles do not update these fields.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub complete_games: u32,
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub ewma_game_handicap: f64,
     /// 0 = Easy, 100 = Tough, 200 = Ace, with probabilistic blends between.
     pub strength: u16,
 }
@@ -87,7 +110,12 @@ impl Default for DynamicProfile {
             started_dynamic: false,
             complete_cycles: 0,
             regret: DynamicRegretBuckets::default(),
-            ewma_handicap: 0.0,
+            handicap_cycles: 0,
+            ewma_cycle_handicap: 0.0,
+            length_games: 0,
+            ewma_cycles_per_game: 0.0,
+            complete_games: 0,
+            ewma_game_handicap: 0.0,
             strength: 0,
         }
     }
@@ -99,49 +127,127 @@ impl DynamicProfile {
             && self.evaluator_version == DYNAMIC_EVALUATOR_VERSION
     }
 
+    pub fn into_current(mut self) -> Self {
+        if self.is_current() {
+            return self;
+        }
+        if self.profile_version == 3 && self.evaluator_version == DYNAMIC_EVALUATOR_VERSION {
+            self.profile_version = DYNAMIC_PROFILE_VERSION;
+            if self.complete_games > 0 && self.ewma_game_handicap.is_finite() {
+                self.handicap_cycles = self.complete_cycles;
+                self.ewma_cycle_handicap = self.ewma_game_handicap / UNIVERSAL_CYCLES_PER_GAME;
+            }
+            self.complete_games = 0;
+            self.ewma_game_handicap = 0.0;
+            self.length_games = 0;
+            self.ewma_cycles_per_game = 0.0;
+            return self;
+        }
+        if self.profile_version == 2 && self.evaluator_version == DYNAMIC_EVALUATOR_VERSION {
+            self.profile_version = DYNAMIC_PROFILE_VERSION;
+            self.handicap_cycles = 0;
+            self.ewma_cycle_handicap = 0.0;
+            self.length_games = 0;
+            self.ewma_cycles_per_game = 0.0;
+            return self;
+        }
+        Self::default()
+    }
+
     pub fn observe_cycle(&mut self, sample: DynamicCycleSample) {
         if !self.is_current() {
             *self = Self::default();
         }
-        let sample = sample.buckets();
-        let alpha = 1.0 - 0.5_f64.powf(1.0 / MOVING_AVERAGE_HALF_LIFE_CYCLES);
+        let buckets = sample.buckets();
+        let strength_alpha = 1.0 - 0.5_f64.powf(1.0 / MOVING_AVERAGE_HALF_LIFE_CYCLES);
         if self.complete_cycles == 0 {
-            self.regret = sample;
+            self.regret = buckets;
         } else {
             self.regret.dealer_discard +=
-                alpha * (sample.dealer_discard - self.regret.dealer_discard);
+                strength_alpha * (buckets.dealer_discard - self.regret.dealer_discard);
             self.regret.dealer_pegging +=
-                alpha * (sample.dealer_pegging - self.regret.dealer_pegging);
-            self.regret.pone_discard += alpha * (sample.pone_discard - self.regret.pone_discard);
-            self.regret.pone_pegging += alpha * (sample.pone_pegging - self.regret.pone_pegging);
+                strength_alpha * (buckets.dealer_pegging - self.regret.dealer_pegging);
+            self.regret.pone_discard +=
+                strength_alpha * (buckets.pone_discard - self.regret.pone_discard);
+            self.regret.pone_pegging +=
+                strength_alpha * (buckets.pone_pegging - self.regret.pone_pegging);
         }
         self.complete_cycles += 1;
-        self.ewma_handicap = -self.regret.mean();
+
+        if sample.total_regret.is_finite() && sample.total_regret >= 0.0 {
+            let cycle_handicap = -sample.total_regret;
+            if self.handicap_cycles == 0 {
+                self.ewma_cycle_handicap = cycle_handicap;
+            } else {
+                let handicap_alpha = 1.0 - 0.5_f64.powf(1.0 / HANDICAP_HALF_LIFE_CYCLES);
+                self.ewma_cycle_handicap +=
+                    handicap_alpha * (cycle_handicap - self.ewma_cycle_handicap);
+            }
+            self.handicap_cycles += 1;
+        }
 
         if self.complete_cycles < MIN_COMPLETE_CYCLES {
             return;
         }
         let expected_regret = calibrated_regret_for_strength(self.strength);
         let observed_regret = self.regret.mean();
-        if observed_regret + HANDICAP_DEADBAND < expected_regret {
+        if observed_regret + REGRET_DEADBAND < expected_regret {
             self.strength = self
                 .strength
                 .saturating_add(STRENGTH_STEP)
                 .min(ACE_STRENGTH);
-        } else if observed_regret > expected_regret + HANDICAP_DEADBAND {
+        } else if observed_regret > expected_regret + REGRET_DEADBAND {
             self.strength = self.strength.saturating_sub(STRENGTH_STEP);
         }
     }
+
+    pub fn cycles_per_game(&self) -> f64 {
+        if self.length_games >= MIN_COMPLETE_GAMES_FOR_PERSONAL_LENGTH
+            && self.ewma_cycles_per_game > 0.0
+        {
+            self.ewma_cycles_per_game
+        } else {
+            UNIVERSAL_CYCLES_PER_GAME
+        }
+    }
+
+    pub fn observe_game_length(&mut self, cycles: f64) {
+        if !cycles.is_finite() || cycles <= 0.0 {
+            return;
+        }
+        if self.length_games == 0 {
+            self.ewma_cycles_per_game = cycles;
+        } else {
+            let alpha = 1.0 - 0.5_f64.powf(1.0 / GAME_LENGTH_HALF_LIFE_GAMES);
+            self.ewma_cycles_per_game += alpha * (cycles - self.ewma_cycles_per_game);
+        }
+        self.length_games += 1;
+    }
+
+    pub fn handicap_per_game(&self) -> Option<f64> {
+        (self.handicap_cycles > 0).then(|| self.ewma_cycle_handicap * self.cycles_per_game())
+    }
+}
+
+fn is_zero_u32(value: &u32) -> bool {
+    *value == 0
+}
+
+fn is_zero_f64(value: &f64) -> bool {
+    *value == 0.0
 }
 
 fn calibrated_regret_for_strength(strength: u16) -> f64 {
     let strength = strength.min(ACE_STRENGTH);
     if strength <= TOUGH_STRENGTH {
         let fraction = f64::from(strength) / f64::from(TOUGH_STRENGTH);
-        EASY_CALIBRATED_REGRET + fraction * (TOUGH_CALIBRATED_REGRET - EASY_CALIBRATED_REGRET)
+        EASY_CALIBRATED_REGRET_PER_DECISION
+            + fraction
+                * (TOUGH_CALIBRATED_REGRET_PER_DECISION - EASY_CALIBRATED_REGRET_PER_DECISION)
     } else {
         let fraction = f64::from(strength - TOUGH_STRENGTH) / f64::from(TOUGH_STRENGTH);
-        TOUGH_CALIBRATED_REGRET + fraction * (ACE_CALIBRATED_REGRET - TOUGH_CALIBRATED_REGRET)
+        TOUGH_CALIBRATED_REGRET_PER_DECISION
+            + fraction * (ACE_CALIBRATED_REGRET_PER_DECISION - TOUGH_CALIBRATED_REGRET_PER_DECISION)
     }
 }
 
@@ -173,10 +279,8 @@ pub struct DynamicState {
 }
 
 impl DynamicState {
-    pub fn new(mut profile: DynamicProfile, selector_seed: u32, _scores: [i32; 2]) -> Self {
-        if !profile.is_current() {
-            profile = DynamicProfile::default();
-        }
+    pub fn new(profile: DynamicProfile, selector_seed: u32, _scores: [i32; 2]) -> Self {
+        let profile = profile.into_current();
         let delegate = select_delegate(profile.strength, selector_seed, 0);
         Self {
             profile,
@@ -192,15 +296,13 @@ impl DynamicState {
 
     pub fn normalize_profile_version(&mut self, selector_seed: u32) {
         if !self.profile.is_current() {
-            *self = Self::new(DynamicProfile::default(), selector_seed, [0, 0]);
+            let profile = std::mem::take(&mut self.profile).into_current();
+            *self = Self::new(profile, selector_seed, [0, 0]);
         }
     }
 
-    pub fn use_profile(&mut self, mut profile: DynamicProfile, _selector_seed: u32) {
-        if !profile.is_current() {
-            profile = DynamicProfile::default();
-        }
-        self.profile = profile;
+    pub fn use_profile(&mut self, profile: DynamicProfile, _selector_seed: u32) {
+        self.profile = profile.into_current();
     }
 
     pub fn decision_model(&self) -> ModelId {

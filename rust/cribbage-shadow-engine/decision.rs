@@ -6,16 +6,22 @@ use crate::model::{
 };
 use crate::model_id::ModelId;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DiscardDecision {
     pub card_ids: Vec<u8>,
     pub best_lead: Option<u8>,
+    pub ev: Option<f64>,
+    pub win_probability: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum PegDecision {
     Go,
-    Play { card_id: u8, ev: Option<f64> },
+    Play {
+        card_id: u8,
+        ev: Option<f64>,
+        win_probability: Option<f64>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -43,10 +49,13 @@ pub fn recommend_discard_for_side(
         Decision::Discard {
             card_ids,
             best_lead,
-            ..
+            ev,
+            win_probability,
         } => Ok(DiscardDecision {
             card_ids,
             best_lead,
+            ev,
+            win_probability,
         }),
         Decision::Peg { .. } => Err("discard decision returned pegging action".to_string()),
     }
@@ -83,8 +92,13 @@ pub fn recommend_peg_for_side_with_model911_cache(
             action,
             card_id: Some(card_id),
             ev,
+            win_probability,
             ..
-        } if action == "play" => Ok(PegDecision::Play { card_id, ev }),
+        } if action == "play" => Ok(PegDecision::Play {
+            card_id,
+            ev,
+            win_probability,
+        }),
         Decision::Peg { action, .. } => Err(format!("unsupported pegging action: {}", action)),
         Decision::Discard { .. } => Err("pegging decision returned discard action".to_string()),
     }
@@ -100,8 +114,25 @@ pub fn review_discard_for_side(
     selected_card_ids: [u8; 2],
     root: &str,
 ) -> Result<DecisionReview, String> {
+    review_discard_for_side_with_recommendation(game, side, model_id, selected_card_ids, None, root)
+}
+
+pub fn review_discard_for_side_with_recommendation(
+    game: &CribbageGame,
+    side: Side,
+    model_id: ModelId,
+    selected_card_ids: [u8; 2],
+    recommended: Option<ReviewedDecisionValue>,
+    root: &str,
+) -> Result<DecisionReview, String> {
     let input = decision_input(game, side, model_id, DecisionKind::Discard, None);
-    review_for_side(&input, &selected_card_ids, root, DecisionKind::Discard)
+    review_for_side(
+        &input,
+        &selected_card_ids,
+        recommended,
+        root,
+        DecisionKind::Discard,
+    )
 }
 
 /// Compare a saved peg play against the native 13.0 decision at that exact
@@ -113,16 +144,52 @@ pub fn review_peg_for_side(
     selected_card_id: u8,
     root: &str,
 ) -> Result<DecisionReview, String> {
+    review_peg_for_side_with_recommendation(game, side, model_id, selected_card_id, None, root)
+}
+
+pub fn review_peg_for_side_with_recommendation(
+    game: &CribbageGame,
+    side: Side,
+    model_id: ModelId,
+    selected_card_id: u8,
+    recommended: Option<ReviewedDecisionValue>,
+    root: &str,
+) -> Result<DecisionReview, String> {
     let input = decision_input(game, side, model_id, DecisionKind::Peg, None);
-    review_for_side(&input, &[selected_card_id], root, DecisionKind::Peg)
+    review_for_side(
+        &input,
+        &[selected_card_id],
+        recommended,
+        root,
+        DecisionKind::Peg,
+    )
 }
 
 fn review_for_side(
     input: &DecisionInput,
     selected_card_ids: &[u8],
+    recommended: Option<ReviewedDecisionValue>,
     root: &str,
     kind: DecisionKind,
 ) -> Result<DecisionReview, String> {
+    if let Some(recommended) = recommended {
+        let mut selected_ids = selected_card_ids.to_vec();
+        let mut recommended_ids = recommended.card_ids.clone();
+        selected_ids.sort_unstable();
+        recommended_ids.sort_unstable();
+        let selected = if selected_ids == recommended_ids {
+            recommended.clone()
+        } else {
+            review_value(
+                model::evaluate_selected_decision(input, selected_card_ids, root)?,
+                kind,
+            )?
+        };
+        return Ok(DecisionReview {
+            selected,
+            recommended,
+        });
+    }
     let review = model::review_decision(input, selected_card_ids, root)?;
     Ok(DecisionReview {
         selected: review_value(review.selected, kind)?,
@@ -269,6 +336,33 @@ mod tests {
             first,
             server_decision_seed(&first_game, Side::Right, DecisionKind::Peg)
         );
+    }
+
+    #[test]
+    fn saved_recommendation_is_reused_without_re_evaluating_it() {
+        let game = CribbageGame::new_with_seed(0x1234_5678, Side::Left);
+        let selected = [
+            game.player(Side::Left).hand[0].id,
+            game.player(Side::Left).hand[1].id,
+        ];
+        let recommended = ReviewedDecisionValue {
+            card_ids: selected.to_vec(),
+            ev: Some(1.25),
+            win_probability: Some(0.55),
+        };
+
+        let review = review_discard_for_side_with_recommendation(
+            &game,
+            Side::Left,
+            ModelId::Schell13,
+            selected,
+            Some(recommended.clone()),
+            "/missing-model-root",
+        )
+        .unwrap();
+
+        assert_eq!(review.selected, recommended);
+        assert_eq!(review.recommended, recommended);
     }
 
     #[test]

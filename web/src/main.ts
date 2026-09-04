@@ -152,8 +152,9 @@ interface LeaderboardPlayer {
 }
 
 interface DynamicHandicapSummary {
-  wpPerDecision: number;
+  wpPerGame: number;
   cycles: number;
+  cyclesPerGame: number;
   evaluatorVersion: string;
 }
 
@@ -1559,7 +1560,7 @@ function peopleInitials(player: Pick<PeoplePlayer, "displayName" | "username">):
   return `${words[0][0] || ""}${words.length > 1 ? words.at(-1)?.[0] || "" : words[0][1] || ""}`.toUpperCase();
 }
 
-const HANDICAP_EXPLANATION = "Estimated percentage points of win probability per decision this player would need to reach Ace-level play.";
+const HANDICAP_EXPLANATION = "Estimated total percentage points of game win probability this player loses per game relative to Ace-level choices.";
 const HANDICAP_TOOLTIP_ID = "player-handicap-tooltip";
 let handicapTooltipOwner: HTMLElement | null = null;
 
@@ -1571,7 +1572,7 @@ function handicapForPlayer(
   displayName: string,
   explicit?: DynamicHandicapSummary | null,
 ): DynamicHandicapSummary | null {
-  if (explicit && Number.isFinite(explicit.wpPerDecision)) return explicit;
+  if (explicit && Number.isFinite(explicit.wpPerGame)) return explicit;
   const normalized = normalizedPlayerDisplayName(displayName);
   const knownPlayers = [
     ownPeopleProfile,
@@ -1586,11 +1587,11 @@ function handicapForPlayer(
     normalizedPlayerDisplayName(player.displayName) === normalized
     || normalizedPlayerDisplayName(player.username) === normalized
   );
-  if (known?.dynamicHandicap && Number.isFinite(known.dynamicHandicap.wpPerDecision)) {
+  if (known?.dynamicHandicap && Number.isFinite(known.dynamicHandicap.wpPerGame)) {
     return known.dynamicHandicap;
   }
   for (const [player, handicap] of Object.entries(state.leaderboardSummary.playerHandicaps ?? {})) {
-    if (normalizedPlayerDisplayName(player) === normalized && Number.isFinite(handicap.wpPerDecision)) {
+    if (normalizedPlayerDisplayName(player) === normalized && Number.isFinite(handicap.wpPerGame)) {
       return handicap;
     }
   }
@@ -1899,7 +1900,7 @@ function renderPeopleProfile(profile: PeopleProfile): void {
   const handicap = profile.dynamicHandicap;
   els.peopleProfileHandicap.hidden = !handicap;
   els.peopleProfileHandicap.textContent = handicap
-    ? `Ace handicap: ${dynamicHandicapPointsCopy(handicap.wpPerDecision)} WP pts/decision · ${handicap.cycles} complete cycles`
+    ? `Ace handicap: ${dynamicHandicapPointsCopy(handicap.wpPerGame)} WP pts/game · ${handicap.cycles} calibrated cycle${handicap.cycles === 1 ? "" : "s"}`
     : "";
   els.peopleProfilePlay.hidden = profile.isSelf || !profile.online;
   els.peopleProfilePlay.textContent = authenticatedUser ? "Play now" : "Sign in to play";

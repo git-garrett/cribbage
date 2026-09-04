@@ -229,7 +229,7 @@ export interface GameState {
     completeCycles: number;
     minimumCycles: number;
     complete: boolean;
-    provisionalHandicap?: number | null;
+    provisionalHandicapPerGame?: number | null;
   } | null;
   analyticsEvents: AnalyticsEvent[];
 }
