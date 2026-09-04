@@ -350,7 +350,7 @@ const state: {
   aceAdvicePreparation: AceAdvicePreparation | null;
   aceMistake: AceMistake | null;
   masterHint: PresentedAceAdvice | null;
-  pendingPathwayOpponent: Opponent | null;
+  pendingPathwayRoute: PathwayRoute | null;
   pendingMasterGameId: string | null;
 } = {
   game: null,
@@ -415,7 +415,7 @@ const state: {
   aceAdvicePreparation: null,
   aceMistake: null,
   masterHint: null,
-  pendingPathwayOpponent: null,
+  pendingPathwayRoute: null,
   pendingMasterGameId: null,
 };
 
@@ -464,7 +464,7 @@ function resetTransientGameUi(): void {
   state.aceAdvicePreparation = null;
   state.aceMistake = null;
   state.masterHint = null;
-  state.pendingPathwayOpponent = null;
+  state.pendingPathwayRoute = null;
   state.pendingMasterGameId = null;
   els.masterSessionDialog.hidden = true;
   closeDecisionSnapshot();
@@ -2435,6 +2435,7 @@ function markAppReady(): void {
 
 function showPathwayView(view: PathwayView): void {
   if (!PATHWAY_NAV_ENABLED) return;
+  if (els.pathwayPage.hidden && isActiveGame(state.game)) suspendActiveGameForPathway();
   els.pathwayPage.hidden = false;
   els.pathwayPage.dataset.view = view;
   els.pathwayHeaderHome.hidden = view === "home";
@@ -2523,7 +2524,7 @@ function syncPathwayOpponentPresentation(opponent: Opponent): void {
 }
 
 function beginPathwayOpponent(opponent: Opponent): void {
-  state.pendingPathwayOpponent = null;
+  state.pendingPathwayRoute = null;
   state.pendingMasterGameId = null;
   els.masterSessionDialog.hidden = true;
   if (opponent === DEFAULT_OPPONENT && !authenticatedUser) {
@@ -2562,27 +2563,40 @@ async function launchPathwayOpponent(opponent: Opponent): Promise<void> {
     beginPathwayOpponent(opponent);
     return;
   }
-  if (opponent !== DEFAULT_OPPONENT) {
-    try {
-      const masterSession = await findRemoteActiveGameSession(DEFAULT_OPPONENT);
-      if (masterSession?.gameId) {
-        state.pendingPathwayOpponent = opponent;
-        state.pendingMasterGameId = masterSession.gameId;
-        els.masterSessionStatus.textContent = "";
-        els.masterSessionDialog.hidden = false;
-        window.setTimeout(() => els.masterSessionSave.focus(), 0);
-        return;
-      }
-    } catch (error) {
-      showServerBusy(error, () => void launchPathwayOpponent(opponent));
-      return;
-    }
-  }
   beginPathwayOpponent(opponent);
 }
 
+function suspendActiveGameForPathway(): void {
+  state.pending = false;
+  resetTransientGameUi();
+}
+
+function clearForfeitedLocalGame(gameId: string): void {
+  if (currentSnapshot?.gameId !== gameId) return;
+  currentSnapshot = null;
+  state.game = null;
+  state.hasResumableGame = false;
+  gameStateGeneration += 1;
+  safeLocalStorageRemove(SAVE_KEY);
+}
+
+function leaveActivePathwayGame(route: PathwayRoute): void {
+  const gameId = currentSnapshot?.opponent === DEFAULT_OPPONENT && isActiveGame(state.game)
+    ? currentSnapshot.gameId
+    : null;
+  if (!gameId) {
+    navigatePathway(route);
+    return;
+  }
+  state.pendingPathwayRoute = route;
+  state.pendingMasterGameId = gameId;
+  els.masterSessionStatus.textContent = "";
+  els.masterSessionDialog.hidden = false;
+  window.setTimeout(() => els.masterSessionSave.focus(), 0);
+}
+
 function dismissMasterSessionDialog(): void {
-  state.pendingPathwayOpponent = null;
+  state.pendingPathwayRoute = null;
   state.pendingMasterGameId = null;
   els.masterSessionDialog.hidden = true;
   els.masterSessionStatus.textContent = "";
@@ -2590,8 +2604,8 @@ function dismissMasterSessionDialog(): void {
 
 async function forfeitSavedMasterGame(): Promise<void> {
   const gameId = state.pendingMasterGameId;
-  const nextOpponent = state.pendingPathwayOpponent;
-  if (!gameId || !nextOpponent) return;
+  const nextRoute = state.pendingPathwayRoute;
+  if (!gameId || !nextRoute) return;
   els.masterSessionForfeit.disabled = true;
   els.masterSessionSave.disabled = true;
   els.masterSessionCancel.disabled = true;
@@ -2603,7 +2617,9 @@ async function forfeitSavedMasterGame(): Promise<void> {
       payload: {},
       tag: currentSessionTag() || null,
     });
-    beginPathwayOpponent(nextOpponent);
+    clearForfeitedLocalGame(gameId);
+    dismissMasterSessionDialog();
+    navigatePathway(nextRoute);
   } catch (error) {
     els.masterSessionStatus.textContent = error instanceof Error ? error.message : "The Ace game could not be forfeited.";
   } finally {
@@ -7795,7 +7811,7 @@ for (const button of els.pathwayBackButtons) {
 
 els.appBack.addEventListener("click", () => {
   if (PATHWAY_NAV_ENABLED) {
-    navigatePathway("home");
+    leaveActivePathwayGame("home");
     return;
   }
   state.splashOpen = true;
@@ -8342,9 +8358,10 @@ els.masterSessionCancel.addEventListener("click", () => {
 });
 
 els.masterSessionSave.addEventListener("click", () => {
-  const opponent = state.pendingPathwayOpponent;
-  if (!opponent) return;
-  beginPathwayOpponent(opponent);
+  const route = state.pendingPathwayRoute;
+  if (!route) return;
+  dismissMasterSessionDialog();
+  navigatePathway(route);
 });
 
 els.masterSessionForfeit.addEventListener("click", () => {

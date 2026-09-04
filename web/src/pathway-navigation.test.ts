@@ -167,14 +167,16 @@ describe("local pathway navigation", () => {
     expect(source).toMatch(/pathwayStatistics\.addEventListener\("click"[\s\S]*kind: "statistics"/);
   });
 
-  it("protects a saved Ace game before switching to a lower opponent", () => {
+  it("protects an active Ace game when leaving its table, not when choosing the next opponent", () => {
     expect(html).toContain('id="master-session-dialog"');
     expect(html).toContain('id="master-session-save"');
     expect(html).toContain('id="master-session-forfeit"');
-    expect(source).toContain("function findRemoteActiveGameSession");
-    expect(source).toMatch(/opponent !== DEFAULT_OPPONENT[\s\S]*findRemoteActiveGameSession\(DEFAULT_OPPONENT\)/);
+    expect(source).toMatch(/appBack\.addEventListener\("click"[\s\S]*leaveActivePathwayGame\("home"\)/);
+    expect(source).toMatch(/function leaveActivePathwayGame[\s\S]*currentSnapshot\?\.opponent === DEFAULT_OPPONENT[\s\S]*masterSessionDialog\.hidden = false/);
+    expect(source).not.toMatch(/function launchPathwayOpponent[\s\S]*findRemoteActiveGameSession\(DEFAULT_OPPONENT\)[\s\S]*function dismissMasterSessionDialog/);
+    expect(source).toMatch(/function suspendActiveGameForPathway[\s\S]*state\.pending = false[\s\S]*resetTransientGameUi\(\)/);
     expect(source).toContain('action: "forfeit"');
-    expect(source).toContain("allowActiveReplacement: true");
+    expect(source).toMatch(/function clearForfeitedLocalGame[\s\S]*safeLocalStorageRemove\(SAVE_KEY\)/);
     expect(css).toContain(".master-session-dialog");
   });
 
