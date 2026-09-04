@@ -54,9 +54,13 @@ describe("Concept B mobile playing UI", () => {
   });
 
   it("anchors a miniature, captioned crib below its dealer marker on mobile", () => {
+    expect(html).toMatch(/id="human-score-panel" class="score"/);
+    expect(html).toMatch(/id="ai-score-panel" class="score ai"/);
+    expect(mainSource).toContain('humanScorePanel: document.querySelector("#human-score-panel")');
+    expect(mainSource).toContain('aiScorePanel: document.querySelector("#ai-score-panel")');
     expect(mainSource).toMatch(/const cribParent = usesMobileGameplayLayout\(\)[\s\S]*game\.cribOwner === "User" \? els\.humanScorePanel : els\.aiScorePanel/s);
     expect(css).toMatch(/\.score > \.crib-tray\s*\{[^}]*top:\s*calc\(100% \+ var\(--score-meta-small-font\) \+ 20px\)[^}]*z-index:\s*4/s);
-    expect(css).toMatch(/\.score:first-child > \.crib-tray\s*\{[^}]*left:\s*0/s);
+    expect(css).toMatch(/#human-score-panel > \.crib-tray\s*\{[^}]*left:\s*0/s);
     expect(css).toMatch(/\.score\.ai > \.crib-tray\s*\{[^}]*right:\s*0/s);
     expect(css).toMatch(/\.score > \.crib-tray \.crib-tray-stack\s*\{[^}]*width:\s*22px[^}]*height:\s*32px/s);
     expect(css).toMatch(/\.score > \.crib-tray,[\s\S]*flex-direction:\s*column-reverse/s);
@@ -84,7 +88,7 @@ describe("Concept B mobile playing UI", () => {
   });
 
   it("mirrors the mobile score alignment at the outside edges", () => {
-    expect(css).toMatch(/\.score:first-child\s*\{[^}]*justify-self:\s*stretch[^}]*justify-items:\s*start[^}]*text-align:\s*left/s);
+    expect(css).toMatch(/#human-score-panel\s*\{[^}]*justify-self:\s*stretch[^}]*justify-items:\s*start[^}]*text-align:\s*left/s);
     expect(css).toMatch(/\.score\.ai\s*\{[^}]*justify-self:\s*stretch[^}]*justify-items:\s*end[^}]*text-align:\s*right/s);
   });
 
@@ -94,8 +98,13 @@ describe("Concept B mobile playing UI", () => {
     expect(mainSource).toContain("setPlayerIdentity(els.humanName, playerDisplayName());");
     expect(mainSource).toContain('els.aiName.textContent = playerName("ai");');
     expect(css).toMatch(/\.app\[data-view="game"\] \.score-crib-marker\s*\{[^}]*position:\s*absolute[^}]*top:\s*calc\(100% \+ 9px\)/s);
-    expect(css).toMatch(/\.score:first-child > \.score-crib-marker\s*\{[^}]*left:\s*0/s);
+    expect(css).toMatch(/#human-score-panel > \.score-crib-marker\s*\{[^}]*left:\s*0/s);
     expect(css).toMatch(/\.score\.ai > \.score-crib-marker\s*\{[^}]*right:\s*0/s);
+  });
+
+  it("never exposes an uninitialized gameplay shell behind navigation", () => {
+    expect(css).toMatch(/\.app:not\(\[data-phase\]\) > \.scoreboard,[\s\S]*\.app:not\(\[data-phase\]\) > \.table\s*\{[^}]*display:\s*none/s);
+    expect(css).toMatch(/\.pathway-page:not\(\[hidden\]\) ~ \.app,[\s\S]*\.human-table-page:not\(\[hidden\]\) ~ \.app\s*\{[^}]*display:\s*none/s);
   });
 
   it("uses one centered header system for pathway and gameplay views", () => {

@@ -444,6 +444,17 @@ body[data-auth="checking"] .people-presence {
   display: none !important;
 }
 
+.pathway-page:not([hidden]) ~ .app,
+.people-page:not([hidden]) ~ .app,
+.human-table-page:not([hidden]) ~ .app {
+  display: none;
+}
+
+.app:not([data-phase]) > .scoreboard,
+.app:not([data-phase]) > .table {
+  display: none;
+}
+
 .account-menu-row {
   display: flex;
   align-items: center;
@@ -938,7 +949,7 @@ button:disabled {
   min-width: 64px;
 }
 
-.score:first-child {
+#human-score-panel {
   justify-self: start;
 }
 
@@ -4602,7 +4613,7 @@ body[data-font-size="x-large"] .turn-card-reveal-animated .card {
     gap: 1px;
   }
 
-  body[data-font-size="normal"] .score:first-child {
+  body[data-font-size="normal"] #human-score-panel {
     justify-self: start;
     justify-items: start;
   }
@@ -4627,7 +4638,7 @@ body[data-font-size="x-large"] .turn-card-reveal-animated .card {
     line-height: 0.92;
   }
 
-  body[data-font-size="normal"] .score:first-child strong {
+  body[data-font-size="normal"] #human-score-panel strong {
     color: #70bdff;
   }
 
@@ -5072,7 +5083,7 @@ body[data-font-size="x-large"] .app[data-view="game"] {
   gap: 1px;
 }
 
-.app[data-view="game"] .score:first-child {
+.app[data-view="game"] #human-score-panel {
   justify-items: start;
 }
 
@@ -9804,7 +9815,7 @@ body[data-font-size="x-large"] .pathway-choice {
     color: var(--game-cream);
   }
 
-  .app[data-view="game"] > .scoreboard > .score:first-child > .crib-tray {
+  .app[data-view="game"] > .scoreboard > #human-score-panel > .crib-tray {
     right: auto;
     left: 0;
     flex-direction: row;
@@ -10119,7 +10130,7 @@ body[data-font-size="x-large"] .pathway-choice {
   letter-spacing: 0.08em;
 }
 
-.app[data-view="game"] .score:first-child > .score-crib-marker {
+.app[data-view="game"] #human-score-panel > .score-crib-marker {
   left: 0;
 }
 
@@ -10145,7 +10156,7 @@ body[data-font-size="x-large"] .pathway-choice {
    and Ace help to the right. Their captions share one visual vocabulary. */
 @media (max-width: 640px) {
   .app[data-view="game"] > .scoreboard > .score > .crib-tray,
-  .app[data-view="game"] > .scoreboard > .score:first-child > .crib-tray,
+  .app[data-view="game"] > .scoreboard > #human-score-panel > .crib-tray,
   .app[data-view="game"] > .scoreboard > .score.ai > .crib-tray {
     flex-direction: column-reverse;
     gap: 3px;
@@ -10384,7 +10395,7 @@ body[data-font-size="x-large"] .pathway-choice {
     max-height: calc(100svh - env(safe-area-inset-top) - 70px);
   }
 
-  .app[data-view="game"] > .scoreboard > .score:first-child {
+  .app[data-view="game"] > .scoreboard > #human-score-panel {
     justify-self: stretch;
     justify-items: start;
     width: 100%;
