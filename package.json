@@ -17,7 +17,7 @@
     "promote:artifact": "node scripts/promote-artifact.cjs",
     "prepare": "git config core.hooksPath .githooks || true",
     "test": "scripts/test-rust.sh",
-    "test:quiet-wrapper": "scripts/test-run-quiet.sh",
+    "test:quiet-wrapper": "scripts/run-quiet.sh \"Quiet wrapper tests\" scripts/test-run-quiet.sh",
     "test:web": "scripts/run-quiet.sh \"Web tests\" node_modules/.bin/vitest run",
     "typecheck": "scripts/run-quiet.sh \"TypeScript typecheck\" node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit"
   },

@@ -6,7 +6,7 @@ RUN_QUIET="$ROOT_DIR/scripts/run-quiet.sh"
 TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cribbage-quiet-test.XXXXXX")"
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
-SUCCESS_OUTPUT="$($RUN_QUIET "Example check" /usr/bin/true)"
+SUCCESS_OUTPUT="$("$RUN_QUIET" "Example check" /usr/bin/true)"
 [[ "$SUCCESS_OUTPUT" == "Example check passed." ]]
 
 set +e

@@ -158,7 +158,15 @@ class CribbageJobQueueTests(unittest.TestCase):
                                 "path": str(database_path),
                                 "table": "compact_games",
                                 "equals": 10,
-                            }
+                            },
+                            {
+                                "type": "sqlite_contiguous_indices",
+                                "path": str(database_path),
+                                "table": "compact_games",
+                                "column": "id",
+                                "start": 1,
+                                "count": 10,
+                            },
                         ],
                     }
                 ],
@@ -209,6 +217,34 @@ class CribbageJobQueueTests(unittest.TestCase):
                 f"test-job failed stage=benchmark stages=0/1 "
                 f"log={root / 'benchmark.log'}",
             )
+
+    def test_completed_summary_reports_stages_instead_of_rows(self):
+        spec = self.spec(
+            Path("/private/tmp/test-job"),
+            [
+                {
+                    "name": "benchmark",
+                    "command": ["/usr/bin/true"],
+                    "completionChecks": [
+                        {
+                            "type": "sqlite_count",
+                            "path": "/private/tmp/test-job/games.db",
+                            "table": "compact_games",
+                            "equals": 10,
+                        }
+                    ],
+                }
+            ],
+        )
+        status = {
+            "state": "complete",
+            "stages": [{"name": "benchmark", "state": "complete"}],
+        }
+
+        self.assertEqual(
+            queue.summary_text(spec, status),
+            "test-job complete stages=1/1",
+        )
 
     def test_changed_spec_cannot_reuse_status(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -386,26 +386,22 @@ def print_status(spec_path: Path) -> int:
     return 0
 
 
-def database_progress(spec: dict) -> tuple[int, int] | None:
+def database_progress(stage: dict) -> tuple[int, int] | None:
     checks: dict[tuple[object, ...], dict] = {}
-    for stage in spec["stages"]:
-        for check in stage.get("completionChecks", []):
-            if check["type"] == "sqlite_count":
-                key = (check["type"], check["path"], check["table"])
-            elif check["type"] == "sqlite_contiguous_indices":
-                key = (
-                    check["type"],
-                    check["path"],
-                    check["table"],
-                    check["column"],
-                    check["start"],
-                )
-            else:
-                continue
-            prior = checks.get(key)
-            expected_field = "equals" if check["type"] == "sqlite_count" else "count"
-            if prior is None or check[expected_field] > prior[expected_field]:
-                checks[key] = check
+    for check in stage.get("completionChecks", []):
+        if check["type"] not in ("sqlite_count", "sqlite_contiguous_indices"):
+            continue
+        key = (check["path"], check["table"])
+        prior = checks.get(key)
+        expected_field = "equals" if check["type"] == "sqlite_count" else "count"
+        prior_expected = None
+        if prior is not None:
+            prior_expected_field = (
+                "equals" if prior["type"] == "sqlite_count" else "count"
+            )
+            prior_expected = prior[prior_expected_field]
+        if prior_expected is None or check[expected_field] > prior_expected:
+            checks[key] = check
 
     if not checks:
         return None
@@ -454,7 +450,19 @@ def summary_text(spec: dict, status: dict) -> str:
     if current:
         fields.append(f"stage={current['name']}")
 
-    progress = database_progress(spec)
+    configured_stage = next(
+        (
+            stage
+            for stage in spec["stages"]
+            if current and stage["name"] == current["name"]
+        ),
+        None,
+    )
+    progress = (
+        database_progress(configured_stage)
+        if configured_stage is not None and state != "complete"
+        else None
+    )
     if progress:
         actual, expected = progress
         percentage = 100 * actual / expected if expected else 100.0
