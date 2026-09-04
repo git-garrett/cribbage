@@ -39,6 +39,10 @@ mod people;
 const HUMAN: Side = Side::Left;
 const AI: Side = Side::Right;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const GIT_COMMIT: &str = match option_env!("CRIBBAGE_BUILD_GIT_COMMIT") {
+    Some(value) => value,
+    None => "unknown",
+};
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
@@ -553,15 +557,9 @@ fn write_response(stream: &mut TcpStream, response: Response) -> Result<(), Stri
 }
 
 fn health_json() -> String {
-    let git_commit = env::var("CRIBBAGE_GIT_COMMIT")
-        .ok()
-        .filter(|value| {
-            (7..=64).contains(&value.len()) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-        })
-        .unwrap_or_else(|| "unknown".to_string());
     format!(
         "{{\"ok\":true,\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"gitCommit\":\"{}\"}}",
-        APP_VERSION, MODEL_13_0, git_commit
+        APP_VERSION, MODEL_13_0, GIT_COMMIT
     )
 }
 
@@ -4166,6 +4164,11 @@ fn civil_date_from_days(days_since_epoch: i64) -> (i64, u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn health_reports_the_commit_compiled_into_the_binary() {
+        assert!(health_json().contains(&format!("\"gitCommit\":\"{}\"", GIT_COMMIT)));
+    }
 
     #[test]
     fn model_metadata_includes_pathway_and_experimental_models() {

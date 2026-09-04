@@ -12,9 +12,4 @@ while read -r _local_ref _local_sha remote_ref _remote_sha; do
   fi
 done < "$input"
 
-if command -v git-lfs >/dev/null 2>&1; then
-  git lfs pre-push "$@" < "$input"
-elif git grep -q 'filter=lfs' -- .gitattributes ':(glob)**/.gitattributes' 2>/dev/null; then
-  echo "Git LFS attributes are present but git-lfs is not installed." >&2
-  exit 2
-fi
+"$(dirname "$0")/lfs-hook" pre-push "$@" < "$input"

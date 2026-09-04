@@ -50,8 +50,9 @@ scripts/deploy-nanode.sh deploy
 By default it targets `root@172.239.170.10` using `../../keys/strongcribbage_admin_ed25519`, builds locally, uploads the artifact, installs the systemd unit, writes the Caddy routes for the game at `cribbage.strongcribbage.com` and the public landing page at `strongcribbage.com`, restarts services, and checks health.
 
 The helper accepts deployments only from a clean local `master` that exactly
-matches `origin/master`. It runs the predeployment tests and build, embeds the
-Git commit in the package, and verifies that production reports the same commit.
+matches `origin/master`. It runs the Python, TypeScript, and Rust checks and
+build, compiles the Git commit into the server binary, and verifies that both
+the host-local and public health endpoints report the same commit.
 
 On the build machine:
 
@@ -60,6 +61,8 @@ cd /path/to/cribbage
 git switch master
 git pull --ff-only origin master
 npm ci
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev]'
 npm run qa:predeploy
 ```
 

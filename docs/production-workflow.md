@@ -27,7 +27,8 @@ git worktree add -b work/SHORT-DESCRIPTION /private/tmp/cribbage-SHORT-DESCRIPTI
 2. Push the branch and open a pull request targeting `master`.
 3. Run the repository code-review workflow against `master`, resolve every
    blocking finding, and wait for required GitHub checks.
-4. Merge the reviewed pull request. Direct pushes to `master` are reserved for
+4. Merge the reviewed pull request. The GitHub `master` ruleset requires this
+   PR path and a passing Quality check; direct pushes are reserved for
    repository recovery.
 5. Synchronize a clean local `master` with `origin/master`.
 
@@ -41,6 +42,6 @@ scripts/deploy-nanode.sh deploy
 ```
 
 The deploy command enforces the branch, clean-tree, and remote-synchronization
-checks, runs the predeployment test/build/package suite, embeds the exact Git
-commit in the package, and accepts production health only when the running API
-reports that commit.
+checks, runs the Python/TypeScript/Rust test and build suite, compiles the exact
+Git commit into the server binary, and accepts production health only when both
+the host-local and public APIs report that commit.

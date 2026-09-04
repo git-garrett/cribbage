@@ -1,9 +1,4 @@
 #!/bin/sh
 set -eu
 
-if command -v git-lfs >/dev/null 2>&1; then
-  git lfs post-merge "$@"
-elif git grep -q 'filter=lfs' -- .gitattributes ':(glob)**/.gitattributes' 2>/dev/null; then
-  echo "Git LFS attributes are present but git-lfs is not installed." >&2
-  exit 2
-fi
+exec "$(dirname "$0")/lfs-hook" post-merge "$@"

@@ -14,8 +14,8 @@ REMOTE_BIND_HOST="${REMOTE_BIND_HOST:-127.0.0.1}"
 GAME_DOMAIN="${GAME_DOMAIN:-cribbage.strongcribbage.com}"
 MARKETING_DOMAIN="${MARKETING_DOMAIN:-strongcribbage.com}"
 ARCHIVE="${ROOT_DIR}/cribbage-server-${VERSION}.tgz"
-PRODUCTION_BRANCH="${PRODUCTION_BRANCH:-master}"
-PRODUCTION_REMOTE="${PRODUCTION_REMOTE:-origin}"
+PRODUCTION_BRANCH="master"
+PRODUCTION_REMOTE="origin"
 GIT_COMMIT=""
 
 SSH_BASE=(ssh -p "$REMOTE_PORT" -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
@@ -78,10 +78,10 @@ check_production_checkout() {
 
 check_archive_identity() {
   local archive_commit archive_version
-  archive_commit="$(tar -xOzf "$ARCHIVE" deployment.json | node -e \
-    'let input=""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => process.stdout.write(JSON.parse(input).gitCommit || ""));')"
-  archive_version="$(tar -xOzf "$ARCHIVE" deployment.json | node -e \
-    'let input=""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => process.stdout.write(JSON.parse(input).version || ""));')"
+  read -r archive_version archive_commit < <(
+    tar -xOzf "$ARCHIVE" deployment.json | node -e \
+      'let input=""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => { const value = JSON.parse(input); process.stdout.write(`${value.version || ""} ${value.gitCommit || ""}\n`); });'
+  )
   [[ "$archive_commit" == "$GIT_COMMIT" ]] \
     || fail_checkout "archive commit ${archive_commit:-unknown} does not match ${GIT_COMMIT}."
   [[ "$archive_version" == "$VERSION" ]] \
@@ -105,7 +105,7 @@ deploy() {
     chmod 700 /etc/cribbage && \
     rm -rf '$REMOTE_APP_DIR/server-dist' '$REMOTE_APP_DIR/package.json' '$REMOTE_APP_DIR/docs' '$REMOTE_APP_DIR/rust' && \
     tar -xzf '/tmp/$(basename "$ARCHIVE")' -C '$REMOTE_APP_DIR' && \
-    cd '$REMOTE_APP_DIR/rust' && cargo build --locked --release --manifest-path cribbage-api/Cargo.toml && \
+    cd '$REMOTE_APP_DIR/rust' && CRIBBAGE_BUILD_GIT_COMMIT='$GIT_COMMIT' cargo build --locked --release --manifest-path cribbage-api/Cargo.toml && \
     chown -R root:root '$REMOTE_APP_DIR' && \
     chown -R cribbage:cribbage '$REMOTE_DATA_DIR' && \
     chmod 755 '$REMOTE_APP_DIR' && \
@@ -126,7 +126,6 @@ Environment=CRIBBAGE_MODEL_ROOT=${REMOTE_APP_DIR}
 Environment=CRIBBAGE_DATA_DIR=${REMOTE_DATA_DIR}
 Environment=CRIBBAGE_REQUIRE_AUTH=true
 Environment=CRIBBAGE_PUBLIC_ORIGIN=https://${GAME_DOMAIN}
-Environment=CRIBBAGE_GIT_COMMIT=${GIT_COMMIT}
 Environment=CRIBBAGE_MAIL_FROM=hello@strongcribbage.com
 Environment="CRIBBAGE_MAIL_FROM_NAME=Strong Cribbage"
 Environment=CRIBBAGE_MAIL_REPLY_TO=founder@evenvision.com
@@ -224,20 +223,39 @@ pull() {
 
 health() {
   echo "Checking remote health..."
-  local expected_commit="${1:-}" attempt response
+  local expected_commit="${1:-}" attempt response="" response_commit=""
   for attempt in {1..20}; do
     if response="$(remote_exec "curl -fsS http://${REMOTE_BIND_HOST}:${REMOTE_PORT_APP}/health")"; then
-      if [[ -n "$expected_commit" && "$response" != *"\"gitCommit\":\"${expected_commit}\""* ]]; then
+      response_commit="$(printf '%s' "$response" | node -e \
+        'let input=""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => { try { process.stdout.write(JSON.parse(input).gitCommit || ""); } catch {} });')"
+      if [[ -n "$expected_commit" && "$response_commit" != "$expected_commit" ]]; then
         sleep 1
         continue
       fi
       echo "$response"
-      echo "Public URL: http://${REMOTE_HOST}/"
-      return 0
+      break
     fi
     sleep 1
   done
-  echo "Remote health check failed after waiting for the app to start." >&2
+  [[ -n "${response:-}" && ( -z "$expected_commit" || "$response_commit" == "$expected_commit" ) ]] || {
+    echo "Remote health check failed after waiting for the app to start." >&2
+    return 1
+  }
+
+  echo "Checking public health..."
+  for attempt in {1..20}; do
+    if response="$(curl -fsS "https://${GAME_DOMAIN}/health")"; then
+      response_commit="$(printf '%s' "$response" | node -e \
+        'let input=""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => { try { process.stdout.write(JSON.parse(input).gitCommit || ""); } catch {} });')"
+      if [[ -z "$expected_commit" || "$response_commit" == "$expected_commit" ]]; then
+        echo "$response"
+        echo "Public URL: https://${GAME_DOMAIN}/"
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+  echo "Public health check failed after waiting for the deployed commit." >&2
   return 1
 }
 
