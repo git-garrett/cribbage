@@ -31,6 +31,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+mod activity;
 mod auth;
 mod email;
 mod people;
@@ -283,6 +284,8 @@ fn main() {
     });
     auth::initialize(&data_dir)
         .unwrap_or_else(|error| panic!("could not initialize authentication storage: {}", error));
+    activity::initialize(&data_dir)
+        .unwrap_or_else(|error| panic!("could not initialize activity storage: {}", error));
     people::initialize(&data_dir)
         .unwrap_or_else(|error| panic!("could not initialize people storage: {}", error));
     auth::validate_configuration()
@@ -328,6 +331,7 @@ fn handle_connection(mut stream: TcpStream, server: &Server) -> Result<(), Strin
     let authenticated_user = auth::authenticated_user(server, &request)
         .map_err(|error| format!("authenticate request: {}", error))?;
     let requires_user = request.method != "OPTIONS"
+        && request.path != "/api/activity"
         && ((auth::auth_required() && auth::protects(&request.path))
             || (request.path == "/api/game/action"
                 && game_action_requires_auth(server, &request.body)));
@@ -336,6 +340,9 @@ fn handle_connection(mut stream: TcpStream, server: &Server) -> Result<(), Strin
             &mut stream,
             Response::json(401, "{\"error\":\"Sign in to continue.\"}".to_string()),
         );
+    }
+    if let Some(response) = activity::handle(server, &request, authenticated_user.as_ref()) {
+        return write_response(&mut stream, response);
     }
     if let Some(response) = people::handle(server, &request, authenticated_user.as_ref()) {
         return write_response(&mut stream, response);
