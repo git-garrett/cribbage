@@ -16,7 +16,7 @@
     "install:git-hooks": "git config core.hooksPath .githooks",
     "promote:artifact": "node scripts/promote-artifact.cjs",
     "prepare": "git config core.hooksPath .githooks || true",
-    "test": "cargo test --manifest-path rust/Cargo.toml",
+    "test": "scripts/test-rust.sh",
     "test:web": "vitest run",
     "typecheck": "node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit"
   },
