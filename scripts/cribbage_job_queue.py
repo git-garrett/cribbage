@@ -45,6 +45,13 @@ def validate_spec(spec: dict) -> None:
         not isinstance(root, str) or not root or not Path(root).is_absolute()
     ):
         raise ValueError("jobRoot must be an absolute path")
+    if root is not None:
+        root_path = Path(root)
+        if root_path == Path("/Volumes") or Path("/Volumes") in root_path.parents:
+            raise ValueError(
+                "jobRoot must be on the internal disk; external volumes may not be "
+                "mounted or accessible when launchd starts"
+            )
     for field in ("launchdPlistPath", "supervisorLogPath"):
         value = spec.get(field)
         if value is not None and (

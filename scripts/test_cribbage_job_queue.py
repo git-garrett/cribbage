@@ -196,6 +196,16 @@ class CribbageJobQueueTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "jobRoot must be an absolute path"):
             queue.validate_spec(spec)
 
+    def test_external_volume_job_root_is_rejected(self):
+        spec = {
+            "schemaVersion": 1,
+            "jobId": "test-job",
+            "jobRoot": "/Volumes/RemoteWorkspace/jobs/test-job",
+            "stages": [{"name": "one", "command": ["/usr/bin/true"]}],
+        }
+        with self.assertRaisesRegex(ValueError, "jobRoot must be on the internal disk"):
+            queue.validate_spec(spec)
+
     def test_stop_falls_back_to_the_supervisor_process_group(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
