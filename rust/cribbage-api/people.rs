@@ -1,5 +1,9 @@
+use std::collections::HashMap;
+use std::path::Path;
+
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine as _;
+use cribbage_shadow_engine::dynamic::MIN_COMPLETE_CYCLES;
 use rand_core::{OsRng, RngCore};
 use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
@@ -7,10 +11,80 @@ use serde_json::{json, Value};
 
 use super::{auth::AuthUser, open_game_database, Request, Response, Server};
 
-const ONLINE_SECONDS: i64 = 90;
+const ONLINE_SECONDS: i64 = 15 * 60;
 const CHALLENGE_SECONDS: i64 = 10 * 60;
 const TABLE_SECONDS: i64 = 12 * 60 * 60;
 const MAX_AVATAR_BYTES: usize = 420_000;
+
+fn dynamic_handicap_value(evaluator_version: &str, profile: &Value) -> Option<Value> {
+    let cycles = profile["complete_cycles"].as_u64().unwrap_or_default();
+    let wp_per_decision = profile["ewma_handicap"].as_f64()?;
+    if cycles == 0 || !wp_per_decision.is_finite() {
+        return None;
+    }
+    Some(json!({
+        "wpPerDecision": wp_per_decision,
+        "cycles": cycles,
+        "evaluatorVersion": evaluator_version,
+    }))
+}
+
+fn dynamic_handicap_for_user(
+    connection: &rusqlite::Connection,
+    user_id: i64,
+) -> Result<Option<Value>, PeopleError> {
+    let saved = connection
+        .query_row(
+            "SELECT evaluator_version, profile_json
+             FROM dynamic_player_profiles
+             WHERE user_id = ?1 ORDER BY updated_at DESC LIMIT 1",
+            [user_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| PeopleError::internal("read Dynamic handicap", error))?;
+    let Some((evaluator_version, profile_json)) = saved else {
+        return Ok(None);
+    };
+    let profile = serde_json::from_str::<Value>(&profile_json)
+        .map_err(|error| PeopleError::internal("parse Dynamic handicap", error))?;
+    Ok(dynamic_handicap_value(&evaluator_version, &profile))
+}
+
+pub fn handicap_summaries(data_dir: &Path) -> Result<HashMap<String, Value>, String> {
+    let connection = open_game_database(data_dir)?;
+    let mut statement = connection
+        .prepare(
+            "SELECT u.display_name, dp.evaluator_version, dp.profile_json
+             FROM dynamic_player_profiles dp
+             JOIN auth_users u ON u.id = dp.user_id
+             ORDER BY u.id, dp.updated_at DESC",
+        )
+        .map_err(|error| format!("prepare player handicaps: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|error| format!("read player handicaps: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("collect player handicaps: {error}"))?;
+    let mut handicaps = HashMap::new();
+    for (display_name, evaluator_version, profile_json) in rows {
+        if handicaps.contains_key(&display_name) {
+            continue;
+        }
+        let profile = serde_json::from_str::<Value>(&profile_json)
+            .map_err(|error| format!("parse Dynamic handicap for {display_name}: {error}"))?;
+        if let Some(handicap) = dynamic_handicap_value(&evaluator_version, &profile) {
+            handicaps.insert(display_name, handicap);
+        }
+    }
+    Ok(handicaps)
+}
 
 #[derive(Debug)]
 struct PeopleError {
@@ -253,6 +327,35 @@ fn profile_value(
         value["email"] = Value::String(profile.3);
         value["textSize"] = Value::String(profile.5);
     }
+    if let Some((evaluator_version, profile_json)) = connection
+        .query_row(
+            "SELECT evaluator_version, profile_json
+             FROM dynamic_player_profiles
+             WHERE user_id = ?1 ORDER BY updated_at DESC LIMIT 1",
+            [profile.0],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| PeopleError::internal("read Dynamic handicap", error))?
+    {
+        let dynamic_profile = serde_json::from_str::<Value>(&profile_json)
+            .map_err(|error| PeopleError::internal("parse Dynamic handicap", error))?;
+        let cycles = dynamic_profile["complete_cycles"]
+            .as_u64()
+            .unwrap_or_default();
+        let started = dynamic_profile["started_dynamic"]
+            .as_bool()
+            .unwrap_or_default();
+        value["dynamicCalibration"] = json!({
+            "started": started,
+            "completeCycles": cycles,
+            "minimumCycles": MIN_COMPLETE_CYCLES,
+            "complete": cycles >= u64::from(MIN_COMPLETE_CYCLES),
+        });
+        if let Some(handicap) = dynamic_handicap_value(&evaluator_version, &dynamic_profile) {
+            value["dynamicHandicap"] = handicap;
+        }
+    }
     if let Some(viewer_id) = viewer_id.filter(|viewer_id| *viewer_id != profile.0) {
         value["headToHead"] = head_to_head_value(&connection, viewer_id, profile.0)?;
     }
@@ -431,7 +534,7 @@ fn directory_value(server: &Server, viewer: Option<&AuthUser>) -> Result<Value, 
     let viewer_id = viewer.map(|user| user.id).unwrap_or(-1);
     let mut statement = connection
         .prepare(
-            "SELECT u.username, u.display_name, p.avatar_data_url, pr.looking_for_game
+            "SELECT u.id, u.username, u.display_name, p.avatar_data_url, pr.looking_for_game
              FROM people_presence pr
              JOIN auth_users u ON u.id = pr.user_id
              LEFT JOIN people_profiles p ON p.user_id = u.id
@@ -439,19 +542,35 @@ fn directory_value(server: &Server, viewer: Option<&AuthUser>) -> Result<Value, 
              ORDER BY pr.looking_for_game DESC, u.username COLLATE NOCASE ASC",
         )
         .map_err(|error| PeopleError::internal("prepare online directory", error))?;
-    let players = statement
+    let player_rows = statement
         .query_map(params![cutoff, viewer_id], |row| {
-            Ok(json!({
-                "username": row.get::<_, String>(0)?,
-                "displayName": row.get::<_, String>(1)?,
-                "avatarDataUrl": row.get::<_, Option<String>>(2)?,
-                "online": true,
-                "lookingForGame": row.get::<_, i64>(3)? != 0,
-            }))
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, i64>(4)? != 0,
+            ))
         })
         .map_err(|error| PeopleError::internal("read online directory", error))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| PeopleError::internal("collect online directory", error))?;
+    let players = player_rows
+        .into_iter()
+        .map(
+            |(user_id, username, display_name, avatar, looking_for_game)| {
+                let mut player = player_value(
+                    &username,
+                    &display_name,
+                    avatar,
+                    dynamic_handicap_for_user(&connection, user_id)?,
+                );
+                player["online"] = Value::Bool(true);
+                player["lookingForGame"] = Value::Bool(looking_for_game);
+                Ok(player)
+            },
+        )
+        .collect::<Result<Vec<_>, PeopleError>>()?;
     let online_count: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM people_presence WHERE last_seen_at >= ?1",
@@ -491,7 +610,7 @@ fn challenge_rows(
     };
     let sql = format!(
         "SELECT c.id, c.table_id, c.status, u.username, u.display_name, p.avatar_data_url,
-                COALESCE(pr.last_seen_at, 0) >= ?2
+                COALESCE(pr.last_seen_at, 0) >= ?2, u.id
          FROM people_challenges c
          JOIN auth_users u ON u.id = {}
          LEFT JOIN people_profiles p ON p.user_id = u.id
@@ -506,22 +625,39 @@ fn challenge_rows(
         .map_err(|error| PeopleError::internal("prepare challenge list", error))?;
     let rows = statement
         .query_map(params![user_id, cutoff, now], |row| {
-            Ok(json!({
-                "id": row.get::<_, String>(0)?,
-                "tableId": row.get::<_, String>(1)?,
-                "status": row.get::<_, String>(2)?,
-                "player": {
-                    "username": row.get::<_, String>(3)?,
-                    "displayName": row.get::<_, String>(4)?,
-                    "avatarDataUrl": row.get::<_, Option<String>>(5)?,
-                    "online": row.get::<_, bool>(6)?,
-                }
-            }))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, bool>(6)?,
+                row.get::<_, i64>(7)?,
+            ))
         })
         .map_err(|error| PeopleError::internal("read challenges", error))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| PeopleError::internal("collect challenges", error))?;
-    Ok(rows)
+    rows.into_iter()
+        .map(
+            |(id, table_id, status, username, display_name, avatar, online, player_id)| {
+                let mut player = player_value(
+                    &username,
+                    &display_name,
+                    avatar,
+                    dynamic_handicap_for_user(connection, player_id)?,
+                );
+                player["online"] = Value::Bool(online);
+                Ok(json!({
+                    "id": id,
+                    "tableId": table_id,
+                    "status": status,
+                    "player": player,
+                }))
+            },
+        )
+        .collect()
 }
 
 fn create_challenge(
@@ -575,7 +711,15 @@ fn create_challenge(
         .map_err(|error| PeopleError::internal("find active challenge", error))?
     {
         return Ok(json!({
-            "challenge": challenge_value(&existing.0, &existing.1, "pending", &target.1, &target.2, target.3),
+            "challenge": challenge_value(
+                &existing.0,
+                &existing.1,
+                "pending",
+                &target.1,
+                &target.2,
+                target.3,
+                dynamic_handicap_for_user(&connection, target.0)?,
+            ),
         }));
     }
     let id = random_id("challenge");
@@ -589,7 +733,15 @@ fn create_challenge(
         )
         .map_err(|error| PeopleError::internal("create player challenge", error))?;
     Ok(json!({
-        "challenge": challenge_value(&id, &table_id, "pending", &target.1, &target.2, target.3),
+        "challenge": challenge_value(
+            &id,
+            &table_id,
+            "pending",
+            &target.1,
+            &target.2,
+            target.3,
+            dynamic_handicap_for_user(&connection, target.0)?,
+        ),
     }))
 }
 
@@ -781,8 +933,18 @@ fn table_value(server: &Server, table_id: &str, viewer_id: i64) -> Result<Value,
             "id": table_id,
             "phase": phase,
             "viewerSeat": if viewer_id == row.challenger_id { "challenger" } else { "challenged" },
-            "challenger": player_value(&row.challenger_username, &row.challenger_display_name, row.challenger_avatar),
-            "challenged": player_value(&row.challenged_username, &row.challenged_display_name, row.challenged_avatar),
+            "challenger": player_value(
+                &row.challenger_username,
+                &row.challenger_display_name,
+                row.challenger_avatar,
+                dynamic_handicap_for_user(&connection, row.challenger_id)?,
+            ),
+            "challenged": player_value(
+                &row.challenged_username,
+                &row.challenged_display_name,
+                row.challenged_avatar,
+                dynamic_handicap_for_user(&connection, row.challenged_id)?,
+            ),
             "challengerCut": row.challenger_cut.map(cut_card_value),
             "challengedCut": row.challenged_cut.map(cut_card_value),
             "dealerUsername": row.dealer_id.map(|id| {
@@ -792,12 +954,21 @@ fn table_value(server: &Server, table_id: &str, viewer_id: i64) -> Result<Value,
     }))
 }
 
-fn player_value(username: &str, display_name: &str, avatar: Option<String>) -> Value {
-    json!({
+fn player_value(
+    username: &str,
+    display_name: &str,
+    avatar: Option<String>,
+    handicap: Option<Value>,
+) -> Value {
+    let mut player = json!({
         "username": username,
         "displayName": display_name,
         "avatarDataUrl": avatar,
-    })
+    });
+    if let Some(handicap) = handicap {
+        player["dynamicHandicap"] = handicap;
+    }
+    player
 }
 
 fn challenge_value(
@@ -807,12 +978,13 @@ fn challenge_value(
     username: &str,
     display_name: &str,
     avatar: Option<String>,
+    handicap: Option<Value>,
 ) -> Value {
     json!({
         "id": id,
         "tableId": table_id,
         "status": status,
-        "player": player_value(username, display_name, avatar),
+        "player": player_value(username, display_name, avatar, handicap),
     })
 }
 
@@ -1061,11 +1233,61 @@ mod tests {
     }
 
     #[test]
+    fn player_profile_includes_the_versioned_ace_handicap() {
+        let server = test_server("dynamic-handicap");
+        let garrett = user(&server, "Garrett");
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection
+            .execute(
+                "INSERT INTO dynamic_player_profiles
+                 (user_id, evaluator_version, profile_json, updated_at)
+                 VALUES (?1, 'ace-13.0', ?2, '2026-09-02T00:00:00.000Z')",
+                params![
+                    garrett.id,
+                    json!({"started_dynamic": true, "complete_cycles": 8, "ewma_handicap": -0.0125}).to_string(),
+                ],
+            )
+            .unwrap();
+        drop(connection);
+
+        let value = profile_value(&server, "Garrett", Some(garrett.id), true).unwrap();
+        assert_eq!(value["profile"]["dynamicHandicap"]["cycles"], 8);
+        assert_eq!(value["profile"]["dynamicCalibration"]["completeCycles"], 8);
+        assert_eq!(
+            value["profile"]["dynamicCalibration"]["minimumCycles"],
+            MIN_COMPLETE_CYCLES
+        );
+        assert_eq!(value["profile"]["dynamicCalibration"]["complete"], true);
+        assert_eq!(
+            value["profile"]["dynamicHandicap"]["wpPerDecision"],
+            -0.0125
+        );
+        assert_eq!(
+            value["profile"]["dynamicHandicap"]["evaluatorVersion"],
+            "ace-13.0"
+        );
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
     fn lists_looking_players_first_and_excludes_the_viewer() {
         let server = test_server("directory");
         let garrett = user(&server, "Garrett");
         let kurt = user(&server, "Kurt");
         let vince = user(&server, "Vince");
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection
+            .execute(
+                "INSERT INTO dynamic_player_profiles
+                 (user_id, evaluator_version, profile_json, updated_at)
+                 VALUES (?1, 'ace-13.0', ?2, '2026-09-02T00:00:00.000Z')",
+                params![
+                    vince.id,
+                    json!({"started_dynamic": true, "complete_cycles": 8, "ewma_handicap": -0.0125}).to_string(),
+                ],
+            )
+            .unwrap();
+        drop(connection);
         for (account, looking) in [(&garrett, false), (&kurt, false), (&vince, true)] {
             heartbeat(
                 &server,
@@ -1078,7 +1300,48 @@ mod tests {
         assert_eq!(value["onlineCount"], 3);
         assert_eq!(value["players"][0]["username"], "Vince");
         assert_eq!(value["players"][0]["lookingForGame"], true);
+        assert_eq!(
+            value["players"][0]["dynamicHandicap"]["wpPerDecision"],
+            -0.0125
+        );
         assert_eq!(value["players"][1]["username"], "Kurt");
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn presence_expires_after_fifteen_minutes_even_for_an_account() {
+        assert_eq!(ONLINE_SECONDS, 15 * 60);
+        let server = test_server("presence-idle");
+        let garrett = user(&server, "Garrett");
+        let kurt = user(&server, "Kurt");
+        heartbeat(
+            &server,
+            &request("/api/people/presence", json!({"lookingForGame": false})),
+            Some(&kurt),
+        )
+        .unwrap();
+        assert_eq!(
+            profile_value(&server, "Kurt", Some(garrett.id), false).unwrap()["profile"]["online"],
+            true
+        );
+
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection
+            .execute(
+                "UPDATE people_presence SET last_seen_at = ?2 WHERE user_id = ?1",
+                params![kurt.id, unix_seconds() - ONLINE_SECONDS - 1],
+            )
+            .unwrap();
+        drop(connection);
+
+        assert_eq!(
+            profile_value(&server, "Kurt", Some(garrett.id), false).unwrap()["profile"]["online"],
+            false
+        );
+        assert!(directory_value(&server, Some(&garrett)).unwrap()["players"]
+            .as_array()
+            .unwrap()
+            .is_empty());
         std::fs::remove_dir_all(server.data_dir).unwrap();
     }
 

@@ -7,6 +7,13 @@ const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const mainSource = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 
 describe("Concept B mobile playing UI", () => {
+  it("shows the live provisional handicap below the Dynamic calibration marker", () => {
+    expect(html).toMatch(/id="dynamic-calibration-status"[^>]*>[\s\S]*<strong>CALIBRATING<\/strong>[\s\S]*id="dynamic-calibration-handicap"/s);
+    expect(mainSource).toContain("dynamicProvisionalHandicapCopy(calibration)");
+    expect(css).toMatch(/\.dynamic-calibration-status\s*\{[^}]*grid-column:\s*1 \/ -1[^}]*order:\s*3[^}]*display:\s*grid[^}]*justify-items:\s*center/s);
+    expect(css).toMatch(/\.dynamic-calibration-status span\s*\{[^}]*white-space:\s*nowrap/s);
+  });
+
   it("does not surface an AI-thinking bubble during normal play", () => {
     expect(mainSource).toContain("els.modelThinking.hidden = !showModelLoadingUi");
     expect(mainSource).toContain("els.thinkingOverlay.hidden = !showModelLoadingUi");
@@ -46,9 +53,9 @@ describe("Concept B mobile playing UI", () => {
     expect(css).toMatch(/\.crib-tray\s*\{[^}]*z-index:\s*7/s);
   });
 
-  it("anchors a miniature, captioned crib just beneath its dealer score on mobile", () => {
+  it("anchors a miniature, captioned crib below its dealer marker on mobile", () => {
     expect(mainSource).toMatch(/const cribParent = usesMobileGameplayLayout\(\)[\s\S]*game\.cribOwner === "User" \? els\.humanScorePanel : els\.aiScorePanel/s);
-    expect(css).toMatch(/\.score > \.crib-tray\s*\{[^}]*top:\s*calc\(100% \+ 7px\)[^}]*z-index:\s*4/s);
+    expect(css).toMatch(/\.score > \.crib-tray\s*\{[^}]*top:\s*calc\(100% \+ var\(--score-meta-small-font\) \+ 20px\)[^}]*z-index:\s*4/s);
     expect(css).toMatch(/\.score:first-child > \.crib-tray\s*\{[^}]*left:\s*0/s);
     expect(css).toMatch(/\.score\.ai > \.crib-tray\s*\{[^}]*right:\s*0/s);
     expect(css).toMatch(/\.score > \.crib-tray \.crib-tray-stack\s*\{[^}]*width:\s*22px[^}]*height:\s*32px/s);
@@ -84,7 +91,7 @@ describe("Concept B mobile playing UI", () => {
   it("uses a separate Crib marker while leaving the dealer names unpossessive", () => {
     expect(html).toMatch(/id="human-name" class="player-name">Player<\/span><\/span>\s*<span id="human-dealer" class="dealer-button score-crib-marker"/s);
     expect(html).toMatch(/id="ai-name" class="player-name">Ace<\/span><\/span>\s*<span id="ai-dealer" class="dealer-button score-crib-marker"/s);
-    expect(mainSource).toContain("els.humanName.textContent = playerDisplayName();");
+    expect(mainSource).toContain("setPlayerIdentity(els.humanName, playerDisplayName());");
     expect(mainSource).toContain('els.aiName.textContent = playerName("ai");');
     expect(css).toMatch(/\.app\[data-view="game"\] \.score-crib-marker\s*\{[^}]*position:\s*absolute[^}]*top:\s*calc\(100% \+ 9px\)/s);
     expect(css).toMatch(/\.score:first-child > \.score-crib-marker\s*\{[^}]*left:\s*0/s);

@@ -1,0 +1,47 @@
+export interface DynamicCalibration {
+  started: boolean;
+  completeCycles: number;
+  minimumCycles: number;
+  complete: boolean;
+  provisionalHandicap?: number | null;
+}
+
+export const DYNAMIC_CALIBRATION_INVITE = "Calibrate and get a handicap!";
+export const DYNAMIC_CALIBRATING_LABEL = "CALIBRATING";
+export const DYNAMIC_CALIBRATED_COPY = "Adapts to your play and plays back at your skill.";
+
+export function isDynamicCalibrating(calibration: DynamicCalibration | null | undefined): boolean {
+  return Boolean(
+    calibration?.started &&
+    !calibration.complete &&
+    calibration.completeCycles < calibration.minimumCycles,
+  );
+}
+
+export function dynamicCardCopy(
+  calibration: DynamicCalibration | null | undefined,
+  hasStartedGame: boolean,
+): string {
+  if (!calibration?.started && !hasStartedGame) return DYNAMIC_CALIBRATION_INVITE;
+  if (!calibration || isDynamicCalibrating(calibration)) return DYNAMIC_CALIBRATING_LABEL;
+  return DYNAMIC_CALIBRATED_COPY;
+}
+
+export function dynamicProvisionalHandicapCopy(
+  calibration: DynamicCalibration | null | undefined,
+): string | null {
+  const handicap = calibration?.provisionalHandicap;
+  if (typeof handicap !== "number" || !Number.isFinite(handicap)) return null;
+  return `Provisional Handicap: ${dynamicHandicapPointsCopy(handicap)}`;
+}
+
+export function dynamicHandicapPointsCopy(handicap: number): string {
+  return Math.abs(handicap * 100).toFixed(2);
+}
+
+export function playerHandicapCopy(
+  handicap: { wpPerDecision: number } | null | undefined,
+): string | null {
+  if (!handicap || !Number.isFinite(handicap.wpPerDecision)) return null;
+  return `(${dynamicHandicapPointsCopy(handicap.wpPerDecision)})`;
+}

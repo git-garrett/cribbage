@@ -84,6 +84,7 @@ function fullCycleRow(player: SingleGameReportTotals, ai: SingleGameReportTotals
 export function singleGameReportRows(
   player: SingleGameReportTotals,
   ai: SingleGameReportTotals,
+  options: { includeAceHelps?: boolean } = {},
 ): SingleGameReportRow[] {
   const rows: SingleGameReportRow[] = [
     {
@@ -98,13 +99,16 @@ export function singleGameReportRows(
     averageRow("Avg hand as pone", player.handPone, player.handPoneHands, ai.handPone, ai.handPoneHands),
     averageRow("Avg crib", player.crib, player.cribHands, ai.crib, ai.cribHands),
     fullCycleRow(player, ai),
-    {
+  ];
+
+  if (options.includeAceHelps !== false) {
+    rows.push({
       label: "Ace helps",
       player: String(player.helps),
       ai: "—",
       difference: "—",
-    },
-  ];
+    });
+  }
 
   if (player.skunks || player.skunked || ai.skunks || ai.skunked) {
     const playerResult = specialResult(player.skunks, player.skunked);

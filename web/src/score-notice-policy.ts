@@ -29,6 +29,11 @@ export interface ScoreNoticePart {
   cardIds?: number[];
 }
 
+export function scoreSummaryPoints(event: ScoreNoticeEvent): number {
+  if (event.category !== "hand" && event.category !== "crib") return event.points;
+  return event.scoreComponents?.total ?? event.points;
+}
+
 export function scoreNoticeEmphasisCardIds(
   event: ScoreNoticeEvent,
   part: ScoreNoticePart,

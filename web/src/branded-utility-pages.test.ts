@@ -49,6 +49,10 @@ describe("branded utility pages", () => {
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*\.game-log-item,[\s\S]*\.model-info-item[\s\S]*transition: none/);
   });
 
+  it("lets mobile leaderboard and game-log controls scroll away with the page", () => {
+    expect(css).toMatch(/@media \(max-width: 640px\)[\s\S]*\.stats-game-log \.game-log-list,[\s\S]*\.stats-leaderboard #stats-leaderboard-list\s*\{[^}]*max-height:\s*none;[^}]*overflow:\s*visible;/s);
+  });
+
   it("renders Statistics even when the user has no active game", () => {
     expect(source).toMatch(/function renderUtilityPages\(\)[\s\S]*if \(state\.analyticsOpen\) renderAnalytics\(\)/);
     expect(source).toMatch(/function render\(game: GameState \| null\)[\s\S]*if \(!game\) \{\s*renderUtilityPages\(\);\s*return;/);

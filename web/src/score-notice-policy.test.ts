@@ -4,6 +4,7 @@ import {
   handScoreNoticeParts,
   peggingScoreNoticeParts,
   scoreNoticeEmphasisCardIds,
+  scoreSummaryPoints,
   shouldAnnounceScoreEvent,
   type ScoreNoticeEvent,
 } from "./score-notice-policy";
@@ -106,6 +107,14 @@ describe("score notification policy", () => {
     }), hand, card(5, "2", "clubs", 2))).toEqual([
       { label: "Pair Royal", points: 6, cardIds: [1, 2, 3] },
     ]);
+  });
+
+  it("shows a winning hand's full count instead of only the points needed to reach 121", () => {
+    expect(scoreSummaryPoints(score({
+      category: "hand",
+      points: 3,
+      scoreComponents: { total: 6, pairs: 6 },
+    }))).toBe(6);
   });
 
   it("animates both the matching jack and the cut card for knobs", () => {

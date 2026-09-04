@@ -224,6 +224,13 @@ export interface GameState {
     ai: SerializedCard | null;
     prompt: string;
   } | null;
+  dynamicCalibration?: {
+    started: boolean;
+    completeCycles: number;
+    minimumCycles: number;
+    complete: boolean;
+    provisionalHandicap?: number | null;
+  } | null;
   analyticsEvents: AnalyticsEvent[];
 }
 

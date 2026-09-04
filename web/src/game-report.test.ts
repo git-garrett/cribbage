@@ -104,4 +104,9 @@ describe("singleGameReportRows", () => {
     const rows = singleGameReportRows(totals({ helps: 3 }), totals());
     expect(rows).toContainEqual({ label: "Ace helps", player: "3", ai: "—", difference: "—" });
   });
+
+  it("omits Ace helps when the opponent does not permit them", () => {
+    const rows = singleGameReportRows(totals(), totals(), { includeAceHelps: false });
+    expect(rows.map((row) => row.label)).not.toContain("Ace helps");
+  });
 });

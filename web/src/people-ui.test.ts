@@ -66,6 +66,12 @@ describe("human clubhouse UI", () => {
     expect(source).toContain("renderGameReportInto(");
   });
 
+  it("uses opponent-scoped production totals and an explicit Ace table heading", () => {
+    expect(source).toContain("playerStatsByOpponent");
+    expect(source).toMatch(/const opponentLabel = MY_STATS_OPPONENT_LABEL\[state\.myStatsOpponent\]/);
+    expect(source).toMatch(/myStatsComparisonTable\([\s\S]*serverScoringAvailable,[\s\S]*opponentLabel,[\s\S]*\)/);
+  });
+
   it("uses player and opponent names throughout the playing surface", () => {
     expect(html).toContain('id="human-name"');
     expect(html).toContain('id="ai-name"');
@@ -73,6 +79,16 @@ describe("human clubhouse UI", () => {
     expect(source).toContain("function playerDisplayName");
     expect(source).toContain("function playerPossessive");
     expect(source).toContain('if (engine === PATHWAY_OPPONENTS.tough) return "Tough"');
+  });
+
+  it("shows positive handicaps beside player identities with hover and focus help", () => {
+    expect(source).toContain("function setPlayerIdentity");
+    expect(source).toContain('marker.className = "player-handicap"');
+    expect(source).toContain("HANDICAP_EXPLANATION");
+    expect(source).toContain("playerHandicaps");
+    expect(source).toContain('document.addEventListener("mouseover"');
+    expect(source).toContain('document.addEventListener("focusin"');
+    expect(css).toContain(".player-handicap-tooltip");
   });
 
   it("offers Ace advice only as a lower-level gameplay aid", () => {
@@ -98,14 +114,24 @@ describe("human clubhouse UI", () => {
     expect(css).toContain("@keyframes people-challenge-pulse");
   });
 
+  it("uses real activity instead of background polling for 15-minute presence", () => {
+    expect(source).toContain("const PEOPLE_IDLE_MS = 15 * 60 * 1000");
+    expect(source).toMatch(/schedulePeoplePoll[\s\S]*await refreshPeople\(\);/);
+    expect(source).toContain("function recordPeopleActivity");
+    expect(source).toMatch(/pointerdown[\s\S]*recordPeopleActivity/);
+    expect(source).toMatch(/keydown[\s\S]*recordPeopleActivity/);
+  });
+
   it("supports public profiles and authenticated profile editing", () => {
     expect(html).toContain('id="people-profile-page"');
     expect(html).toContain('id="people-profile-username"');
+    expect(html).toContain('id="people-profile-handicap"');
     expect(html).toContain('id="people-profile-email"');
     expect(html).toContain('id="people-profile-image"');
     expect(html).toContain('id="people-password-reset"');
     expect(html).toContain('id="people-profile-head-to-head"');
     expect(source).toContain('"/api/people/profile"');
+    expect(source).toContain("Ace handicap:");
     expect(source).toContain('"/api/people/me"');
     expect(source).toContain('"/api/auth/password/request"');
   });

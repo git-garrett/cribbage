@@ -77,19 +77,77 @@ pub fn invitation(display_name: &str, invite_url: &str) -> EmailMessage {
     }
 }
 
+pub fn access_request(
+    first_name: &str,
+    last_name: &str,
+    username: &str,
+    email: &str,
+) -> EmailMessage {
+    let full_name = format!("{} {}", first_name, last_name);
+    let details = format!(
+        "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"margin:24px 0;padding:18px;border:1px solid #d6c087;border-radius:14px;background:#f3eddf;color:#17231f;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:24px;\"><tr><td><strong>Name</strong></td><td>{}</td></tr><tr><td><strong>Username</strong></td><td>{}</td></tr><tr><td><strong>Email</strong></td><td>{}</td></tr></table>",
+        html_escape(&full_name),
+        html_escape(username),
+        html_escape(email),
+    );
+    EmailMessage {
+        subject: format!("Strong Cribbage preview request from {}", full_name),
+        text: format!(
+            "A player requested Strong Cribbage preview access.\n\nName: {}\nUsername: {}\nEmail: {}",
+            full_name, username, email
+        ),
+        html: frame(
+            "Preview access request",
+            "A player would like a seat",
+            "A prospective player completed the preview access form.",
+            &details,
+            "Reply to this email to contact the player.",
+        ),
+    }
+}
+
+pub fn send_access_request(
+    first_name: &str,
+    last_name: &str,
+    username: &str,
+    email: &str,
+) -> Result<(), String> {
+    let recipient = env::var("CRIBBAGE_ACCESS_REQUEST_TO")
+        .or_else(|_| env::var("CRIBBAGE_MAIL_REPLY_TO"))
+        .unwrap_or_else(|_| "founder@evenvision.com".to_string());
+    let full_name = format!("{} {}", first_name, last_name);
+    send_with_reply_to(
+        &recipient,
+        "Strong Cribbage",
+        &access_request(first_name, last_name, username, email),
+        email,
+        &full_name,
+    )
+}
+
 pub fn send(to_email: &str, to_name: &str, message: &EmailMessage) -> Result<(), String> {
+    let reply_to =
+        env::var("CRIBBAGE_MAIL_REPLY_TO").unwrap_or_else(|_| "founder@evenvision.com".to_string());
+    send_with_reply_to(to_email, to_name, message, &reply_to, "Strong Cribbage")
+}
+
+fn send_with_reply_to(
+    to_email: &str,
+    to_name: &str,
+    message: &EmailMessage,
+    reply_to_email: &str,
+    reply_to_name: &str,
+) -> Result<(), String> {
     let api_key = env::var("SENDGRID_API_KEY")
         .map_err(|_| "SENDGRID_API_KEY is not configured".to_string())?;
     let from_email =
         env::var("CRIBBAGE_MAIL_FROM").unwrap_or_else(|_| "hello@strongcribbage.com".to_string());
     let from_name =
         env::var("CRIBBAGE_MAIL_FROM_NAME").unwrap_or_else(|_| "Strong Cribbage".to_string());
-    let reply_to =
-        env::var("CRIBBAGE_MAIL_REPLY_TO").unwrap_or_else(|_| "founder@evenvision.com".to_string());
     let payload = json!({
         "personalizations": [{"to": [{"email": to_email, "name": to_name}]}],
         "from": {"email": from_email, "name": from_name},
-        "reply_to": {"email": reply_to, "name": "Strong Cribbage"},
+        "reply_to": {"email": reply_to_email, "name": reply_to_name},
         "subject": message.subject,
         "content": [
             {"type": "text/plain", "value": message.text},
@@ -175,5 +233,16 @@ mod tests {
         assert!(reset.html.contains("reset=abc"));
         assert!(invite.html.contains("invite=xyz"));
         assert!(!invite.html.contains("A <B>"));
+    }
+
+    #[test]
+    fn preview_request_contains_all_requested_fields_and_escapes_html() {
+        let message = access_request("Ada <", "Lovelace", "Analyst & Player", "ada@example.com");
+        assert!(message.subject.contains("Ada < Lovelace"));
+        assert!(message.text.contains("Analyst & Player"));
+        assert!(message.text.contains("ada@example.com"));
+        assert!(message.html.contains("Ada &lt; Lovelace"));
+        assert!(message.html.contains("Analyst &amp; Player"));
+        assert!(!message.html.contains("Analyst & Player"));
     }
 }

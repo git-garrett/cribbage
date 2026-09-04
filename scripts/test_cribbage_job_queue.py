@@ -146,6 +146,56 @@ class CribbageJobQueueTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "different job specification"):
                 queue.read_status(queue.load_spec(changed_path))
 
+    def test_install_supports_an_explicit_persistent_job_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "persistent-job"
+            root.mkdir()
+            spec = self.spec(
+                root,
+                [{"name": "one", "command": ["/usr/bin/true"]}],
+            )
+            path = self.write_spec(Path(temporary), spec)
+            completed = queue.subprocess.CompletedProcess([], 0)
+            with mock.patch.object(queue.subprocess, "run", return_value=completed):
+                self.assertEqual(queue.install_job(path), 0)
+
+            self.assertTrue((root / "cribbage_job_queue.py").is_file())
+            self.assertTrue((root / "job.json").is_file())
+            self.assertTrue(
+                (root / "com.strongcribbage.job.test-job.plist").is_file()
+            )
+
+    def test_install_supports_separate_persistent_launchd_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_root = Path(temporary)
+            root = temporary_root / "persistent-job"
+            launcher = temporary_root / "LaunchAgents" / "test.plist"
+            log = temporary_root / "Logs" / "test.log"
+            spec = self.spec(
+                root,
+                [{"name": "one", "command": ["/usr/bin/true"]}],
+            )
+            spec["launchdPlistPath"] = str(launcher)
+            spec["supervisorLogPath"] = str(log)
+            path = self.write_spec(temporary_root, spec)
+            completed = queue.subprocess.CompletedProcess([], 0)
+            with mock.patch.object(queue.subprocess, "run", return_value=completed):
+                self.assertEqual(queue.install_job(path), 0)
+
+            decoded = plistlib.loads(launcher.read_bytes())
+            self.assertEqual(decoded["StandardOutPath"], str(log))
+            self.assertEqual(decoded["StandardErrorPath"], str(log))
+
+    def test_relative_job_root_is_rejected(self):
+        spec = {
+            "schemaVersion": 1,
+            "jobId": "test-job",
+            "jobRoot": "relative/job",
+            "stages": [{"name": "one", "command": ["/usr/bin/true"]}],
+        }
+        with self.assertRaisesRegex(ValueError, "jobRoot must be an absolute path"):
+            queue.validate_spec(spec)
+
     def test_stop_falls_back_to_the_supervisor_process_group(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
 
-import { rankLeaderboardWins } from "./leaderboard";
+import { leaderboardScore, rankLeaderboardPlayers, rankLeaderboardWins } from "./leaderboard";
+
+describe("rankLeaderboardPlayers", () => {
+  it("ranks by (wins + skunks) / (wins + skunks + losses + skunked)", () => {
+    const players = [
+      { player: "Skunk split", wins: 1, skunks: 1, losses: 1, skunked: 1 },
+      { player: "Two of three", wins: 2, skunks: 0, losses: 1, skunked: 0 },
+    ];
+
+    expect(leaderboardScore(players[0])).toBe(0.5);
+    expect(leaderboardScore(players[1])).toBeCloseTo(2 / 3);
+    expect(rankLeaderboardPlayers(players).map((player) => player.player)).toEqual([
+      "Two of three",
+      "Skunk split",
+    ]);
+  });
+});
 
 describe("rankLeaderboardWins", () => {
   it("keeps a newly received two-point win below 48- and 45-point wins", () => {

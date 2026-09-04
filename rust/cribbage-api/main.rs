@@ -14,11 +14,14 @@ use cribbage_shadow_engine::cards::{
     PeggingScoreComponents, RANKS, SUIT_NAMES, VALUES,
 };
 use cribbage_shadow_engine::decision::{
-    recommend_discard_for_side, recommend_peg_for_side,
-    recommend_peg_for_side_with_model911_cache, review_discard_for_side, review_peg_for_side,
-    DecisionReview as EngineDecisionReview, PegDecision,
+    recommend_discard_for_side, recommend_peg_for_side, recommend_peg_for_side_with_model911_cache,
+    review_discard_for_side, review_peg_for_side, DecisionReview as EngineDecisionReview,
+    PegDecision,
 };
-use cribbage_shadow_engine::dynamic::{DynamicProfile, DynamicState};
+use cribbage_shadow_engine::dynamic::{
+    DynamicCycleSample, DynamicProfile, DynamicState, DYNAMIC_EVALUATOR_VERSION,
+    MIN_COMPLETE_CYCLES,
+};
 use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
 use cribbage_shadow_engine::model::Model911HandCache;
 use cribbage_shadow_engine::model_id::{
@@ -288,7 +291,7 @@ fn main() {
         eprintln!("Rust API leaderboard history was not loaded: {}", error);
         HashMap::new()
     });
-    let leaderboard_summary = leaderboard_summary_json(&uploads);
+    let leaderboard_summary = leaderboard_summary_json_for_data_dir(&uploads, &data_dir);
     let sessions = load_active_sessions(&data_dir).unwrap_or_else(|error| {
         eprintln!("Durable game sessions were not loaded: {}", error);
         HashMap::new()
@@ -324,16 +327,18 @@ fn handle_connection(mut stream: TcpStream, server: &Server) -> Result<(), Strin
     }
     let authenticated_user = auth::authenticated_user(server, &request)
         .map_err(|error| format!("authenticate request: {}", error))?;
-    if let Some(response) = people::handle(server, &request, authenticated_user.as_ref()) {
-        return write_response(&mut stream, response);
-    }
-    let requires_user = (auth::auth_required() && auth::protects(&request.path))
-        || (request.path == "/api/game/action" && game_action_requires_auth(server, &request.body));
+    let requires_user = request.method != "OPTIONS"
+        && ((auth::auth_required() && auth::protects(&request.path))
+            || (request.path == "/api/game/action"
+                && game_action_requires_auth(server, &request.body)));
     if requires_user && authenticated_user.is_none() {
         return write_response(
             &mut stream,
             Response::json(401, "{\"error\":\"Sign in to continue.\"}".to_string()),
         );
+    }
+    if let Some(response) = people::handle(server, &request, authenticated_user.as_ref()) {
+        return write_response(&mut stream, response);
     }
     let request_body = authenticated_user
         .as_ref()
@@ -344,8 +349,12 @@ fn handle_connection(mut stream: TcpStream, server: &Server) -> Result<(), Strin
         ("GET", "/health") => Response::json(200, health_json()),
         ("GET", "/api/model") => Response::json(200, model_json()),
         ("GET", "/api/leaderboard") => Response::json(200, leaderboard_json(server)?),
-        ("POST", "/api/game/action") => game_action(server, &request_body),
-        ("POST", "/api/game/review") => review_game(server, &request_body),
+        ("POST", "/api/game/action") => {
+            game_action(server, &request_body, authenticated_user.as_ref())
+        }
+        ("POST", "/api/game/review") => {
+            review_game(server, &request_body, authenticated_user.as_ref())
+        }
         ("POST", "/api/game/session/save") => save_session(server, &request_body),
         ("POST", "/api/game/session/load") => load_session(server, &request_body),
         ("POST", "/api/game/session/complete") => Response::json(200, "{\"ok\":true}".to_string()),
@@ -552,7 +561,11 @@ fn guest_model(model: ModelId) -> bool {
     )
 }
 
-fn game_action(server: &Server, body: &str) -> Response {
+fn game_action(
+    server: &Server,
+    body: &str,
+    authenticated_user: Option<&auth::AuthUser>,
+) -> Response {
     let action = json_string(body, "action").unwrap_or_default();
     let tag = json_string(body, "tag")
         .filter(|value| !value.trim().is_empty())
@@ -584,8 +597,8 @@ fn game_action(server: &Server, body: &str) -> Response {
                 return response_for_session(existing).map(|response| (response, None));
             }
             let inherited_dynamic_profile = if model == ModelId::Dynamic {
-                tag.as_deref()
-                    .map(|tag| load_latest_dynamic_profile(&server.data_dir, tag))
+                authenticated_user
+                    .map(|user| load_dynamic_profile(&server.data_dir, user.id))
                     .transpose()?
                     .flatten()
             } else {
@@ -594,6 +607,15 @@ fn game_action(server: &Server, body: &str) -> Response {
             let mut session = new_session(model, tag);
             if let Some(profile) = inherited_dynamic_profile {
                 session.use_dynamic_profile(profile);
+            }
+            if model == ModelId::Dynamic {
+                if let Some(user) = authenticated_user {
+                    if let Some(profile) =
+                        sync_dynamic_player_profile(&server.data_dir, user.id, &session)?
+                    {
+                        session.use_dynamic_profile(profile);
+                    }
+                }
             }
             session.event_sequence = 1;
             if let Err(error) = persist_session_event(&server.data_dir, &session, "new", body) {
@@ -633,7 +655,10 @@ fn game_action(server: &Server, body: &str) -> Response {
         {
             session.completed_at = Some(isoish_now());
         }
-        let records_event = !matches!(action.as_str(), "state" | "prepare-ai-discard" | "master-hint");
+        let records_event = !matches!(
+            action.as_str(),
+            "state" | "prepare-ai-discard" | "master-hint"
+        );
         if records_event {
             session.updated_at = isoish_now();
             session.event_sequence += 1;
@@ -648,11 +673,25 @@ fn game_action(server: &Server, body: &str) -> Response {
                 return Err(error);
             }
         }
+        if action == "continue-scoring" {
+            if let Some(user) = authenticated_user {
+                if let Some(profile) =
+                    sync_dynamic_player_profile(&server.data_dir, user.id, session)?
+                {
+                    if let Some(dynamic) = session.dynamic.as_mut() {
+                        dynamic.use_profile(profile, session.seed);
+                        persist_session_snapshot(&server.data_dir, session)?;
+                    }
+                }
+            }
+        }
         let response = response_for_session(session)?;
         let recommendation_game = if action == "master-hint" {
             Some(DeferredRecommendation::MasterHint(session.game.clone()))
-        } else if matches!(action.as_str(), "prepare-cut-for-deal" | "prepare-ai-discard")
-            && !session.waiting_for_deal_cut
+        } else if matches!(
+            action.as_str(),
+            "prepare-cut-for-deal" | "prepare-ai-discard"
+        ) && !session.waiting_for_deal_cut
             && session.game.phase == Phase::Discard
         {
             Some(DeferredRecommendation::AiDiscard(
@@ -686,7 +725,11 @@ fn game_action(server: &Server, body: &str) -> Response {
     }
 }
 
-fn review_game(server: &Server, body: &str) -> Response {
+fn review_game(
+    server: &Server,
+    body: &str,
+    authenticated_user: Option<&auth::AuthUser>,
+) -> Response {
     let result = (|| -> Result<String, String> {
         let game_id =
             json_string(body, "gameId").ok_or_else(|| "Missing completed game id.".to_string())?;
@@ -742,6 +785,24 @@ fn review_game(server: &Server, body: &str) -> Response {
                 {
                     *session = before;
                     return Err(error);
+                }
+            }
+        }
+
+        if let Some(user) = authenticated_user {
+            let mut app = server
+                .state
+                .lock()
+                .map_err(|_| "server state lock poisoned".to_string())?;
+            let session = app
+                .sessions
+                .get_mut(&game_id)
+                .ok_or_else(|| "The saved game is no longer available.".to_string())?;
+            if let Some(profile) = sync_dynamic_player_profile(&server.data_dir, user.id, session)?
+            {
+                if let Some(dynamic) = session.dynamic.as_mut() {
+                    dynamic.use_profile(profile, session.seed);
+                    persist_session_snapshot(&server.data_dir, session)?;
                 }
             }
         }
@@ -851,6 +912,22 @@ fn initialize_game_database(data_dir: &Path) -> Result<(), String> {
                game_id TEXT PRIMARY KEY,
                received_at TEXT NOT NULL,
                payload_json TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS dynamic_player_profiles (
+               user_id INTEGER NOT NULL,
+               evaluator_version TEXT NOT NULL,
+               profile_json TEXT NOT NULL,
+               updated_at TEXT NOT NULL,
+               PRIMARY KEY(user_id, evaluator_version)
+             );
+             CREATE TABLE IF NOT EXISTS dynamic_profile_cycles (
+               user_id INTEGER NOT NULL,
+               evaluator_version TEXT NOT NULL,
+               session_id TEXT NOT NULL,
+               first_hand_number INTEGER NOT NULL,
+               sample_json TEXT NOT NULL,
+               applied_at TEXT NOT NULL,
+               PRIMARY KEY(user_id, evaluator_version, session_id, first_hand_number)
              );",
         )
         .map_err(|error| format!("create game tables: {}", error))
@@ -888,7 +965,7 @@ fn restore_persisted_session(stored: PersistedSession) -> Result<Session, String
         return Err(format!("unsupported saved game version {}", stored.version));
     }
     let model = ModelId::from_str(&stored.model)?;
-    Ok(Session {
+    let mut session = Session {
         id: stored.id,
         tag: stored.tag,
         model,
@@ -911,7 +988,11 @@ fn restore_persisted_session(stored: PersistedSession) -> Result<Session, String
         pending_final_scoring: stored.pending_final_scoring,
         model911_hand_cache: Model911HandCache::new(),
         dynamic: stored.dynamic,
-    })
+    };
+    if let Some(dynamic) = session.dynamic.as_mut() {
+        dynamic.normalize_profile_version(session.seed);
+    }
+    Ok(session)
 }
 
 fn session_status(session: &Session) -> &'static str {
@@ -1072,18 +1153,22 @@ fn load_session_by_tag(
 ) -> Result<Option<Session>, String> {
     let connection = open_game_database(data_dir)?;
     let saved = match model {
-        Some(model) => connection.query_row(
-            "SELECT session_json FROM cribbage_game_sessions
+        Some(model) => connection
+            .query_row(
+                "SELECT session_json FROM cribbage_game_sessions
              WHERE tag = ?1 AND model = ?2 AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
-            params![tag, model.as_str()],
-            |row| row.get::<_, String>(0),
-        ).optional(),
-        None => connection.query_row(
-            "SELECT session_json FROM cribbage_game_sessions
+                params![tag, model.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional(),
+        None => connection
+            .query_row(
+                "SELECT session_json FROM cribbage_game_sessions
              WHERE tag = ?1 AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
-            [tag],
-            |row| row.get::<_, String>(0),
-        ).optional(),
+                [tag],
+                |row| row.get::<_, String>(0),
+            )
+            .optional(),
     }
     .map_err(|error| format!("find saved game by tag: {}", error))?;
     saved
@@ -1095,28 +1180,223 @@ fn load_session_by_tag(
         .transpose()
 }
 
-fn load_latest_dynamic_profile(
-    data_dir: &Path,
-    tag: &str,
-) -> Result<Option<DynamicProfile>, String> {
+fn load_dynamic_profile(data_dir: &Path, user_id: i64) -> Result<Option<DynamicProfile>, String> {
     let connection = open_game_database(data_dir)?;
     let saved = connection
         .query_row(
-            "SELECT session_json FROM cribbage_game_sessions
-             WHERE tag = ?1 AND model = ?2 ORDER BY updated_at DESC LIMIT 1",
-            params![tag, DYNAMIC],
+            "SELECT profile_json FROM dynamic_player_profiles
+             WHERE user_id = ?1 AND evaluator_version = ?2",
+            params![user_id, DYNAMIC_EVALUATOR_VERSION],
             |row| row.get::<_, String>(0),
         )
         .optional()
-        .map_err(|error| format!("find Dynamic profile by tag: {}", error))?;
+        .map_err(|error| format!("find Dynamic player profile: {}", error))?;
     saved
         .map(|text| {
-            let stored = serde_json::from_str::<PersistedSession>(&text)
-                .map_err(|error| format!("parse saved Dynamic session: {}", error))?;
-            Ok(stored.dynamic.map(|state| state.profile().clone()))
+            let profile = serde_json::from_str::<DynamicProfile>(&text)
+                .map_err(|error| format!("parse Dynamic player profile: {}", error))?;
+            Ok(profile.is_current().then_some(profile))
         })
         .transpose()
         .map(Option::flatten)
+}
+
+#[derive(Clone, Copy, Default)]
+struct RegretAccumulator {
+    sum: f64,
+    count: u32,
+}
+
+impl RegretAccumulator {
+    fn add(&mut self, regret: f64) {
+        self.sum += regret;
+        self.count += 1;
+    }
+
+    fn mean(self) -> Option<f64> {
+        (self.count > 0).then(|| self.sum / f64::from(self.count))
+    }
+}
+
+#[derive(Default)]
+struct CycleRegretAccumulators {
+    dealer_discard: RegretAccumulator,
+    dealer_pegging: RegretAccumulator,
+    pone_discard: RegretAccumulator,
+    pone_pegging: RegretAccumulator,
+}
+
+impl CycleRegretAccumulators {
+    fn add(&mut self, kind: ReviewKind, dealer: bool, regret: f64) {
+        match (dealer, kind) {
+            (true, ReviewKind::Discard) => self.dealer_discard.add(regret),
+            (true, ReviewKind::Peg) => self.dealer_pegging.add(regret),
+            (false, ReviewKind::Discard) => self.pone_discard.add(regret),
+            (false, ReviewKind::Peg) => self.pone_pegging.add(regret),
+        }
+    }
+
+    fn sample(self) -> Option<DynamicCycleSample> {
+        Some(DynamicCycleSample {
+            dealer_discard_regret: self.dealer_discard.mean()?,
+            dealer_pegging_regret: self.dealer_pegging.mean()?,
+            pone_discard_regret: self.pone_discard.mean()?,
+            pone_pegging_regret: self.pone_pegging.mean()?,
+        })
+    }
+}
+
+fn reviewed_decision_regret(review: &SavedDecisionReview) -> Option<f64> {
+    if review.kind == ReviewKind::Peg {
+        if review.game.legal_cards(HUMAN).len() <= 1 {
+            return None;
+        }
+        let selected = *review.selected_card_ids.first()?;
+        let mut result = review.game.clone();
+        result.play_card(HUMAN, selected).ok()?;
+        if result.phase == Phase::GameOver {
+            return None;
+        }
+    }
+
+    let completed = review.completed.as_ref()?;
+    let selected = completed.selected_win_probability?;
+    let recommended = completed.recommended_win_probability?;
+    if !selected.is_finite()
+        || !recommended.is_finite()
+        || !(0.0..=1.0).contains(&selected)
+        || !(0.0..=1.0).contains(&recommended)
+        || recommended + f64::EPSILON < selected
+    {
+        return None;
+    }
+    Some(recommended - selected)
+}
+
+fn eligible_dynamic_cycle_samples(session: &Session) -> Vec<(u32, DynamicCycleSample)> {
+    let completed_hands = session
+        .score_events
+        .iter()
+        .filter(|event| event.category == SavedScoreCategory::Crib)
+        .map(|event| event.hand_number)
+        .collect::<HashSet<_>>();
+    let mut samples = Vec::new();
+
+    for first_hand in (1..=session.game.hand_number).step_by(2) {
+        let second_hand = first_hand + 1;
+        if !completed_hands.contains(&first_hand) || !completed_hands.contains(&second_hand) {
+            continue;
+        }
+        let reviews = session
+            .decision_reviews
+            .iter()
+            .filter(|review| {
+                review.game.hand_number == first_hand || review.game.hand_number == second_hand
+            })
+            .collect::<Vec<_>>();
+        if reviews.is_empty() || reviews.iter().any(|review| review.completed.is_none()) {
+            continue;
+        }
+
+        let mut buckets = CycleRegretAccumulators::default();
+        for review in reviews {
+            if let Some(regret) = reviewed_decision_regret(review) {
+                buckets.add(review.kind, review.game.dealer == HUMAN, regret);
+            }
+        }
+        if let Some(sample) = buckets.sample() {
+            samples.push((first_hand, sample));
+        }
+    }
+    samples
+}
+
+fn sync_dynamic_player_profile(
+    data_dir: &Path,
+    user_id: i64,
+    session: &Session,
+) -> Result<Option<DynamicProfile>, String> {
+    let samples = eligible_dynamic_cycle_samples(session);
+    let mut connection = open_game_database(data_dir)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("begin Dynamic profile transaction: {}", error))?;
+    let saved = transaction
+        .query_row(
+            "SELECT profile_json FROM dynamic_player_profiles
+             WHERE user_id = ?1 AND evaluator_version = ?2",
+            params![user_id, DYNAMIC_EVALUATOR_VERSION],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| format!("read Dynamic player profile: {}", error))?;
+    let parsed = saved
+        .map(|text| {
+            serde_json::from_str::<DynamicProfile>(&text)
+                .map_err(|error| format!("parse Dynamic player profile: {}", error))
+        })
+        .transpose()?;
+    let needs_initial_save = parsed
+        .as_ref()
+        .map(|profile| !profile.is_current())
+        .unwrap_or(true);
+    let mut profile = parsed
+        .filter(DynamicProfile::is_current)
+        .unwrap_or_default();
+    let mut changed = false;
+    if session.model == ModelId::Dynamic && !profile.started_dynamic {
+        profile.started_dynamic = true;
+        changed = true;
+    }
+
+    for (first_hand, sample) in samples {
+        let sample_json = serde_json::to_string(&sample)
+            .map_err(|error| format!("serialize Dynamic cycle sample: {}", error))?;
+        let inserted = transaction
+            .execute(
+                "INSERT OR IGNORE INTO dynamic_profile_cycles
+                 (user_id, evaluator_version, session_id, first_hand_number, sample_json, applied_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    user_id,
+                    DYNAMIC_EVALUATOR_VERSION,
+                    session.id,
+                    first_hand,
+                    sample_json,
+                    isoish_now(),
+                ],
+            )
+            .map_err(|error| format!("save Dynamic cycle sample: {}", error))?;
+        if inserted > 0 {
+            profile.observe_cycle(sample);
+            changed = true;
+        }
+    }
+
+    if changed || needs_initial_save {
+        let profile_json = serde_json::to_string(&profile)
+            .map_err(|error| format!("serialize Dynamic player profile: {}", error))?;
+        transaction
+            .execute(
+                "INSERT INTO dynamic_player_profiles
+                 (user_id, evaluator_version, profile_json, updated_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(user_id, evaluator_version) DO UPDATE SET
+                   profile_json = excluded.profile_json,
+                   updated_at = excluded.updated_at",
+                params![
+                    user_id,
+                    DYNAMIC_EVALUATOR_VERSION,
+                    profile_json,
+                    isoish_now()
+                ],
+            )
+            .map_err(|error| format!("save Dynamic player profile: {}", error))?;
+    }
+    transaction
+        .commit()
+        .map_err(|error| format!("commit Dynamic player profile: {}", error))?;
+    Ok((changed || needs_initial_save).then_some(profile))
 }
 
 fn persist_completed_game_upload(data_dir: &Path, game_id: &str, body: &str) -> Result<(), String> {
@@ -1357,10 +1637,17 @@ fn apply_action(
                 return Err("Ace is already your opponent.".to_string());
             }
             match session.game.phase {
-                Phase::Discard if !session.waiting_for_deal_cut && !session.waiting_for_ai_discard => Ok(()),
+                Phase::Discard
+                    if !session.waiting_for_deal_cut && !session.waiting_for_ai_discard =>
+                {
+                    Ok(())
+                }
                 Phase::Pegging
                     if !session.game.pegging_reset_pending
-                        && session.game.current_player() == HUMAN => Ok(()),
+                        && session.game.current_player() == HUMAN =>
+                {
+                    Ok(())
+                }
                 _ => Err("Ace advice is not available for this decision.".to_string()),
             }
         }
@@ -1528,19 +1815,19 @@ fn apply_action(
                     model_root,
                     Some(&session.model911_hand_cache),
                 )? {
-                PegDecision::Go => {
-                    session.game.say_go(AI)?;
-                    ("Go", Vec::new(), None)
-                }
-                PegDecision::Play { card_id, .. } => {
-                    session.game.play_card(AI, card_id)?;
-                    (
-                        "Pegging play",
-                        Card::new(card_id).ok().into_iter().collect(),
-                        Some(score_count_components(&session.game.plays)),
-                    )
-                }
-            };
+                    PegDecision::Go => {
+                        session.game.say_go(AI)?;
+                        ("Go", Vec::new(), None)
+                    }
+                    PegDecision::Play { card_id, .. } => {
+                        session.game.play_card(AI, card_id)?;
+                        (
+                            "Pegging play",
+                            Card::new(card_id).ok().into_iter().collect(),
+                            Some(score_count_components(&session.game.plays)),
+                        )
+                    }
+                };
             record_score_changes(
                 session,
                 score_before,
@@ -1630,8 +1917,7 @@ fn apply_action(
                     None,
                 );
             }
-            if let (Some(dealer), Some(dynamic)) =
-                (completed_hand_dealer, session.dynamic.as_mut())
+            if let (Some(dealer), Some(dynamic)) = (completed_hand_dealer, session.dynamic.as_mut())
             {
                 dynamic.complete_hand(dealer, score_snapshot(&session.game), session.seed);
             }
@@ -1876,10 +2162,12 @@ fn response_with_master_hint(
             let decision = recommend_discard_for_side(game, HUMAN, ModelId::Schell13, model_root)?;
             ("discard", decision.card_ids)
         }
-        Phase::Pegging => match recommend_peg_for_side(game, HUMAN, ModelId::Schell13, None, model_root)? {
-            PegDecision::Play { card_id, .. } => ("play", vec![card_id]),
-            PegDecision::Go => ("go", Vec::new()),
-        },
+        Phase::Pegging => {
+            match recommend_peg_for_side(game, HUMAN, ModelId::Schell13, None, model_root)? {
+                PegDecision::Play { card_id, .. } => ("play", vec![card_id]),
+                PegDecision::Go => ("go", Vec::new()),
+            }
+        }
         _ => return Err("Ace advice is not available for this decision.".to_string()),
     };
     let Some(body) = response.strip_suffix('}').map(str::to_string) else {
@@ -1945,8 +2233,23 @@ fn game_state_json(session: &Session) -> String {
     } else {
         "null".to_string()
     };
+    let dynamic_calibration = session
+        .dynamic
+        .as_ref()
+        .map(|dynamic| {
+            let complete_cycles = dynamic.profile().complete_cycles;
+            let provisional_handicap = dynamic.profile().ewma_handicap;
+            format!(
+                "{{\"started\":true,\"completeCycles\":{},\"minimumCycles\":{},\"complete\":{},\"provisionalHandicap\":{}}}",
+                complete_cycles,
+                MIN_COMPLETE_CYCLES,
+                complete_cycles >= MIN_COMPLETE_CYCLES,
+                provisional_handicap,
+            )
+        })
+        .unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"phase\":\"{}\",\"message\":\"{}\",\"log\":[],\"result\":{},\"handNumber\":{},\"scores\":{{\"human\":{},\"ai\":{}}},\"pegPositions\":{{\"human\":[{},{}],\"ai\":[{},{}]}},\"dealer\":\"{}\",\"firstDealer\":\"{}\",\"cribOwner\":\"{}\",\"turn\":{},\"count\":{},\"turnCard\":{},\"turnCardRevealed\":{},\"plays\":{},\"completedPlays\":{},\"peggingResetPending\":{},\"humanHand\":{},\"aiHandCount\":{},\"humanTable\":{},\"aiTable\":{},\"legalCardIds\":{},\"aiLegalCardIds\":{},\"canGo\":{},\"scoring\":{},\"cutForDeal\":{},\"analyticsEvents\":{}}}",
+        "{{\"phase\":\"{}\",\"message\":\"{}\",\"log\":[],\"result\":{},\"handNumber\":{},\"scores\":{{\"human\":{},\"ai\":{}}},\"pegPositions\":{{\"human\":[{},{}],\"ai\":[{},{}]}},\"dealer\":\"{}\",\"firstDealer\":\"{}\",\"cribOwner\":\"{}\",\"turn\":{},\"count\":{},\"turnCard\":{},\"turnCardRevealed\":{},\"plays\":{},\"completedPlays\":{},\"peggingResetPending\":{},\"humanHand\":{},\"aiHandCount\":{},\"humanTable\":{},\"aiTable\":{},\"legalCardIds\":{},\"aiLegalCardIds\":{},\"canGo\":{},\"scoring\":{},\"cutForDeal\":{},\"dynamicCalibration\":{},\"analyticsEvents\":{}}}",
         phase,
         json_escape(&message_for(session)),
         result_json(session),
@@ -1976,6 +2279,7 @@ fn game_state_json(session: &Session) -> String {
         phase == "pegging" && game.current_player() == HUMAN && game.legal_cards(HUMAN).is_empty(),
         scoring,
         cut_for_deal,
+        dynamic_calibration,
         analytics_events_json(session),
     )
 }
@@ -2672,7 +2976,8 @@ fn save_session(server: &Server, body: &str) -> Response {
 
 fn load_session(server: &Server, body: &str) -> Response {
     let tag = json_string(body, "tag").unwrap_or_default();
-    let requested_model = json_string(body, "opponent").and_then(|value| ModelId::from_str(&value).ok());
+    let requested_model =
+        json_string(body, "opponent").and_then(|value| ModelId::from_str(&value).ok());
     let result = (|| -> Result<String, String> {
         let mut app = server
             .state
@@ -2793,7 +3098,8 @@ fn upload_game(server: &Server, body: &str) -> Response {
             let _ = persist_uploads(&server.data_dir, &app.uploads);
             return Err(error);
         }
-        app.leaderboard_summary = leaderboard_summary_json(&app.uploads);
+        app.leaderboard_summary =
+            leaderboard_summary_json_for_data_dir(&app.uploads, &server.data_dir);
         Ok((is_new, app.leaderboard_summary.clone()))
     })();
     match result {
@@ -2973,6 +3279,52 @@ struct PlayerTotals {
     errors: i32,
 }
 
+const STATS_OPPONENT_FAMILIES: [&str; 6] =
+    ["master", "human", "easy", "tough", "grandmaster", "dynamic"];
+
+fn stats_opponent_family(model: &str) -> &'static str {
+    let normalized = model.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "myrmidon-5" => "easy",
+        "schell_table-peg_table-9.1" | "schell_table-peg_table-9.11" => "tough",
+        value if value == "human" || value.starts_with("human:") => "human",
+        value if value.contains("grandmaster") => "grandmaster",
+        value if value.contains("dynamic") => "dynamic",
+        _ => "master",
+    }
+}
+
+fn add_upload_to_player_totals(total: &mut PlayerTotals, upload: &UploadedGame) {
+    total.games += 1;
+    total.human_scoring.add(&upload.human_scoring);
+    total.ai_scoring.add(&upload.ai_scoring);
+    if upload.human_scoring.has_opportunities() || upload.ai_scoring.has_opportunities() {
+        total.scoring_games += 1;
+    }
+    if upload.analyzed {
+        total.analyzed_games += 1;
+    }
+    total.errors += upload.errors;
+    let won = upload.winner.as_deref() == Some("human");
+    total.margin_total += upload.human_score - upload.ai_score;
+    if won {
+        total.wins += 1;
+        total.points += if upload.result == "skunk" || upload.result == "double-skunk" {
+            2
+        } else {
+            1
+        };
+        if upload.result == "skunk" || upload.result == "double-skunk" {
+            total.skunks += 1;
+        }
+    } else {
+        total.losses += 1;
+        if upload.result == "skunk" || upload.result == "double-skunk" {
+            total.skunked += 1;
+        }
+    }
+}
+
 struct LeaderboardWin {
     player: String,
     margin: i32,
@@ -2991,40 +3343,42 @@ fn leaderboard_json(server: &Server) -> Result<String, String> {
     Ok(app.leaderboard_summary.clone())
 }
 
+#[cfg(test)]
 fn leaderboard_summary_json(uploads: &HashMap<String, UploadedGame>) -> String {
+    leaderboard_summary_json_with_handicaps(uploads, &HashMap::new())
+}
+
+fn leaderboard_summary_json_for_data_dir(
+    uploads: &HashMap<String, UploadedGame>,
+    data_dir: &Path,
+) -> String {
+    let handicaps = people::handicap_summaries(data_dir).unwrap_or_else(|error| {
+        eprintln!("Player handicaps were not loaded for the leaderboard: {error}");
+        HashMap::new()
+    });
+    leaderboard_summary_json_with_handicaps(uploads, &handicaps)
+}
+
+fn leaderboard_summary_json_with_handicaps(
+    uploads: &HashMap<String, UploadedGame>,
+    handicaps: &HashMap<String, Value>,
+) -> String {
     let mut totals: HashMap<String, PlayerTotals> = HashMap::new();
+    let mut totals_by_opponent: HashMap<&'static str, HashMap<String, PlayerTotals>> =
+        HashMap::new();
     let mut best_wins = Vec::new();
     for upload in uploads.values() {
-        let total = totals.entry(upload.player.clone()).or_default();
-        total.games += 1;
-        total.human_scoring.add(&upload.human_scoring);
-        total.ai_scoring.add(&upload.ai_scoring);
-        if upload.human_scoring.has_opportunities() || upload.ai_scoring.has_opportunities() {
-            total.scoring_games += 1;
-        }
-        if upload.analyzed {
-            total.analyzed_games += 1;
-        }
-        total.errors += upload.errors;
+        add_upload_to_player_totals(totals.entry(upload.player.clone()).or_default(), upload);
+        add_upload_to_player_totals(
+            totals_by_opponent
+                .entry(stats_opponent_family(&upload.model))
+                .or_default()
+                .entry(upload.player.clone())
+                .or_default(),
+            upload,
+        );
         let won = upload.winner.as_deref() == Some("human");
         let margin = upload.human_score - upload.ai_score;
-        total.margin_total += margin;
-        if won {
-            total.wins += 1;
-            total.points += if upload.result == "skunk" || upload.result == "double-skunk" {
-                2
-            } else {
-                1
-            };
-            if upload.result == "skunk" || upload.result == "double-skunk" {
-                total.skunks += 1;
-            }
-        } else {
-            total.losses += 1;
-            if upload.result == "skunk" || upload.result == "double-skunk" {
-                total.skunked += 1;
-            }
-        }
         if won {
             best_wins.push(LeaderboardWin {
                 player: upload.player.clone(),
@@ -3040,6 +3394,32 @@ fn leaderboard_summary_json(uploads: &HashMap<String, UploadedGame>) -> String {
     let mut rows = totals.into_iter().collect::<Vec<_>>();
     rows.sort_by(compare_leaderboard_players);
     let player_stats = leaderboard_player_json(&rows);
+    let player_stats_by_opponent = STATS_OPPONENT_FAMILIES
+        .iter()
+        .map(|family| {
+            let mut family_rows = totals_by_opponent
+                .remove(family)
+                .unwrap_or_default()
+                .into_iter()
+                .collect::<Vec<_>>();
+            family_rows.sort_by(compare_leaderboard_players);
+            format!("\"{}\":[{}]", family, leaderboard_player_json(&family_rows))
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut handicap_rows = handicaps.iter().collect::<Vec<_>>();
+    handicap_rows.sort_by(|(left, _), (right, _)| left.cmp(right));
+    let handicap_json = handicap_rows
+        .into_iter()
+        .map(|(player, handicap)| {
+            format!(
+                "\"{}\":{}",
+                json_escape(player),
+                serde_json::to_string(handicap).unwrap_or_else(|_| "null".to_string())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     let mut skunk_rows = rows
         .iter()
         .filter(|(_, total)| total.skunks > 0)
@@ -3076,10 +3456,12 @@ fn leaderboard_summary_json(uploads: &HashMap<String, UploadedGame>) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"generatedAt\":\"{}\",\"source\":\"rust-api-tsv\",\"model\":\"historical\",\"games\":{},\"playerStats\":[{}],\"bestWinRate\":[{}],\"winRate14_3\":[{}],\"bestWins\":[{}],\"mostSkunks\":[{}]}}",
+        "{{\"generatedAt\":\"{}\",\"source\":\"rust-api-tsv\",\"model\":\"historical\",\"games\":{},\"playerStats\":[{}],\"playerStatsByOpponent\":{{{}}},\"playerHandicaps\":{{{}}},\"bestWinRate\":[{}],\"winRate14_3\":[{}],\"bestWins\":[{}],\"mostSkunks\":[{}]}}",
         isoish_now(),
         uploads.len(),
         player_stats,
+        player_stats_by_opponent,
+        handicap_json,
         player_stats,
         player_stats,
         best_wins_json,
@@ -3087,17 +3469,32 @@ fn leaderboard_summary_json(uploads: &HashMap<String, UploadedGame>) -> String {
     )
 }
 
-/// Rank by the score percentage shown in the UI (leaderboard points per game),
-/// never by accumulated points.  Cross multiplication keeps the comparison
-/// exact and lets equal percentages fall through to other quality measures.
+fn leaderboard_weighted_results(total: &PlayerTotals) -> i64 {
+    i64::from(total.points + total.losses + total.skunked)
+}
+
+fn leaderboard_score(total: &PlayerTotals) -> f64 {
+    let weighted_results = leaderboard_weighted_results(total);
+    if weighted_results > 0 {
+        f64::from(total.points) / weighted_results as f64
+    } else {
+        0.0
+    }
+}
+
+/// Rank by (wins + skunks) / (wins + skunks + losses + skunked).
+/// Cross multiplication keeps the comparison exact and lets equal scores fall
+/// through to ordinary win rate, average margin, then player name.
 fn compare_leaderboard_players(
     (left_name, left): &(String, PlayerTotals),
     (right_name, right): &(String, PlayerTotals),
 ) -> std::cmp::Ordering {
+    let left_weighted_results = leaderboard_weighted_results(left).max(1);
+    let right_weighted_results = leaderboard_weighted_results(right).max(1);
     let left_games = i64::from(left.games.max(1));
     let right_games = i64::from(right.games.max(1));
-    (i64::from(right.points) * left_games)
-        .cmp(&(i64::from(left.points) * right_games))
+    (i64::from(right.points) * left_weighted_results)
+        .cmp(&(i64::from(left.points) * right_weighted_results))
         .then_with(|| {
             (i64::from(right.wins) * left_games).cmp(&(i64::from(left.wins) * right_games))
         })
@@ -3117,7 +3514,7 @@ where
             let (player, total) = row.borrow();
             let games = total.games.max(1) as f64;
             format!(
-                "{{\"player\":\"{}\",\"games\":{},\"wins\":{},\"losses\":{},\"skunks\":{},\"skunked\":{},\"leaderboardPoints\":{},\"leaderboardPointsPerGame\":{:.3},\"winRate\":{:.3},\"avgMargin\":{:.3},\"scoringGames\":{},\"analyzedGames\":{},\"errors\":{},\"humanScoring\":{},\"aiScoring\":{}}}",
+                "{{\"player\":\"{}\",\"games\":{},\"wins\":{},\"losses\":{},\"skunks\":{},\"skunked\":{},\"leaderboardPoints\":{},\"leaderboardScore\":{:.6},\"leaderboardPointsPerGame\":{:.6},\"winRate\":{:.3},\"avgMargin\":{:.3},\"scoringGames\":{},\"analyzedGames\":{},\"errors\":{},\"humanScoring\":{},\"aiScoring\":{}}}",
                 json_escape(player),
                 total.games,
                 total.wins,
@@ -3125,7 +3522,8 @@ where
                 total.skunks,
                 total.skunked,
                 total.points,
-                total.points as f64 / games,
+                leaderboard_score(total),
+                leaderboard_score(total),
                 total.wins as f64 / games,
                 total.margin_total as f64 / games,
                 total.scoring_games,
@@ -3433,18 +3831,22 @@ mod tests {
         let master = game_action(
             &server,
             &json!({"action": "new", "opponent": MODEL_13_0, "tag": "Garrett"}).to_string(),
+            None,
         );
         assert_eq!(master.status, 200);
         let master_response = serde_json::from_str::<Value>(&master.body).unwrap();
         let master_game_id = master_response["snapshot"]["gameId"].as_str().unwrap();
         let cut = game_action(
             &server,
-            &json!({"action": "cut-for-deal", "gameId": master_game_id, "tag": "Garrett"}).to_string(),
+            &json!({"action": "cut-for-deal", "gameId": master_game_id, "tag": "Garrett"})
+                .to_string(),
+            None,
         );
         assert_eq!(cut.status, 200);
         let easy = game_action(
             &server,
             &json!({"action": "new", "opponent": MYRMIDON_5, "tag": "Garrett"}).to_string(),
+            None,
         );
         assert_eq!(easy.status, 200);
         let response = serde_json::from_str::<Value>(&easy.body).unwrap();
@@ -3453,6 +3855,7 @@ mod tests {
         let resumed_master = game_action(
             &server,
             &json!({"action": "new", "opponent": MODEL_13_0, "tag": "Garrett"}).to_string(),
+            None,
         );
         let resumed = serde_json::from_str::<Value>(&resumed_master.body).unwrap();
         assert_eq!(resumed["snapshot"]["gameId"], master_game_id);
@@ -3460,11 +3863,13 @@ mod tests {
         let forfeit = game_action(
             &server,
             &json!({"action": "forfeit", "gameId": master_game_id, "tag": "Garrett"}).to_string(),
+            None,
         );
         assert_eq!(forfeit.status, 200);
         let replacement_master = game_action(
             &server,
             &json!({"action": "new", "opponent": MODEL_13_0, "tag": "Garrett"}).to_string(),
+            None,
         );
         let replacement = serde_json::from_str::<Value>(&replacement_master.body).unwrap();
         assert_ne!(replacement["snapshot"]["gameId"], master_game_id);
@@ -3501,14 +3906,14 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_uses_easy_until_complete_cycle_evidence_changes_its_profile() {
+    fn score_cycles_do_not_change_dynamic_decision_quality_profile() {
         let mut session = new_session_from_seed(ModelId::Dynamic, None, 0x1234_5678, 1);
         assert_eq!(session.decision_model(), ModelId::Myrmidon5);
 
         let dynamic = session.dynamic.as_mut().expect("dynamic state");
         assert!(!dynamic.complete_hand(HUMAN, [14, 10], session.seed));
         assert!(dynamic.complete_hand(AI, [28, 20], session.seed));
-        assert_eq!(dynamic.profile().complete_cycles, 1);
+        assert_eq!(dynamic.profile().complete_cycles, 0);
         assert_eq!(dynamic.profile().strength, 0);
     }
 
@@ -3609,6 +4014,69 @@ mod tests {
         assert!(summary.contains("\"player\":\"Kurtis\""));
         assert!(summary.contains("\"bestWins\":[{\"player\":\"Garrett\""));
         assert!(summary.contains("\"mostSkunks\":[{\"player\":\"Garrett\""));
+    }
+
+    #[test]
+    fn leaderboard_summary_groups_lifetime_stats_by_opponent_family() {
+        let uploads = HashMap::from([
+            (
+                "ace-loss".to_string(),
+                UploadedGame {
+                    game_id: "ace-loss".to_string(),
+                    player: "Garrett".to_string(),
+                    winner: Some("ai".to_string()),
+                    result: "regular".to_string(),
+                    human_score: 112,
+                    ai_score: 121,
+                    model: "schell_table-peg_table-13.0".to_string(),
+                    ended_at: "2026-09-01T00:00:00Z".to_string(),
+                    human_scoring: ScoringTotals::default(),
+                    ai_scoring: ScoringTotals::default(),
+                    analyzed: false,
+                    errors: 0,
+                },
+            ),
+            (
+                "easy-win".to_string(),
+                UploadedGame {
+                    game_id: "easy-win".to_string(),
+                    player: "Garrett".to_string(),
+                    winner: Some("human".to_string()),
+                    result: "skunk".to_string(),
+                    human_score: 121,
+                    ai_score: 88,
+                    model: "myrmidon-5".to_string(),
+                    ended_at: "2026-09-02T00:00:00Z".to_string(),
+                    human_scoring: ScoringTotals::default(),
+                    ai_scoring: ScoringTotals::default(),
+                    analyzed: false,
+                    errors: 0,
+                },
+            ),
+        ]);
+
+        let handicaps = HashMap::from([(
+            "Garrett".to_string(),
+            json!({
+                "wpPerDecision": -0.0125,
+                "cycles": 8,
+                "evaluatorVersion": "ace-13.0",
+            }),
+        )]);
+        let summary = serde_json::from_str::<Value>(&leaderboard_summary_json_with_handicaps(
+            &uploads, &handicaps,
+        ))
+        .unwrap();
+        assert_eq!(summary["playerStats"][0]["games"], 2);
+        assert_eq!(summary["playerStatsByOpponent"]["master"][0]["games"], 1);
+        assert_eq!(summary["playerStatsByOpponent"]["master"][0]["losses"], 1);
+        assert_eq!(summary["playerStatsByOpponent"]["easy"][0]["games"], 1);
+        assert_eq!(summary["playerStatsByOpponent"]["easy"][0]["wins"], 1);
+        assert_eq!(summary["playerStatsByOpponent"]["easy"][0]["skunks"], 1);
+        assert_eq!(
+            summary["playerHandicaps"]["Garrett"]["wpPerDecision"],
+            -0.0125
+        );
     }
 
     #[test]
@@ -3729,22 +4197,26 @@ mod tests {
     }
 
     #[test]
-    fn leaderboard_ranks_quality_percentage_over_accumulated_points() {
+    fn leaderboard_ranks_by_weighted_wins_and_skunk_results() {
         let mut rows = vec![
             (
-                "Volume".to_string(),
+                "Skunk split".to_string(),
                 PlayerTotals {
-                    games: 40,
-                    wins: 20,
-                    points: 20,
+                    games: 2,
+                    wins: 1,
+                    losses: 1,
+                    skunks: 1,
+                    skunked: 1,
+                    points: 2,
                     ..PlayerTotals::default()
                 },
             ),
             (
-                "Quality".to_string(),
+                "Two of three".to_string(),
                 PlayerTotals {
                     games: 3,
                     wins: 2,
+                    losses: 1,
                     points: 2,
                     ..PlayerTotals::default()
                 },
@@ -3753,8 +4225,8 @@ mod tests {
 
         rows.sort_by(compare_leaderboard_players);
 
-        assert_eq!(rows[0].0, "Quality");
-        assert_eq!(rows[1].0, "Volume");
+        assert_eq!(rows[0].0, "Two of three");
+        assert_eq!(rows[1].0, "Skunk split");
     }
 
     #[test]
@@ -4024,7 +4496,7 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_counts_a_hand_only_after_its_crib_and_pairs_opposite_roles() {
+    fn scoring_progress_does_not_create_dynamic_calibration_evidence() {
         let mut session = new_session_from_seed(ModelId::Dynamic, None, 0x1234_5678, 1);
         session.waiting_for_deal_cut = false;
         session.turn_card_revealed = true;
@@ -4049,7 +4521,7 @@ mod tests {
         apply_action(&mut session, "continue-scoring", "{}", ".").unwrap();
         assert_eq!(
             session.dynamic.as_ref().unwrap().profile().complete_cycles,
-            1
+            0
         );
     }
 
@@ -4170,31 +4642,166 @@ mod tests {
         std::fs::remove_dir_all(data_dir).unwrap();
     }
 
+    fn completed_review(selected: f64, recommended: f64) -> CompletedDecisionReview {
+        CompletedDecisionReview {
+            selected_card_ids: vec![0],
+            recommended_card_ids: vec![1],
+            selected_ev: 0.0,
+            recommended_ev: 0.0,
+            selected_win_probability: Some(selected),
+            recommended_win_probability: Some(recommended),
+        }
+    }
+
+    fn calibration_review(
+        id: &str,
+        hand_number: u32,
+        human_is_dealer: bool,
+        kind: ReviewKind,
+        selected: f64,
+        recommended: f64,
+    ) -> SavedDecisionReview {
+        use cribbage_shadow_engine::game::PegTurn;
+
+        let mut game = CribbageGame::new_with_seed(hand_number, HUMAN);
+        game.hand_number = hand_number;
+        game.dealer = if human_is_dealer { HUMAN } else { AI };
+        game.pone = game.dealer.other();
+        let selected_card_ids = match kind {
+            ReviewKind::Discard => vec![0, 1],
+            ReviewKind::Peg => {
+                game.phase = Phase::Pegging;
+                game.turn = if human_is_dealer {
+                    PegTurn::Dealer
+                } else {
+                    PegTurn::Pone
+                };
+                game.count = 0;
+                game.player_mut(HUMAN).hand = vec![Card::new(0).unwrap(), Card::new(2).unwrap()];
+                vec![0]
+            }
+        };
+        SavedDecisionReview {
+            id: id.to_string(),
+            at: isoish_now(),
+            kind,
+            game,
+            selected_card_ids,
+            completed: Some(completed_review(selected, recommended)),
+        }
+    }
+
+    fn completed_hand_event(hand_number: u32, dealer: Side) -> SavedScoreEvent {
+        SavedScoreEvent {
+            id: format!("hand-{hand_number}-crib"),
+            at: isoish_now(),
+            hand_number,
+            player: dealer,
+            dealer,
+            category: SavedScoreCategory::Crib,
+            points: 0,
+            reason: "Crib".to_string(),
+            total_score: 0,
+            scores: [0, 0],
+            cards: Vec::new(),
+            turn_card: None,
+            count: None,
+            score_components: None,
+        }
+    }
+
+    fn reviewed_cycle_session(model: ModelId, id: &str) -> Session {
+        let mut session = new_session_from_seed(model, Some("Travis".to_string()), 17, 1);
+        session.id = id.to_string();
+        session.game.hand_number = 3;
+        session.score_events = vec![completed_hand_event(1, HUMAN), completed_hand_event(2, AI)];
+        session.decision_reviews = vec![
+            calibration_review("dealer-discard", 1, true, ReviewKind::Discard, 0.46, 0.50),
+            calibration_review("dealer-peg-1", 1, true, ReviewKind::Peg, 0.48, 0.50),
+            calibration_review("dealer-peg-2", 1, true, ReviewKind::Peg, 0.48, 0.50),
+            calibration_review("pone-discard", 2, false, ReviewKind::Discard, 0.49, 0.50),
+            calibration_review("pone-peg", 2, false, ReviewKind::Peg, 0.50, 0.50),
+        ];
+        session
+    }
+
     #[test]
-    fn completed_dynamic_profile_is_inherited_without_partial_cycle_state() {
+    fn reviewed_cycle_averages_each_role_and_decision_bucket_once() {
+        let session = reviewed_cycle_session(ModelId::Myrmidon5, "easy-cycle");
+        let samples = eligible_dynamic_cycle_samples(&session);
+
+        assert_eq!(samples.len(), 1);
+        let sample = samples[0].1;
+        assert!((sample.dealer_discard_regret - 0.04).abs() < 1e-12);
+        assert!((sample.dealer_pegging_regret - 0.02).abs() < 1e-12);
+        assert!((sample.pone_discard_regret - 0.01).abs() < 1e-12);
+        assert_eq!(sample.pone_pegging_regret, 0.0);
+        assert!((sample.handicap() - -0.0175).abs() < 1e-12);
+    }
+
+    #[test]
+    fn forced_unreliable_and_terminal_plays_are_not_calibration_evidence() {
+        use cribbage_shadow_engine::game::PegTurn;
+
+        let mut session = reviewed_cycle_session(ModelId::Schell911, "filtered-cycle");
+        let mut forced = calibration_review("forced", 1, true, ReviewKind::Peg, 0.0, 1.0);
+        forced.game.player_mut(HUMAN).hand = vec![Card::new(0).unwrap()];
+        let mut unreliable = calibration_review("unreliable", 1, true, ReviewKind::Peg, 0.0, 1.0);
+        unreliable
+            .completed
+            .as_mut()
+            .unwrap()
+            .selected_win_probability = None;
+        let mut terminal = calibration_review("terminal", 1, true, ReviewKind::Peg, 0.0, 1.0);
+        terminal.game.player_mut(HUMAN).score = 119;
+        terminal.game.plays = vec![Card::new(13).unwrap()];
+        terminal.game.play_owners = vec![AI];
+        terminal.game.count = 1;
+        terminal.game.turn = PegTurn::Dealer;
+        session
+            .decision_reviews
+            .extend([forced, unreliable, terminal]);
+
+        let sample = eligible_dynamic_cycle_samples(&session)[0].1;
+        assert!((sample.dealer_pegging_regret - 0.02).abs() < 1e-12);
+    }
+
+    #[test]
+    fn player_profile_is_idempotent_cross_opponent_and_evaluator_versioned() {
         let data_dir = std::env::temp_dir().join(format!(
             "cribbage-api-dynamic-profile-test-{}-{}",
             std::process::id(),
             unix_millis()
         ));
         initialize_game_database(&data_dir).unwrap();
-        let mut prior = new_session_from_seed(
-            ModelId::Dynamic,
-            Some("Travis".to_string()),
-            0x1234_5678,
-            1,
+        auth::initialize(&data_dir).unwrap();
+        let connection = open_game_database(&data_dir).unwrap();
+        let travis = connection
+            .query_row(
+                "SELECT id, username, display_name, email, password_hash
+                 FROM auth_users WHERE username = 'Travis'",
+                [],
+                auth::user_from_row,
+            )
+            .unwrap();
+        drop(connection);
+        let easy = reviewed_cycle_session(ModelId::Myrmidon5, "easy-cycle");
+        let tough = reviewed_cycle_session(ModelId::Schell911, "tough-cycle");
+        let first = sync_dynamic_player_profile(&data_dir, travis.id, &easy)
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.complete_cycles, 1);
+        assert!(sync_dynamic_player_profile(&data_dir, travis.id, &easy)
+            .unwrap()
+            .is_none());
+        let second = sync_dynamic_player_profile(&data_dir, travis.id, &tough)
+            .unwrap()
+            .unwrap();
+        assert_eq!(second.complete_cycles, 2);
+        assert_eq!(
+            load_dynamic_profile(&data_dir, travis.id).unwrap(),
+            Some(second.clone())
         );
-        let mut scores = [0, 0];
-        for _ in 0..6 {
-            scores[HUMAN.index()] += 24;
-            scores[AI.index()] += 20;
-            let dynamic = prior.dynamic.as_mut().unwrap();
-            assert!(!dynamic.complete_hand(HUMAN, scores, prior.seed));
-            assert!(dynamic.complete_hand(AI, scores, prior.seed));
-        }
-        prior.forfeited = true;
-        prior.event_sequence = 1;
-        persist_session_event(&data_dir, &prior, "test-complete", "{}").unwrap();
 
         let server = Server {
             state: Mutex::new(AppState::default()),
@@ -4204,19 +4811,104 @@ mod tests {
         let response = game_action(
             &server,
             &json!({"action": "new", "opponent": DYNAMIC, "tag": "Travis"}).to_string(),
+            Some(&travis),
         );
         assert_eq!(response.status, 200);
+        let response_json = serde_json::from_str::<Value>(&response.body).unwrap();
+        assert_eq!(
+            response_json["state"]["dynamicCalibration"]["started"],
+            true
+        );
+        assert_eq!(
+            response_json["state"]["dynamicCalibration"]["completeCycles"],
+            2
+        );
+        assert_eq!(
+            response_json["state"]["dynamicCalibration"]["minimumCycles"],
+            MIN_COMPLETE_CYCLES
+        );
+        assert_eq!(
+            response_json["state"]["dynamicCalibration"]["complete"],
+            false
+        );
+        assert_eq!(
+            response_json["state"]["dynamicCalibration"]["provisionalHandicap"].as_f64(),
+            Some(second.ewma_handicap)
+        );
         let app = server.state.lock().unwrap();
-        let current = app
+        let inherited = app
             .sessions
             .values()
-            .find(|session| !session.forfeited)
+            .next()
+            .unwrap()
+            .dynamic
+            .as_ref()
             .unwrap();
-        let state = current.dynamic.as_ref().unwrap();
-        assert_eq!(state.profile().complete_cycles, 6);
-        assert_eq!(state.profile().strength, 5);
-
+        assert!(inherited.profile().started_dynamic);
+        assert_eq!(inherited.profile().complete_cycles, second.complete_cycles);
+        assert_eq!(inherited.profile().ewma_handicap, second.ewma_handicap);
         drop(app);
+
+        let connection = open_game_database(&data_dir).unwrap();
+        connection
+            .execute(
+                "INSERT INTO dynamic_player_profiles
+                 (user_id, evaluator_version, profile_json, updated_at)
+                 VALUES (?1, 'older-ace', '{}', ?2)",
+                params![travis.id, isoish_now()],
+            )
+            .unwrap();
+        let profile_versions: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM dynamic_player_profiles WHERE user_id = ?1",
+                [travis.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(profile_versions, 2);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn starting_dynamic_persists_zero_cycle_calibration() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-dynamic-start-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        auth::initialize(&data_dir).unwrap();
+        let connection = open_game_database(&data_dir).unwrap();
+        let travis = connection
+            .query_row(
+                "SELECT id, username, display_name, email, password_hash
+                 FROM auth_users WHERE username = 'Travis'",
+                [],
+                auth::user_from_row,
+            )
+            .unwrap();
+        drop(connection);
+        let server = Server {
+            state: Mutex::new(AppState::default()),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+
+        let response = game_action(
+            &server,
+            &json!({"action": "new", "opponent": DYNAMIC, "tag": "Travis"}).to_string(),
+            Some(&travis),
+        );
+
+        assert_eq!(response.status, 200);
+        let response_json = serde_json::from_str::<Value>(&response.body).unwrap();
+        let calibration = &response_json["state"]["dynamicCalibration"];
+        assert_eq!(calibration["completeCycles"], 0);
+        assert_eq!(calibration["minimumCycles"], MIN_COMPLETE_CYCLES);
+        assert_eq!(calibration["provisionalHandicap"], 0.0);
+        let saved = load_dynamic_profile(&data_dir, travis.id).unwrap().unwrap();
+        assert!(saved.started_dynamic);
+        assert_eq!(saved.complete_cycles, 0);
         std::fs::remove_dir_all(data_dir).unwrap();
     }
 

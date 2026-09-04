@@ -13,7 +13,7 @@ describe("game log decision analysis", () => {
     expect(source).toContain("function analyzeGameDecisionReviews");
     expect(source).toContain("function analyzeAllLoggedGames");
     expect(source).toContain('serverJson<ServerGameActionResponse>("/api/game/review"');
-    expect(apiSource).toContain('("POST", "/api/game/review") => review_game');
+    expect(apiSource).toMatch(/\("POST", "\/api\/game\/review"\)\s*=>[\s\S]{0,80}review_game/);
   });
 
   it("retains review access when a report was opened from the log", () => {

@@ -40,6 +40,17 @@ def validate_spec(spec: dict) -> None:
         char not in "abcdefghijklmnopqrstuvwxyz0123456789-" for char in job_id
     ):
         raise ValueError("jobId must contain only lowercase letters, digits, and hyphens")
+    root = spec.get("jobRoot")
+    if root is not None and (
+        not isinstance(root, str) or not root or not Path(root).is_absolute()
+    ):
+        raise ValueError("jobRoot must be an absolute path")
+    for field in ("launchdPlistPath", "supervisorLogPath"):
+        value = spec.get(field)
+        if value is not None and (
+            not isinstance(value, str) or not value or not Path(value).is_absolute()
+        ):
+            raise ValueError(f"{field} must be an absolute path")
     stages = spec.get("stages")
     if not isinstance(stages, list) or not stages:
         raise ValueError("stages must be a non-empty list")
@@ -311,6 +322,7 @@ def launch_label(spec: dict) -> str:
 
 def make_plist(spec: dict, internal_runner: Path, internal_spec: Path) -> dict:
     root = job_root(spec)
+    supervisor_log = Path(spec.get("supervisorLogPath", root / "supervisor.log"))
     return {
         "Label": launch_label(spec),
         "ProgramArguments": [
@@ -322,16 +334,14 @@ def make_plist(spec: dict, internal_runner: Path, internal_spec: Path) -> dict:
         "RunAtLoad": True,
         "KeepAlive": False,
         "ProcessType": "Standard",
-        "StandardOutPath": str(root / "supervisor.log"),
-        "StandardErrorPath": str(root / "supervisor.log"),
+        "StandardOutPath": str(supervisor_log),
+        "StandardErrorPath": str(supervisor_log),
     }
 
 
 def install_job(spec_path: Path) -> int:
     spec = load_spec(spec_path)
     root = job_root(spec)
-    if root != INTERNAL_JOB_ROOT / spec["jobId"]:
-        raise ValueError(f"managed jobRoot must be {INTERNAL_JOB_ROOT / spec['jobId']}")
     root.mkdir(parents=True, exist_ok=True)
     if status_path(spec).exists():
         # Refuse to reuse a job ID for different work. A matching failed or
@@ -342,7 +352,10 @@ def install_job(spec_path: Path) -> int:
     internal_spec = root / "job.json"
     shutil.copy2(Path(__file__).resolve(), internal_runner)
     internal_spec.write_text(json.dumps(spec, indent=2, sort_keys=True) + "\n")
-    plist_path = root / f"{launch_label(spec)}.plist"
+    plist_path = Path(
+        spec.get("launchdPlistPath", root / f"{launch_label(spec)}.plist")
+    )
+    plist_path.parent.mkdir(parents=True, exist_ok=True)
     with plist_path.open("wb") as plist_file:
         plistlib.dump(make_plist(spec, internal_runner, internal_spec), plist_file)
     domain = f"gui/{os.getuid()}"

@@ -415,7 +415,8 @@ body[data-font-size="x-large"] {
 }
 
 .auth-help a,
-.auth-access a {
+.auth-access a,
+.auth-site-home {
   color: var(--entry-link);
 }
 
@@ -423,8 +424,23 @@ body[data-font-size="x-large"] {
   text-align: center;
 }
 
+.auth-site-home {
+  justify-self: center;
+  font-size: 13px;
+  font-weight: 750;
+  text-underline-offset: 3px;
+}
+
 body[data-auth="signed-out"] .app,
-body[data-auth="signed-out"] .splash-page {
+body[data-auth="signed-out"] .splash-page,
+body[data-auth="signed-out"] .pathway-page,
+body[data-auth="signed-out"] .people-page,
+body[data-auth="signed-out"] .people-presence,
+body[data-auth="checking"] .app,
+body[data-auth="checking"] .splash-page,
+body[data-auth="checking"] .pathway-page,
+body[data-auth="checking"] .people-page,
+body[data-auth="checking"] .people-presence {
   display: none !important;
 }
 
@@ -945,6 +961,60 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.player-identity-name {
+  min-width: 0;
+}
+
+.player-handicap {
+  position: relative;
+  z-index: 8;
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-inline-start: 0.3em;
+  color: color-mix(in srgb, currentColor 68%, #b78019);
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 0.72em;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  vertical-align: 0.08em;
+  cursor: help;
+}
+
+.player-handicap-tooltip {
+  position: fixed;
+  z-index: 200;
+  width: max-content;
+  max-width: min(260px, calc(100vw - 32px));
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--entry-accent, #b78019) 54%, var(--line));
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: var(--ink, #14231d);
+  box-shadow: 0 8px 22px rgba(5, 28, 21, 0.22);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.35;
+  pointer-events: none;
+  text-align: left;
+  white-space: normal;
+}
+
+.player-handicap-tooltip[hidden] {
+  display: none;
+}
+
+.player-handicap:focus-visible {
+  outline: 2px solid var(--entry-focus, #258460);
+  outline-offset: 2px;
+}
+
+.score .player-handicap {
+  font-size: 0.72em;
 }
 
 .dealer-button {
@@ -4960,6 +5030,41 @@ body[data-font-size="x-large"] .app[data-view="game"] {
   box-shadow: 0 12px 30px rgba(3, 42, 32, 0.12);
 }
 
+.dynamic-calibration-status {
+  position: relative;
+  z-index: 8;
+  grid-column: 1 / -1;
+  order: 3;
+  display: grid;
+  justify-items: center;
+  justify-self: center;
+  gap: 3px;
+  width: max-content;
+  margin-top: 8px;
+  padding: 5px 10px 6px;
+  border: 1px solid color-mix(in srgb, var(--game-gold) 72%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--game-navy) 91%, transparent);
+  color: var(--game-gold);
+  pointer-events: none;
+}
+
+.dynamic-calibration-status strong {
+  font-size: max(10px, var(--score-meta-small-font));
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  line-height: 1;
+}
+
+.dynamic-calibration-status span {
+  color: var(--game-cream);
+  font-size: max(9px, calc(var(--score-meta-small-font) * 0.84));
+  font-weight: 750;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
 .app[data-view="game"] .score {
   position: relative;
   z-index: 3;
@@ -7016,6 +7121,12 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   border-color: var(--entry-border-strong);
 }
 
+.pathway-choice-dynamic #dynamic-card-copy[data-state="calibrating"] {
+  color: var(--pathway-gold-deep);
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
 .pathway-card:focus-visible,
 .pathway-choice:focus-visible,
 .pathway-back:focus-visible {
@@ -7881,9 +7992,19 @@ body[data-auth="signed-in"] .pathway-login-note {
 }
 
 .people-list-copy strong {
-  overflow: hidden;
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  overflow: visible;
   color: var(--entry-heading);
   font-size: var(--access-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.people-list-copy strong .player-identity-name,
+.account-profile-link .player-identity-name {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -8061,6 +8182,12 @@ body[data-auth="signed-in"] .pathway-login-note {
   margin: 11px 0 0;
   color: #b9cdc4;
   font-size: var(--access-body);
+}
+
+.people-profile-handicap {
+  margin: 0.3rem 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
 }
 
 .people-profile-presence::before {
@@ -8479,9 +8606,11 @@ body[data-auth="signed-in"] .pathway-login-note {
 }
 
 .account-profile-link {
+  display: flex;
+  align-items: baseline;
   min-width: 0;
   padding: 4px 0;
-  overflow: hidden;
+  overflow: visible;
   border: 0;
   background: transparent;
   color: #cfe8de;
@@ -9628,6 +9757,15 @@ body[data-font-size="x-large"] .pathway-choice {
     grid-template-columns: 1fr;
   }
 
+  /* Keep mobile statistics to one page-level scroll. Nested, height-capped
+     result panes strand the filters above the rows and consume most of the
+     viewport; expanded lists let the controls leave the screen naturally. */
+  .stats-game-log .game-log-list,
+  .stats-leaderboard #stats-leaderboard-list {
+    max-height: none;
+    overflow: visible;
+  }
+
   .stats-game-log > header {
     grid-template-columns: 1fr;
   }
@@ -9656,7 +9794,7 @@ body[data-font-size="x-large"] .pathway-choice {
 @media (max-width: 640px) {
   .app[data-view="game"] > .scoreboard > .score > .crib-tray {
     position: absolute;
-    top: calc(100% + 7px);
+    top: calc(100% + var(--score-meta-small-font) + 20px);
     bottom: auto;
     z-index: 4;
     display: flex;

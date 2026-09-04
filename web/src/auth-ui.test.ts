@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const source = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
+const landing = readFileSync(new URL("../public/coming-soon.html", import.meta.url), "utf8");
 
 describe("account entry", () => {
   it("offers password, email code, reset, and invitation setup surfaces", () => {
@@ -17,8 +18,23 @@ describe("account entry", () => {
     expect(source).toContain('"/api/auth/invite/accept"');
   });
 
-  it("offers prospective players a direct way to request access", () => {
-    expect(html).toMatch(/Don’t have an account\?\s*<a href="mailto:founder@evenvision\.com\?subject=Strong%20Cribbage%20access%20request">Request access<\/a>/);
+  it("offers prospective players a direct way to request preview access", () => {
+    expect(html).toContain('href="https://strongcribbage.com/#request-access">Request preview access</a>');
+    expect(landing).toContain('id="request-access"');
+    for (const field of ["firstName", "lastName", "username", "email"]) {
+      expect(landing).toMatch(new RegExp(`<input[^>]+name="${field}"[^>]+required`));
+    }
+    expect(landing).toContain('/api/auth/access-request');
+  });
+
+  it("requires authentication before revealing any application area", () => {
+    expect(source).toContain("const AUTHENTICATION_ENABLED = true;");
+    expect(html).toContain('<body data-auth="checking">');
+    expect(css).toMatch(/body\[data-auth="checking"\] \.pathway-page/);
+    expect(css).toMatch(/body\[data-auth="signed-out"\] \.people-presence/);
+    expect(source).toContain("function locationAuthenticationRequest");
+    expect(source).toContain('kind: "table"');
+    expect(source).toContain('kind: "profile"');
   });
 
   it("keeps credentials in secure server sessions rather than browser storage", () => {

@@ -69,6 +69,7 @@ describe("contextual game notifications", () => {
     expect(html).toMatch(/id="continue-scoring"[^>]*>Next</);
     expect(mainSource).toMatch(/if \(!notice\) \{\s*maybeOpenScoreSummary\(\);/s);
     expect(mainSource).toMatch(/scoreSummaryQueue\.push\(summary\)/);
+    expect(mainSource).toContain("points: scoreSummaryPoints(event)");
   });
 
   it("uses each hand-score combination's exact cards for its animation", () => {

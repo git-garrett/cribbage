@@ -61,6 +61,15 @@ struct PasswordTokenRequest {
     password: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AccessRequest {
+    first_name: String,
+    last_name: String,
+    username: String,
+    email: String,
+}
+
 pub fn initialize(data_dir: &std::path::Path) -> Result<(), String> {
     let connection = open_game_database(data_dir)?;
     connection
@@ -104,7 +113,17 @@ pub fn initialize(data_dir: &std::path::Path) -> Result<(), String> {
                occurred_at INTEGER NOT NULL
              );
              CREATE INDEX IF NOT EXISTS auth_rate_events_lookup
-               ON auth_rate_events(kind, subject, occurred_at DESC);",
+               ON auth_rate_events(kind, subject, occurred_at DESC);
+             CREATE TABLE IF NOT EXISTS auth_access_requests (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               first_name TEXT NOT NULL,
+               last_name TEXT NOT NULL,
+               username TEXT NOT NULL,
+               email TEXT NOT NULL,
+               normalized_email TEXT NOT NULL UNIQUE,
+               requested_at INTEGER NOT NULL,
+               updated_at INTEGER NOT NULL
+             );",
         )
         .map_err(|error| format!("create authentication tables: {}", error))?;
 
@@ -152,14 +171,7 @@ pub fn auth_required() -> bool {
 }
 
 pub fn protects(path: &str) -> bool {
-    matches!(
-        path,
-        "/api/game/session/save"
-            | "/api/game/session/load"
-            | "/api/game/session/complete"
-            | "/api/game/review"
-            | "/api/games"
-    )
+    path.starts_with("/api/")
 }
 
 pub fn handle(server: &Server, request: &Request) -> Option<Response> {
@@ -170,6 +182,7 @@ pub fn handle(server: &Server, request: &Request) -> Option<Response> {
         ("POST", "/api/auth/otp/verify") => otp_verify(server, request),
         ("POST", "/api/auth/password/request") => password_request(server, request),
         ("POST", "/api/auth/password/reset") => password_reset(server, request),
+        ("POST", "/api/auth/access-request") => request_access(server, request),
         ("POST", "/api/auth/invite/send") => invite_send(server, request),
         ("POST", "/api/auth/invite/accept") => invite_accept(server, request),
         ("POST", "/api/auth/logout") => logout(server, request),
@@ -382,6 +395,99 @@ fn password_reset(server: &Server, request: &Request) -> Response {
         Ok(None) => invalid_link(),
         Err(error) => internal_error(error),
     }
+}
+
+fn request_access(server: &Server, request: &Request) -> Response {
+    let Ok(input) = parse::<AccessRequest>(request) else {
+        return bad_request("Complete all four fields to request preview access.");
+    };
+    let first_name = match validate_name("first name", &input.first_name) {
+        Ok(value) => value,
+        Err(message) => return bad_request(message),
+    };
+    let last_name = match validate_name("last name", &input.last_name) {
+        Ok(value) => value,
+        Err(message) => return bad_request(message),
+    };
+    let username = match validate_access_username(&input.username) {
+        Ok(value) => value,
+        Err(message) => return bad_request(message),
+    };
+    let email_address = match validate_access_email(&input.email) {
+        Ok(value) => value,
+        Err(message) => return bad_request(message),
+    };
+    let normalized_email = normalize_email(&email_address);
+    match rate_limited(
+        &server.data_dir,
+        "access-request",
+        &normalized_email,
+        24 * 60 * 60,
+        3,
+    ) {
+        Ok(true) => {
+            return generic_email_response(
+                "Your preview request is already on the list. We’ll contact you by email when a seat is available.",
+            )
+        }
+        Err(error) => return internal_error(error),
+        Ok(false) => {}
+    }
+
+    if let Err(error) = save_access_request(
+        &server.data_dir,
+        &first_name,
+        &last_name,
+        &username,
+        &email_address,
+    ) {
+        return internal_error(error);
+    }
+
+    if let Err(error) =
+        email::send_access_request(&first_name, &last_name, &username, &email_address)
+    {
+        eprintln!(
+            "Could not send preview access notification for {}: {}",
+            normalized_email, error
+        );
+    }
+    generic_email_response(
+        "Your preview request is on the list. We’ll contact you by email when a seat is available.",
+    )
+}
+
+fn save_access_request(
+    data_dir: &std::path::Path,
+    first_name: &str,
+    last_name: &str,
+    username: &str,
+    email: &str,
+) -> Result<(), String> {
+    let connection = open_game_database(data_dir)?;
+    let now = unix_seconds();
+    connection
+        .execute(
+            "INSERT INTO auth_access_requests
+         (first_name, last_name, username, email, normalized_email, requested_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+         ON CONFLICT(normalized_email) DO UPDATE SET
+           first_name = excluded.first_name,
+           last_name = excluded.last_name,
+           username = excluded.username,
+           email = excluded.email,
+           updated_at = excluded.updated_at",
+            params![
+                first_name,
+                last_name,
+                username,
+                email,
+                normalize_email(email),
+                now
+            ],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("save preview access request: {}", error))
 }
 
 fn invite_send(server: &Server, request: &Request) -> Response {
@@ -778,6 +884,58 @@ fn normalize_email(email: &str) -> String {
     email.trim().to_ascii_lowercase()
 }
 
+fn validate_name(label: &str, value: &str) -> Result<String, &'static str> {
+    let name = value
+        .trim()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if name.is_empty() || name.chars().count() > 80 {
+        return Err(match label {
+            "first name" => "Enter your first name.",
+            _ => "Enter your last name.",
+        });
+    }
+    if name.chars().any(char::is_control) {
+        return Err("Names cannot contain control characters.");
+    }
+    Ok(name)
+}
+
+fn validate_access_username(value: &str) -> Result<String, &'static str> {
+    let username = value
+        .trim()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !(2..=28).contains(&username.chars().count()) {
+        return Err("Use 2 to 28 characters for your username.");
+    }
+    if !username
+        .chars()
+        .all(|character| character.is_alphanumeric() || matches!(character, ' ' | '-' | '_' | '\''))
+    {
+        return Err(
+            "Usernames can use letters, numbers, spaces, apostrophes, hyphens, and underscores.",
+        );
+    }
+    Ok(username)
+}
+
+fn validate_access_email(value: &str) -> Result<String, &'static str> {
+    let email = value.trim();
+    let parts = email.split('@').collect::<Vec<_>>();
+    if email.len() > 254
+        || parts.len() != 2
+        || parts[0].is_empty()
+        || !parts[1].contains('.')
+        || email.chars().any(char::is_whitespace)
+    {
+        return Err("Enter a valid email address.");
+    }
+    Ok(email.to_string())
+}
+
 fn public_origin() -> String {
     env::var("CRIBBAGE_PUBLIC_ORIGIN")
         .unwrap_or_else(|_| "https://cribbage.strongcribbage.com".to_string())
@@ -979,6 +1137,68 @@ mod tests {
             .unwrap();
         assert_eq!(rows, 7);
         assert_eq!(edited, 1);
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn application_api_routes_are_private_but_health_is_public() {
+        assert!(protects("/api/model"));
+        assert!(protects("/api/leaderboard"));
+        assert!(protects("/api/people/online"));
+        assert!(!protects("/health"));
+    }
+
+    #[test]
+    fn preview_access_fields_are_validated_and_normalized() {
+        assert_eq!(validate_name("first name", "  Ada  ").unwrap(), "Ada");
+        assert_eq!(
+            validate_access_username("  Countess  of  Lovelace ").unwrap(),
+            "Countess of Lovelace"
+        );
+        assert_eq!(
+            validate_access_email("  ada@example.com ").unwrap(),
+            "ada@example.com"
+        );
+        assert!(validate_name("last name", "   ").is_err());
+        assert!(validate_access_username("A").is_err());
+        assert!(validate_access_username("Ada!Lovelace").is_err());
+        assert!(validate_access_email("ada@example").is_err());
+    }
+
+    #[test]
+    fn preview_access_requests_are_durable_and_update_by_email() {
+        let server = test_server("preview-request");
+        save_access_request(
+            &server.data_dir,
+            "Ada",
+            "Lovelace",
+            "Analytical Engine",
+            "Ada@Example.com",
+        )
+        .unwrap();
+        save_access_request(
+            &server.data_dir,
+            "Augusta Ada",
+            "Lovelace",
+            "First Programmer",
+            "ada@example.com",
+        )
+        .unwrap();
+
+        let connection = open_game_database(&server.data_dir).unwrap();
+        let request: (i64, String, String, String) = connection
+            .query_row(
+                "SELECT COUNT(*), first_name, username, normalized_email
+                 FROM auth_access_requests",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(request.0, 1);
+        assert_eq!(request.1, "Augusta Ada");
+        assert_eq!(request.2, "First Programmer");
+        assert_eq!(request.3, "ada@example.com");
+        drop(connection);
         std::fs::remove_dir_all(server.data_dir).unwrap();
     }
 

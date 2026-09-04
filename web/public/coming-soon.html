@@ -3,12 +3,12 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Strong Cribbage - Coming Soon</title>
-    <meta name="description" content="Strong Cribbage is building a sharper cribbage training engine. The public site is coming soon.">
+    <title>Strong Cribbage - Private Preview</title>
+    <meta name="description" content="Request access to the Strong Cribbage private preview or sign in if you already have a seat.">
     <meta name="theme-color" content="#e8eee9" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#063d30" media="(prefers-color-scheme: dark)">
     <meta property="og:title" content="Strong Cribbage">
-    <meta property="og:description" content="A sharper cribbage training engine is coming soon.">
+    <meta property="og:description" content="Request access to the Strong Cribbage private preview.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://strongcribbage.com/">
     <meta property="og:image" content="https://strongcribbage.com/social-preview-counted-monogram.png">
@@ -18,7 +18,7 @@
     <meta property="og:image:alt" content="Strong Cribbage — Play. Learn. Master the game.">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Strong Cribbage">
-    <meta name="twitter:description" content="A sharper cribbage training engine is coming soon.">
+    <meta name="twitter:description" content="Request access to the Strong Cribbage private preview.">
     <meta name="twitter:image" content="https://strongcribbage.com/social-preview-counted-monogram.png">
     <meta name="twitter:image:alt" content="Strong Cribbage — Play. Learn. Master the game.">
     <link rel="icon" type="image/svg+xml" href="/brand/strong-cribbage-mark-micro.svg">
@@ -40,6 +40,11 @@
         --muted: #52615b;
         --gold: #8f6720;
         --border: #c5a85d;
+        --field-border: #99afa5;
+        --field: #fffefb;
+        --status: #f3eddf;
+        --danger: #7c2824;
+        --focus: #1d7fd1;
         --shadow: 0 26px 58px rgba(20, 35, 30, 0.16);
         --button-text: #fbf8f0;
       }
@@ -55,6 +60,11 @@
           --muted: #cfe8de;
           --gold: #e8c575;
           --border: rgba(232, 197, 117, 0.72);
+          --field-border: rgba(207, 232, 222, 0.44);
+          --field: #0d2a24;
+          --status: rgba(232, 197, 117, 0.11);
+          --danger: #ff9d98;
+          --focus: #70bdff;
           --shadow: 0 26px 58px rgba(2, 28, 21, 0.38);
         }
       }
@@ -81,21 +91,19 @@
       }
 
       main {
-        width: min(100%, 780px);
+        width: min(100%, 980px);
         display: grid;
-        justify-items: center;
-        gap: 20px;
-        padding: clamp(28px, 7vw, 58px);
+        gap: clamp(22px, 4vw, 34px);
+        padding: clamp(26px, 5vw, 52px);
         border: 1px solid var(--border);
         border-radius: 28px;
         background: var(--panel);
         box-shadow: var(--shadow);
-        text-align: center;
       }
 
       .homepage-logo {
         display: block;
-        width: min(100%, 510px);
+        width: min(100%, 430px);
       }
 
       .homepage-logo img {
@@ -125,16 +133,79 @@
         text-transform: uppercase;
       }
 
-      p {
-        max-width: 560px;
-        margin: 0;
-        color: var(--muted);
-        font-size: clamp(18px, 4vw, 24px);
-        line-height: 1.35;
+      .peg-track {
+        display: grid;
+        grid-template-columns: 1fr repeat(4, 10px) 1fr;
+        align-items: center;
+        gap: 9px;
+        color: var(--gold);
       }
 
-      a {
-        min-width: min(100%, 310px);
+      .peg-track::before,
+      .peg-track::after {
+        height: 1px;
+        background: var(--border);
+        content: "";
+      }
+
+      .peg-track i {
+        width: 10px;
+        height: 10px;
+        border: 2px solid currentColor;
+        border-radius: 50%;
+      }
+
+      .preview-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 0.9fr) minmax(340px, 1.1fr);
+        gap: clamp(28px, 6vw, 64px);
+        align-items: start;
+      }
+
+      .preview-copy,
+      .request-form,
+      .request-form header {
+        display: grid;
+      }
+
+      .preview-copy {
+        gap: 16px;
+        padding-top: 8px;
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      h1,
+      h2 {
+        color: var(--text);
+        font-family: Georgia, "Times New Roman", serif;
+      }
+
+      h1 {
+        max-width: 450px;
+        font-size: clamp(38px, 6vw, 60px);
+        line-height: 0.98;
+      }
+
+      h2 {
+        font-size: clamp(28px, 4vw, 38px);
+        line-height: 1.05;
+      }
+
+      .preview-copy > p:not(.eyebrow),
+      .request-form header p {
+        color: var(--muted);
+        font-size: 17px;
+        line-height: 1.5;
+      }
+
+      .preview-link {
+        width: fit-content;
+        min-width: min(100%, 250px);
         min-height: 56px;
         display: inline-flex;
         align-items: center;
@@ -147,6 +218,110 @@
         font-weight: 900;
         text-decoration: none;
       }
+
+      .request-form {
+        gap: 15px;
+        padding: clamp(20px, 4vw, 30px);
+        border: 1px solid var(--field-border);
+        border-radius: 20px;
+        background: color-mix(in srgb, var(--field) 84%, transparent);
+      }
+
+      .request-form header {
+        gap: 7px;
+        margin-bottom: 3px;
+      }
+
+      .name-fields {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        color: var(--text);
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      input {
+        width: 100%;
+        min-height: 50px;
+        padding: 10px 13px;
+        border: 1px solid var(--field-border);
+        border-radius: 10px;
+        background: var(--field);
+        color: var(--text);
+        font: 17px/1.2 Arial, Helvetica, sans-serif;
+      }
+
+      input:focus-visible,
+      button:focus-visible,
+      .preview-link:focus-visible {
+        outline: 3px solid color-mix(in srgb, var(--focus) 28%, transparent);
+        outline-offset: 2px;
+        border-color: var(--focus);
+      }
+
+      button {
+        min-height: 54px;
+        border: 2px solid var(--gold);
+        border-radius: 999px;
+        background: var(--green);
+        color: var(--button-text);
+        font: 900 16px/1 Arial, Helvetica, sans-serif;
+        cursor: pointer;
+      }
+
+      button:disabled,
+      input:disabled {
+        cursor: wait;
+        opacity: 0.66;
+      }
+
+      .form-status {
+        min-height: 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .form-status:not(:empty) {
+        padding: 11px 13px;
+        border-left: 4px solid var(--gold);
+        background: var(--status);
+      }
+
+      .form-status[data-error="true"] {
+        border-left-color: var(--danger);
+        color: var(--danger);
+      }
+
+      @media (max-width: 760px) {
+        .preview-layout {
+          grid-template-columns: 1fr;
+        }
+
+        .preview-copy {
+          padding-top: 0;
+        }
+      }
+
+      @media (max-width: 460px) {
+        body {
+          padding: 10px;
+        }
+
+        main {
+          border-radius: 22px;
+        }
+
+        .name-fields {
+          grid-template-columns: 1fr;
+        }
+      }
     </style>
   </head>
   <body>
@@ -156,9 +331,77 @@
         <img src="/brand/strong-cribbage-lockup-light.svg" alt="">
       </picture>
       <h1 class="visually-hidden">Strong Cribbage</h1>
-      <p class="eyebrow">Coming soon</p>
-      <p>Strong cribbage is going to be the strongest cribbage playing app in the App Store. Version 13.0 is already very good. It’s going to get better. Soon we’ll add training and teaching features. For now you can play the preview.</p>
-      <a href="https://cribbage.strongcribbage.com/">Play the preview</a>
+      <div class="peg-track" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <div class="preview-layout">
+        <section class="preview-copy" aria-labelledby="preview-title">
+          <p class="eyebrow">Private preview</p>
+          <h1 id="preview-title">Request a seat at the table.</h1>
+          <p>Strong Cribbage is open to invited preview players while we sharpen the game and build its teaching tools. Request access and we’ll contact you when a seat is available.</p>
+          <a class="preview-link" href="https://cribbage.strongcribbage.com/">Already invited? Log in</a>
+        </section>
+        <form id="request-access" class="request-form">
+          <header>
+            <p class="eyebrow">Join the preview</p>
+            <h2>Request access</h2>
+            <p>Tell us who you’d like to be at the table.</p>
+          </header>
+          <div class="name-fields">
+            <label>
+              <span>First name</span>
+              <input name="firstName" type="text" autocomplete="given-name" maxlength="80" required>
+            </label>
+            <label>
+              <span>Last name</span>
+              <input name="lastName" type="text" autocomplete="family-name" maxlength="80" required>
+            </label>
+          </div>
+          <label>
+            <span>Username</span>
+            <input name="username" type="text" autocomplete="username" minlength="2" maxlength="28" required>
+          </label>
+          <label>
+            <span>Email</span>
+            <input name="email" type="email" inputmode="email" autocomplete="email" maxlength="254" required>
+          </label>
+          <button type="submit">Request preview access</button>
+          <p id="request-access-status" class="form-status" role="status" aria-live="polite"></p>
+        </form>
+      </div>
     </main>
+    <script>
+      const form = document.querySelector("#request-access");
+      const status = document.querySelector("#request-access-status");
+      const applicationOrigin = location.hostname.endsWith("strongcribbage.com")
+        ? "https://cribbage.strongcribbage.com"
+        : "";
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!form.reportValidity()) return;
+        const controls = form.querySelectorAll("input, button");
+        const values = Object.fromEntries(new FormData(form).entries());
+        controls.forEach((control) => { control.disabled = true; });
+        status.dataset.error = "false";
+        status.textContent = "Sending your request…";
+        try {
+          const response = await fetch(`${applicationOrigin}/api/auth/access-request`, {
+            method: "POST",
+            headers: { "accept": "application/json", "content-type": "application/json" },
+            body: JSON.stringify(values),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload.error || "Your request could not be sent. Please try again.");
+          form.reset();
+          status.textContent = payload.message || "Your preview request is on the list. We’ll contact you by email when a seat is available.";
+        } catch (error) {
+          status.dataset.error = "true";
+          status.textContent = error instanceof Error
+            ? error.message
+            : "Your request could not be sent. Please try again.";
+        } finally {
+          controls.forEach((control) => { control.disabled = false; });
+        }
+      });
+    </script>
   </body>
 </html>

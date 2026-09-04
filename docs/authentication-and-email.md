@@ -5,6 +5,12 @@ an `HttpOnly`, `Secure`, `SameSite=Lax` session cookie; it does not store bearer
 tokens. The server replaces client-supplied game tags with the authenticated
 account name before saving or loading a game.
 
+The private preview requires a signed-in account for every application area and
+every application API. `/health` and the authentication endpoints remain public
+so the login, password recovery, invitation, and access-request flows can work.
+Deep links to games, player profiles, statistics, and human tables retain their
+destination while asking the visitor to sign in.
+
 Passwords are hashed with Argon2id. One-time codes, password-reset links, and
 invitation links are random, hashed in SQLite with the deployment pepper,
 single-use, rate-limited, and time-limited. Email sign-in is a passwordless
@@ -31,6 +37,17 @@ password-reset email.
 Store production secrets in `/etc/cribbage/cribbage.env` as documented in
 `nanode-rocky-server-setup.md`. Never put SendGrid keys, the authentication
 pepper, or the invitation admin key in this repository.
+
+## Preview access requests
+
+The public homepage collects first name, last name, requested username, and
+email through `POST /api/auth/access-request`. Each request is stored durably in
+the `auth_access_requests` table before the notification email is attempted, so
+a temporary email-provider failure does not lose the request. Repeated requests
+from the same normalized email update that record and are rate-limited.
+
+Notifications go to `CRIBBAGE_ACCESS_REQUEST_TO` when set, then fall back to
+`CRIBBAGE_MAIL_REPLY_TO`. The applicant's address is used as the email reply-to.
 
 ## Sending an invitation
 

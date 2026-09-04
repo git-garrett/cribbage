@@ -29,7 +29,7 @@ describe("local pathway navigation", () => {
     ]) {
       expect(html).toContain(`data-pathway-destination="${destination}"`);
     }
-    expect(html).toContain("Adapts to your play and plays back at your skill.");
+    expect(html).toContain('id="dynamic-card-copy">Calibrate and get a handicap!</small>');
     expect(html).toContain("Find a Human Opponent");
     expect(html).toContain("Good for Learners");
     expect(html).toContain("Challenges Most Players");
@@ -147,6 +147,16 @@ describe("local pathway navigation", () => {
     expect(source).toMatch(/button\.dataset\.resumable === "true"[\s\S]*resumeGameFromSplash\(opponent\)/);
     expect(css).toMatch(/\.pathway-choice-resumable\s*\{[^}]*border-color:\s*var\(--pathway-gold-deep\)/s);
     expect(css).toMatch(/\.pathway-resume-status\s*\{[^}]*top:\s*18px[^}]*right:\s*20px[^}]*left:\s*auto/s);
+  });
+
+  it("shows Dynamic calibration status on the card and playing surface", () => {
+    expect(html).toContain('id="dynamic-calibration-status"');
+    expect(html).toContain("<strong>CALIBRATING</strong>");
+    expect(html).toContain('id="dynamic-calibration-handicap"');
+    expect(source).toContain("function renderDynamicCalibrationStatus");
+    expect(source).toContain("dynamicCardCopy(calibration, hasStartedGame)");
+    expect(css).toContain(".dynamic-calibration-status");
+    expect(css).toContain('#dynamic-card-copy[data-state="calibrating"]');
   });
 
   it("requires an account for Statistics, human games, Ace, and Dynamic", () => {

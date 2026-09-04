@@ -28,7 +28,7 @@
     <link rel="manifest" href="/site.webmanifest">
     <link rel="stylesheet" href="styles.css">
   </head>
-  <body>
+  <body data-auth="checking">
     <aside id="people-presence" class="people-presence" aria-label="Human players" hidden>
       <button id="people-presence-toggle" class="people-presence-toggle" type="button" aria-expanded="false" aria-controls="people-presence-panel">
         <span class="people-presence-pegs" aria-hidden="true"><i></i><i></i></span>
@@ -156,7 +156,7 @@
                 <button class="pathway-choice pathway-choice-dynamic" type="button" data-pathway-destination="dynamic">
                   <span>Adaptive opponent</span>
                   <strong>Dynamic</strong>
-                  <small>Adapts to your play and plays back at your skill.</small>
+                  <small id="dynamic-card-copy">Calibrate and get a handicap!</small>
                   <em class="pathway-resume-status" hidden>Resume</em>
                   <em class="pathway-login-note">Sign in required</em>
                 </button>
@@ -286,6 +286,7 @@
             <p class="people-eyebrow">Player profile</p>
             <h1 id="people-profile-title">Player</h1>
             <p id="people-profile-presence" class="people-profile-presence"></p>
+            <p id="people-profile-handicap" class="people-profile-handicap" hidden></p>
           </div>
           <button id="people-profile-play" class="people-primary-action" type="button" hidden>Play now</button>
         </article>
@@ -395,7 +396,7 @@
         </picture>
         <div class="auth-peg-track" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
         <div class="auth-heading">
-          <p class="auth-eyebrow">Invitation only · Ace</p>
+          <p class="auth-eyebrow">Strong Cribbage · Private preview</p>
           <h1 id="auth-title">Your seat is waiting.</h1>
           <p id="auth-intro">Sign in to continue your games and keep your results with your account.</p>
         </div>
@@ -411,7 +412,7 @@
           <button id="auth-password-submit" class="auth-primary" type="submit">Sign in</button>
           <button id="auth-code-request" class="auth-secondary" type="button">Email me a sign-in code</button>
           <button id="auth-forgot-password" class="auth-link" type="button">Forgot password?</button>
-          <p class="auth-access">Don’t have an account? <a href="mailto:founder@evenvision.com?subject=Strong%20Cribbage%20access%20request">Request access</a>.</p>
+          <p class="auth-access">Don’t have an account? <a href="https://strongcribbage.com/#request-access">Request preview access</a>.</p>
         </form>
         <button id="auth-cancel" class="auth-link auth-cancel" type="button" hidden>← Back</button>
         <form id="auth-otp-form" class="auth-form" hidden>
@@ -432,6 +433,7 @@
         </form>
         <p id="auth-status" class="auth-status" role="status" aria-live="polite"></p>
         <p class="auth-help">Need help with your account? <a href="mailto:founder@evenvision.com">Contact Strong Cribbage</a>.</p>
+        <a class="auth-site-home" href="https://strongcribbage.com/">Strong Cribbage home</a>
       </div>
     </section>
     <section id="splash-page" class="splash-page" aria-label="Strong Cribbage" hidden>
@@ -519,6 +521,10 @@
       </section>
 
       <section class="scoreboard">
+        <div id="dynamic-calibration-status" class="dynamic-calibration-status" role="status" hidden>
+          <strong>CALIBRATING</strong>
+          <span id="dynamic-calibration-handicap"></span>
+        </div>
         <div class="score">
           <span class="score-label"><span id="human-name" class="player-name">Player</span></span>
           <span id="human-dealer" class="dealer-button score-crib-marker" hidden>Crib</span>

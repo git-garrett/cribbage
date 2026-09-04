@@ -22,6 +22,15 @@ import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 import { maybeLoadAdSense } from "./adsense";
 import { circularTurnCutPresentation, createCircularBoard, updateCircularBoard } from "./circular-board";
 import { comparisonTone, type ComparisonTone } from "./comparison-difference";
+import {
+  DYNAMIC_CALIBRATING_LABEL,
+  dynamicCardCopy,
+  dynamicHandicapPointsCopy,
+  dynamicProvisionalHandicapCopy,
+  isDynamicCalibrating,
+  playerHandicapCopy,
+  type DynamicCalibration,
+} from "./dynamic-calibration";
 import { endGameAds } from "./end-game-ad";
 import { shouldAnimateScoringCards, shouldShowScoreBubble } from "./fast-counting-policy";
 import { singleGameReportRows } from "./game-report";
@@ -30,7 +39,7 @@ import {
   helpCountForGame,
   pendingAnalysisGameIds,
 } from "./game-analysis";
-import { rankLeaderboardWins } from "./leaderboard";
+import { leaderboardScore, rankLeaderboardPlayers, rankLeaderboardWins } from "./leaderboard";
 import { mergedLifetimeResults, type LifetimeScoringStats } from "./my-stats";
 import { myStatsTableRows } from "./my-stats-table";
 import { resumablePathwayDestinations } from "./pathway-resume";
@@ -40,11 +49,12 @@ import { resolveRemoteAiBase } from "./runtime-config";
 import { shouldRestoreSavedGameSurface } from "./resume-surface";
 import { isCoherentSavedGameState } from "./saved-game-state";
 import { scoringTitle } from "./scoring-title";
-import { analyticsForStatsOpponent } from "./stats-opponent";
+import { analyticsForStatsOpponent, statsOpponentForModel } from "./stats-opponent";
 import {
   handScoreNoticeParts,
   peggingScoreNoticeParts,
   scoreNoticeEmphasisCardIds,
+  scoreSummaryPoints,
   shouldAnnounceScoreEvent,
 } from "./score-notice-policy";
 import {
@@ -122,6 +132,7 @@ interface LeaderboardPlayer {
   skunks: number;
   skunked: number;
   leaderboardPoints?: number;
+  leaderboardScore?: number;
   leaderboardPointsPerGame?: number;
   winRate: number;
   avgMargin: number;
@@ -130,6 +141,12 @@ interface LeaderboardPlayer {
   errors?: number;
   humanScoring?: LifetimeScoringStats;
   aiScoring?: LifetimeScoringStats;
+}
+
+interface DynamicHandicapSummary {
+  wpPerDecision: number;
+  cycles: number;
+  evaluatorVersion: string;
 }
 
 interface LeaderboardWin {
@@ -148,6 +165,8 @@ interface LeaderboardSummarySource {
   model?: string;
   games: number;
   playerStats: LeaderboardPlayer[];
+  playerStatsByOpponent?: Partial<Record<MyStatsOpponent, LeaderboardPlayer[]>>;
+  playerHandicaps?: Record<string, DynamicHandicapSummary>;
   bestWinRate?: LeaderboardPlayer[];
   winRate14_3?: LeaderboardPlayer[];
   bestWins?: LeaderboardWin[];
@@ -184,6 +203,8 @@ const EMPTY_LEADERBOARD_SUMMARY: LeaderboardSummarySource = {
   model: "13.0 public",
   games: 0,
   playerStats: [],
+  playerStatsByOpponent: {},
+  playerHandicaps: {},
   winRate14_3: [],
   bestWins: [],
   mostSkunks: [],
@@ -213,6 +234,8 @@ const HINTS_ENABLED_STORAGE_KEY = "strong-cribbage.hintsEnabled.v1";
 const ERROR_NOTICES_ENABLED_STORAGE_KEY = "strong-cribbage.errorNoticesEnabled.v1";
 const DISMISSED_GAME_OVER_STORAGE_KEY = "strong-cribbage.dismissedGameOverId";
 const LEADERBOARD_CACHE_KEY = "strong-cribbage.leaderboard.v1";
+const PEOPLE_IDLE_MS = 15 * 60 * 1000;
+const PEOPLE_ACTIVITY_HEARTBEAT_MIN_MS = 1000;
 
 function normalizeAppFontSize(value: string | null): AppFontSize {
   return value === "large" || value === "x-large" ? value : "normal";
@@ -461,6 +484,8 @@ const els = {
   table: document.querySelector(".table") as HTMLElement,
   actions: document.querySelector(".app > .table .actions") as HTMLElement,
   scoreboard: document.querySelector(".app > .scoreboard") as HTMLElement,
+  dynamicCalibrationStatus: document.querySelector("#dynamic-calibration-status") as HTMLElement,
+  dynamicCalibrationHandicap: document.querySelector("#dynamic-calibration-handicap") as HTMLElement,
   played: document.querySelector(".app > .table > .played") as HTMLElement,
   aceTools: document.querySelector("#ace-tools") as HTMLElement,
   pathwayPage: document.querySelector("#pathway-page") as HTMLElement,
@@ -470,6 +495,7 @@ const els = {
   pathwayTargetButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-target]")],
   pathwayBackButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-back]")],
   pathwayDestinationButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-destination]")],
+  dynamicCardCopy: document.querySelector("#dynamic-card-copy") as HTMLElement,
   pathwayStatistics: document.querySelector("#pathway-statistics") as HTMLButtonElement,
   peoplePresence: document.querySelector("#people-presence") as HTMLElement,
   peoplePresenceToggle: document.querySelector("#people-presence-toggle") as HTMLButtonElement,
@@ -486,6 +512,7 @@ const els = {
   peopleProfileAvatar: document.querySelector("#people-profile-avatar") as HTMLElement,
   peopleProfileTitle: document.querySelector("#people-profile-title") as HTMLElement,
   peopleProfilePresence: document.querySelector("#people-profile-presence") as HTMLElement,
+  peopleProfileHandicap: document.querySelector("#people-profile-handicap") as HTMLElement,
   peopleProfilePlay: document.querySelector("#people-profile-play") as HTMLButtonElement,
   peopleProfileHeadToHead: document.querySelector("#people-profile-head-to-head") as HTMLElement,
   peopleProfileHeadToHeadGames: document.querySelector("#people-profile-head-to-head-games") as HTMLElement,
@@ -818,7 +845,7 @@ const LOCAL_QA_MODE = IS_VITE_DEV && LOCAL_NETWORK_MODE;
 const PATHWAY_NAV_ENABLED = SIMPLE_NETWORK_MODE && URL_PARAMS.get("pathway") !== "0";
 const PATHWAY_VIEW_PARAM = "pathwayView";
 const PATHWAY_HISTORY_STATE_KEY = "strongCribbagePathway";
-const AUTHENTICATION_ENABLED = FULL_APP_MODE || URL_PARAMS.get("auth") === "1";
+const AUTHENTICATION_ENABLED = true;
 const SIMPLE_NETWORK_LOCAL_AI_MODE = SIMPLE_NETWORK_MODE &&
   LOCAL_NETWORK_MODE &&
   (REMOTE_AI_DISABLED || (IS_VITE_DEV && !REMOTE_AI_EXPLICIT));
@@ -842,6 +869,8 @@ interface PeopleProfile {
   online: boolean;
   lookingForGame: boolean;
   isSelf: boolean;
+  dynamicCalibration?: DynamicCalibration;
+  dynamicHandicap?: DynamicHandicapSummary;
   headToHead?: PeopleHeadToHead;
 }
 
@@ -860,6 +889,7 @@ interface PeoplePlayer {
   avatarDataUrl: string | null;
   online?: boolean;
   lookingForGame?: boolean;
+  dynamicHandicap?: DynamicHandicapSummary;
 }
 
 interface PeopleChallenge {
@@ -944,6 +974,10 @@ let pendingAvatarDataUrl: string | null = null;
 let activeHumanTable: HumanTable | null = null;
 let peoplePollTimer: number | null = null;
 let humanTablePollTimer: number | null = null;
+let peopleIdleTimer: number | null = null;
+let peopleLastActivityAt = Date.now();
+let peopleLastHeartbeatAt = 0;
+let peopleActive = false;
 
 els.parGuidesToggle.checked = state.parGuides;
 els.fastCounting.checked = state.fastCounting;
@@ -1426,6 +1460,137 @@ function peopleInitials(player: Pick<PeoplePlayer, "displayName" | "username">):
   return `${words[0][0] || ""}${words.length > 1 ? words.at(-1)?.[0] || "" : words[0][1] || ""}`.toUpperCase();
 }
 
+const HANDICAP_EXPLANATION = "Estimated percentage points of win probability per decision this player would need to reach Ace-level play.";
+const HANDICAP_TOOLTIP_ID = "player-handicap-tooltip";
+let handicapTooltipOwner: HTMLElement | null = null;
+
+function normalizedPlayerDisplayName(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+function handicapForPlayer(
+  displayName: string,
+  explicit?: DynamicHandicapSummary | null,
+): DynamicHandicapSummary | null {
+  if (explicit && Number.isFinite(explicit.wpPerDecision)) return explicit;
+  const normalized = normalizedPlayerDisplayName(displayName);
+  const knownPlayers = [
+    ownPeopleProfile,
+    selectedPeopleProfile,
+    activeHumanTable?.challenger,
+    activeHumanTable?.challenged,
+    ...peopleDirectory.players,
+    ...peopleDirectory.incomingChallenges.map((challenge) => challenge.player),
+    ...peopleDirectory.outgoingChallenges.map((challenge) => challenge.player),
+  ].filter((player): player is PeoplePlayer | PeopleProfile => Boolean(player));
+  const known = knownPlayers.find((player) =>
+    normalizedPlayerDisplayName(player.displayName) === normalized
+    || normalizedPlayerDisplayName(player.username) === normalized
+  );
+  if (known?.dynamicHandicap && Number.isFinite(known.dynamicHandicap.wpPerDecision)) {
+    return known.dynamicHandicap;
+  }
+  for (const [player, handicap] of Object.entries(state.leaderboardSummary.playerHandicaps ?? {})) {
+    if (normalizedPlayerDisplayName(player) === normalized && Number.isFinite(handicap.wpPerDecision)) {
+      return handicap;
+    }
+  }
+  return null;
+}
+
+function playerHandicapMarker(handicap: DynamicHandicapSummary | null | undefined): HTMLElement | null {
+  const copy = playerHandicapCopy(handicap);
+  if (!copy) return null;
+  const marker = document.createElement("span");
+  marker.className = "player-handicap";
+  marker.textContent = copy;
+  marker.tabIndex = 0;
+  marker.setAttribute("aria-describedby", HANDICAP_TOOLTIP_ID);
+  marker.setAttribute("aria-label", `${copy.slice(1, -1)} handicap. ${HANDICAP_EXPLANATION}`);
+  return marker;
+}
+
+function handicapTooltipElement(): HTMLElement {
+  const existing = document.querySelector(`#${HANDICAP_TOOLTIP_ID}`) as HTMLElement | null;
+  if (existing) return existing;
+  const tooltip = document.createElement("div");
+  tooltip.id = HANDICAP_TOOLTIP_ID;
+  tooltip.className = "player-handicap-tooltip";
+  tooltip.role = "tooltip";
+  tooltip.textContent = HANDICAP_EXPLANATION;
+  tooltip.hidden = true;
+  document.body.append(tooltip);
+  return tooltip;
+}
+
+function showHandicapTooltip(marker: HTMLElement): void {
+  const tooltip = handicapTooltipElement();
+  handicapTooltipOwner = marker;
+  tooltip.hidden = false;
+  tooltip.style.left = "0px";
+  tooltip.style.top = "0px";
+  const markerRect = marker.getBoundingClientRect();
+  const tooltipRect = tooltip.getBoundingClientRect();
+  const margin = 12;
+  const left = Math.min(
+    window.innerWidth - tooltipRect.width - margin,
+    Math.max(margin, markerRect.left + markerRect.width / 2 - tooltipRect.width / 2),
+  );
+  const roomBelow = markerRect.bottom + 8 + tooltipRect.height <= window.innerHeight - margin;
+  const top = roomBelow
+    ? markerRect.bottom + 8
+    : Math.max(margin, markerRect.top - tooltipRect.height - 8);
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+}
+
+function hideHandicapTooltip(marker: HTMLElement): void {
+  if (handicapTooltipOwner !== marker) return;
+  const tooltip = document.querySelector(`#${HANDICAP_TOOLTIP_ID}`) as HTMLElement | null;
+  if (tooltip) tooltip.hidden = true;
+  handicapTooltipOwner = null;
+}
+
+function handicapMarkerFromEvent(event: Event): HTMLElement | null {
+  return event.target instanceof Element
+    ? event.target.closest<HTMLElement>(".player-handicap")
+    : null;
+}
+
+document.addEventListener("mouseover", (event) => {
+  const marker = handicapMarkerFromEvent(event);
+  if (marker) showHandicapTooltip(marker);
+});
+document.addEventListener("mouseout", (event) => {
+  const marker = handicapMarkerFromEvent(event);
+  if (marker && !(event.relatedTarget instanceof Node && marker.contains(event.relatedTarget))) {
+    hideHandicapTooltip(marker);
+  }
+});
+document.addEventListener("focusin", (event) => {
+  const marker = handicapMarkerFromEvent(event);
+  if (marker) showHandicapTooltip(marker);
+});
+document.addEventListener("focusout", (event) => {
+  const marker = handicapMarkerFromEvent(event);
+  if (marker) hideHandicapTooltip(marker);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && handicapTooltipOwner) hideHandicapTooltip(handicapTooltipOwner);
+});
+
+function setPlayerIdentity(
+  element: HTMLElement,
+  displayName: string,
+  handicap: DynamicHandicapSummary | null = handicapForPlayer(displayName),
+): void {
+  const name = document.createElement("span");
+  name.className = "player-identity-name";
+  name.textContent = displayName;
+  const marker = playerHandicapMarker(handicap);
+  element.replaceChildren(name, ...(marker ? [marker] : []));
+}
+
 function renderPeopleAvatar(element: HTMLElement, player: Pick<PeoplePlayer, "displayName" | "username" | "avatarDataUrl">): void {
   element.setAttribute("aria-hidden", "true");
   element.textContent = peopleInitials(player);
@@ -1448,7 +1613,7 @@ function peopleListItem(
   const copy = document.createElement("span");
   copy.className = "people-list-copy";
   const name = document.createElement("strong");
-  name.textContent = player.displayName;
+  setPlayerIdentity(name, player.displayName, player.dynamicHandicap ?? null);
   const status = document.createElement("small");
   status.textContent = options.challenge
     ? "Wants to play you"
@@ -1525,8 +1690,39 @@ function isLookingForHumanGame(): boolean {
   return !els.pathwayPage.hidden && els.pathwayPage.dataset.view === "human" && els.humanTablePage.hidden;
 }
 
+function schedulePeopleIdleTimeout(): void {
+  if (peopleIdleTimer !== null) window.clearTimeout(peopleIdleTimer);
+  peopleIdleTimer = null;
+  if (!authenticatedUser || !peopleActive) return;
+  const remaining = Math.max(0, PEOPLE_IDLE_MS - (Date.now() - peopleLastActivityAt));
+  peopleIdleTimer = window.setTimeout(() => {
+    if (Date.now() - peopleLastActivityAt < PEOPLE_IDLE_MS) {
+      schedulePeopleIdleTimeout();
+      return;
+    }
+    peopleActive = false;
+    peopleIdleTimer = null;
+  }, remaining);
+}
+
+function recordPeopleActivity(): void {
+  const now = Date.now();
+  const reactivating = !peopleActive || now - peopleLastActivityAt >= PEOPLE_IDLE_MS;
+  peopleLastActivityAt = now;
+  peopleActive = true;
+  schedulePeopleIdleTimeout();
+  if (
+    !authenticatedUser ||
+    document.visibilityState !== "visible" ||
+    (!reactivating && now - peopleLastHeartbeatAt < PEOPLE_ACTIVITY_HEARTBEAT_MIN_MS)
+  ) return;
+  peopleLastHeartbeatAt = now;
+  void refreshPeople({ heartbeat: true });
+}
+
 async function refreshPeople(options: { heartbeat?: boolean } = {}): Promise<void> {
   try {
+    if (authenticatedUser && options.heartbeat) peopleLastHeartbeatAt = Date.now();
     peopleDirectory = authenticatedUser && options.heartbeat
       ? await authJson<PeopleDirectoryResponse>("/api/people/presence", {
         lookingForGame: isLookingForHumanGame(),
@@ -1541,16 +1737,24 @@ async function refreshPeople(options: { heartbeat?: boolean } = {}): Promise<voi
 function schedulePeoplePoll(): void {
   if (peoplePollTimer !== null) window.clearTimeout(peoplePollTimer);
   peoplePollTimer = window.setTimeout(async () => {
-    await refreshPeople({ heartbeat: Boolean(authenticatedUser) });
+    await refreshPeople();
     schedulePeoplePoll();
   }, 15_000);
 }
 
 async function initializePeople(): Promise<void> {
   if (authenticatedUser) {
+    peopleActive = true;
+    peopleLastActivityAt = Date.now();
+    schedulePeopleIdleTimeout();
     try {
       const response = await authJson<PeopleProfileResponse>("/api/people/me");
       ownPeopleProfile = response.profile;
+      setPlayerIdentity(
+        els.authAccountProfile,
+        response.profile.displayName,
+        response.profile.dynamicHandicap ?? null,
+      );
       if (response.profile.textSize) {
         state.fontSize = normalizeAppFontSize(response.profile.textSize);
         safeLocalStorageSet(FONT_SIZE_STORAGE_KEY, state.fontSize);
@@ -1561,6 +1765,9 @@ async function initializePeople(): Promise<void> {
     }
   } else {
     ownPeopleProfile = null;
+    peopleActive = false;
+    if (peopleIdleTimer !== null) window.clearTimeout(peopleIdleTimer);
+    peopleIdleTimer = null;
   }
   await refreshPeople({ heartbeat: Boolean(authenticatedUser) });
   schedulePeoplePoll();
@@ -1583,13 +1790,18 @@ function tableRouteUrl(tableId: string): string {
 function renderPeopleProfile(profile: PeopleProfile): void {
   selectedPeopleProfile = profile;
   renderPeopleAvatar(els.peopleProfileAvatar, profile);
-  els.peopleProfileTitle.textContent = profile.displayName;
+  setPlayerIdentity(els.peopleProfileTitle, profile.displayName, profile.dynamicHandicap ?? null);
   els.peopleProfilePresence.textContent = profile.online
     ? profile.lookingForGame
       ? "Online · Looking for a game"
       : "Online now"
     : "Offline";
   els.peopleProfilePresence.classList.toggle("is-online", profile.online);
+  const handicap = profile.dynamicHandicap;
+  els.peopleProfileHandicap.hidden = !handicap;
+  els.peopleProfileHandicap.textContent = handicap
+    ? `Ace handicap: ${dynamicHandicapPointsCopy(handicap.wpPerDecision)} WP pts/decision · ${handicap.cycles} complete cycles`
+    : "";
   els.peopleProfilePlay.hidden = profile.isSelf || !profile.online;
   els.peopleProfilePlay.textContent = authenticatedUser ? "Play now" : "Sign in to play";
   renderPeopleHeadToHead(profile);
@@ -1610,7 +1822,11 @@ function renderPeopleHeadToHead(profile: PeopleProfile): void {
   els.peopleProfileHeadToHeadGames.textContent = `${stats.games} ${gameWord}`;
   els.peopleProfileHeadToHeadViewerWins.textContent = String(stats.viewerWins);
   els.peopleProfileHeadToHeadProfileWins.textContent = String(stats.profileWins);
-  els.peopleProfileHeadToHeadOpponent.textContent = profile.displayName;
+  setPlayerIdentity(
+    els.peopleProfileHeadToHeadOpponent,
+    profile.displayName,
+    profile.dynamicHandicap ?? null,
+  );
   els.peopleProfileHeadToHeadScore.hidden = stats.games === 0;
   if (stats.games === 0) {
     els.peopleProfileHeadToHeadSummary.textContent = "No completed games together yet.";
@@ -1657,7 +1873,7 @@ function playerSeat(player: PeoplePlayer, label: string): HTMLElement[] {
   const eyebrow = document.createElement("span");
   eyebrow.textContent = label;
   const name = document.createElement("strong");
-  name.textContent = player.displayName;
+  setPlayerIdentity(name, player.displayName, player.dynamicHandicap ?? null);
   copy.append(eyebrow, name);
   return [avatar, copy];
 }
@@ -1836,6 +2052,41 @@ function requestAuthentication(destination: PendingAuthDestination | null, messa
   window.setTimeout(() => els.authEmail.focus(), 0);
 }
 
+function locationAuthenticationRequest(): {
+  destination: PendingAuthDestination;
+  message: string;
+} | null {
+  const params = new URL(window.location.href).searchParams;
+  const tableId = params.get("table");
+  if (tableId) {
+    return {
+      destination: { kind: "table", tableId },
+      message: "Sign in to take your seat at this table.",
+    };
+  }
+  const username = params.get("profile");
+  if (username) {
+    return {
+      destination: { kind: "profile", username },
+      message: "Sign in to view this player profile.",
+    };
+  }
+  const route = pathwayRouteFromLocation();
+  if (route === "statistics") {
+    return {
+      destination: { kind: "statistics" },
+      message: "Sign in to view your statistics.",
+    };
+  }
+  if (route === "human") {
+    return {
+      destination: { kind: "human" },
+      message: "Sign in to find a human opponent.",
+    };
+  }
+  return null;
+}
+
 async function resumeAuthenticatedDestination(): Promise<void> {
   const destination = pendingAuthDestination;
   pendingAuthDestination = null;
@@ -1904,6 +2155,10 @@ async function syncPeopleRouteFromLocation(): Promise<void> {
   }
   hideHumanTable();
   if (username) {
+    if (!authenticatedUser) {
+      requestAuthentication({ kind: "profile", username }, "Sign in to view this player profile.");
+      return;
+    }
     await openPeopleProfile(username, { push: false });
     return;
   }
@@ -1925,7 +2180,7 @@ function showAuthView(view: AuthView, message = "", error = false): void {
   els.authPasswordForm.hidden = view !== "reset" && view !== "invite";
   els.authStatus.textContent = message;
   els.authStatus.dataset.error = error ? "true" : "false";
-  els.authCancel.hidden = !pendingAuthDestination || view !== "login";
+  els.authCancel.hidden = AUTHENTICATION_ENABLED || !pendingAuthDestination || view !== "login";
   if (view === "reset") {
     els.authTitle.textContent = "Choose a new password.";
     els.authIntro.textContent = "Secure your Strong Cribbage account with a memorable passphrase.";
@@ -2032,6 +2287,7 @@ async function completeAuthenticationAndStart(response: AuthSessionResponse): Pr
   finishAuthentication(response.user);
   await initializePeople();
   await resumeAuthenticatedDestination();
+  if (!PATHWAY_NAV_ENABLED) await initializeGameState();
 }
 
 function uploadedGameIds(): Set<string> {
@@ -2214,6 +2470,42 @@ function syncPathwayResumePresentation(): void {
     else button.removeAttribute("aria-current");
     const status = button.querySelector<HTMLElement>(".pathway-resume-status");
     if (status) status.hidden = !active;
+  }
+  const liveCalibration = currentSnapshot?.opponent === PATHWAY_OPPONENTS.dynamic
+    ? state.game?.dynamicCalibration
+    : null;
+  const profileCalibration = ownPeopleProfile?.dynamicCalibration;
+  const calibration = liveCalibration &&
+    (!profileCalibration || liveCalibration.completeCycles >= profileCalibration.completeCycles)
+    ? liveCalibration
+    : profileCalibration;
+  const hasStartedGame = Boolean(
+    calibration?.started ||
+    remoteResumableModelGames.has(PATHWAY_OPPONENTS.dynamic) ||
+    currentSnapshot?.opponent === PATHWAY_OPPONENTS.dynamic && state.game,
+  );
+  const copy = dynamicCardCopy(calibration, hasStartedGame);
+  els.dynamicCardCopy.textContent = copy;
+  els.dynamicCardCopy.dataset.state = copy === DYNAMIC_CALIBRATING_LABEL ? "calibrating" : "default";
+}
+
+function renderDynamicCalibrationStatus(game: GameState): void {
+  const calibration = game.dynamicCalibration;
+  const calibrating = isDynamicCalibrating(calibration);
+  els.dynamicCalibrationStatus.hidden = !calibrating;
+  if (!calibration || !calibrating) {
+    els.dynamicCalibrationStatus.removeAttribute("aria-label");
+    els.dynamicCalibrationHandicap.hidden = true;
+    return;
+  }
+  const handicapCopy = dynamicProvisionalHandicapCopy(calibration);
+  els.dynamicCalibrationHandicap.hidden = !handicapCopy;
+  if (handicapCopy && els.dynamicCalibrationHandicap.textContent !== handicapCopy) {
+    els.dynamicCalibrationHandicap.textContent = handicapCopy;
+  }
+  const accessibleCopy = `Dynamic calibration: ${calibration.completeCycles} of ${calibration.minimumCycles} complete cycles${handicapCopy ? `. ${handicapCopy}` : ""}`;
+  if (els.dynamicCalibrationStatus.getAttribute("aria-label") !== accessibleCopy) {
+    els.dynamicCalibrationStatus.setAttribute("aria-label", accessibleCopy);
   }
 }
 
@@ -4421,7 +4713,7 @@ function scoreSummaryForEvent(event: ScoreEvent, game: GameState): ScoreSummary 
     key: event.id,
     category: event.category,
     title: `${playerPossessive(player)} ${event.category}`,
-    points: event.points,
+    points: scoreSummaryPoints(event),
     items,
     nextLabel: scoreSummaryNextLabel(game),
   };
@@ -4749,7 +5041,12 @@ function renderGameReportInto(
   const finalScores = end.finalScores ?? fallbackScores;
   const result = end.result && end.result !== "regular" ? `, ${end.result}` : "";
   summary.textContent = `${shortDate(end.at)} vs ${opponent}. ${playerName(end.winner ?? "human", start?.opponent)} won ${finalScores.human}-${finalScores.ai}${result}.`;
-  container.append(title, summary, singleGameReportTable(report), singleGameDecisionReview(events, end));
+  container.append(
+    title,
+    summary,
+    singleGameReportTable(report, { includeAceHelps: isAceAdviceOpponent(start?.opponent) }),
+    singleGameDecisionReview(events, end),
+  );
 }
 
 function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): HTMLElement {
@@ -5261,14 +5558,17 @@ function snapshotScoreboard(
     label.className = "score-label";
     const name = document.createElement("span");
     name.className = "player-name";
+    const identity = document.createElement("span");
+    if (player === "human") setPlayerIdentity(identity, playerName(player));
+    else identity.textContent = playerName(player);
     if (dealer === player) {
       const badge = document.createElement("span");
       badge.className = "dealer-button";
       badge.textContent = "Crib";
-      if (player === "human") name.append(badge, " ", playerName(player));
-      else name.append(playerName(player), " ", badge);
+      if (player === "human") name.append(badge, " ", identity);
+      else name.append(identity, " ", badge);
     } else {
-      name.textContent = playerName(player);
+      name.append(identity);
     }
     label.append(name);
     const value = document.createElement("strong");
@@ -5298,7 +5598,11 @@ function snapshotStatus(label: string, value: string): HTMLElement {
   const item = document.createElement("span");
   if (label === "Count") item.className = "status-count";
   const strong = document.createElement("strong");
-  strong.textContent = value;
+  if (normalizedPlayerDisplayName(value) === normalizedPlayerDisplayName(playerDisplayName())) {
+    setPlayerIdentity(strong, value);
+  } else {
+    strong.textContent = value;
+  }
   item.append(`${label}: `, strong);
   return item;
 }
@@ -5580,7 +5884,7 @@ function renderAnalytics(): void {
 
   if (personalStats) {
     renderStatsViewTabs();
-    renderMyStats(events, scoreEvents, gameEvents);
+    renderMyStats(events);
     return;
   }
 
@@ -5637,44 +5941,10 @@ function renderStatsViewTabs(): void {
   }
 }
 
-function renderMyStats(
-  events: AnalyticsEvent[],
-  scoreEvents: ScoreEvent[],
-  gameEvents: Extract<AnalyticsEvent, { type: "game" }>[],
-): void {
+function renderMyStats(events: AnalyticsEvent[]): void {
   renderMyStatsOpponentTabs();
-  if (state.myStatsOpponent !== "master") {
-    const scopedEvents = analyticsForStatsOpponent(events, state.myStatsOpponent);
-    const scopedScoreEvents = scopedEvents.filter((event): event is ScoreEvent => event.type === "score");
-    const scopedGameEvents = scopedEvents.filter((event): event is Extract<AnalyticsEvent, { type: "game" }> =>
-      event.type === "game"
-    );
-    const completedGames = scopedGameEvents.filter((event) => event.action === "end").length;
-    if (!completedGames) {
-      renderEmptyMyStatsOpponent();
-      return;
-    }
-    const totals = playerAnalyticsTotals(scopedEvents, scopedScoreEvents, scopedGameEvents);
-    const opponentLabel = MY_STATS_OPPONENT_LABEL[state.myStatsOpponent];
-    els.analyticsTitle.textContent = "My Stats";
-    els.analyticsSummary.textContent = `${completedGames} completed game${completedGames === 1 ? "" : "s"} against ${opponentLabel} recorded on this device.`;
-    els.analyticsTotals.innerHTML = "";
-    els.analyticsTotals.classList.add("my-stats-comparison");
-    els.analyticsTotals.append(myStatsComparisonTable(
-      playerDisplayName(),
-      totals,
-      completedGames,
-      completedGames,
-      false,
-      opponentLabel,
-    ));
-    renderAnalyticsRows(els.analyticsGames, []);
-    renderAnalyticsRows(els.analyticsHands, []);
-    renderAnalyticsRows(els.analyticsScores, []);
-    renderAnalyticsRows(els.analyticsPegging, []);
-    return;
-  }
-  const scopedEvents = analyticsForStatsOpponent(events, "master");
+  const opponentLabel = MY_STATS_OPPONENT_LABEL[state.myStatsOpponent];
+  const scopedEvents = analyticsForStatsOpponent(events, state.myStatsOpponent);
   const scopedScoreEvents = scopedEvents.filter((event): event is ScoreEvent => event.type === "score");
   const scopedGameEvents = scopedEvents.filter((event): event is Extract<AnalyticsEvent, { type: "game" }> =>
     event.type === "game"
@@ -5682,10 +5952,14 @@ function renderMyStats(
   const completedGames = scopedGameEvents.filter((event) => event.action === "end").length;
   const localTotals = playerAnalyticsTotals(scopedEvents, scopedScoreEvents, scopedGameEvents);
   const lifetime = mergedLifetimeResults(
-    playerFirstName,
-    state.leaderboardSummary.playerStats ?? [],
+    playerDisplayName(),
+    state.leaderboardSummary.playerStatsByOpponent?.[state.myStatsOpponent] ?? [],
     localTotals,
   );
+  if (!lifetime.human.games) {
+    renderEmptyMyStatsOpponent();
+    return;
+  }
   const serverScoringAvailable = lifetime.source === "server" && lifetime.scoringGames !== undefined;
   const totals = {
     human: { ...(serverScoringAvailable ? emptyAnalyticsTotals() : localTotals.human), ...lifetime.human },
@@ -5694,12 +5968,12 @@ function renderMyStats(
   els.analyticsTitle.textContent = "My Stats";
   els.analyticsSummary.textContent = serverScoringAvailable
     ? lifetime.scoringGames === lifetime.human.games
-      ? `Scoring averages use every recorded hand across all ${lifetime.human.games} production game${lifetime.human.games === 1 ? "" : "s"}.`
-      : `${lifetime.human.games} production game${lifetime.human.games === 1 ? "" : "s"}; scoring averages use every recorded hand from ${lifetime.scoringGames} game${lifetime.scoringGames === 1 ? "" : "s"} with detailed scoring.`
+      ? `Scoring averages use every recorded hand across all ${lifetime.human.games} production game${lifetime.human.games === 1 ? "" : "s"} against ${opponentLabel}.`
+      : `${lifetime.human.games} production game${lifetime.human.games === 1 ? "" : "s"} against ${opponentLabel}; scoring averages use every recorded hand from ${lifetime.scoringGames} game${lifetime.scoringGames === 1 ? "" : "s"} with detailed scoring.`
     : lifetime.source === "server"
       ? "Loading production scoring history…"
-    : completedGames
-      ? `${completedGames} completed game${completedGames === 1 ? "" : "s"} recorded on this device.`
+      : completedGames
+        ? `${completedGames} completed game${completedGames === 1 ? "" : "s"} against ${opponentLabel} recorded on this device.`
       : "Loading merged production history…";
   els.analyticsTotals.innerHTML = "";
   els.analyticsTotals.classList.add("my-stats-comparison");
@@ -5709,6 +5983,7 @@ function renderMyStats(
     serverScoringAvailable ? lifetime.scoringGames ?? 0 : completedGames,
     lifetime.human.games,
     serverScoringAvailable,
+    opponentLabel,
   ));
   renderAnalyticsRows(els.analyticsGames, []);
   renderAnalyticsRows(els.analyticsHands, []);
@@ -5733,7 +6008,9 @@ function renderEmptyMyStatsOpponent(): void {
   els.analyticsTitle.textContent = "My Stats";
   els.analyticsSummary.textContent = human
     ? "Track your completed head-to-head games separately from your AI matches."
-    : `Track your completed games against ${MY_STATS_OPPONENT_LABEL[opponent]} separately from Ace.`;
+    : opponent === "master"
+      ? "Track your completed games against Ace."
+      : `Track your completed games against ${MY_STATS_OPPONENT_LABEL[opponent]} separately from Ace.`;
   els.analyticsTotals.innerHTML = "";
   els.analyticsTotals.classList.add("my-stats-comparison");
   els.analyticsTotals.append(emptyMyStatsComparisonTable(
@@ -5954,10 +6231,10 @@ function playerLeaderboardPoints(player: LeaderboardPlayer): number {
 }
 
 function playerLeaderboardRate(player: LeaderboardPlayer): number {
-  if (typeof player.leaderboardPointsPerGame === "number" && Number.isFinite(player.leaderboardPointsPerGame)) {
-    return player.leaderboardPointsPerGame;
+  if (typeof player.leaderboardScore === "number" && Number.isFinite(player.leaderboardScore)) {
+    return player.leaderboardScore;
   }
-  return player.games ? playerLeaderboardPoints(player) / player.games : 0;
+  return leaderboardScore(player);
 }
 
 function formatLeaderboardScore(player: LeaderboardPlayer): string {
@@ -5965,7 +6242,8 @@ function formatLeaderboardScore(player: LeaderboardPlayer): string {
 }
 
 function formatLeaderboardPointsDetail(player: LeaderboardPlayer): string {
-  return `${playerLeaderboardPoints(player)} pts in ${player.games} game${player.games === 1 ? "" : "s"}`;
+  const weightedResults = playerLeaderboardPoints(player) + player.losses + player.skunked;
+  return `${playerLeaderboardPoints(player)}/${weightedResults} weighted results`;
 }
 
 function leaderboardSummaryKey(summary: LeaderboardSummarySource): string {
@@ -6005,9 +6283,43 @@ async function loadInitialLeaderboard(): Promise<void> {
   }
 }
 
+interface PlayerIdentityContent {
+  player: string;
+  handicap: DynamicHandicapSummary | null;
+}
+
+type LeaderboardContent = string | Array<string | PlayerIdentityContent>;
+
 interface LeaderboardRowData {
   key: string;
-  cells: string[];
+  cells: LeaderboardContent[];
+}
+
+function leaderboardPlayerIdentity(player: string): PlayerIdentityContent {
+  return { player, handicap: handicapForPlayer(player) };
+}
+
+function leaderboardContentKey(content: LeaderboardContent): string {
+  return typeof content === "string" ? `text:${content}` : `rich:${JSON.stringify(content)}`;
+}
+
+function setLeaderboardContent(element: HTMLElement, content: LeaderboardContent): boolean {
+  const key = leaderboardContentKey(content);
+  if (element.dataset.contentKey === key) return false;
+  if (typeof content === "string") {
+    element.textContent = content;
+  } else {
+    const parts = content.map((part) => {
+      if (typeof part === "string") return document.createTextNode(part);
+      const identity = document.createElement("span");
+      identity.className = "leaderboard-player-identity";
+      setPlayerIdentity(identity, part.player, part.handicap);
+      return identity;
+    });
+    element.replaceChildren(...parts);
+  }
+  element.dataset.contentKey = key;
+  return true;
 }
 
 let renderedLeaderboardKey = "";
@@ -6018,16 +6330,15 @@ function renderLeaderboard(): void {
   const renderKey = `${loading ? "loading" : "ready"}:${leaderboardSummaryKey(summary)}`;
   if (renderKey === renderedLeaderboardKey) return;
   renderedLeaderboardKey = renderKey;
-  const rankedPlayers = summary.playerStats?.length ? summary.playerStats : summary.winRate14_3 ?? [];
-  const bestWins = rankLeaderboardWins(summary.bestWins ?? []);
-  const leaderboardScope = summary.source === "rust-api-tsv"
-    ? "production"
-    : summary.model
-      ? engineName(summary.model)
-      : "production";
+  const acePlayers = summary.playerStatsByOpponent?.master ?? summary.playerStats ?? summary.winRate14_3 ?? [];
+  const rankedPlayers = rankLeaderboardPlayers(acePlayers);
+  const bestWins = rankLeaderboardWins(
+    (summary.bestWins ?? []).filter((win) => statsOpponentForModel(win.opponent) === "master"),
+  );
+  const aceGames = acePlayers.reduce((games, player) => games + player.games, 0);
   els.leaderboardSummary.textContent = loading
     ? "Loading leaderboard..."
-    : `${summary.games} completed ${leaderboardScope} game${summary.games === 1 ? "" : "s"} recorded.`;
+    : `${aceGames} completed production Ace game${aceGames === 1 ? "" : "s"}. Ranked by (wins + skunks) / (wins + skunks + losses + skunked).`;
   if (loading) {
     els.leaderboardHighlights.replaceChildren();
     els.leaderboardList.replaceChildren(leaderboardLoadingElement());
@@ -6037,30 +6348,39 @@ function renderLeaderboard(): void {
   const animate = state.leaderboardAnimateNext;
   state.leaderboardAnimateNext = false;
   const topPlayer = rankedPlayers[0] ?? null;
-  const skunks = summary.mostSkunks?.length ? summary.mostSkunks : [];
+  const skunks = [...rankedPlayers]
+    .filter((player) => player.skunks > 0)
+    .sort((left, right) => right.skunks - left.skunks || left.player.localeCompare(right.player));
   reconcileLeaderboardCard(
     "top-score",
     "Top leaderboard score",
     topPlayer
-      ? `${topPlayer.player} ${formatLeaderboardScore(topPlayer)} (${formatLeaderboardPointsDetail(topPlayer)})`
+      ? [
+        leaderboardPlayerIdentity(topPlayer.player),
+        ` ${formatLeaderboardScore(topPlayer)} (${formatLeaderboardPointsDetail(topPlayer)})`,
+      ]
       : "No games yet",
     animate,
   );
   reconcileLeaderboardCard(
     "skunks",
-    `Skunked ${engineName(summary.model)}:`,
+    "Skunked Ace:",
     skunks.length
-      ? skunks.map((player) => `${player.player} ${player.skunks}`).join(", ")
+      ? skunks.flatMap((player, index) => [
+        index ? ", " : "",
+        leaderboardPlayerIdentity(player.player),
+        ` ${player.skunks}`,
+      ])
       : "No skunks yet",
     animate,
   );
   reconcileLeaderboardSection(
     "players",
-    `Leaderboard score vs ${engineName(summary.model)}`,
+    "Leaderboard score against Ace",
     rankedPlayers.map((player) => ({
       key: player.player,
       cells: [
-        player.player,
+        [leaderboardPlayerIdentity(player.player)],
         `${formatLeaderboardScore(player)} (${formatLeaderboardPointsDetail(player)})`,
         `${player.wins}-${player.losses}; skunks ${player.skunks}`,
       ],
@@ -6069,11 +6389,11 @@ function renderLeaderboard(): void {
   );
   reconcileLeaderboardSection(
     "wins",
-    "Biggest human wins",
+    "Biggest wins against Ace",
     bestWins.map((win) => ({
       key: `${win.player}\u0000${win.endedAt}\u0000${win.margin}`,
       cells: [
-        win.player,
+        [leaderboardPlayerIdentity(win.player)],
         `Margin ${formatSigned(win.margin)}`,
         `${engineName(win.opponent)} · ${shortDate(win.endedAt)}${win.result !== "regular" ? ` · ${win.result}` : ""}`,
       ],
@@ -6107,7 +6427,7 @@ function leaderboardLoadingElement(): HTMLElement {
   return loading;
 }
 
-function reconcileLeaderboardCard(key: string, label: string, value: string, animate: boolean): void {
+function reconcileLeaderboardCard(key: string, label: string, value: LeaderboardContent, animate: boolean): void {
   let card = Array.from(els.leaderboardHighlights.children).find(
     (element) => (element as HTMLElement).dataset.leaderboardCard === key,
   ) as HTMLElement | undefined;
@@ -6122,8 +6442,7 @@ function reconcileLeaderboardCard(key: string, label: string, value: string, ani
   }
   const [title, strong] = Array.from(card.children) as [HTMLElement, HTMLElement];
   title.textContent = label;
-  const changed = strong.textContent !== value;
-  strong.textContent = value;
+  const changed = setLeaderboardContent(strong, value);
   if (changed && animate) pulseLeaderboardElement(card, "leaderboard-card-updated");
 }
 
@@ -6182,15 +6501,13 @@ function reconcileLeaderboardSection(
   }
 }
 
-function updateLeaderboardRow(row: HTMLElement, cells: string[]): boolean {
+function updateLeaderboardRow(row: HTMLElement, cells: LeaderboardContent[]): boolean {
   let changed = false;
   while (row.children.length < cells.length) row.append(document.createElement("span"));
   while (row.children.length > cells.length) row.lastElementChild?.remove();
-  cells.forEach((text, index) => {
+  cells.forEach((content, index) => {
     const cell = row.children[index] as HTMLElement;
-    if (cell.textContent === text) return;
-    cell.textContent = text;
-    changed = true;
+    if (setLeaderboardContent(cell, content)) changed = true;
   });
   return changed;
 }
@@ -6678,7 +6995,12 @@ function analyticsTotalCard(
     ? `Includes benchmarks: ${(totals.baselineSources ?? ["AI baseline"]).join("; ")} (${totals.baselineGames} model-games)`
     : "";
   const title = document.createElement("strong");
-  title.textContent = label;
+  if (kind === "human" && (label === playerDisplayName() || label.startsWith(`${playerDisplayName()} vs `))) {
+    setPlayerIdentity(title, playerDisplayName());
+    title.append(label.slice(playerDisplayName().length));
+  } else {
+    title.textContent = label;
+  }
   card.append(title);
   if (kind === "ai" && benchmarkNote) {
     const note = document.createElement("span");
@@ -6708,7 +7030,10 @@ function analyticsTotalCard(
   return card;
 }
 
-function singleGameReportTable(report: { human: AnalyticsTotals; ai: AnalyticsTotals }): HTMLTableElement {
+function singleGameReportTable(
+  report: { human: AnalyticsTotals; ai: AnalyticsTotals },
+  options: { includeAceHelps?: boolean } = {},
+): HTMLTableElement {
   const table = document.createElement("table");
   table.className = "single-game-report-table";
   const playerLabel = playerDisplayName();
@@ -6722,12 +7047,13 @@ function singleGameReportTable(report: { human: AnalyticsTotals; ai: AnalyticsTo
     cell.scope = "col";
     if (className) cell.className = className;
     if (className === "difference") cell.title = `${playerLabel} minus ${opponentLabel}`;
-    cell.textContent = label;
+    if (className === "human") setPlayerIdentity(cell, label);
+    else cell.textContent = label;
     header.append(cell);
   }
 
   const body = table.createTBody();
-  for (const row of singleGameReportRows(report.human, report.ai)) {
+  for (const row of singleGameReportRows(report.human, report.ai, options)) {
     const tableRow = body.insertRow();
     const label = document.createElement("th");
     label.scope = "row";
@@ -6771,7 +7097,8 @@ function myStatsComparisonTable(
     cell.scope = "col";
     if (className) cell.className = className;
     if (className === "difference") cell.title = `${playerLabel} minus ${opponentLabel}`;
-    cell.textContent = label;
+    if (className === "human") setPlayerIdentity(cell, label);
+    else cell.textContent = label;
     header.append(cell);
   }
 
@@ -6811,7 +7138,8 @@ function emptyMyStatsComparisonTable(playerLabel: string, opponentLabel: string)
     const cell = document.createElement("th");
     cell.scope = "col";
     if (className) cell.className = className;
-    cell.textContent = label;
+    if (className === "human") setPlayerIdentity(cell, label);
+    else cell.textContent = label;
     header.append(cell);
   }
 
@@ -7011,9 +7339,10 @@ function render(game: GameState | null): void {
   els.humanScore.textContent = String(scoreboardGame.scores.human);
   els.aiScore.textContent = String(scoreboardGame.scores.ai);
   els.currentModel.textContent = engineName(currentSnapshot?.opponent ?? els.opponent.value ?? DEFAULT_OPPONENT);
+  renderDynamicCalibrationStatus(game);
   renderScorePace(scoreboardGame);
   const revealCribOwner = shouldRevealCribOwner(game.phase, state.dealCutRevealStage);
-  els.humanName.textContent = playerDisplayName();
+  setPlayerIdentity(els.humanName, playerDisplayName());
   els.aiName.textContent = playerName("ai");
   els.aiHandTitle.textContent = `${playerPossessive("ai")} hand`;
   els.humanDealer.hidden = !revealCribOwner || game.dealer !== "User";
@@ -7596,7 +7925,11 @@ els.peopleProfileForm.addEventListener("submit", async (event) => {
     };
     playerFirstName = response.profile.displayName;
     safeLocalStorageSet(PLAYER_FIRST_NAME_KEY, playerFirstName);
-    els.authAccountProfile.textContent = response.profile.displayName;
+    setPlayerIdentity(
+      els.authAccountProfile,
+      response.profile.displayName,
+      response.profile.dynamicHandicap ?? null,
+    );
     renderPeopleProfile(response.profile);
     const url = profileRouteUrl(response.profile.username);
     window.history.replaceState({ peopleProfile: response.profile.username }, "", url);
@@ -7667,6 +8000,7 @@ els.sizeDialog.addEventListener("submit", (event) => {
 els.sizeDialogClose.addEventListener("click", () => els.sizeDialog.close());
 
 document.addEventListener("keydown", (event) => {
+  recordPeopleActivity();
   if (event.key !== "Escape" || els.pathwayPage.hidden) return;
   if (els.pathwayPage.dataset.view !== "home") navigatePathway("home");
 });
@@ -8422,6 +8756,7 @@ els.troubleGame.addEventListener("click", async () => {
 });
 
 window.addEventListener("touchstart", (event) => {
+  recordPeopleActivity();
   if (!mobileGameplayHeaderActive() ||
       !els.topbar.classList.contains("mobile-game-header-hidden") ||
       event.touches.length !== 1 ||
@@ -8447,6 +8782,7 @@ window.addEventListener("touchend", () => {
 }, { passive: true });
 
 document.addEventListener("pointerdown", (event) => {
+  recordPeopleActivity();
   if (!mobileGameplayHeaderActive()) return;
   const target = event.target;
   if (target instanceof Node && !els.topbar.contains(target)) hideMobileGameplayHeader();
@@ -8486,8 +8822,13 @@ function recoverInterruptedAuthentication(): void {
 
 window.addEventListener("pageshow", recoverInterruptedAuthentication);
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") recoverInterruptedAuthentication();
+  if (document.visibilityState === "visible") {
+    recordPeopleActivity();
+    recoverInterruptedAuthentication();
+  }
 });
+
+document.addEventListener("wheel", recordPeopleActivity, { passive: true });
 
 async function finishDiscardInBackground(
   epoch = interactionEpoch,
@@ -8571,7 +8912,10 @@ async function initializeGameState(): Promise<void> {
 
 async function initializeApplication(): Promise<void> {
   if (!await initializeAuthentication()) {
-    await initializePeople();
+    if (!URL_PARAMS.get("reset") && !URL_PARAMS.get("invite")) {
+      const request = locationAuthenticationRequest();
+      if (request) requestAuthentication(request.destination, request.message);
+    }
     return;
   }
   await initializePeople();

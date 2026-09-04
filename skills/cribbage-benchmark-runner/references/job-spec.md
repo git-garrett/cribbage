@@ -1,6 +1,11 @@
 # Job specification
 
 Use schema version 1. Commands are argv arrays, never shell strings.
+`jobRoot` may be set to an absolute persistent path when checkpoints must
+survive a reboot; otherwise the supervisor defaults to `/private/tmp`.
+Use absolute `launchdPlistPath` and `supervisorLogPath` overrides when the job
+root is on a `noowners` volume that launchd cannot use for registration or
+standard-output files. The stage logs and all job state remain in `jobRoot`.
 
 ```json
 {
