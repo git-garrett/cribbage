@@ -16,6 +16,7 @@ TRAJECTORY_COUNTS = {
     "model91-left.sqlite": 5_000,
     "model911-left.sqlite": 5_000,
 }
+SEAMS = ("discard", "after_discard", "after_pegging", "after_pone")
 
 
 def verify_trajectory(path: Path, expected: int) -> dict:
@@ -43,46 +44,84 @@ def verify_trajectory(path: Path, expected: int) -> dict:
 
 def verify_matrix(path: Path) -> dict:
     connection = sqlite3.connect(path)
-    cohorts = {
-        row[0]: {"games": row[1], "seedClusters": row[2]}
+    metadata = {
+        (row[0], row[1]): {"sourceGames": row[2], "seedClusters": row[3]}
         for row in connection.execute(
-            "SELECT cohort, games, seed_clusters FROM matrix_cohorts ORDER BY cohort"
+            "SELECT cohort, seam, source_games, seed_clusters FROM matrix_cohorts "
+            "ORDER BY cohort, seam"
         )
     }
-    expected = {
-        "model9-round-robin": {"games": 30_000, "seedClusters": 5_000},
-        "model911-vs-model91": {"games": 10_000, "seedClusters": 5_000},
-        "pooled": {"games": 40_000, "seedClusters": 10_000},
+    cohort_expected = {
+        "model9-round-robin": {"sourceGames": 30_000, "seedClusters": 5_000},
+        "model911-vs-model91": {"sourceGames": 10_000, "seedClusters": 5_000},
+        "pooled": {"sourceGames": 40_000, "seedClusters": 10_000},
     }
-    if cohorts != expected:
-        raise ValueError(f"matrix cohort metadata differs: {cohorts}")
-    for cohort in expected:
+    expected = {
+        (cohort, seam): values
+        for cohort, values in cohort_expected.items()
+        for seam in SEAMS
+    }
+    if metadata != expected:
+        raise ValueError(f"matrix cohort metadata differs: {metadata}")
+    summary: dict[str, dict] = {}
+    for cohort, seam in expected:
         rows = connection.execute(
-            "SELECT dealer_score, pone_score, win_probability, ci95_low, ci95_high "
-            "FROM matrix_cells WHERE cohort=? ORDER BY dealer_score,pone_score",
-            (cohort,),
+            "SELECT dealer_score, pone_score, observations, contributing_clusters, "
+            "win_probability, ci95_low, ci95_high FROM matrix_cells "
+            "WHERE cohort=? AND seam=? ORDER BY dealer_score,pone_score",
+            (cohort, seam),
         ).fetchall()
         if len(rows) != 121 * 121:
-            raise ValueError(f"{cohort} has {len(rows)} cells")
-        values = {(dealer, pone): probability for dealer, pone, probability, _, _ in rows}
-        for dealer, pone, probability, low, high in rows:
+            raise ValueError(f"{cohort}:{seam} has {len(rows)} cells")
+        for dealer, pone, observations, clusters, probability, low, high in rows:
+            if observations <= 0 or clusters <= 0:
+                raise ValueError(f"{cohort}:{seam} is empty at {dealer}:{pone}")
             if not (0.0 <= low <= probability <= high <= 1.0):
-                raise ValueError(f"{cohort} has invalid probability bounds at {dealer}:{pone}")
-            if dealer < 120 and values[(dealer + 1, pone)] + 1e-15 < probability:
-                raise ValueError(f"{cohort} decreases with dealer score at {dealer}:{pone}")
-            if pone < 120 and values[(dealer, pone + 1)] - 1e-15 > probability:
-                raise ValueError(f"{cohort} increases with pone score at {dealer}:{pone}")
+                raise ValueError(
+                    f"{cohort}:{seam} has invalid probability bounds at {dealer}:{pone}"
+                )
+        minimum = min(row[2] for row in rows)
+        maximum = max(row[2] for row in rows)
+        if maximum <= minimum:
+            raise ValueError(f"{cohort}:{seam} did not gain suffix observations near the corner")
+        observations = {(row[0], row[1]): row[2] for row in rows}
+        if observations[(120, 120)] <= observations[(0, 0)]:
+            raise ValueError(
+                f"{cohort}:{seam} is not denser at 120:120 than at 0:0"
+            )
+        summary.setdefault(cohort, {})[seam] = {
+            **expected[(cohort, seam)],
+            "minimumObservations": minimum,
+            "maximumObservations": maximum,
+        }
+    for cohort in cohort_expected:
+        distinct_cells = connection.execute(
+            "SELECT COUNT(*) FROM matrix_cells d JOIN matrix_cells a "
+            "USING(cohort,dealer_score,pone_score) "
+            "WHERE d.cohort=? AND d.seam='discard' AND a.seam='after_discard' "
+            "AND (d.wins<>a.wins OR d.observations<>a.observations)",
+            (cohort,),
+        ).fetchone()[0]
+        if distinct_cells == 0:
+            raise ValueError(
+                f"{cohort} after-discard seam did not remove starter/heels scoring"
+            )
+        summary[cohort]["after_discard"]["cellsDistinctFromDiscard"] = distinct_cells
     connection.close()
-    return cohorts
+    return summary
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--trajectory-root", type=Path)
     args = parser.parse_args()
     root = args.root.resolve()
+    trajectory_root = (
+        args.trajectory_root.resolve() if args.trajectory_root is not None else root
+    )
     trajectory = {
-        filename: verify_trajectory(root / filename, expected)
+        filename: verify_trajectory(trajectory_root / filename, expected)
         for filename, expected in TRAJECTORY_COUNTS.items()
     }
     matrix = verify_matrix(root / "board-win-matrix.sqlite")
@@ -90,7 +129,7 @@ def main() -> None:
     if not report_path.is_file():
         raise ValueError(f"missing matrix report {report_path}")
     status = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "status": "complete",
         "verifiedAt": datetime.now(timezone.utc).isoformat(),
         "trajectory": trajectory,

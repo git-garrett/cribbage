@@ -21,6 +21,11 @@ pub const MODEL_13_2: &str = "schell_table-peg_table-13.2";
 /// Model 13.2. Dealer discards retain the 13.2 keep-pair forecast, while pone
 /// discards and every live decision remain frozen at Model 13.0.
 pub const MODEL_13_21: &str = "schell_table-peg_table-13.21";
+/// Model 13.215 keeps Model 13.0's discard, current-hand scoring, and live
+/// pegging machinery, while replacing its pre-90 heuristic and post-90 future
+/// board recursion with empirical phase-seam board matrices. Known and
+/// predicted current-hand scores are applied before the continuation lookup.
+pub const MODEL_13_215: &str = "schell_table-peg_table-13.215";
 pub const MODEL_14_3: &str = "schell_table-peg_table-14.3";
 pub const MODEL_14_8: &str = "schell_table-peg_table-14.8";
 pub const MODEL_14_8_1: &str = "schell_table-peg_table-14.8.1";
@@ -50,6 +55,7 @@ pub enum ModelId {
     Schell131,
     Schell132,
     Schell1321,
+    Schell13215,
     Schell143,
     Schell148,
     Schell1481,
@@ -73,6 +79,7 @@ impl ModelId {
             ModelId::Schell131 => MODEL_13_1,
             ModelId::Schell132 => MODEL_13_2,
             ModelId::Schell1321 => MODEL_13_21,
+            ModelId::Schell13215 => MODEL_13_215,
             ModelId::Schell143 => MODEL_14_3,
             ModelId::Schell148 => MODEL_14_8,
             ModelId::Schell1481 => MODEL_14_8_1,
@@ -96,6 +103,7 @@ impl ModelId {
             ModelId::Schell131 => "Schell Table + Peg Table 13.1",
             ModelId::Schell132 => "Schell Table + Peg Table 13.2",
             ModelId::Schell1321 => "Schell Table + Peg Table 13.21",
+            ModelId::Schell13215 => "Schell Table + Peg Table 13.215",
             ModelId::Schell143 => "Schell Table + Peg Table 14.3",
             ModelId::Schell148 => "Schell Table + Peg Table 14.8",
             ModelId::Schell1481 => "Schell Table + Peg Table 14.8.1",
@@ -120,6 +128,7 @@ impl ModelId {
                 | ModelId::Schell131
                 | ModelId::Schell132
                 | ModelId::Schell1321
+                | ModelId::Schell13215
                 | ModelId::Schell143
                 | ModelId::Schell148
                 | ModelId::Schell1481
@@ -164,6 +173,7 @@ impl FromStr for ModelId {
             MODEL_13_1 => Ok(ModelId::Schell131),
             MODEL_13_2 => Ok(ModelId::Schell132),
             MODEL_13_21 => Ok(ModelId::Schell1321),
+            MODEL_13_215 => Ok(ModelId::Schell13215),
             MODEL_14_3 => Ok(ModelId::Schell143),
             MODEL_14_8 => Ok(ModelId::Schell148),
             MODEL_14_8_1 => Ok(ModelId::Schell1481),
@@ -204,6 +214,12 @@ mod tests {
         assert_eq!(MODEL_13_21.parse::<ModelId>().unwrap(), ModelId::Schell1321);
         assert!(ModelId::Schell1321.has_native_rust_decisions());
         assert!(!ModelId::Schell1321.is_strength_model());
+        assert_eq!(
+            MODEL_13_215.parse::<ModelId>().unwrap(),
+            ModelId::Schell13215
+        );
+        assert!(ModelId::Schell13215.has_native_rust_decisions());
+        assert!(!ModelId::Schell13215.is_strength_model());
         assert_eq!(MODEL_14_3.parse::<ModelId>().unwrap(), ModelId::Schell143);
         assert_eq!(
             MODEL_14_8_1.parse::<ModelId>().unwrap().as_str(),
