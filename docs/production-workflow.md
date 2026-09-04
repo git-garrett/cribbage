@@ -24,6 +24,8 @@ git worktree add -b work/SHORT-DESCRIPTION /private/tmp/cribbage-SHORT-DESCRIPTI
 ## Review and merge
 
 1. Verify the change in proportion to its risk and commit it on the work branch.
+   Run the full Rust suite with `npm test`; successful runs print one summary,
+   while failures print the complete Cargo log.
 2. Push the branch and open a pull request targeting `master`.
 3. Run the repository code-review workflow against `master`, resolve every
    blocking finding, and wait for required GitHub checks.
