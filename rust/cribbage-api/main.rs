@@ -553,9 +553,15 @@ fn write_response(stream: &mut TcpStream, response: Response) -> Result<(), Stri
 }
 
 fn health_json() -> String {
+    let git_commit = env::var("CRIBBAGE_GIT_COMMIT")
+        .ok()
+        .filter(|value| {
+            (7..=64).contains(&value.len()) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+        .unwrap_or_else(|| "unknown".to_string());
     format!(
-        "{{\"ok\":true,\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\"}}",
-        APP_VERSION, MODEL_13_0
+        "{{\"ok\":true,\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"gitCommit\":\"{}\"}}",
+        APP_VERSION, MODEL_13_0, git_commit
     )
 }
 
