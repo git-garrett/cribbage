@@ -6,6 +6,7 @@
     "package:server": "scripts/package-rust-server.sh && node scripts/check-server-package.cjs",
     "cap:copy": "npm run build && cap copy",
     "cap:sync:ios": "npm run build && cap sync ios",
+    "qa:client-cache": "node scripts/check-client-cache-contract.cjs",
     "dev": "vite --host 0.0.0.0",
     "ios": "npm run cap:sync:ios && cap open ios",
     "analyze:ai-run": "node --no-warnings scripts/analyze-ai-run.cjs",

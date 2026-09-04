@@ -66,7 +66,7 @@ deploy() {
   remote_exec "id cribbage >/dev/null 2>&1 || useradd --system --home-dir '$REMOTE_DATA_DIR' --shell /usr/sbin/nologin cribbage && \
     mkdir -p '$REMOTE_APP_DIR' '$REMOTE_DATA_DIR' /etc/cribbage && \
     chmod 700 /etc/cribbage && \
-    rm -rf '$REMOTE_APP_DIR/dist' '$REMOTE_APP_DIR/server-dist' '$REMOTE_APP_DIR/package.json' '$REMOTE_APP_DIR/docs' '$REMOTE_APP_DIR/rust' && \
+    rm -rf '$REMOTE_APP_DIR/server-dist' '$REMOTE_APP_DIR/package.json' '$REMOTE_APP_DIR/docs' '$REMOTE_APP_DIR/rust' && \
     tar -xzf '/tmp/$(basename "$ARCHIVE")' -C '$REMOTE_APP_DIR' && \
     cd '$REMOTE_APP_DIR/rust' && cargo build --locked --release --manifest-path cribbage-api/Cargo.toml && \
     chown -R root:root '$REMOTE_APP_DIR' && \
@@ -134,8 +134,13 @@ ${GAME_DOMAIN} {
 	handle @api {
 		reverse_proxy ${REMOTE_BIND_HOST}:${REMOTE_PORT_APP}
 	}
+	root * ${REMOTE_APP_DIR}/dist
+	@assets path /assets/*
+	handle @assets {
+		file_server
+	}
 	handle {
-		root * ${REMOTE_APP_DIR}/dist
+		header Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
 		try_files {path} /index.html
 		file_server
 	}
@@ -158,6 +163,7 @@ CADDY
     systemctl reload caddy"
 
   health
+  (cd "$ROOT_DIR" && node scripts/check-client-cache-contract.cjs "https://${GAME_DOMAIN}")
 }
 
 pull() {

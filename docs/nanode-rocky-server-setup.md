@@ -177,8 +177,13 @@ cribbage.strongcribbage.com {
 	handle @api {
 		reverse_proxy 127.0.0.1:8787
 	}
+	root * /opt/cribbage/dist
+	@assets path /assets/*
+	handle @assets {
+		file_server
+	}
 	handle {
-		root * /opt/cribbage/dist
+		header Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
 		try_files {path} /index.html
 		file_server
 	}
@@ -201,8 +206,10 @@ curl https://cribbage.strongcribbage.com/health
 ```
 
 Caddy serves the browser client and routes `/api/*` and `/health` to the Rust
-API only on `cribbage.strongcribbage.com`. The apex domain serves the public
-landing page in `dist/coming-soon.html`.
+API only on `cribbage.strongcribbage.com`. HTML is never cached, and missing
+hashed assets return 404 instead of falling through to `index.html`. Deploys
+retain earlier hashed assets so a client with older HTML can finish loading.
+The apex domain serves the public landing page in `dist/coming-soon.html`.
 
 ## 8. Operating Notes
 
