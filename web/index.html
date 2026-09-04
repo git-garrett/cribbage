@@ -67,7 +67,7 @@
       <div class="pathway-shell">
         <header class="pathway-brandbar">
           <button id="pathway-header-home" class="pathway-back pathway-header-home" type="button">
-            <span aria-hidden="true">←</span> Home
+            <span aria-hidden="true">←</span> <span id="pathway-header-parent-label">Home</span>
           </button>
           <picture class="pathway-logo">
             <source media="(prefers-color-scheme: dark)" srcset="/brand/strong-cribbage-lockup-dark.svg">
@@ -172,8 +172,8 @@
 
           <section class="pathway-view pathway-subview pathway-human" data-pathway-view="human" aria-labelledby="pathway-human-title" hidden>
             <header class="pathway-subhead">
-              <button class="pathway-back" type="button" data-pathway-back>
-                <span aria-hidden="true">←</span> Home
+              <button class="pathway-back" type="button" data-pathway-back="play">
+                <span aria-hidden="true">←</span> Play
               </button>
               <p class="pathway-eyebrow">Find a Human Opponent</p>
               <h2 id="pathway-human-title">Find a seat across the board.</h2>
@@ -465,7 +465,7 @@
           <h1 class="visually-hidden">Strong Cribbage</h1>
         </div>
         <button id="app-back" class="pathway-back app-back" type="button">
-          <span aria-hidden="true">←</span> Home
+          <span aria-hidden="true">←</span> Play
         </button>
         <div id="settings-panel" class="settings-panel" hidden>
           <label class="font-size-control" for="font-size-select">

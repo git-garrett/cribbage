@@ -20,6 +20,7 @@ import {
 } from "./ace-advice";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 import { maybeLoadAdSense } from "./adsense";
+import { AuthenticationRequiredError, shouldRecoverExpiredSession } from "./auth-recovery";
 import { circularTurnCutPresentation, createCircularBoard, updateCircularBoard } from "./circular-board";
 import { comparisonTone, type ComparisonTone } from "./comparison-difference";
 import {
@@ -491,6 +492,7 @@ const els = {
   pathwayPage: document.querySelector("#pathway-page") as HTMLElement,
   pathwayBrandbar: document.querySelector(".pathway-brandbar") as HTMLElement,
   pathwayHeaderHome: document.querySelector("#pathway-header-home") as HTMLButtonElement,
+  pathwayHeaderParentLabel: document.querySelector("#pathway-header-parent-label") as HTMLElement,
   pathwayViews: [...document.querySelectorAll<HTMLElement>("[data-pathway-view]")],
   pathwayTargetButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-target]")],
   pathwayBackButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-back]")],
@@ -746,6 +748,12 @@ function clearServerBusy(): void {
 }
 
 function showServerBusy(error: unknown, retry: ServerBusyRetry | null): void {
+  if (error instanceof AuthenticationRequiredError) {
+    clearServerBusy();
+    state.pending = false;
+    setAiThinking(false);
+    return;
+  }
   console.warn("API interaction failed", error);
   state.serverBusy = { retry };
   state.pending = false;
@@ -1385,6 +1393,9 @@ async function serverJson<T>(path: string, body: Record<string, unknown>): Promi
       signal: controller.signal,
     });
     const contentType = response.headers.get("content-type") || "";
+    if (shouldRecoverExpiredSession(response.status, path)) {
+      throw recoverExpiredAuthentication();
+    }
     if (!response.ok) {
       await response.text().catch(() => "");
       throw new ApiInteractionError(`Server Busy (${response.status})`);
@@ -1398,7 +1409,7 @@ async function serverJson<T>(path: string, body: Record<string, unknown>): Promi
       throw new ApiInteractionError("Server Busy", { cause: error });
     }
   } catch (error) {
-    if (error instanceof ApiInteractionError) throw error;
+    if (error instanceof ApiInteractionError || error instanceof AuthenticationRequiredError) throw error;
     throw new ApiInteractionError("Server Busy", { cause: error });
   } finally {
     window.clearTimeout(timeout);
@@ -1416,12 +1427,15 @@ async function serverGetJson<T>(path: string): Promise<T> {
       signal: controller.signal,
     });
     const contentType = response.headers.get("content-type") || "";
+    if (shouldRecoverExpiredSession(response.status, path)) {
+      throw recoverExpiredAuthentication();
+    }
     if (!response.ok || !contentType.includes("application/json")) {
       throw new ApiInteractionError(`Server Busy (${response.status})`);
     }
     return await response.json() as T;
   } catch (error) {
-    if (error instanceof ApiInteractionError) throw error;
+    if (error instanceof ApiInteractionError || error instanceof AuthenticationRequiredError) throw error;
     throw new ApiInteractionError("Server Busy", { cause: error });
   } finally {
     window.clearTimeout(timeout);
@@ -1441,6 +1455,9 @@ async function authJson<T>(path: string, body?: Record<string, unknown>): Promis
       body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
+    if (shouldRecoverExpiredSession(response.status, path)) {
+      throw recoverExpiredAuthentication();
+    }
     const payload = await response.json().catch(() => ({})) as { error?: string };
     if (!response.ok) {
       throw new Error(payload.error || "Account service is temporarily unavailable.");
@@ -2052,6 +2069,55 @@ function requestAuthentication(destination: PendingAuthDestination | null, messa
   window.setTimeout(() => els.authEmail.focus(), 0);
 }
 
+function currentAuthenticationRequest(): {
+  destination: PendingAuthDestination | null;
+  message: string;
+} {
+  if (pendingAuthDestination) {
+    return { destination: pendingAuthDestination, message: "Your session expired. Sign in to continue." };
+  }
+  const locationRequest = locationAuthenticationRequest();
+  if (locationRequest) return locationRequest;
+  if (activeHumanTable) {
+    return {
+      destination: { kind: "table", tableId: activeHumanTable.id },
+      message: "Your session expired. Sign in to return to this table.",
+    };
+  }
+  if (selectedPeopleProfile) {
+    return {
+      destination: { kind: "profile", username: selectedPeopleProfile.username },
+      message: "Your session expired. Sign in to return to this player profile.",
+    };
+  }
+  if (state.analyticsOpen && state.analyticsMode === "my") {
+    return { destination: { kind: "statistics" }, message: "Your session expired. Sign in to view your statistics." };
+  }
+  if (selectedPathwayOpponent === DEFAULT_OPPONENT) {
+    return { destination: { kind: "master" }, message: "Your session expired. Sign in to continue with Ace." };
+  }
+  if (selectedPathwayOpponent === PATHWAY_OPPONENTS.dynamic) {
+    return { destination: { kind: "dynamic" }, message: "Your session expired. Sign in to continue with Dynamic." };
+  }
+  return { destination: null, message: "Your session expired. Sign in to continue." };
+}
+
+function recoverExpiredAuthentication(): AuthenticationRequiredError {
+  const request = currentAuthenticationRequest();
+  authenticatedUser = null;
+  ownPeopleProfile = null;
+  peopleActive = false;
+  if (peopleIdleTimer !== null) window.clearTimeout(peopleIdleTimer);
+  peopleIdleTimer = null;
+  if (humanTablePollTimer !== null) window.clearTimeout(humanTablePollTimer);
+  humanTablePollTimer = null;
+  els.authAccountRow.hidden = true;
+  els.authLoginRow.hidden = false;
+  resetTransientGameUi();
+  requestAuthentication(request.destination, request.message);
+  return new AuthenticationRequiredError();
+}
+
 function locationAuthenticationRequest(): {
   destination: PendingAuthDestination;
   message: string;
@@ -2438,7 +2504,9 @@ function showPathwayView(view: PathwayView): void {
   if (els.pathwayPage.hidden && isActiveGame(state.game)) suspendActiveGameForPathway();
   els.pathwayPage.hidden = false;
   els.pathwayPage.dataset.view = view;
-  els.pathwayHeaderHome.hidden = view === "home";
+  const parent = pathwayParentRoute(view);
+  els.pathwayHeaderHome.hidden = parent === null;
+  if (parent) els.pathwayHeaderParentLabel.textContent = pathwayRouteLabel(parent);
   syncMobileGameplayHeaderPlacement();
   syncPathwayResumePresentation();
   for (const pathwayView of els.pathwayViews) {
@@ -2633,6 +2701,23 @@ function pathwayRouteFromLocation(): PathwayRoute {
   const route = new URL(window.location.href).searchParams.get(PATHWAY_VIEW_PARAM);
   if (route === "play" || route === "human" || route === "tutorial" || route === "settings" || route === "gameplay" || route === "statistics") return route;
   return "home";
+}
+
+function pathwayParentRoute(route: PathwayRoute): PathwayRoute | null {
+  if (route === "home") return null;
+  if (route === "human") return "play";
+  if (route === "gameplay") return "settings";
+  return "home";
+}
+
+function pathwayRouteLabel(route: PathwayRoute): string {
+  if (route === "play") return "Play";
+  if (route === "settings") return "Settings";
+  if (route === "tutorial") return "Training";
+  if (route === "statistics") return "Statistics";
+  if (route === "human") return "Human Opponents";
+  if (route === "gameplay") return "Gameplay";
+  return "Home";
 }
 
 function pathwayHistoryState(route: PathwayRoute): Record<string, unknown> {
@@ -7804,21 +7889,26 @@ for (const button of els.pathwayTargetButtons) {
 
 for (const button of els.pathwayBackButtons) {
   button.addEventListener("click", () => {
+    const view = button.closest<HTMLElement>("[data-pathway-view]")?.dataset.pathwayView as PathwayView | undefined;
     const destination = button.dataset.pathwayBack as PathwayView | undefined;
-    navigatePathway(destination || "home");
+    navigatePathway(destination || (view ? pathwayParentRoute(view) : null) || "home");
   });
 }
 
 els.appBack.addEventListener("click", () => {
   if (PATHWAY_NAV_ENABLED) {
-    leaveActivePathwayGame("home");
+    leaveActivePathwayGame("play");
     return;
   }
   state.splashOpen = true;
   render(state.game);
 });
 
-els.pathwayHeaderHome.addEventListener("click", () => navigatePathway("home"));
+els.pathwayHeaderHome.addEventListener("click", () => {
+  const view = els.pathwayPage.dataset.view as PathwayView;
+  const parent = pathwayParentRoute(view);
+  if (parent) navigatePathway(parent);
+});
 
 for (const button of els.pathwayDestinationButtons) {
   if (button.disabled) continue;
@@ -8018,7 +8108,8 @@ els.sizeDialogClose.addEventListener("click", () => els.sizeDialog.close());
 document.addEventListener("keydown", (event) => {
   recordPeopleActivity();
   if (event.key !== "Escape" || els.pathwayPage.hidden) return;
-  if (els.pathwayPage.dataset.view !== "home") navigatePathway("home");
+  const parent = pathwayParentRoute(els.pathwayPage.dataset.view as PathwayView);
+  if (parent) navigatePathway(parent);
 });
 
 function openAnalytics(mode: "my" | "full"): void {

@@ -20,13 +20,13 @@ describe("Concept B mobile playing UI", () => {
     expect(mainSource).not.toContain("els.thinkingOverlay.hidden = !state.aiThinking");
   });
 
-  it("uses the scalable dark lockup and a pathway-style home control in the header", () => {
+  it("uses the scalable dark lockup and a pathway-style parent control in the header", () => {
     expect(html).toMatch(/class="app-brand-logo" src="\/brand\/strong-cribbage-lockup-dark\.svg"/);
     expect(html).toMatch(/<picture class="splash-logo">[\s\S]*?lockup-dark\.svg[\s\S]*?lockup-light\.svg[\s\S]*?<\/picture>/);
     expect(html).toMatch(/id="app-back" class="pathway-back app-back"/);
     expect(html).not.toMatch(/id="hand-number"/);
     expect(html).not.toMatch(/id="new-game"/);
-    expect(mainSource).toMatch(/els\.appBack\.addEventListener\("click", \(\) => \{[\s\S]*navigatePathway\("home"\)/);
+    expect(mainSource).toMatch(/els\.appBack\.addEventListener\("click", \(\) => \{[\s\S]*leaveActivePathwayGame\("play"\)/);
   });
 
   it("moves the text-size selector inside the hamburger menu", () => {

@@ -19,7 +19,7 @@ const MAX_AVATAR_BYTES: usize = 420_000;
 fn dynamic_handicap_value(evaluator_version: &str, profile: &Value) -> Option<Value> {
     let cycles = profile["complete_cycles"].as_u64().unwrap_or_default();
     let wp_per_decision = profile["ewma_handicap"].as_f64()?;
-    if cycles == 0 || !wp_per_decision.is_finite() {
+    if cycles < u64::from(MIN_COMPLETE_CYCLES) || !wp_per_decision.is_finite() {
         return None;
     }
     Some(json!({
@@ -1266,6 +1266,30 @@ mod tests {
             value["profile"]["dynamicHandicap"]["evaluatorVersion"],
             "ace-13.0"
         );
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn player_profile_omits_handicap_until_calibration_is_complete() {
+        let server = test_server("incomplete-dynamic-handicap");
+        let garrett = user(&server, "Garrett");
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection
+            .execute(
+                "INSERT INTO dynamic_player_profiles
+                 (user_id, evaluator_version, profile_json, updated_at)
+                 VALUES (?1, 'ace-13.0', ?2, '2026-09-02T00:00:00.000Z')",
+                params![
+                    garrett.id,
+                    json!({"started_dynamic": true, "complete_cycles": 5, "ewma_handicap": -0.0125}).to_string(),
+                ],
+            )
+            .unwrap();
+        drop(connection);
+
+        let value = profile_value(&server, "Garrett", Some(garrett.id), true).unwrap();
+        assert!(value["profile"].get("dynamicHandicap").is_none());
+        assert_eq!(value["profile"]["dynamicCalibration"]["complete"], false);
         std::fs::remove_dir_all(server.data_dir).unwrap();
     }
 

@@ -71,7 +71,7 @@ describe("local pathway navigation", () => {
     expect(source).toMatch(/analyticsClose\.addEventListener\("click"[\s\S]*showPathwayView\("home"\)/);
   });
 
-  it("shares the Home, centered logo, and online-pill header arrangement away from home", () => {
+  it("shares the parent link, centered logo, and online-pill header arrangement away from home", () => {
     expect(html).toMatch(/<header class="pathway-brandbar">[\s\S]*id="pathway-header-home"[\s\S]*class="pathway-logo"/);
     expect(css).toMatch(/\.pathway-brandbar\s*\{[^}]*grid-template-columns:\s*minmax\(58px, 1fr\) minmax\(0, auto\) minmax\(70px, 1fr\)[^}]*min-height:\s*68px/s);
     expect(css).toMatch(/\.pathway-logo\s*\{[^}]*grid-column:\s*2[^}]*width:\s*min\(168px, 43vw\)/s);
@@ -79,7 +79,7 @@ describe("local pathway navigation", () => {
   });
 
   it("removes the redundant Home control on the app home and aligns logo left, online right", () => {
-    expect(source).toContain('els.pathwayHeaderHome.hidden = view === "home"');
+    expect(source).toContain("const parent = pathwayParentRoute(view)");
     expect(css).toMatch(/\.pathway-page\[data-view="home"\] \.pathway-brandbar\s*\{[^}]*grid-template-columns:\s*minmax\(0, auto\) minmax\(70px, 1fr\)/s);
     expect(css).toMatch(/\.pathway-page\[data-view="home"\] \.pathway-logo\s*\{[^}]*grid-column:\s*1[^}]*justify-self:\s*start/s);
     expect(css).toMatch(/\.pathway-page\[data-view="home"\] \.pathway-brandbar > \.people-presence\s*\{[^}]*grid-column:\s*2/s);
@@ -171,7 +171,7 @@ describe("local pathway navigation", () => {
     expect(html).toContain('id="master-session-dialog"');
     expect(html).toContain('id="master-session-save"');
     expect(html).toContain('id="master-session-forfeit"');
-    expect(source).toMatch(/appBack\.addEventListener\("click"[\s\S]*leaveActivePathwayGame\("home"\)/);
+    expect(source).toMatch(/appBack\.addEventListener\("click"[\s\S]*leaveActivePathwayGame\("play"\)/);
     expect(source).toMatch(/function leaveActivePathwayGame[\s\S]*currentSnapshot\?\.opponent === DEFAULT_OPPONENT[\s\S]*masterSessionDialog\.hidden = false/);
     expect(source).not.toMatch(/function launchPathwayOpponent[\s\S]*findRemoteActiveGameSession\(DEFAULT_OPPONENT\)[\s\S]*function dismissMasterSessionDialog/);
     expect(source).toMatch(/function suspendActiveGameForPathway[\s\S]*state\.pending = false[\s\S]*resetTransientGameUi\(\)/);
@@ -204,7 +204,15 @@ describe("local pathway navigation", () => {
     expect(html).toContain('data-pathway-view="gameplay"');
     expect(html).toContain('data-pathway-back="settings"');
     expect(source).toMatch(/destination === "gameplay"[\s\S]*navigatePathway\("gameplay"\)/);
-    expect(source).toMatch(/dataset\.pathwayBack[\s\S]*destination \|\| "home"/);
+    expect(source).toMatch(/dataset\.pathwayBack[\s\S]*pathwayParentRoute\(view\)[\s\S]*"home"/);
+  });
+
+  it("links every view to its immediate parent in the pathway hierarchy", () => {
+    expect(html).toMatch(/id="pathway-header-parent-label"[^>]*>Home<\/span>/);
+    expect(html).toMatch(/data-pathway-view="human"[\s\S]*?data-pathway-back="play"[\s\S]*?←<\/span> Play/);
+    expect(html).toMatch(/id="app-back"[\s\S]*?←<\/span> Play/);
+    expect(source).toMatch(/function pathwayParentRoute[\s\S]*route === "human"[\s\S]*return "play"[\s\S]*route === "gameplay"[\s\S]*return "settings"/);
+    expect(source).toMatch(/pathwayHeaderHome\.addEventListener[\s\S]*pathwayParentRoute/);
   });
 
   it("uses a restrained staggered deal with an explicit reduced-motion fallback", () => {
