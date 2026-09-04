@@ -45,7 +45,7 @@ describe("account entry", () => {
 
   it("rechecks an interrupted account session when Safari returns to the page", () => {
     expect(source).toContain("function recoverInterruptedAuthentication");
-    expect(source).toContain('window.addEventListener("pageshow", recoverInterruptedAuthentication)');
+    expect(source).toMatch(/addEventListener\("pageshow",[\s\S]*recoverInterruptedAuthentication\(\)/);
     expect(source).toMatch(/visibilitychange[\s\S]*recoverInterruptedAuthentication/);
   });
 

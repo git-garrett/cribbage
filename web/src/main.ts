@@ -20,6 +20,13 @@ import {
 } from "./ace-advice";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 import { maybeLoadAdSense } from "./adsense";
+import {
+  ActivityTracker,
+  activityEnvironment,
+  activityTarget,
+  currentActivityClient,
+  safeActivityPage,
+} from "./activity";
 import { AuthenticationRequiredError, shouldRecoverExpiredSession } from "./auth-recovery";
 import { circularTurnCutPresentation, createCircularBoard, updateCircularBoard } from "./circular-board";
 import { comparisonTone, type ComparisonTone } from "./comparison-difference";
@@ -755,6 +762,10 @@ function showServerBusy(error: unknown, retry: ServerBusyRetry | null): void {
     return;
   }
   console.warn("API interaction failed", error);
+  activityTracker.track("server_error_ui", {
+    error: activityErrorSummary(error),
+    retryAvailable: Boolean(retry),
+  }, true);
   state.serverBusy = { retry };
   state.pending = false;
   setAiThinking(false);
@@ -1183,6 +1194,76 @@ if (SIMPLE_NETWORK_MODE) {
 } else {
   safeLocalStorageRemove(SIMPLE_NETWORK_SESSION_KEY);
 }
+
+function activityErrorSummary(error: unknown): string {
+  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return message.replace(/([?&](?:invite|reset|token|api)=)[^\s&#]*/gi, "$1[redacted]")
+    .slice(0, 300);
+}
+
+function currentActivitySurface(): string {
+  if (!els.authPage.hidden) {
+    if (!els.authPasswordForm.hidden) return URL_PARAMS.has("invite") ? "auth:invite" : "auth:reset";
+    if (!els.authOtpForm.hidden) return "auth:otp";
+    return "auth:login";
+  }
+  if (!els.peopleProfilePage.hidden) return "people:profile";
+  if (!els.humanTablePage.hidden) return "people:table";
+  if (state.analyticsOpen) return "statistics";
+  if (state.leaderboardOpen) return "leaderboard";
+  if (state.modelInfoOpen) return "model-info";
+  if (state.decisionReviewOpen) return "decision-review";
+  if (!els.pathwayPage.hidden) return `pathway:${els.pathwayPage.dataset.view || "home"}`;
+  if (!els.splashPage.hidden) return "splash";
+  return state.game ? "game" : "app";
+}
+
+function availableSessionStorage(): Storage | undefined {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+const nativeIosClient = Capacitor.isNativePlatform();
+const activityTracker = new ActivityTracker({
+  endpoint: `${REMOTE_AI_BASE}/api/activity`,
+  environment: activityEnvironment(window.location.hostname, nativeIosClient),
+  appVersion: __APP_VERSION__,
+  client: currentActivityClient(nativeIosClient),
+  sessionStorage: availableSessionStorage(),
+  getContext: () => ({
+    authenticated: authenticatedUser !== null,
+    gameId: currentSnapshot?.gameId ?? null,
+    phase: state.game?.phase ?? null,
+    opponent: currentSnapshot?.opponent ?? null,
+    surface: currentActivitySurface(),
+  }),
+});
+let lastActivityPageView = "";
+
+function trackActivityPageView(surface = currentActivitySurface(), source = "navigation"): void {
+  const key = `${safeActivityPage(window.location.href)}|${surface}`;
+  if (key === lastActivityPageView) return;
+  lastActivityPageView = key;
+  activityTracker.track("page_view", { surface, source });
+}
+
+activityTracker.track("session_start");
+window.addEventListener("error", (event) => {
+  activityTracker.track("client_error", {
+    kind: "error",
+    error: activityErrorSummary(event.error ?? event.message),
+  }, true);
+});
+window.addEventListener("unhandledrejection", (event) => {
+  activityTracker.track("client_error", {
+    kind: "unhandledrejection",
+    error: activityErrorSummary(event.reason),
+  }, true);
+});
+
 els.appVersion.textContent = displayAppVersion(__APP_VERSION__);
 buildBoard();
 
@@ -1230,6 +1311,7 @@ applySimpleNetworkMode();
 applyAdminVisibility();
 applyFontSizePreference();
 applyPathwayNavigation();
+trackActivityPageView(currentActivitySurface(), "initial");
 window.addEventListener("hashchange", applyAdminVisibility);
 window.addEventListener("popstate", () => {
   if (PATHWAY_NAV_ENABLED) applyPathwayRoute(pathwayRouteFromLocation());
@@ -1873,6 +1955,7 @@ async function openPeopleProfile(username: string, options: { push?: boolean } =
   if (options.push !== false) {
     window.history.pushState({ peopleProfile: response.profile.username }, "", profileRouteUrl(response.profile.username));
   }
+  trackActivityPageView("people:profile");
   window.setTimeout(() => els.peopleProfileBack.focus(), 0);
 }
 
@@ -1957,6 +2040,7 @@ async function openHumanTable(tableId: string, options: { push?: boolean } = {})
   if (options.push !== false) {
     window.history.pushState({ humanTable: tableId }, "", tableRouteUrl(tableId));
   }
+  trackActivityPageView("people:table");
   scheduleHumanTablePoll();
   void refreshPeople({ heartbeat: true });
 }
@@ -2262,6 +2346,7 @@ function showAuthView(view: AuthView, message = "", error = false): void {
     els.authTitle.textContent = "Your seat is waiting.";
     els.authIntro.textContent = "Sign in to continue your games and keep your results with your account.";
   }
+  trackActivityPageView(`auth:${view}`);
   markAppReady();
 }
 
@@ -2346,11 +2431,12 @@ async function initializeAuthentication(): Promise<boolean> {
   }
 }
 
-async function completeAuthenticationAndStart(response: AuthSessionResponse): Promise<void> {
+async function completeAuthenticationAndStart(response: AuthSessionResponse, method: string): Promise<void> {
   if (!response.authenticated || !response.user) {
     throw new Error("The account response was incomplete.");
   }
   finishAuthentication(response.user);
+  activityTracker.track("login", { method }, true);
   await initializePeople();
   await resumeAuthenticatedDestination();
   if (!PATHWAY_NAV_ENABLED) await initializeGameState();
@@ -2685,6 +2771,7 @@ async function forfeitSavedMasterGame(): Promise<void> {
       payload: {},
       tag: currentSessionTag() || null,
     });
+    activityTracker.track("game_forfeit", { gameId, opponent: DEFAULT_OPPONENT }, true);
     clearForfeitedLocalGame(gameId);
     dismissMasterSessionDialog();
     navigatePathway(nextRoute);
@@ -2757,6 +2844,7 @@ function applyPathwayRoute(route: PathwayRoute): void {
     render(state.game);
   }
   showPathwayView(route);
+  trackActivityPageView(`pathway:${route}`);
 }
 
 function navigatePathway(route: PathwayRoute): void {
@@ -3529,6 +3617,21 @@ async function serverGameAction(action: string, payload: Record<string, unknown>
     return state.game ?? response.state;
   }
   applyAuthoritativeGameState(response.snapshot, response.state);
+  const gameId = response.snapshot.gameId;
+  if (action === "new" && gameId) {
+    activityTracker.track("game_start", {
+      opponent: response.snapshot.opponent,
+      handNumber: response.state.handNumber,
+    }, true);
+  }
+  if (response.state.phase === "game_over" && gameId) {
+    activityTracker.trackGameCompleted(gameId, {
+      opponent: response.snapshot.opponent,
+      humanScore: response.state.scores.human,
+      aiScore: response.state.scores.ai,
+      handNumber: response.state.handNumber,
+    });
+  }
   startCutForDealPreparation(response.state);
   startAiDiscardPreparation(response.state);
   return response.state;
@@ -3742,6 +3845,11 @@ async function loadRemoteActiveGameSession(opponent?: Opponent): Promise<GameSta
   if (!session) return null;
   if (SIMPLE_NETWORK_MODE && !isAllowedSimpleNetworkOpponent(session.snapshot.opponent)) return null;
   applyAuthoritativeGameState(session.snapshot, session.state);
+  activityTracker.track("game_resume", {
+    opponent: session.snapshot.opponent,
+    handNumber: session.state.handNumber,
+    resumedPhase: session.state.phase,
+  });
   baselineScoreEvents(
     state.scoreNoticeCursor,
     scoreNoticeGameId(session.state),
@@ -7401,6 +7509,9 @@ function renderUtilityPages(): void {
   if (state.leaderboardOpen) renderLeaderboard();
   if (state.modelInfoOpen) renderModelInfoPage();
   if (state.decisionReviewOpen) renderDecisionReviewPage();
+  if (state.analyticsOpen || state.leaderboardOpen || state.modelInfoOpen || state.decisionReviewOpen) {
+    trackActivityPageView(currentActivitySurface());
+  }
 }
 
 function render(game: GameState | null): void {
@@ -7415,6 +7526,7 @@ function render(game: GameState | null): void {
   if (SIMPLE_NETWORK_MODE && game.phase === "game_over") state.hasResumableGame = false;
   document.body.dataset.splash = state.splashOpen ? "true" : "false";
   els.splashPage.hidden = !state.splashOpen;
+  trackActivityPageView(currentActivitySurface());
   syncMobileGameplayHeaderPlacement();
   maybeLoadAdSense({
     hostname: window.location.hostname,
@@ -8647,6 +8759,12 @@ async function startNewGameFromUi(
     render(state.game);
     return;
   }
+  if (forceNew && isActiveGame(state.game) && currentSnapshot?.gameId) {
+    activityTracker.track("game_abandonment_candidate", {
+      reason: "replacement",
+      replacedGameId: currentSnapshot.gameId,
+    }, true);
+  }
   resetTransientGameUi();
   state.pending = true;
   render(state.game);
@@ -8720,7 +8838,7 @@ els.authLoginForm.addEventListener("submit", async (event) => {
       email,
       password: els.authPassword.value,
     });
-    await completeAuthenticationAndStart(response);
+    await completeAuthenticationAndStart(response, "password");
   } catch (error) {
     showAuthView("login", error instanceof Error ? error.message : "Sign-in failed.", true);
   } finally {
@@ -8769,7 +8887,7 @@ els.authOtpForm.addEventListener("submit", async (event) => {
       email: pendingAuthEmail,
       code: els.authOtp.value.trim(),
     });
-    await completeAuthenticationAndStart(response);
+    await completeAuthenticationAndStart(response, "otp");
   } catch (error) {
     showAuthView("otp", error instanceof Error ? error.message : "The code could not be verified.", true);
   } finally {
@@ -8802,7 +8920,7 @@ els.authPasswordForm.addEventListener("submit", async (event) => {
       inviteToken ? "/api/auth/invite/accept" : "/api/auth/password/reset",
       { token, password: els.authNewPassword.value },
     );
-    await completeAuthenticationAndStart(response);
+    await completeAuthenticationAndStart(response, inviteToken ? "invite" : "password_reset");
   } catch (error) {
     showAuthView(view, error instanceof Error ? error.message : "The password could not be saved.", true);
   } finally {
@@ -8812,6 +8930,7 @@ els.authPasswordForm.addEventListener("submit", async (event) => {
 
 els.authLogout.addEventListener("click", async () => {
   els.authLogout.disabled = true;
+  activityTracker.track("logout", {}, true);
   try {
     await authJson<AuthMessageResponse>("/api/auth/logout", {});
   } finally {
@@ -8863,6 +8982,15 @@ els.troubleGame.addEventListener("click", async () => {
   }
 });
 
+function recordUiInteraction(kind: "click" | "change" | "submit", event: Event): void {
+  const target = activityTarget(event.target);
+  if (target) activityTracker.trackInteraction(kind, target);
+}
+
+document.addEventListener("click", (event) => recordUiInteraction("click", event), { capture: true });
+document.addEventListener("change", (event) => recordUiInteraction("change", event), { capture: true });
+document.addEventListener("submit", (event) => recordUiInteraction("submit", event), { capture: true });
+
 window.addEventListener("touchstart", (event) => {
   recordPeopleActivity();
   if (!mobileGameplayHeaderActive() ||
@@ -8891,6 +9019,8 @@ window.addEventListener("touchend", () => {
 
 document.addEventListener("pointerdown", (event) => {
   recordPeopleActivity();
+  const activityPointerTarget = activityTarget(event.target);
+  if (activityPointerTarget) activityTracker.trackPointer(activityPointerTarget);
   if (!mobileGameplayHeaderActive()) return;
   const target = event.target;
   if (target instanceof Node && !els.topbar.contains(target)) hideMobileGameplayHeader();
@@ -8904,8 +9034,21 @@ els.mobileHeaderReveal.addEventListener("click", (event) => {
 els.topbar.addEventListener("focusin", () => showMobileGameplayHeader(false));
 els.topbar.addEventListener("focusout", () => scheduleMobileGameplayHeaderHide());
 
-window.addEventListener("resize", () => render(state.game));
+let activityResizeTimer: number | null = null;
+window.addEventListener("resize", () => {
+  render(state.game);
+  if (activityResizeTimer !== null) window.clearTimeout(activityResizeTimer);
+  activityResizeTimer = window.setTimeout(() => {
+    activityResizeTimer = null;
+    activityTracker.track("viewport_resize", {
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      orientation: window.innerWidth >= window.innerHeight ? "landscape" : "portrait",
+    });
+  }, 500);
+});
 window.addEventListener("pagehide", () => {
+  activityTracker.trackPageExit();
   uploadLocalCompletedGames(true);
 });
 
@@ -8928,8 +9071,15 @@ function recoverInterruptedAuthentication(): void {
   });
 }
 
-window.addEventListener("pageshow", recoverInterruptedAuthentication);
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) {
+    lastActivityPageView = "";
+    trackActivityPageView(currentActivitySurface(), "pageshow");
+  }
+  recoverInterruptedAuthentication();
+});
 document.addEventListener("visibilitychange", () => {
+  activityTracker.track("visibility", { state: document.visibilityState });
   if (document.visibilityState === "visible") {
     recordPeopleActivity();
     recoverInterruptedAuthentication();
