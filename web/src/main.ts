@@ -88,6 +88,8 @@ import { shouldUploadCompletedGame } from "./upload-policy";
 
 const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-13.0";
 const DECISION_REVIEWER_NAME = "Ace";
+const MAX_FEEDBACK_SCREENSHOT_BYTES = 5 * 1024 * 1024;
+const FEEDBACK_SCREENSHOT_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const PATHWAY_OPPONENTS = {
   easy: "myrmidon-5",
   tough: "schell_table-peg_table-9.11",
@@ -513,6 +515,23 @@ const els = {
   pathwayDestinationButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-destination]")],
   dynamicCardCopy: document.querySelector("#dynamic-card-copy") as HTMLElement,
   pathwayStatistics: document.querySelector("#pathway-statistics") as HTMLButtonElement,
+  bugReportOpen: document.querySelector("#bug-report-open") as HTMLButtonElement,
+  bugReportDialog: document.querySelector("#bug-report-dialog") as HTMLDialogElement,
+  bugReportForm: document.querySelector("#bug-report-form") as HTMLFormElement,
+  bugReportDescription: document.querySelector("#bug-report-description") as HTMLTextAreaElement,
+  bugReportScreenshot: document.querySelector("#bug-report-screenshot") as HTMLInputElement,
+  bugReportStatus: document.querySelector("#bug-report-status") as HTMLElement,
+  bugReportClose: document.querySelector("#bug-report-close") as HTMLButtonElement,
+  bugReportCancel: document.querySelector("#bug-report-cancel") as HTMLButtonElement,
+  bugReportSubmit: document.querySelector("#bug-report-submit") as HTMLButtonElement,
+  featureRequestOpen: document.querySelector("#feature-request-open") as HTMLButtonElement,
+  featureRequestDialog: document.querySelector("#feature-request-dialog") as HTMLDialogElement,
+  featureRequestForm: document.querySelector("#feature-request-form") as HTMLFormElement,
+  featureRequestDescription: document.querySelector("#feature-request-description") as HTMLTextAreaElement,
+  featureRequestStatus: document.querySelector("#feature-request-status") as HTMLElement,
+  featureRequestClose: document.querySelector("#feature-request-close") as HTMLButtonElement,
+  featureRequestCancel: document.querySelector("#feature-request-cancel") as HTMLButtonElement,
+  featureRequestSubmit: document.querySelector("#feature-request-submit") as HTMLButtonElement,
   peoplePresence: document.querySelector("#people-presence") as HTMLElement,
   peoplePresenceToggle: document.querySelector("#people-presence-toggle") as HTMLButtonElement,
   peoplePresenceLabel: document.querySelector("#people-presence-label") as HTMLElement,
@@ -1602,6 +1621,91 @@ async function authJson<T>(path: string, body?: Record<string, unknown>): Promis
   } finally {
     window.clearTimeout(timeout);
   }
+}
+
+interface FeedbackResponse {
+  ok: boolean;
+  message: string;
+}
+
+function feedbackPageContext(): string {
+  return `${window.location.origin}${window.location.pathname}`;
+}
+
+function submitFeedback(
+  path: "/api/feedback/bug-report" | "/api/feedback/feature-request",
+  body: Record<string, unknown>,
+): Promise<FeedbackResponse> {
+  return authJson<FeedbackResponse>(path, body);
+}
+
+function feedbackScreenshotError(file: File): string | null {
+  if (!FEEDBACK_SCREENSHOT_TYPES.has(file.type)) {
+    return "Choose a PNG, JPEG, or WebP screenshot.";
+  }
+  if (file.size > MAX_FEEDBACK_SCREENSHOT_BYTES) {
+    return "Keep the screenshot under 5 MB.";
+  }
+  return null;
+}
+
+function screenshotDataUrl(file: File): Promise<string> {
+  const validationError = feedbackScreenshotError(file);
+  if (validationError) return Promise.reject(new Error(validationError));
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error("The screenshot could not be read."));
+    });
+    reader.addEventListener("error", () => reject(new Error("The screenshot could not be read.")));
+    reader.readAsDataURL(file);
+  });
+}
+
+function setFeedbackStatus(
+  status: HTMLElement,
+  state: "sending" | "success" | "error" | "idle",
+  message = "",
+): void {
+  if (state === "sending") status.dataset.state = "sending";
+  if (state === "success") status.dataset.state = "success";
+  if (state === "error") status.dataset.state = "error";
+  if (state === "idle") delete status.dataset.state;
+  status.textContent = message;
+}
+
+function setFeedbackSubmitting(
+  submit: HTMLButtonElement,
+  cancel: HTMLButtonElement,
+  close: HTMLButtonElement,
+  submitting: boolean,
+): void {
+  submit.disabled = submitting;
+  cancel.disabled = submitting;
+  close.disabled = submitting;
+}
+
+function openFeedbackDialog(dialog: HTMLDialogElement, description: HTMLTextAreaElement): void {
+  if (dialog.open) return;
+  dialog.showModal();
+  description.focus();
+}
+
+function resetBugReportDialog(): void {
+  els.bugReportForm.reset();
+  els.bugReportScreenshot.setCustomValidity("");
+  setFeedbackStatus(els.bugReportStatus, "idle");
+  setFeedbackSubmitting(els.bugReportSubmit, els.bugReportCancel, els.bugReportClose, false);
+}
+
+function resetFeatureRequestDialog(): void {
+  els.featureRequestForm.reset();
+  setFeedbackStatus(els.featureRequestStatus, "idle");
+  setFeedbackSubmitting(els.featureRequestSubmit, els.featureRequestCancel, els.featureRequestClose, false);
 }
 
 function peopleInitials(player: Pick<PeoplePlayer, "displayName" | "username">): string {
@@ -8540,6 +8644,96 @@ async function analyzeAllLoggedGames(): Promise<void> {
     render(state.game);
   }
 }
+
+els.bugReportOpen.addEventListener("click", () => {
+  resetBugReportDialog();
+  openFeedbackDialog(els.bugReportDialog, els.bugReportDescription);
+});
+
+els.bugReportClose.addEventListener("click", () => els.bugReportDialog.close());
+els.bugReportCancel.addEventListener("click", () => els.bugReportDialog.close());
+els.bugReportDialog.addEventListener("close", resetBugReportDialog);
+els.bugReportDialog.addEventListener("cancel", (event) => {
+  if (els.bugReportSubmit.disabled) event.preventDefault();
+});
+
+els.bugReportScreenshot.addEventListener("change", () => {
+  const file = els.bugReportScreenshot.files?.[0];
+  const error = file ? feedbackScreenshotError(file) : null;
+  els.bugReportScreenshot.setCustomValidity(error || "");
+  setFeedbackStatus(els.bugReportStatus, error ? "error" : "idle", error || "");
+});
+
+els.bugReportForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!els.bugReportForm.reportValidity()) return;
+  setFeedbackSubmitting(els.bugReportSubmit, els.bugReportCancel, els.bugReportClose, true);
+  setFeedbackStatus(els.bugReportStatus, "sending", "Sending your bug report…");
+  try {
+    const file = els.bugReportScreenshot.files?.[0];
+    const screenshot = file ? await screenshotDataUrl(file) : undefined;
+    const response = await submitFeedback("/api/feedback/bug-report", {
+      description: els.bugReportDescription.value,
+      screenshotDataUrl: screenshot,
+      page: feedbackPageContext(),
+    });
+    els.bugReportForm.reset();
+    setFeedbackStatus(els.bugReportStatus, "success", response.message);
+  } catch (error) {
+    setFeedbackStatus(
+      els.bugReportStatus,
+      "error",
+      error instanceof Error ? error.message : "Your bug report could not be sent. Please try again.",
+    );
+  } finally {
+    setFeedbackSubmitting(els.bugReportSubmit, els.bugReportCancel, els.bugReportClose, false);
+  }
+});
+
+els.featureRequestOpen.addEventListener("click", () => {
+  resetFeatureRequestDialog();
+  openFeedbackDialog(els.featureRequestDialog, els.featureRequestDescription);
+});
+
+els.featureRequestClose.addEventListener("click", () => els.featureRequestDialog.close());
+els.featureRequestCancel.addEventListener("click", () => els.featureRequestDialog.close());
+els.featureRequestDialog.addEventListener("close", resetFeatureRequestDialog);
+els.featureRequestDialog.addEventListener("cancel", (event) => {
+  if (els.featureRequestSubmit.disabled) event.preventDefault();
+});
+
+els.featureRequestForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!els.featureRequestForm.reportValidity()) return;
+  setFeedbackSubmitting(
+    els.featureRequestSubmit,
+    els.featureRequestCancel,
+    els.featureRequestClose,
+    true,
+  );
+  setFeedbackStatus(els.featureRequestStatus, "sending", "Sending your feature request…");
+  try {
+    const response = await submitFeedback("/api/feedback/feature-request", {
+      description: els.featureRequestDescription.value,
+      page: feedbackPageContext(),
+    });
+    els.featureRequestForm.reset();
+    setFeedbackStatus(els.featureRequestStatus, "success", response.message);
+  } catch (error) {
+    setFeedbackStatus(
+      els.featureRequestStatus,
+      "error",
+      error instanceof Error ? error.message : "Your feature request could not be sent. Please try again.",
+    );
+  } finally {
+    setFeedbackSubmitting(
+      els.featureRequestSubmit,
+      els.featureRequestCancel,
+      els.featureRequestClose,
+      false,
+    );
+  }
+});
 
 for (const button of els.pathwayTargetButtons) {
   button.addEventListener("click", () => {

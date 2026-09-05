@@ -6,6 +6,14 @@ pub struct EmailMessage {
     pub subject: String,
     pub text: String,
     pub html: String,
+    pub attachments: Vec<EmailAttachment>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EmailAttachment {
+    pub filename: String,
+    pub mime_type: String,
+    pub content: String,
 }
 
 pub fn one_time_code(display_name: &str, code: &str) -> EmailMessage {
@@ -30,6 +38,7 @@ pub fn one_time_code(display_name: &str, code: &str) -> EmailMessage {
             ),
             "This code expires in 10 minutes and works once. Strong Cribbage will never ask you to send this code to another person.",
         ),
+        attachments: Vec::new(),
     }
 }
 
@@ -52,6 +61,7 @@ pub fn password_reset(display_name: &str, reset_url: &str) -> EmailMessage {
             &button("Choose a new password", &safe_url),
             "This private link expires in 30 minutes and works once. If you did not request a reset, no action is required.",
         ),
+        attachments: Vec::new(),
     }
 }
 
@@ -74,6 +84,7 @@ pub fn invitation(display_name: &str, invite_url: &str) -> EmailMessage {
             &button("Set up your account", &safe_url),
             "This invitation is tied to your email address, expires in 7 days, and works once.",
         ),
+        attachments: Vec::new(),
     }
 }
 
@@ -103,7 +114,81 @@ pub fn access_request(
             &details,
             "Reply to this email to contact the player.",
         ),
+        attachments: Vec::new(),
     }
+}
+
+pub fn bug_report(
+    display_name: &str,
+    username: &str,
+    email: &str,
+    description: &str,
+    page: &str,
+    screenshot: Option<EmailAttachment>,
+) -> EmailMessage {
+    let attachment_note = if screenshot.is_some() {
+        "A screenshot is attached."
+    } else {
+        "No screenshot was attached."
+    };
+    let details = feedback_details(username, email, description, page, attachment_note);
+    EmailMessage {
+        subject: format!("Strong Cribbage bug report from {}", display_name),
+        text: format!(
+            "Bug report from {} (@{}, {})\n\nPage: {}\n\n{}\n\n{}",
+            display_name, username, email, page, description, attachment_note
+        ),
+        html: frame(
+            "Player bug report",
+            "Something needs attention",
+            "A signed-in player found something that may be wrong.",
+            &details,
+            attachment_note,
+        ),
+        attachments: screenshot.into_iter().collect(),
+    }
+}
+
+pub fn feature_request(
+    display_name: &str,
+    username: &str,
+    email: &str,
+    description: &str,
+    page: &str,
+) -> EmailMessage {
+    let details = feedback_details(username, email, description, page, "Feature request");
+    EmailMessage {
+        subject: format!("Strong Cribbage feature request from {}", display_name),
+        text: format!(
+            "Feature request from {} (@{}, {})\n\nPage: {}\n\n{}",
+            display_name, username, email, page, description
+        ),
+        html: frame(
+            "Player feature request",
+            "A new way to strengthen the game",
+            "A signed-in player suggested an improvement.",
+            &details,
+            "Reply to this email if you would like to follow up with the player.",
+        ),
+        attachments: Vec::new(),
+    }
+}
+
+pub fn send_feedback(
+    message: &EmailMessage,
+    reply_to_email: &str,
+    reply_to_name: &str,
+) -> Result<(), String> {
+    let recipient = env::var("CRIBBAGE_FEEDBACK_TO")
+        .or_else(|_| env::var("CRIBBAGE_MAIL_REPLY_TO"))
+        .unwrap_or_else(|_| "founder@evenvision.com".to_string());
+    send_with_reply_to(
+        &recipient,
+        "Strong Cribbage",
+        message,
+        reply_to_email,
+        reply_to_name,
+    )
 }
 
 pub fn send_access_request(
@@ -140,11 +225,14 @@ fn send_with_reply_to(
 ) -> Result<(), String> {
     let api_key = env::var("SENDGRID_API_KEY")
         .map_err(|_| "SENDGRID_API_KEY is not configured".to_string())?;
+    if api_key == "local-email-disabled" {
+        return Ok(());
+    }
     let from_email =
         env::var("CRIBBAGE_MAIL_FROM").unwrap_or_else(|_| "hello@strongcribbage.com".to_string());
     let from_name =
         env::var("CRIBBAGE_MAIL_FROM_NAME").unwrap_or_else(|_| "Strong Cribbage".to_string());
-    let payload = json!({
+    let mut payload = json!({
         "personalizations": [{"to": [{"email": to_email, "name": to_name}]}],
         "from": {"email": from_email, "name": from_name},
         "reply_to": {"email": reply_to_email, "name": reply_to_name},
@@ -158,6 +246,18 @@ fn send_with_reply_to(
             "open_tracking": {"enable": false}
         }
     });
+    if !message.attachments.is_empty() {
+        payload["attachments"] = json!(message
+            .attachments
+            .iter()
+            .map(|attachment| json!({
+                "content": attachment.content,
+                "type": attachment.mime_type,
+                "filename": attachment.filename,
+                "disposition": "attachment"
+            }))
+            .collect::<Vec<_>>());
+    }
     match ureq::post("https://api.sendgrid.com/v3/mail/send")
         .set("Authorization", &format!("Bearer {}", api_key))
         .set("Content-Type", "application/json")
@@ -168,6 +268,23 @@ fn send_with_reply_to(
         Err(ureq::Error::Status(status, _)) => Err(format!("SendGrid returned HTTP {}", status)),
         Err(error) => Err(format!("SendGrid request failed: {}", error)),
     }
+}
+
+fn feedback_details(
+    username: &str,
+    email: &str,
+    description: &str,
+    page: &str,
+    note: &str,
+) -> String {
+    format!(
+        "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"margin:24px 0;padding:18px;border:1px solid #d6c087;border-radius:14px;background:#f3eddf;color:#17231f;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:24px;\"><tr><td><strong>Player</strong></td><td>@{}</td></tr><tr><td><strong>Email</strong></td><td>{}</td></tr><tr><td><strong>Page</strong></td><td>{}</td></tr></table><div style=\"margin:0 0 18px;padding:18px;border-left:4px solid #0b5b43;background:#f8f4ea;white-space:pre-wrap;\">{}</div><p style=\"margin:0;\">{}</p>",
+        html_escape(username),
+        html_escape(email),
+        html_escape(page),
+        html_escape(description),
+        html_escape(note),
+    )
 }
 
 fn button(label: &str, url: &str) -> String {
@@ -244,5 +361,36 @@ mod tests {
         assert!(message.html.contains("Ada &lt; Lovelace"));
         assert!(message.html.contains("Analyst &amp; Player"));
         assert!(!message.html.contains("Analyst & Player"));
+    }
+
+    #[test]
+    fn feedback_messages_escape_player_copy_and_attach_screenshots() {
+        let attachment = EmailAttachment {
+            filename: "bug-report.png".to_string(),
+            mime_type: "image/png".to_string(),
+            content: "cG5n".to_string(),
+        };
+        let bug = bug_report(
+            "Ada",
+            "ada",
+            "ada@example.com",
+            "Cards < overlap & vanish",
+            "https://example.test/play",
+            Some(attachment),
+        );
+        assert!(bug.html.contains("Cards &lt; overlap &amp; vanish"));
+        assert!(!bug.html.contains("Cards < overlap"));
+        assert_eq!(bug.attachments.len(), 1);
+        assert_eq!(bug.attachments[0].mime_type, "image/png");
+
+        let feature = feature_request(
+            "Ada",
+            "ada",
+            "ada@example.com",
+            "Add daily boards",
+            "https://example.test/",
+        );
+        assert!(feature.text.contains("Add daily boards"));
+        assert!(feature.attachments.is_empty());
     }
 }

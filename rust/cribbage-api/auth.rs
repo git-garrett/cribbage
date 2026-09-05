@@ -38,6 +38,17 @@ pub struct AuthUser {
     password_hash: Option<String>,
 }
 
+#[cfg(test)]
+pub(crate) fn test_user(id: i64, username: &str, email: &str) -> AuthUser {
+    AuthUser {
+        id,
+        username: username.to_string(),
+        display_name: username.to_string(),
+        email: email.to_string(),
+        password_hash: None,
+    }
+}
+
 #[derive(Deserialize)]
 struct EmailRequest {
     email: String,

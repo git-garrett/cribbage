@@ -91,25 +91,25 @@ Every PR must:
 
 ## PR 2 — Bug reports and feature requests
 
-- **Branch:** create from the accepted `server` baseline after PR 1
+- **Branch:** `feat/feedback-requests`
 - **Target:** `server`
 - **Release gate:** Local runtime only; leave PR open for review.
 
 ### Scope
 
-- [ ] Add a small, fixed “Bug report” control in a viewport-safe location with
+- [x] Add a small, fixed “Bug report” control in a viewport-safe location with
   an accessible tooltip explaining when to use it.
-- [ ] Add a bug-report modal with optional screenshot upload and required brief
+- [x] Add a bug-report modal with optional screenshot upload and required brief
   description.
-- [ ] Email bug reports through the existing server mail infrastructure to the
+- [x] Email bug reports through the existing server mail infrastructure to the
   configured Strong Cribbage owner address.
-- [ ] Add a “Feature request” control in the upper-right of the Choose Your Path
+- [x] Add a “Feature request” control in the upper-right of the Choose Your Path
   home hero with the supplied hover explanation.
-- [ ] Add a concise feature-request modal and email submission flow.
-- [ ] Validate and size-limit screenshot uploads server-side (PNG, JPEG, or
+- [x] Add a concise feature-request modal and email submission flow.
+- [x] Validate and size-limit screenshot uploads server-side (PNG, JPEG, or
   WebP; 5 MB maximum), rate-limit both endpoints, and never expose mail
   credentials to the browser.
-- [ ] Provide clear submitting, success, validation, and failure states.
+- [x] Provide clear submitting, success, validation, and failure states.
 
 ### Acceptance checks
 
@@ -118,6 +118,22 @@ Every PR must:
 - The API accepts valid submissions, rejects invalid/oversized payloads, and
   sends the expected owner email without logging sensitive content.
 - The local review uses a non-delivering or captured mail transport.
+
+### Verification evidence
+
+- `npx vitest run`: 45 files, 286 tests passed.
+- `npm run typecheck`: passed.
+- `npm run build`: passed, including the protected-artifact check.
+- `cargo test --manifest-path rust/Cargo.toml`: passed across the full Rust
+  workspace, including feedback routing, upload validation, per-user rate
+  limits, mail escaping, and attachment coverage.
+- Chromium interaction and visual QA passed at 1440×1050 and 390×844 in light
+  and dark mode with no page errors. The pass covered keyboard focus, both
+  success flows, a real PNG upload, rejection above 5 MB, and verified that
+  page context omits URL query parameters.
+- The shared local runtime serves this branch at `http://127.0.0.1:8765/` with
+  `SENDGRID_API_KEY=local-email-disabled`; direct unauthenticated API requests
+  return 401.
 
 ## PR 3 — Presence responsiveness and Dynamic calibration reliability
 
@@ -210,8 +226,8 @@ production release; leave PR open and never merge to `master`.
 ## Progress log
 
 - [x] Workstream captured in this plan.
-- [ ] PR 1 complete and deployed to production.
-- [ ] PR 2 available on the local runtime for review.
+- [x] PR 1 complete and deployed to production.
+- [x] PR 2 available on the local runtime for review.
 - [ ] PR 3 available on the local runtime for review.
 - [ ] PR 4 available on the local runtime for review.
 - [ ] PR 5 available on the local runtime for review.
