@@ -15,9 +15,9 @@ describe("browser color-scheme support", () => {
   });
 
   it("defines light and dark entry materials instead of inverting arbitrary colors", () => {
-    expect(css).toMatch(/:root\s*\{[^}]*color-scheme:\s*light[^}]*--entry-canvas:\s*#e8eee9[^}]*--entry-panel:\s*#fbf8f0[^}]*--entry-accent:\s*#8f6720/s);
+    expect(css).toMatch(/:root\s*\{[^}]*color-scheme:\s*light[^}]*--entry-canvas:\s*#dfe9e2[^}]*--entry-panel:\s*#f8f1e4[^}]*--entry-accent:\s*#85580d/s);
     expect(css).toMatch(/@media \(prefers-color-scheme: dark\)\s*\{\s*:root\s*\{[^}]*color-scheme:\s*dark[^}]*--entry-canvas:\s*#042d22[^}]*--entry-panel:\s*#071f38[^}]*--entry-accent:\s*#e8c575/s);
-    expect(homepageHtml).toContain("--gold: #8f6720");
+    expect(homepageHtml).toContain("--gold: #85580d");
     expect(homepageHtml).toMatch(/@media \(prefers-color-scheme: dark\)[\s\S]*color-scheme:\s*dark/);
   });
 

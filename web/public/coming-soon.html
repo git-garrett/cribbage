@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Strong Cribbage - Private Preview</title>
     <meta name="description" content="Request access to the Strong Cribbage private preview or sign in if you already have a seat.">
-    <meta name="theme-color" content="#e8eee9" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#dfe9e2" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#063d30" media="(prefers-color-scheme: dark)">
     <meta property="og:title" content="Strong Cribbage">
     <meta property="og:description" content="Request access to the Strong Cribbage private preview.">
@@ -32,20 +32,20 @@
         --green: #0b5b43;
         --navy: #071f38;
         --cream: #fbf8f0;
-        --canvas: #e8eee9;
-        --canvas-glow: rgba(24, 123, 91, 0.2);
-        --grid: rgba(7, 31, 56, 0.055);
-        --panel: #fbf8f0;
-        --text: #071f38;
-        --muted: #52615b;
-        --gold: #8f6720;
-        --border: #c5a85d;
-        --field-border: #99afa5;
-        --field: #fffefb;
-        --status: #f3eddf;
+        --canvas: #dfe9e2;
+        --canvas-glow: rgba(11, 91, 67, 0.26);
+        --grid: rgba(7, 31, 56, 0.066);
+        --panel: #f8f1e4;
+        --text: #061f36;
+        --muted: #52685f;
+        --gold: #85580d;
+        --border: #b8944b;
+        --field-border: #86a296;
+        --field: #fffdf7;
+        --status: #eee3cc;
         --danger: #7c2824;
         --focus: #1d7fd1;
-        --shadow: 0 26px 58px rgba(20, 35, 30, 0.16);
+        --shadow: 0 30px 76px rgba(7, 31, 56, 0.17), 0 8px 22px rgba(11, 91, 67, 0.1);
         --button-text: #fbf8f0;
       }
 
@@ -217,6 +217,59 @@
         color: var(--button-text);
         font-weight: 900;
         text-decoration: none;
+      }
+
+      @media (prefers-color-scheme: light) {
+        main {
+          background:
+            radial-gradient(circle at 100% 0, color-mix(in srgb, var(--gold) 13%, transparent), transparent 25rem),
+            linear-gradient(145deg, color-mix(in srgb, #fff 64%, transparent), transparent 43%),
+            var(--panel);
+        }
+
+        .preview-link {
+          background: linear-gradient(180deg, #147456, #07513f);
+          box-shadow:
+            inset 0 1px rgba(255, 255, 255, 0.18),
+            0 8px 18px rgba(7, 81, 63, 0.2);
+        }
+
+        body .request-form {
+          border-color: rgba(184, 148, 75, 0.78);
+          background:
+            radial-gradient(circle at 100% 0, rgba(37, 132, 96, 0.42), transparent 18rem),
+            #0b4939;
+          box-shadow:
+            inset 0 1px rgba(255, 255, 255, 0.12),
+            0 16px 34px rgba(7, 49, 39, 0.2);
+        }
+
+        .request-form h2,
+        .request-form label {
+          color: var(--cream);
+        }
+
+        .request-form .eyebrow {
+          color: #e8c575;
+        }
+
+        .request-form header p:not(.eyebrow) {
+          color: #cfe8de;
+        }
+
+        .request-form input {
+          border-color: rgba(207, 232, 222, 0.58);
+          box-shadow:
+            inset 0 1px 2px rgba(7, 31, 56, 0.08),
+            0 1px rgba(255, 255, 255, 0.14);
+        }
+
+        .request-form button {
+          background: var(--navy);
+          box-shadow:
+            inset 0 1px rgba(255, 255, 255, 0.1),
+            0 8px 18px rgba(2, 28, 21, 0.24);
+        }
       }
 
       .request-form {
