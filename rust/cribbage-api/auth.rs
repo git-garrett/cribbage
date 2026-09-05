@@ -134,6 +134,16 @@ pub fn initialize(data_dir: &std::path::Path) -> Result<(), String> {
                normalized_email TEXT NOT NULL UNIQUE,
                requested_at INTEGER NOT NULL,
                updated_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS auth_roles (
+               user_id INTEGER NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+               role TEXT NOT NULL,
+               created_at INTEGER NOT NULL,
+               PRIMARY KEY (user_id, role)
+             );
+             CREATE TABLE IF NOT EXISTS auth_role_bootstrap (
+               role TEXT PRIMARY KEY,
+               completed_at INTEGER NOT NULL
              );",
         )
         .map_err(|error| format!("create authentication tables: {}", error))?;
@@ -154,6 +164,45 @@ pub fn initialize(data_dir: &std::path::Path) -> Result<(), String> {
                 .map_err(|error| format!("seed account for {}: {}", username, error))?;
         }
     }
+    bootstrap_engagement_admins(&connection)?;
+    Ok(())
+}
+
+fn bootstrap_engagement_admins(connection: &rusqlite::Connection) -> Result<(), String> {
+    let already_bootstrapped: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM auth_role_bootstrap WHERE role = 'engagement_admin')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("read engagement admin bootstrap: {error}"))?;
+    if already_bootstrapped {
+        return Ok(());
+    }
+    let configured =
+        env::var("CRIBBAGE_ENGAGEMENT_ADMINS").unwrap_or_else(|_| "Garrett,Test".to_string());
+    let now = unix_seconds();
+    for username in configured
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO auth_roles (user_id, role, created_at)
+                 SELECT id, 'engagement_admin', ?2 FROM auth_users
+                 WHERE username = ?1 COLLATE NOCASE",
+                params![username, now],
+            )
+            .map_err(|error| format!("bootstrap engagement admin {username}: {error}"))?;
+    }
+    connection
+        .execute(
+            "INSERT INTO auth_role_bootstrap (role, completed_at)
+             VALUES ('engagement_admin', ?1)",
+            [now],
+        )
+        .map_err(|error| format!("complete engagement admin bootstrap: {error}"))?;
     Ok(())
 }
 
@@ -186,14 +235,21 @@ pub fn auth_required() -> bool {
         .unwrap_or(false)
 }
 
-pub fn is_engagement_admin(user: &AuthUser) -> bool {
-    let configured =
-        env::var("CRIBBAGE_ENGAGEMENT_ADMINS").unwrap_or_else(|_| "Garrett,Test".to_string());
-    configured
-        .split(',')
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .any(|name| name.eq_ignore_ascii_case(&user.username))
+pub fn is_engagement_admin(data_dir: &std::path::Path, user: &AuthUser) -> bool {
+    open_game_database(data_dir)
+        .and_then(|connection| {
+            connection
+                .query_row(
+                    "SELECT EXISTS(
+                       SELECT 1 FROM auth_roles
+                       WHERE user_id = ?1 AND role = 'engagement_admin'
+                     )",
+                    [user.id],
+                    |row| row.get(0),
+                )
+                .map_err(|error| format!("read engagement admin role: {error}"))
+        })
+        .unwrap_or(false)
 }
 
 pub fn protects(path: &str) -> bool {
@@ -257,7 +313,7 @@ pub fn body_for_user(body: &str, user: &AuthUser) -> String {
 
 fn session_response(server: &Server, request: &Request) -> Response {
     match authenticated_user(server, request) {
-        Ok(Some(user)) => Response::json(200, user_json(&user)),
+        Ok(Some(user)) => Response::json(200, user_json(&server.data_dir, &user)),
         Ok(None) => Response::json(200, "{\"authenticated\":false}".to_string()),
         Err(error) => internal_error(error),
     }
@@ -632,7 +688,7 @@ fn create_session_response(server: &Server, request: &Request, user: &AuthUser) 
     ) {
         return internal_error(format!("create authentication session: {}", error));
     }
-    Response::json(200, user_json(user)).with_header(
+    Response::json(200, user_json(&server.data_dir, user)).with_header(
         "Set-Cookie",
         format!(
             "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}{}",
@@ -1053,28 +1109,17 @@ fn unix_seconds() -> i64 {
         .as_secs() as i64
 }
 
-fn user_json(user: &AuthUser) -> String {
+fn user_json(data_dir: &std::path::Path, user: &AuthUser) -> String {
     json!({
         "authenticated": true,
         "user": {
             "username": user.username,
             "displayName": user.display_name,
             "email": user.email,
-            "engagementAdmin": is_engagement_admin(user)
+            "engagementAdmin": is_engagement_admin(data_dir, user)
         }
     })
     .to_string()
-}
-
-#[cfg(test)]
-pub fn test_auth_user(id: i64, username: &str) -> AuthUser {
-    AuthUser {
-        id,
-        username: username.to_string(),
-        display_name: username.to_string(),
-        email: format!("{}@example.com", username.to_ascii_lowercase()),
-        password_hash: None,
-    }
 }
 
 fn generic_email_response(message: &str) -> Response {
@@ -1163,6 +1208,46 @@ mod tests {
             .unwrap();
         assert_eq!(rows, 7);
         assert_eq!(vince, "Vpellegrini@me.com");
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn engagement_admin_role_survives_rename_and_cannot_be_claimed_by_name() {
+        let server = test_server("stable-engagement-role");
+        let connection = open_game_database(&server.data_dir).unwrap();
+        let garrett = connection
+            .query_row(
+                "SELECT id, username, display_name, email, password_hash
+                 FROM auth_users WHERE username = 'Garrett'",
+                [],
+                user_from_row,
+            )
+            .unwrap();
+        let kurt = connection
+            .query_row(
+                "SELECT id, username, display_name, email, password_hash
+                 FROM auth_users WHERE username = 'Kurt'",
+                [],
+                user_from_row,
+            )
+            .unwrap();
+        assert!(is_engagement_admin(&server.data_dir, &garrett));
+        assert!(!is_engagement_admin(&server.data_dir, &kurt));
+
+        connection
+            .execute(
+                "UPDATE auth_users SET username = 'Owner renamed' WHERE id = ?1",
+                [garrett.id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE auth_users SET username = 'Test' WHERE id = ?1",
+                [kurt.id],
+            )
+            .unwrap();
+        assert!(is_engagement_admin(&server.data_dir, &garrett));
+        assert!(!is_engagement_admin(&server.data_dir, &kurt));
         std::fs::remove_dir_all(server.data_dir).unwrap();
     }
 

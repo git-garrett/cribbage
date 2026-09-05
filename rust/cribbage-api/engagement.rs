@@ -36,12 +36,15 @@ struct EventRow {
     viewport_height: i64,
     screen_width: i64,
     screen_height: i64,
+    device_pixel_ratio: f64,
+    touch_points: i64,
     language: String,
     timezone: String,
     platform: String,
     metadata: Value,
     active_now: bool,
     active_last_24_hours: bool,
+    visitor_id: String,
 }
 
 #[derive(Default)]
@@ -56,13 +59,13 @@ struct TimeBucket {
     events: usize,
     visitors: HashSet<String>,
     sessions: HashSet<String>,
-    game_starts: usize,
-    game_completions: usize,
-    game_forfeits: usize,
+    game_starts: HashSet<String>,
+    game_completions: HashSet<String>,
+    game_forfeits: HashSet<String>,
     bounces: usize,
     error_events: usize,
     friction_events: usize,
-    abandonment_candidates: usize,
+    abandonment_candidates: HashSet<String>,
 }
 
 #[derive(Default)]
@@ -74,8 +77,9 @@ struct UserActivity {
     sessions: HashSet<String>,
     events: usize,
     page_views: usize,
-    game_starts: usize,
-    game_completions: usize,
+    game_starts: HashSet<String>,
+    observed_games: HashSet<String>,
+    game_completions: HashSet<String>,
     errors: usize,
     friction_events: usize,
     clients: HashMap<String, usize>,
@@ -96,6 +100,7 @@ struct Totals {
     active_now: usize,
     active_last_24_hours: usize,
     game_starts: usize,
+    observed_games: usize,
     game_resumes: usize,
     game_completions: usize,
     game_forfeits: usize,
@@ -141,7 +146,7 @@ pub fn handle(
             json!({"error": "Sign in to continue."}).to_string(),
         ));
     };
-    if !auth::is_engagement_admin(user) {
+    if !auth::is_engagement_admin(&server.data_dir, user) {
         return Some(Response::json(
             403,
             json!({"error": "Engagement reporting is restricted."}).to_string(),
@@ -213,14 +218,7 @@ fn report(
             .filter(|surface| surface.starts_with("pathway:"))
             .map(|surface| (title_case(surface.trim_start_matches("pathway:")), event))
     }));
-    let opponents = breakdown(rows.iter().filter_map(|event| {
-        (event.event_name == "game_start").then(|| {
-            (
-                title_case(metadata_string(event, "opponent").unwrap_or("Unknown")),
-                event,
-            )
-        })
-    }));
+    let opponents = game_breakdown(&rows);
     let devices = breakdown(rows.iter().map(|event| {
         (
             format!(
@@ -236,11 +234,13 @@ fn report(
     let clients = breakdown(rows.iter().map(|event| {
         (
             format!(
-                "{} · {} · {}×{} screen",
+                "{} · {} · {}×{} screen · {:.1}× · {} touch",
                 title_case(&event.client_type),
                 title_case(&event.platform),
                 event.screen_width,
-                event.screen_height
+                event.screen_height,
+                event.device_pixel_ratio,
+                event.touch_points
             ),
             event,
         )
@@ -287,6 +287,20 @@ fn report(
         rows.iter()
             .map(|event| (title_case(&event.event_name), event)),
     );
+    let states = breakdown(rows.iter().filter_map(|event| {
+        let label = match event.event_name.as_str() {
+            "visibility" => metadata_string(event, "state")
+                .map(|value| format!("Visibility · {}", title_case(value))),
+            "viewport_resize" => metadata_string(event, "orientation")
+                .map(|value| format!("Resize · {}", title_case(value))),
+            "login" => metadata_string(event, "method")
+                .map(|value| format!("Login · {}", title_case(value))),
+            "logout" => Some("Logout".to_string()),
+            _ => metadata_string(event, "phase")
+                .map(|value| format!("Game phase · {}", title_case(value))),
+        };
+        label.map(|value| (value, event))
+    }));
     let interactions = breakdown(rows.iter().filter_map(|event| {
         matches!(
             event.event_name.as_str(),
@@ -322,26 +336,14 @@ fn report(
         })
     }));
 
-    let session_starts = sessions_for(&rows, |event| event.event_name == "session_start");
-    let home_views = sessions_for(&rows, |event| {
-        event.event_name == "page_view"
-            && matches!(
-                metadata_string(event, "surface"),
-                Some("pathway:home") | Some("home")
-            )
-    });
-    let play_views = sessions_for(&rows, |event| {
-        event.event_name == "page_view" && metadata_string(event, "surface") == Some("pathway:play")
-    });
-    let started_sessions = sessions_for(&rows, |event| event.event_name == "game_start");
-    let completed_sessions = sessions_for(&rows, |event| event.event_name == "game_complete");
-    let funnel_base = session_starts.len();
+    let funnel_counts = ordered_funnel_counts(&rows);
+    let funnel_base = funnel_counts[0];
     let funnel = [
-        ("Sessions started", session_starts.len()),
-        ("Reached home", home_views.len()),
-        ("Reached Play Now", play_views.len()),
-        ("Started a game", started_sessions.len()),
-        ("Completed a game", completed_sessions.len()),
+        ("Sessions started", funnel_counts[0]),
+        ("Reached home", funnel_counts[1]),
+        ("Reached Play Now", funnel_counts[2]),
+        ("Started a game", funnel_counts[3]),
+        ("Completed a game", funnel_counts[4]),
     ]
     .into_iter()
     .scan(None, |previous: &mut Option<usize>, (label, count)| {
@@ -380,7 +382,7 @@ fn report(
             "activeNow": "Distinct visitors with an event received in the last 15 minutes.",
             "returningUsers": "Signed-in accounts active on at least two distinct UTC dates in the selected window.",
             "gameAbandons": "Games whose latest abandonment candidate has no later resume, completion, or forfeit event in the selected window.",
-            "completionPercent": "Game completions divided by game starts in the selected window.",
+            "completionPercent": "Distinct completed games divided by distinct games with any lifecycle event in the selected window.",
             "bouncePercent": "Sessions with a bounce event divided by all sessions in the selected window.",
             "averageExitSeconds": "Average observed page lifetime from page_exit events; exits the browser could not send are absent."
         },
@@ -393,6 +395,7 @@ fn report(
         "locations": locations,
         "surfaces": surfaces,
         "eventTypes": event_types,
+        "states": states,
         "interactions": interactions,
         "errors": errors,
         "users": users,
@@ -424,7 +427,8 @@ fn load_events(
                 e.event_name, e.received_at, e.page, e.game_id, e.environment,
                 e.app_version, e.client_type, e.browser, e.device_type,
                 e.viewport_width, e.viewport_height, e.screen_width, e.screen_height,
-                e.language, e.timezone, e.platform, e.metadata_json,
+                e.device_pixel_ratio, e.touch_points, e.language, e.timezone, e.platform,
+                e.metadata_json,
                 e.received_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-15 minutes'),
                 e.received_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
          FROM user_activity_events e
@@ -438,11 +442,11 @@ fn load_events(
     let mut statement = connection
         .prepare(&sql)
         .map_err(|error| format!("prepare engagement events: {error}"))?;
-    let rows = statement
+    let mut rows = statement
         .query_map(
             params![days, modifier, previous_modifier, environment, audience],
             |row| {
-                let metadata_json = row.get::<_, String>(20)?;
+                let metadata_json = row.get::<_, String>(22)?;
                 Ok(EventRow {
                     user_id: row.get(0)?,
                     username: row.get(1)?,
@@ -461,18 +465,37 @@ fn load_events(
                     viewport_height: row.get(14)?,
                     screen_width: row.get(15)?,
                     screen_height: row.get(16)?,
-                    language: row.get(17)?,
-                    timezone: row.get(18)?,
-                    platform: row.get(19)?,
+                    device_pixel_ratio: row.get(17)?,
+                    touch_points: row.get(18)?,
+                    language: row.get(19)?,
+                    timezone: row.get(20)?,
+                    platform: row.get(21)?,
                     metadata: serde_json::from_str(&metadata_json).unwrap_or_else(|_| json!({})),
-                    active_now: row.get::<_, i64>(21)? != 0,
-                    active_last_24_hours: row.get::<_, i64>(22)? != 0,
+                    active_now: row.get::<_, i64>(23)? != 0,
+                    active_last_24_hours: row.get::<_, i64>(24)? != 0,
+                    visitor_id: String::new(),
                 })
             },
         )
         .map_err(|error| format!("query engagement events: {error}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("read engagement events: {error}"))?;
+    let session_users = rows
+        .iter()
+        .filter_map(|event| {
+            event
+                .user_id
+                .map(|user_id| (event.session_id.clone(), user_id))
+        })
+        .collect::<HashMap<_, _>>();
+    for event in &mut rows {
+        event.visitor_id = session_users
+            .get(&event.session_id)
+            .copied()
+            .or(event.user_id)
+            .map(|id| format!("user:{id}"))
+            .unwrap_or_else(|| format!("anonymous:{}", event.session_id));
+    }
     Ok(rows)
 }
 
@@ -506,8 +529,9 @@ fn totals(rows: &[EventRow]) -> Totals {
         }
     }
     let returning_users = user_days.values().filter(|dates| dates.len() >= 2).count();
-    let game_starts = count_events(rows, &["game_start"]);
-    let game_completions = count_events(rows, &["game_complete"]);
+    let game_starts = distinct_games(rows, |event| event.event_name == "game_start").len();
+    let observed_games = distinct_games(rows, is_game_lifecycle).len();
+    let game_completions = distinct_games(rows, |event| event.event_name == "game_complete").len();
     let bounce_sessions = sessions_for(rows, |event| event.event_name == "bounce");
     let error_sessions = sessions_for(rows, is_error);
     let friction_sessions = sessions_for(rows, is_friction);
@@ -539,11 +563,12 @@ fn totals(rows: &[EventRow]) -> Totals {
             .collect::<HashSet<_>>()
             .len(),
         game_starts,
+        observed_games,
         game_resumes: count_events(rows, &["game_resume"]),
         game_completions,
-        game_forfeits: count_events(rows, &["game_forfeit"]),
+        game_forfeits: distinct_games(rows, |event| event.event_name == "game_forfeit").len(),
         game_abandons: unresolved_abandonments(rows),
-        completion_percent: percent(game_completions, game_starts),
+        completion_percent: percent(game_completions, observed_games),
         bounce_sessions: bounce_sessions.len(),
         bounce_percent: percent(bounce_sessions.len(), sessions.len()),
         error_events: rows.iter().filter(|event| is_error(event)).count(),
@@ -595,13 +620,29 @@ fn time_series(rows: &[EventRow], hourly: bool) -> Vec<Value> {
         bucket.visitors.insert(visitor_key(event));
         bucket.sessions.insert(event.session_id.clone());
         match event.event_name.as_str() {
-            "game_start" => bucket.game_starts += 1,
-            "game_complete" => bucket.game_completions += 1,
-            "game_forfeit" => bucket.game_forfeits += 1,
+            "game_start" => {
+                if let Some(game_id) = &event.game_id {
+                    bucket.game_starts.insert(game_id.clone());
+                }
+            }
+            "game_complete" => {
+                if let Some(game_id) = &event.game_id {
+                    bucket.game_completions.insert(game_id.clone());
+                }
+            }
+            "game_forfeit" => {
+                if let Some(game_id) = &event.game_id {
+                    bucket.game_forfeits.insert(game_id.clone());
+                }
+            }
             "bounce" => bucket.bounces += 1,
             "client_error" | "server_error_ui" => bucket.error_events += 1,
             "rage_click" | "repeat_ui_action" => bucket.friction_events += 1,
-            "game_abandonment_candidate" => bucket.abandonment_candidates += 1,
+            "game_abandonment_candidate" => {
+                if let Some(game_id) = &event.game_id {
+                    bucket.abandonment_candidates.insert(game_id.clone());
+                }
+            }
             _ => {}
         }
     }
@@ -613,13 +654,13 @@ fn time_series(rows: &[EventRow], hourly: bool) -> Vec<Value> {
                 "activeVisitors": bucket.visitors.len(),
                 "sessions": bucket.sessions.len(),
                 "events": bucket.events,
-                "gameStarts": bucket.game_starts,
-                "gameCompletions": bucket.game_completions,
-                "gameForfeits": bucket.game_forfeits,
+                "gameStarts": bucket.game_starts.len(),
+                "gameCompletions": bucket.game_completions.len(),
+                "gameForfeits": bucket.game_forfeits.len(),
                 "bounces": bucket.bounces,
                 "errorEvents": bucket.error_events,
                 "frictionEvents": bucket.friction_events,
-                "abandonmentCandidates": bucket.abandonment_candidates
+                "abandonmentCandidates": bucket.abandonment_candidates.len()
             })
         })
         .collect()
@@ -650,11 +691,24 @@ fn user_activity(rows: &[EventRow]) -> Vec<Value> {
         user.events += 1;
         match event.event_name.as_str() {
             "page_view" => user.page_views += 1,
-            "game_start" => user.game_starts += 1,
-            "game_complete" => user.game_completions += 1,
+            "game_start" => {
+                if let Some(game_id) = &event.game_id {
+                    user.game_starts.insert(game_id.clone());
+                }
+            }
+            "game_complete" => {
+                if let Some(game_id) = &event.game_id {
+                    user.game_completions.insert(game_id.clone());
+                }
+            }
             "client_error" | "server_error_ui" => user.errors += 1,
             "rage_click" | "repeat_ui_action" => user.friction_events += 1,
             _ => {}
+        }
+        if is_game_lifecycle(event) {
+            if let Some(game_id) = &event.game_id {
+                user.observed_games.insert(game_id.clone());
+            }
         }
         *user
             .clients
@@ -682,8 +736,9 @@ fn user_activity(rows: &[EventRow]) -> Vec<Value> {
                 "sessions": user.sessions.len(),
                 "events": user.events,
                 "pageViews": user.page_views,
-                "gameStarts": user.game_starts,
-                "gameCompletions": user.game_completions,
+                "gameStarts": user.game_starts.len(),
+                "observedGames": user.observed_games.len(),
+                "gameCompletions": user.game_completions.len(),
                 "errors": user.errors,
                 "frictionEvents": user.friction_events,
                 "primaryClient": primary_client
@@ -721,10 +776,7 @@ fn recent_activity(rows: &[EventRow]) -> Vec<Value> {
 }
 
 fn visitor_key(event: &EventRow) -> String {
-    event
-        .user_id
-        .map(|id| format!("user:{id}"))
-        .unwrap_or_else(|| format!("anonymous:{}", event.session_id))
+    event.visitor_id.clone()
 }
 
 fn day(value: &str) -> String {
@@ -777,6 +829,24 @@ fn count_events(rows: &[EventRow], names: &[&str]) -> usize {
         .count()
 }
 
+fn distinct_games(rows: &[EventRow], predicate: impl Fn(&EventRow) -> bool) -> HashSet<String> {
+    rows.iter()
+        .filter(|event| predicate(event))
+        .filter_map(|event| event.game_id.clone())
+        .collect()
+}
+
+fn is_game_lifecycle(event: &EventRow) -> bool {
+    matches!(
+        event.event_name.as_str(),
+        "game_start"
+            | "game_resume"
+            | "game_complete"
+            | "game_forfeit"
+            | "game_abandonment_candidate"
+    )
+}
+
 fn is_error(event: &EventRow) -> bool {
     matches!(
         event.event_name.as_str(),
@@ -793,6 +863,43 @@ fn sessions_for(rows: &[EventRow], predicate: impl Fn(&EventRow) -> bool) -> Has
         .filter(|event| predicate(event))
         .map(|event| event.session_id.clone())
         .collect()
+}
+
+fn ordered_funnel_counts(rows: &[EventRow]) -> [usize; 5] {
+    let mut progress: HashMap<String, usize> = HashMap::new();
+    for event in rows {
+        let step = progress.entry(event.session_id.clone()).or_default();
+        if *step < 5 && matches_funnel_step(*step, event) {
+            *step += 1;
+        }
+    }
+    let mut counts = [0; 5];
+    for completed_steps in progress.into_values() {
+        for count in counts.iter_mut().take(completed_steps) {
+            *count += 1;
+        }
+    }
+    counts
+}
+
+fn matches_funnel_step(step: usize, event: &EventRow) -> bool {
+    match step {
+        0 => event.event_name == "session_start",
+        1 => {
+            event.event_name == "page_view"
+                && matches!(
+                    metadata_string(event, "surface"),
+                    Some("pathway:home") | Some("home")
+                )
+        }
+        2 => {
+            event.event_name == "page_view"
+                && metadata_string(event, "surface") == Some("pathway:play")
+        }
+        3 => event.event_name == "game_start",
+        4 => event.event_name == "game_complete",
+        _ => false,
+    }
 }
 
 fn unresolved_abandonments(rows: &[EventRow]) -> usize {
@@ -842,6 +949,52 @@ fn breakdown<'a>(rows: impl Iterator<Item = (String, &'a EventRow)>) -> Vec<Valu
             .then_with(|| left["label"].as_str().cmp(&right["label"].as_str()))
     });
     result.truncate(40);
+    result
+}
+
+fn game_breakdown(rows: &[EventRow]) -> Vec<Value> {
+    let labels = rows
+        .iter()
+        .filter(|event| is_game_lifecycle(event))
+        .filter_map(|event| {
+            Some((
+                event.game_id.as_ref()?.clone(),
+                title_case(metadata_string(event, "opponent")?),
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+    let mut groups: BTreeMap<String, (HashSet<String>, HashSet<String>, HashSet<String>)> =
+        BTreeMap::new();
+    for event in rows.iter().filter(|event| is_game_lifecycle(event)) {
+        let Some(game_id) = &event.game_id else {
+            continue;
+        };
+        let label = labels
+            .get(game_id)
+            .cloned()
+            .unwrap_or_else(|| "Unknown".to_string());
+        let group = groups.entry(label).or_default();
+        group.0.insert(game_id.clone());
+        group.1.insert(event.session_id.clone());
+        group.2.insert(visitor_key(event));
+    }
+    let mut result = groups
+        .into_iter()
+        .map(|(label, (games, sessions, visitors))| {
+            json!({
+                "label": label,
+                "events": games.len(),
+                "sessions": sessions.len(),
+                "visitors": visitors.len()
+            })
+        })
+        .collect::<Vec<_>>();
+    result.sort_by(|left, right| {
+        right["events"]
+            .as_u64()
+            .cmp(&left["events"].as_u64())
+            .then_with(|| left["label"].as_str().cmp(&right["label"].as_str()))
+    });
     result
 }
 
@@ -922,6 +1075,24 @@ mod tests {
     #[test]
     fn owner_and_test_user_receive_the_same_seeded_report() {
         let server = test_server("authorized");
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection
+            .execute(
+                "INSERT INTO auth_users
+                 (username, display_name, email, normalized_email, created_at, updated_at)
+                 VALUES ('Test', 'Test', 'test@example.test', 'test@example.test', 1, 1)",
+                [],
+            )
+            .unwrap();
+        let test_user_id = connection.last_insert_rowid();
+        connection
+            .execute(
+                "INSERT INTO auth_roles (user_id, role, created_at)
+                 VALUES (?1, 'engagement_admin', 1)",
+                [test_user_id],
+            )
+            .unwrap();
+        drop(connection);
         add_event(
             &server,
             "1",
@@ -958,8 +1129,8 @@ mod tests {
             Some("g1"),
             json!({}),
         );
-        let owner = auth::test_auth_user(1, "Garrett");
-        let tester = auth::test_auth_user(8, "Test");
+        let owner = auth::test_user(1, "Garrett", "owner@example.test");
+        let tester = auth::test_user(test_user_id, "Test", "test@example.test");
         let owner_response = handle(&server, &request(30), Some(&owner)).unwrap();
         let tester_response = handle(&server, &request(30), Some(&tester)).unwrap();
         assert_eq!(owner_response.status, 200);
@@ -987,7 +1158,7 @@ mod tests {
             None,
             json!({}),
         );
-        let player = auth::test_auth_user(2, "Player");
+        let player = auth::test_user(2, "Player", "player@example.test");
         let response = handle(&server, &request(30), Some(&player)).unwrap();
         assert_eq!(response.status, 403);
         assert!(!response.body.contains("secret-session"));
@@ -1007,7 +1178,7 @@ mod tests {
             json!({}),
         );
         add_event(&server, "2", None, "anon", "session_start", None, json!({}));
-        let owner = auth::test_auth_user(1, "Garrett");
+        let owner = auth::test_user(1, "Garrett", "owner@example.test");
         let mut filtered = request(30);
         filtered.body =
             json!({"days": 30, "environment": "prod", "audience": "registered"}).to_string();
@@ -1022,6 +1193,77 @@ mod tests {
             handle(&server, &filtered, Some(&owner)).unwrap().status,
             400
         );
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn a_tab_that_signs_in_counts_as_one_visitor() {
+        let server = test_server("visitor-reconciliation");
+        add_event(
+            &server,
+            "1",
+            None,
+            "same-tab",
+            "session_start",
+            None,
+            json!({}),
+        );
+        add_event(
+            &server,
+            "2",
+            Some(1),
+            "same-tab",
+            "login",
+            None,
+            json!({"method":"password"}),
+        );
+        let owner = auth::test_user(1, "Garrett", "owner@example.test");
+        let response = handle(&server, &request(30), Some(&owner)).unwrap();
+        let value: Value = serde_json::from_str(&response.body).unwrap();
+        assert_eq!(value["totals"]["activeVisitors"], 1);
+        assert_eq!(value["totals"]["sessions"], 1);
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn completion_rate_uses_every_observed_game_once() {
+        let server = test_server("completion-denominator");
+        add_event(
+            &server,
+            "1",
+            Some(1),
+            "human-session",
+            "game_complete",
+            Some("human-game"),
+            json!({"opponent":"human"}),
+        );
+        add_event(
+            &server,
+            "2",
+            Some(1),
+            "ai-session",
+            "game_start",
+            Some("ai-game"),
+            json!({"opponent":"dynamic"}),
+        );
+        add_event(
+            &server,
+            "3",
+            Some(1),
+            "ai-session",
+            "game_complete",
+            Some("ai-game"),
+            json!({"opponent":"dynamic"}),
+        );
+        let owner = auth::test_user(1, "Garrett", "owner@example.test");
+        let response = handle(&server, &request(30), Some(&owner)).unwrap();
+        let value: Value = serde_json::from_str(&response.body).unwrap();
+        assert_eq!(value["totals"]["gameStarts"], 1);
+        assert_eq!(value["totals"]["observedGames"], 2);
+        assert_eq!(value["totals"]["gameCompletions"], 2);
+        assert_eq!(value["totals"]["completionPercent"], 100.0);
+        assert_eq!(value["opponents"][0]["events"], 1);
+        assert_eq!(value["opponents"][1]["events"], 1);
         std::fs::remove_dir_all(server.data_dir).unwrap();
     }
 
@@ -1044,12 +1286,15 @@ mod tests {
             viewport_height: 1,
             screen_width: 1,
             screen_height: 1,
+            device_pixel_ratio: 1.0,
+            touch_points: 0,
             language: "en".into(),
             timezone: "UTC".into(),
             platform: "Mac".into(),
             metadata: json!({}),
             active_now: false,
             active_last_24_hours: false,
+            visitor_id: "user:1".into(),
         }
     }
 
@@ -1061,5 +1306,40 @@ mod tests {
             event("game_abandonment_candidate", "abandoned", "3"),
         ];
         assert_eq!(unresolved_abandonments(&rows), 1);
+    }
+
+    #[test]
+    fn funnel_requires_each_step_in_order() {
+        let mut ordered = vec![
+            event("session_start", "none", "1"),
+            event("page_view", "none", "2"),
+            event("page_view", "none", "3"),
+            event("game_start", "game", "4"),
+            event("game_complete", "game", "5"),
+        ];
+        ordered[0].game_id = None;
+        ordered[1].game_id = None;
+        ordered[1].metadata = json!({"surface":"pathway:home"});
+        ordered[2].game_id = None;
+        ordered[2].metadata = json!({"surface":"pathway:play"});
+
+        let mut out_of_order = vec![
+            event("session_start", "none", "1"),
+            event("page_view", "none", "2"),
+            event("game_start", "game-2", "3"),
+            event("page_view", "none", "4"),
+            event("game_complete", "game-2", "5"),
+        ];
+        for row in &mut out_of_order {
+            row.session_id = "out-of-order".into();
+        }
+        out_of_order[0].game_id = None;
+        out_of_order[1].game_id = None;
+        out_of_order[1].metadata = json!({"surface":"pathway:play"});
+        out_of_order[3].game_id = None;
+        out_of_order[3].metadata = json!({"surface":"pathway:home"});
+
+        ordered.extend(out_of_order);
+        assert_eq!(ordered_funnel_counts(&ordered), [2, 2, 1, 1, 1]);
     }
 }

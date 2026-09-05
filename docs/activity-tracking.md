@@ -50,8 +50,8 @@ timezone, platform, and touch-point count. Raw user-agent strings are not retain
 - `bounce`
 
 An active game at page exit is a `game_abandonment_candidate`, not a final
-abandonment. A future report should classify it as abandoned only when the same
-game has no later resume, action, completion, or forfeit within the chosen window.
+abandonment. The report classifies it as abandoned only when the same game has
+no later resume, completion, or forfeit within the chosen window.
 A bounce is currently a page exit within ten seconds with no tracked interaction.
 
 UI events contain stable element IDs or generic component classes. They never
@@ -64,23 +64,31 @@ retained in page paths.
 `POST /api/admin/engagement` accepts `days` as `1`, `7`, `30`, `90`, or `0`
 for all available history, plus `environment` (`all`, `prod`, `ios`, `lan`, or
 `local`) and `audience` (`all`, `registered`, or `anonymous`) filters. The
-server authorizes only usernames listed in
-`CRIBBAGE_ENGAGEMENT_ADMINS`; the default designated accounts are `Garrett` and
-`Test`. Hiding the client link is only a convenience—the API independently
-returns `403` to every other signed-in account.
+server resolves the usernames in `CRIBBAGE_ENGAGEMENT_ADMINS` into immutable
+account-role rows once when the role schema is first initialized; the default
+bootstrap names are `Garrett` and `Test`. Later profile-name edits neither grant
+nor revoke access. Adding another administrator requires an explicit role-row
+change rather than adopting a configured display name. Hiding the client link is
+only a convenience—the API independently returns `403` to every other signed-in
+account.
 
 The report defines its metrics in the response and UI. Active visitors combine
 distinct authenticated accounts with anonymous tab sessions. Returning users
 are authenticated accounts seen on two or more UTC dates in the window.
-Completion rate divides completion events by start events in the same window.
+Completion rate divides distinct completed games by distinct games with any
+lifecycle event in the same window. This keeps older human-game completions
+without a corresponding start event from producing a rate above 100 percent.
 An abandonment is a game's latest abandonment candidate with no later resume,
 completion, or forfeit event in the selected window. Funnel conversion uses
-sessions with a recorded `session_start` as its denominator. Daily aggregates
-are available as a CSV download. The report also provides hourly and daily
+sessions with a recorded `session_start` as its denominator and counts each
+later step only when that session reached the preceding steps in order. Daily
+aggregates are available as a CSV download. The report also provides hourly and daily
 trend series, previous-window comparisons, active-now and last-24-hour visitors,
 account-level engagement, recent activity, screen and pathway use, interaction
 hot spots, sanitized error groups, event inventory, and client, platform,
-version, timezone, and language breakdowns.
+version, screen, pixel-ratio, touch, timezone, language, visibility, orientation,
+authentication, and recorded game-phase breakdowns. Anonymous activity from a
+tab that later signs in is reconciled to the signed-in account for visitor totals.
 
 ## Known measurement gaps
 
@@ -90,7 +98,8 @@ version, timezone, and language breakdowns.
 - Gameplay currently records starts, resumes, completions, forfeits, and exit
   candidates, but not the timing of each hand, discard, pegging, hint, or score
   review. Milestone events would identify the precise stage where play slows or
-  stops.
+  stops. Human-game starts are recorded from this release forward; older human
+  completions may have no matching historical start event.
 - Client-visible errors are recorded, but API route latency and response status
   are not. Duration/status buckets would connect performance to frustration.
 - Anonymous identity lives only for a browser tab. A durable random browser ID

@@ -165,9 +165,11 @@ Every PR must:
 
 ## PR 4 — Private engagement administration
 
-- **Branch:** create from the accepted `server` baseline after PR 3 review
-- **Target:** `server`
-- **Release gate:** Local runtime only; leave PR open for review.
+- **Branch:** `feat/private-engagement-admin`
+- **Target:** `master`
+- **Release gate:** Prepare and review the PR, but do not merge or deploy until
+  the separately running production deployment is complete and the owner gives
+  an explicit go-ahead.
 
 ### Scope
 
@@ -192,12 +194,13 @@ Every PR must:
 
 ### Verification evidence
 
-- `npm test --silent`: 272 Rust tests across 18 targets passed.
+- `npm test --silent`: 276 Rust tests across 18 targets passed.
 - `npm run test:web`, `npm run typecheck`, and `npm run build`: passed.
 - The live API returns `401` for an unauthenticated engagement request.
-- Chromium interaction and visual checks passed at 1440×1050 and 390×844,
-  including dashboard tabs, line charts, account activity, and server-side
-  environment filters.
+- The committed Chromium regression covers dashboard keyboard tabs, line-chart
+  rendering and legend controls, account activity, experience and state views,
+  and server-side environment filters. Additional visual checks passed at
+  1440×1050 and 390×844.
 - The shared LAN runtime serves the current branch at
   `http://192.168.88.17:8765/?engagement=1`.
 

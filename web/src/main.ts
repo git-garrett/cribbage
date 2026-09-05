@@ -661,6 +661,7 @@ const els = {
   engagementEnvironments: document.querySelector("#engagement-environments") as HTMLElement,
   engagementLocations: document.querySelector("#engagement-locations") as HTMLElement,
   engagementEvents: document.querySelector("#engagement-events") as HTMLElement,
+  engagementStates: document.querySelector("#engagement-states") as HTMLElement,
   engagementDaily: document.querySelector("#engagement-daily") as HTMLElement,
   exportGameLog: document.querySelector("#export-game-log") as HTMLButtonElement,
   troubleGame: document.querySelector("#trouble-game") as HTMLButtonElement,
@@ -982,6 +983,7 @@ interface EngagementUserActivity {
   events: number;
   pageViews: number;
   gameStarts: number;
+  observedGames: number;
   gameCompletions: number;
   errors: number;
   frictionEvents: number;
@@ -1020,6 +1022,7 @@ interface EngagementReport {
     activeNow: number;
     activeLast24Hours: number;
     gameStarts: number;
+    observedGames: number;
     gameResumes: number;
     gameCompletions: number;
     gameForfeits: number;
@@ -1044,6 +1047,7 @@ interface EngagementReport {
   locations: EngagementBreakdown[];
   surfaces: EngagementBreakdown[];
   eventTypes: EngagementBreakdown[];
+  states: EngagementBreakdown[];
   interactions: EngagementBreakdown[];
   errors: EngagementBreakdown[];
   users: EngagementUserActivity[];
@@ -2582,7 +2586,7 @@ function refreshVisibleHumanGame(): Promise<void> {
   return humanGameRefreshPromise;
 }
 
-async function enterHumanGame(): Promise<void> {
+async function enterHumanGame(started = false): Promise<void> {
   if (!activeHumanTable) return;
   const previousGameId = currentSnapshot?.gameId;
   const game = await fetchHumanGame();
@@ -2594,6 +2598,12 @@ async function enterHumanGame(): Promise<void> {
   els.peopleProfilePage.hidden = true;
   els.humanTablePage.hidden = true;
   render(game);
+  if (started && currentSnapshot?.gameId) {
+    activityTracker.track("game_start", {
+      opponent: "human",
+      handNumber: game.handNumber,
+    }, true);
+  }
   if (previousGameId !== currentSnapshot?.gameId) announceGameEntry(game);
   startHumanGameSync();
 }
@@ -2620,7 +2630,7 @@ function scheduleHumanTablePoll(): void {
       const response = await authJson<HumanTableResponse>("/api/people/table", { tableId: activeHumanTable.id });
       renderHumanTable(response.table);
       if (response.table.phase === "playing" || response.table.phase === "complete") {
-        await enterHumanGame();
+        await enterHumanGame(true);
         return;
       }
       scheduleHumanTablePoll();
@@ -9120,7 +9130,7 @@ els.humanTableCut.addEventListener("click", async () => {
     renderHumanTable(response.table);
     els.humanTableStatus.textContent = "";
     if (response.table.phase === "playing") {
-      await enterHumanGame();
+      await enterHumanGame(true);
       return;
     }
     scheduleHumanTablePoll();
@@ -9237,16 +9247,19 @@ function filledEngagementTrend(report: EngagementReport): EngagementTrendPoint[]
   const source = hourly ? report.hourly : report.daily;
   if (report.range.days === 0) return source;
   const values = new Map(source.map((point) => [point.period, point]));
-  const count = hourly ? 24 : report.range.days;
-  const now = new Date(report.range.to);
-  if (hourly) now.setUTCMinutes(0, 0, 0);
-  else now.setUTCHours(0, 0, 0, 0);
-  return Array.from({ length: count }, (_, index) => {
-    const value = new Date(now);
-    if (hourly) value.setUTCHours(value.getUTCHours() - (count - index - 1));
-    else value.setUTCDate(value.getUTCDate() - (count - index - 1));
+  const end = new Date(report.range.to);
+  const start = new Date(end.getTime() - report.range.days * 24 * 60 * 60 * 1_000);
+  if (hourly) {
+    start.setUTCMinutes(0, 0, 0);
+    end.setUTCMinutes(0, 0, 0);
+  } else {
+    start.setUTCHours(0, 0, 0, 0);
+    end.setUTCHours(0, 0, 0, 0);
+  }
+  const points: EngagementTrendPoint[] = [];
+  for (const value = new Date(start); value <= end; hourly ? value.setUTCHours(value.getUTCHours() + 1) : value.setUTCDate(value.getUTCDate() + 1)) {
     const period = value.toISOString().slice(0, hourly ? 13 : 10);
-    return values.get(period) ?? {
+    points.push(values.get(period) ?? {
       period,
       activeVisitors: 0,
       sessions: 0,
@@ -9258,8 +9271,9 @@ function filledEngagementTrend(report: EngagementReport): EngagementTrendPoint[]
       errorEvents: 0,
       frictionEvents: 0,
       abandonmentCandidates: 0,
-    };
-  });
+    });
+  }
+  return points;
 }
 
 function engagementPeriodLabel(period: string, hourly: boolean): string {
@@ -9409,7 +9423,7 @@ function renderEngagementReport(report: EngagementReport): void {
   els.engagementInsights.replaceChildren(
     engagementInsight("Active now", String(totals.activeNow), `${totals.activeLast24Hours} visitor${totals.activeLast24Hours === 1 ? "" : "s"} in the last 24 hours.`, totals.activeNow ? "good" : "neutral"),
     engagementInsight("Audience trend", visitorChange === null ? "No baseline" : `${visitorChange > 0 ? "+" : ""}${visitorChange}%`, "Active visitors compared with the prior matching window.", visitorChange === null || visitorChange === 0 ? "neutral" : visitorChange > 0 ? "good" : "watch"),
-    engagementInsight("Game follow-through", `${totals.completionPercent}%`, `${totals.gameCompletions} completions from ${totals.gameStarts} starts; ${totals.gameAbandons} unresolved abandonments.`, totals.gameStarts === 0 ? "neutral" : totals.completionPercent >= 70 ? "good" : "watch"),
+    engagementInsight("Game follow-through", `${totals.completionPercent}%`, `${totals.gameCompletions} completions among ${totals.observedGames} observed games; ${totals.gameAbandons} unresolved abandonments.`, totals.observedGames === 0 ? "neutral" : totals.completionPercent >= 70 ? "good" : "watch"),
     engagementInsight("UX signals", String(totals.errorEvents + totals.frictionEvents), `${totals.errorEvents} errors and ${totals.frictionEvents} repeat/rage-click signals.`, totals.errorEvents + totals.frictionEvents ? "watch" : "good"),
   );
   els.engagementOverview.replaceChildren(
@@ -9417,7 +9431,7 @@ function renderEngagementReport(report: EngagementReport): void {
     engagementMetric("Sessions", String(totals.sessions), `${totals.signedInSessions} sessions included a signed-in account.`, { value: comparisonValue(report, "sessions") }),
     engagementMetric("Returning people", String(totals.returningUsers), "Signed-in on at least two distinct UTC dates."),
     engagementMetric("Game starts", String(totals.gameStarts), `${totals.gameResumes} game resume events.`, { value: comparisonValue(report, "gameStarts") }),
-    engagementMetric("Completed games", String(totals.gameCompletions), `${totals.completionPercent}% of starts completed.`, { value: completionChange, points: true }),
+    engagementMetric("Completed games", String(totals.gameCompletions), `${totals.completionPercent}% of ${totals.observedGames} observed games completed.`, { value: completionChange, points: true }),
     engagementMetric("Observed time", totals.averageExitSeconds ? `${Math.round(totals.averageExitSeconds / 60)}m` : "—", "Average page lifetime when a page-exit event arrived."),
   );
   renderEngagementLineChart(els.engagementActivityChart, report, [
@@ -9461,8 +9475,8 @@ function renderEngagementReport(report: EngagementReport): void {
   ]);
   engagementTable(
     els.engagementUsers,
-    ["Person", "Last active", "Days", "Sessions", "Starts", "Completed", "Errors", "Friction", "Primary client"],
-    report.users.map((user) => [user.displayName, new Date(user.lastActive).toLocaleString(), user.activeDays, user.sessions, user.gameStarts, user.gameCompletions, user.errors, user.frictionEvents, user.primaryClient]),
+    ["Person", "Last active", "Days", "Sessions", "Starts", "Observed", "Completed", "Errors", "Friction", "Primary client"],
+    report.users.map((user) => [user.displayName, new Date(user.lastActive).toLocaleString(), user.activeDays, user.sessions, user.gameStarts, user.observedGames, user.gameCompletions, user.errors, user.frictionEvents, user.primaryClient]),
     "No signed-in people were active in this window.",
   );
   engagementTable(
@@ -9475,12 +9489,13 @@ function renderEngagementReport(report: EngagementReport): void {
   engagementTable(els.engagementErrors, ["Error", "Events", "Sessions", "Visitors"], breakdownRows(report.errors), "No client or server errors in this window.");
   engagementTable(els.engagementSurfaces, ["Screen", "Views", "Sessions", "Visitors"], breakdownRows(report.surfaces), "No screen views in this window.");
   engagementTable(els.engagementPathways, ["Pathway", "Views", "Sessions", "Visitors"], breakdownRows(report.pathways), "No pathway views in this window.");
-  engagementTable(els.engagementOpponents, ["Opponent/model", "Starts", "Sessions", "Visitors"], breakdownRows(report.opponents), "No games started in this window.");
+  engagementTable(els.engagementOpponents, ["Opponent/model", "Games", "Sessions", "Visitors"], breakdownRows(report.opponents), "No game activity in this window.");
   engagementTable(els.engagementDevices, ["Device · browser · viewport", "Events", "Sessions", "Visitors"], breakdownRows(report.devices), "No client activity in this window.");
   engagementTable(els.engagementClients, ["Client · platform · screen", "Events", "Sessions", "Visitors"], breakdownRows(report.clients), "No client activity in this window.");
   engagementTable(els.engagementEnvironments, ["Environment · version", "Events", "Sessions", "Visitors"], breakdownRows(report.environments), "No environment data in this window.");
   engagementTable(els.engagementLocations, ["Timezone · language", "Events", "Sessions", "Visitors"], breakdownRows(report.locations), "No regional context in this window.");
   engagementTable(els.engagementEvents, ["Event", "Count", "Sessions", "Visitors"], breakdownRows(report.eventTypes), "No events in this window.");
+  engagementTable(els.engagementStates, ["State or phase", "Events", "Sessions", "Visitors"], breakdownRows(report.states), "No state or phase signals in this window.");
   engagementTable(
     els.engagementDaily,
     ["UTC date", "Visitors", "Sessions", "Events", "Starts", "Completed", "Bounces", "Errors", "Friction", "Abandon signals"],
