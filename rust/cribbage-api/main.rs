@@ -35,6 +35,7 @@ use serde_json::{json, Value};
 mod activity;
 mod auth;
 mod email;
+mod engagement;
 mod feedback;
 mod people;
 
@@ -321,6 +322,8 @@ fn main() {
     });
     auth::initialize(&data_dir)
         .unwrap_or_else(|error| panic!("could not initialize authentication storage: {}", error));
+    email::initialize(&data_dir)
+        .unwrap_or_else(|error| panic!("could not initialize email delivery queue: {}", error));
     let migrated_legacy_sessions = migrate_legacy_session_owners(&data_dir)
         .unwrap_or_else(|error| panic!("could not migrate legacy game ownership: {}", error));
     if migrated_legacy_sessions > 0 {
@@ -337,6 +340,8 @@ fn main() {
         .unwrap_or_else(|error| panic!("could not initialize people storage: {}", error));
     auth::validate_configuration()
         .unwrap_or_else(|error| panic!("invalid authentication configuration: {}", error));
+    let email_data_dir = data_dir.clone();
+    std::thread::spawn(move || email::run_delivery_worker(email_data_dir));
     let uploads = load_uploads(&data_dir).unwrap_or_else(|error| {
         eprintln!("Rust API leaderboard history was not loaded: {}", error);
         HashMap::new()
@@ -389,6 +394,9 @@ fn handle_connection(mut stream: TcpStream, server: &Server) -> Result<(), Strin
         );
     }
     if let Some(response) = activity::handle(server, &request, authenticated_user.as_ref()) {
+        return write_response(&mut stream, response);
+    }
+    if let Some(response) = engagement::handle(server, &request, authenticated_user.as_ref()) {
         return write_response(&mut stream, response);
     }
     if let Some(response) = feedback::handle(server, &request, authenticated_user.as_ref()) {

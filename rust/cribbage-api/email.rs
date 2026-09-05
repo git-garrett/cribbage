@@ -1,6 +1,118 @@
 use std::env;
+use std::path::Path;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde_json::json;
+
+use super::open_game_database;
+
+const DELIVERY_RETRY_SECONDS: u64 = 60;
+const CLAIM_LEASE_SECONDS: i64 = 5 * 60;
+
+struct QueuedEmail {
+    payload: String,
+    expires_at: Option<i64>,
+}
+
+#[derive(Clone, Copy)]
+struct Mailbox<'a> {
+    email: &'a str,
+    name: &'a str,
+}
+
+#[derive(Clone, Copy, Default)]
+struct QueuePolicy<'a> {
+    dedupe_key: Option<&'a str>,
+    expires_at: Option<i64>,
+}
+
+pub fn initialize(data_dir: &Path) -> Result<(), String> {
+    let connection = open_game_database(data_dir)?;
+    connection
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS email_delivery_queue (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               dedupe_key TEXT,
+               payload_json TEXT NOT NULL,
+               expires_at INTEGER,
+               status TEXT NOT NULL DEFAULT 'pending',
+               attempts INTEGER NOT NULL DEFAULT 0,
+               last_error TEXT,
+               claimed_at INTEGER,
+               created_at INTEGER NOT NULL,
+               updated_at INTEGER NOT NULL,
+               sent_at INTEGER,
+               CHECK(status IN ('pending', 'sending', 'sent', 'expired', 'superseded'))
+             );
+             CREATE INDEX IF NOT EXISTS email_delivery_queue_pending
+               ON email_delivery_queue(status, id);",
+        )
+        .map_err(|error| format!("create email delivery queue: {}", error))?;
+    Ok(())
+}
+
+pub fn run_delivery_worker(data_dir: std::path::PathBuf) {
+    if delivery_paused() {
+        return;
+    }
+    loop {
+        if let Err(error) = deliver_pending(&data_dir) {
+            eprintln!("Could not process queued email: {}", error);
+        }
+        std::thread::sleep(Duration::from_secs(DELIVERY_RETRY_SECONDS));
+    }
+}
+
+pub fn deliver_pending(data_dir: &Path) -> Result<(), String> {
+    if delivery_paused() {
+        return Ok(());
+    }
+    recover_stale_claims(data_dir)?;
+    let connection = open_game_database(data_dir)?;
+
+    let mut statement = connection
+        .prepare(
+            "SELECT id FROM email_delivery_queue
+             WHERE status = 'pending'
+             ORDER BY id",
+        )
+        .map_err(|error| format!("prepare pending email query: {}", error))?;
+    let ids = statement
+        .query_map([], |row| row.get::<_, i64>(0))
+        .map_err(|error| format!("read pending emails: {}", error))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("collect pending emails: {}", error))?;
+    drop(statement);
+    drop(connection);
+
+    for id in ids {
+        if let Err(error) = deliver_queued_with(data_dir, id, send_via_sendgrid) {
+            eprintln!("Could not deliver queued email {}: {}", id, error);
+        }
+    }
+    Ok(())
+}
+
+fn recover_stale_claims(data_dir: &Path) -> Result<(), String> {
+    let connection = open_game_database(data_dir)?;
+    let now = unix_seconds();
+    connection
+        .execute(
+            "UPDATE email_delivery_queue
+             SET status = 'pending', claimed_at = NULL, updated_at = ?1
+             WHERE status = 'sending' AND COALESCE(claimed_at, updated_at) <= ?2",
+            params![now, now - CLAIM_LEASE_SECONDS],
+        )
+        .map_err(|error| format!("recover stale email delivery claims: {}", error))?;
+    Ok(())
+}
+
+pub fn delivery_paused() -> bool {
+    env::var("CRIBBAGE_EMAIL_DELIVERY_PAUSED")
+        .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false)
+}
 
 pub struct EmailMessage {
     pub subject: String,
@@ -175,6 +287,7 @@ pub fn feature_request(
 }
 
 pub fn send_feedback(
+    data_dir: &Path,
     message: &EmailMessage,
     reply_to_email: &str,
     reply_to_name: &str,
@@ -182,16 +295,23 @@ pub fn send_feedback(
     let recipient = env::var("CRIBBAGE_FEEDBACK_TO")
         .or_else(|_| env::var("CRIBBAGE_MAIL_REPLY_TO"))
         .unwrap_or_else(|_| "founder@evenvision.com".to_string());
-    send_with_reply_to(
-        &recipient,
-        "Strong Cribbage",
+    queue_with_reply_to(
+        data_dir,
+        Mailbox {
+            email: &recipient,
+            name: "Strong Cribbage",
+        },
         message,
-        reply_to_email,
-        reply_to_name,
+        Mailbox {
+            email: reply_to_email,
+            name: reply_to_name,
+        },
+        QueuePolicy::default(),
     )
 }
 
 pub fn send_access_request(
+    data_dir: &Path,
     first_name: &str,
     last_name: &str,
     username: &str,
@@ -201,41 +321,197 @@ pub fn send_access_request(
         .or_else(|_| env::var("CRIBBAGE_MAIL_REPLY_TO"))
         .unwrap_or_else(|_| "founder@evenvision.com".to_string());
     let full_name = format!("{} {}", first_name, last_name);
-    send_with_reply_to(
-        &recipient,
-        "Strong Cribbage",
+    let dedupe_key = format!("access-request:{}", email.to_ascii_lowercase());
+    queue_with_reply_to(
+        data_dir,
+        Mailbox {
+            email: &recipient,
+            name: "Strong Cribbage",
+        },
         &access_request(first_name, last_name, username, email),
-        email,
-        &full_name,
+        Mailbox {
+            email,
+            name: &full_name,
+        },
+        QueuePolicy {
+            dedupe_key: Some(&dedupe_key),
+            expires_at: None,
+        },
     )
 }
 
-pub fn send(to_email: &str, to_name: &str, message: &EmailMessage) -> Result<(), String> {
-    let reply_to =
-        env::var("CRIBBAGE_MAIL_REPLY_TO").unwrap_or_else(|_| "founder@evenvision.com".to_string());
-    send_with_reply_to(to_email, to_name, message, &reply_to, "Strong Cribbage")
-}
-
-fn send_with_reply_to(
+pub fn send(
+    data_dir: &Path,
     to_email: &str,
     to_name: &str,
     message: &EmailMessage,
-    reply_to_email: &str,
-    reply_to_name: &str,
+    dedupe_key: &str,
+    expires_at: i64,
 ) -> Result<(), String> {
-    let api_key = env::var("SENDGRID_API_KEY")
-        .map_err(|_| "SENDGRID_API_KEY is not configured".to_string())?;
-    if api_key == "local-email-disabled" {
+    let reply_to =
+        env::var("CRIBBAGE_MAIL_REPLY_TO").unwrap_or_else(|_| "founder@evenvision.com".to_string());
+    queue_with_reply_to(
+        data_dir,
+        Mailbox {
+            email: to_email,
+            name: to_name,
+        },
+        message,
+        Mailbox {
+            email: &reply_to,
+            name: "Strong Cribbage",
+        },
+        QueuePolicy {
+            dedupe_key: Some(dedupe_key),
+            expires_at: Some(expires_at),
+        },
+    )
+}
+
+fn queue_with_reply_to(
+    data_dir: &Path,
+    recipient: Mailbox<'_>,
+    message: &EmailMessage,
+    reply_to: Mailbox<'_>,
+    policy: QueuePolicy<'_>,
+) -> Result<(), String> {
+    let payload = sendgrid_payload(recipient, message, reply_to);
+    let id = enqueue(
+        data_dir,
+        policy.dedupe_key,
+        &payload.to_string(),
+        policy.expires_at,
+    )?;
+    if !delivery_paused() {
+        if let Err(error) = deliver_queued_with(data_dir, id, send_via_sendgrid) {
+            eprintln!("Could not deliver queued email {}: {}", id, error);
+        }
+    }
+    Ok(())
+}
+
+fn enqueue(
+    data_dir: &Path,
+    dedupe_key: Option<&str>,
+    payload: &str,
+    expires_at: Option<i64>,
+) -> Result<i64, String> {
+    let mut connection = open_game_database(data_dir)?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| format!("start email queue transaction: {}", error))?;
+    let now = unix_seconds();
+    if let Some(dedupe_key) = dedupe_key {
+        transaction
+            .execute(
+                "UPDATE email_delivery_queue
+                 SET status = 'superseded', payload_json = '', updated_at = ?2
+                 WHERE dedupe_key = ?1 AND status = 'pending'",
+                params![dedupe_key, now],
+            )
+            .map_err(|error| format!("supersede queued email: {}", error))?;
+    }
+    transaction
+        .execute(
+            "INSERT INTO email_delivery_queue
+             (dedupe_key, payload_json, expires_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?4)",
+            params![dedupe_key, payload, expires_at, now],
+        )
+        .map_err(|error| format!("queue email: {}", error))?;
+    let id = transaction.last_insert_rowid();
+    transaction
+        .commit()
+        .map_err(|error| format!("commit queued email: {}", error))?;
+    Ok(id)
+}
+
+fn deliver_queued_with<F>(data_dir: &Path, id: i64, deliver: F) -> Result<(), String>
+where
+    F: FnOnce(&QueuedEmail) -> Result<(), String>,
+{
+    let connection = open_game_database(data_dir)?;
+    let now = unix_seconds();
+    let claimed = connection
+        .execute(
+            "UPDATE email_delivery_queue
+             SET status = 'sending', attempts = attempts + 1,
+                 claimed_at = ?2, updated_at = ?2
+             WHERE id = ?1 AND status = 'pending'",
+            params![id, now],
+        )
+        .map_err(|error| format!("claim queued email: {}", error))?;
+    if claimed == 0 {
         return Ok(());
     }
+    let queued = connection
+        .query_row(
+            "SELECT payload_json, expires_at FROM email_delivery_queue WHERE id = ?1",
+            [id],
+            |row| {
+                Ok(QueuedEmail {
+                    payload: row.get(0)?,
+                    expires_at: row.get(1)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| format!("read claimed email: {}", error))?
+        .ok_or_else(|| format!("queued email {} disappeared", id))?;
+    if queued
+        .expires_at
+        .is_some_and(|expires_at| expires_at <= now)
+    {
+        connection
+            .execute(
+                "UPDATE email_delivery_queue
+                 SET status = 'expired', payload_json = '', claimed_at = NULL, updated_at = ?2
+                 WHERE id = ?1",
+                params![id, now],
+            )
+            .map_err(|error| format!("expire queued email: {}", error))?;
+        return Ok(());
+    }
+
+    match deliver(&queued) {
+        Ok(()) => connection
+            .execute(
+                "UPDATE email_delivery_queue
+                 SET status = 'sent', payload_json = '', last_error = NULL,
+                     claimed_at = NULL, sent_at = ?2, updated_at = ?2
+                 WHERE id = ?1",
+                params![id, unix_seconds()],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("record delivered email: {}", error)),
+        Err(error) => {
+            connection
+                .execute(
+                    "UPDATE email_delivery_queue
+                     SET status = 'pending', last_error = ?2,
+                         claimed_at = NULL, updated_at = ?3
+                     WHERE id = ?1",
+                    params![id, error, unix_seconds()],
+                )
+                .map_err(|db_error| format!("record email delivery failure: {}", db_error))?;
+            Err(error)
+        }
+    }
+}
+
+fn sendgrid_payload(
+    recipient: Mailbox<'_>,
+    message: &EmailMessage,
+    reply_to: Mailbox<'_>,
+) -> serde_json::Value {
     let from_email =
         env::var("CRIBBAGE_MAIL_FROM").unwrap_or_else(|_| "hello@strongcribbage.com".to_string());
     let from_name =
         env::var("CRIBBAGE_MAIL_FROM_NAME").unwrap_or_else(|_| "Strong Cribbage".to_string());
     let mut payload = json!({
-        "personalizations": [{"to": [{"email": to_email, "name": to_name}]}],
+        "personalizations": [{"to": [{"email": recipient.email, "name": recipient.name}]}],
         "from": {"email": from_email, "name": from_name},
-        "reply_to": {"email": reply_to_email, "name": reply_to_name},
+        "reply_to": {"email": reply_to.email, "name": reply_to.name},
         "subject": message.subject,
         "content": [
             {"type": "text/plain", "value": message.text},
@@ -258,16 +534,33 @@ fn send_with_reply_to(
             }))
             .collect::<Vec<_>>());
     }
+    payload
+}
+
+fn send_via_sendgrid(queued: &QueuedEmail) -> Result<(), String> {
+    let api_key = env::var("SENDGRID_API_KEY")
+        .map_err(|_| "SENDGRID_API_KEY is not configured".to_string())?;
+    if api_key == "local-email-disabled" {
+        return Ok(());
+    }
     match ureq::post("https://api.sendgrid.com/v3/mail/send")
+        .timeout(Duration::from_secs(10))
         .set("Authorization", &format!("Bearer {}", api_key))
         .set("Content-Type", "application/json")
-        .send_string(&payload.to_string())
+        .send_string(&queued.payload)
     {
         Ok(response) if response.status() == 202 => Ok(()),
         Ok(response) => Err(format!("SendGrid returned HTTP {}", response.status())),
         Err(ureq::Error::Status(status, _)) => Err(format!("SendGrid returned HTTP {}", status)),
         Err(error) => Err(format!("SendGrid request failed: {}", error)),
     }
+}
+
+fn unix_seconds() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 fn feedback_details(
@@ -328,6 +621,172 @@ fn html_escape(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn queue_data_dir(name: &str) -> std::path::PathBuf {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-email-{}-{}-{}",
+            name,
+            std::process::id(),
+            unix_seconds()
+        ));
+        super::super::initialize_game_database(&data_dir).unwrap();
+        initialize(&data_dir).unwrap();
+        data_dir
+    }
+
+    #[test]
+    fn queue_supersedes_an_older_auth_message_with_the_same_key() {
+        let data_dir = queue_data_dir("supersede");
+        enqueue(
+            &data_dir,
+            Some("otp:1"),
+            "{\"message\":\"old secret\"}",
+            Some(unix_seconds() + 600),
+        )
+        .unwrap();
+        let current = enqueue(
+            &data_dir,
+            Some("otp:1"),
+            "{\"message\":\"current secret\"}",
+            Some(unix_seconds() + 600),
+        )
+        .unwrap();
+
+        let connection = open_game_database(&data_dir).unwrap();
+        let superseded: (String, String) = connection
+            .query_row(
+                "SELECT status, payload_json FROM email_delivery_queue WHERE id < ?1",
+                [current],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let pending: String = connection
+            .query_row(
+                "SELECT status FROM email_delivery_queue WHERE id = ?1",
+                [current],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(superseded, ("superseded".to_string(), String::new()));
+        assert_eq!(pending, "pending");
+        drop(connection);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn successful_delivery_redacts_content_and_failure_stays_pending() {
+        let data_dir = queue_data_dir("delivery");
+        let sent_id = enqueue(&data_dir, None, "{\"message\":\"send me\"}", None).unwrap();
+        deliver_queued_with(&data_dir, sent_id, |queued| {
+            assert!(queued.payload.contains("send me"));
+            Ok(())
+        })
+        .unwrap();
+        let failed_id = enqueue(&data_dir, None, "{\"message\":\"retry me\"}", None).unwrap();
+        assert!(
+            deliver_queued_with(&data_dir, failed_id, |_| Err("provider down".to_string()))
+                .is_err()
+        );
+
+        let connection = open_game_database(&data_dir).unwrap();
+        let sent: (String, String, i64) = connection
+            .query_row(
+                "SELECT status, payload_json, attempts FROM email_delivery_queue WHERE id = ?1",
+                [sent_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let failed: (String, String, i64) = connection
+            .query_row(
+                "SELECT status, last_error, attempts FROM email_delivery_queue WHERE id = ?1",
+                [failed_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(sent, ("sent".to_string(), String::new(), 1));
+        assert_eq!(
+            failed,
+            ("pending".to_string(), "provider down".to_string(), 1)
+        );
+        drop(connection);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn expired_auth_message_is_not_delivered_and_is_redacted() {
+        let data_dir = queue_data_dir("expired");
+        let id = enqueue(
+            &data_dir,
+            Some("password-reset:1"),
+            "{\"message\":\"expired secret\"}",
+            Some(unix_seconds() - 1),
+        )
+        .unwrap();
+        deliver_queued_with(&data_dir, id, |_| {
+            panic!("expired email must not be delivered")
+        })
+        .unwrap();
+
+        let connection = open_game_database(&data_dir).unwrap();
+        let row: (String, String) = connection
+            .query_row(
+                "SELECT status, payload_json FROM email_delivery_queue WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row, ("expired".to_string(), String::new()));
+        drop(connection);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn only_stale_delivery_claims_are_recovered() {
+        let data_dir = queue_data_dir("claim-lease");
+        let stale = enqueue(&data_dir, None, "{\"message\":\"stale\"}", None).unwrap();
+        let fresh = enqueue(&data_dir, None, "{\"message\":\"fresh\"}", None).unwrap();
+        let now = unix_seconds();
+        let connection = open_game_database(&data_dir).unwrap();
+        connection
+            .execute(
+                "UPDATE email_delivery_queue
+                 SET status = 'sending', claimed_at = ?2, updated_at = ?2
+                 WHERE id = ?1",
+                params![stale, now - CLAIM_LEASE_SECONDS - 1],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE email_delivery_queue
+                 SET status = 'sending', claimed_at = ?2, updated_at = ?2
+                 WHERE id = ?1",
+                params![fresh, now],
+            )
+            .unwrap();
+        drop(connection);
+
+        recover_stale_claims(&data_dir).unwrap();
+
+        let connection = open_game_database(&data_dir).unwrap();
+        let stale_status: String = connection
+            .query_row(
+                "SELECT status FROM email_delivery_queue WHERE id = ?1",
+                [stale],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let fresh_status: String = connection
+            .query_row(
+                "SELECT status FROM email_delivery_queue WHERE id = ?1",
+                [fresh],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stale_status, "pending");
+        assert_eq!(fresh_status, "sending");
+        drop(connection);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
 
     #[test]
     fn otp_email_contains_code_expiry_and_brand() {

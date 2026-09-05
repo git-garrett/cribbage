@@ -136,6 +136,12 @@
                 <span>Adjust the game for your screen and space.</span>
                 <b aria-hidden="true">→</b>
               </button>
+              <button id="engagement-pathway-open" class="pathway-card pathway-card-admin" type="button" hidden>
+                <span class="pathway-card-kicker">Private administration</span>
+                <strong>Engagement</strong>
+                <span>Review usage, progression, games, and client context.</span>
+                <b aria-hidden="true">→</b>
+              </button>
             </nav>
           </section>
 
@@ -582,6 +588,7 @@
           <button id="export-game-log" type="button">Export games</button>
           <details id="admin-menu" class="admin-menu" hidden>
             <summary>Administrator</summary>
+            <button id="engagement-menu-open" type="button">Engagement report</button>
             <button id="analytics-open" type="button">Full analytics</button>
             <label class="toggle-row">
               <span>Par guides</span>
@@ -692,6 +699,226 @@
           </div>
         </div>
         <div id="single-game-report" class="single-game-report" hidden></div>
+      </section>
+
+      <section id="engagement-page" class="engagement-page" aria-labelledby="engagement-title" hidden>
+        <div class="engagement-shell">
+          <header class="engagement-header">
+            <div>
+              <p class="pathway-eyebrow">Private administration</p>
+              <h1 id="engagement-title">Engagement board</h1>
+              <p id="engagement-summary">Loading activity…</p>
+            </div>
+            <button id="engagement-close" class="people-page-back" type="button"><span aria-hidden="true">←</span> Home</button>
+          </header>
+          <div class="engagement-toolbar">
+            <label>Window
+              <select id="engagement-range">
+                <option value="1">Last 24 hours</option>
+                <option value="7">Last 7 days</option>
+                <option value="30" selected>Last 30 days</option>
+                <option value="90">Last 90 days</option>
+                <option value="0">All time</option>
+              </select>
+            </label>
+            <label>Environment
+              <select id="engagement-environment">
+                <option value="all">Everywhere</option>
+                <option value="prod">Production web</option>
+                <option value="ios">iOS app</option>
+                <option value="lan">LAN review</option>
+                <option value="local">Local development</option>
+              </select>
+            </label>
+            <label>Audience
+              <select id="engagement-audience">
+                <option value="all">Everyone</option>
+                <option value="registered">Signed-in people</option>
+                <option value="anonymous">Anonymous visits</option>
+              </select>
+            </label>
+            <div class="engagement-toolbar-actions">
+              <button id="engagement-refresh" type="button">Refresh</button>
+              <button id="engagement-export" type="button" disabled>Export CSV</button>
+            </div>
+          </div>
+          <p id="engagement-status" class="people-form-status" role="status" aria-live="polite"></p>
+          <div id="engagement-content" class="engagement-content" hidden>
+            <nav class="engagement-tabs" aria-label="Engagement dashboard views" role="tablist">
+              <button type="button" role="tab" aria-selected="true" data-engagement-tab="overview">Overview</button>
+              <button type="button" role="tab" aria-selected="false" data-engagement-tab="people">People</button>
+              <button type="button" role="tab" aria-selected="false" data-engagement-tab="experience">Experience</button>
+              <button type="button" role="tab" aria-selected="false" data-engagement-tab="data">Data</button>
+            </nav>
+
+            <div class="engagement-panel" data-engagement-panel="overview">
+              <section class="engagement-attention" aria-labelledby="engagement-attention-title">
+                <div class="engagement-section-heading">
+                  <div>
+                    <p class="engagement-kicker">What changed</p>
+                    <h2 id="engagement-attention-title">Read the board</h2>
+                  </div>
+                  <p>Current window compared with the immediately preceding window.</p>
+                </div>
+                <div id="engagement-insights" class="engagement-insights"></div>
+              </section>
+              <section aria-labelledby="engagement-overview-title">
+                <div class="engagement-section-heading">
+                  <div>
+                    <p class="engagement-kicker">Pulse</p>
+                    <h2 id="engagement-overview-title">Engagement at a glance</h2>
+                  </div>
+                  <p>Every total uses the selected filters and reporting window.</p>
+                </div>
+                <div id="engagement-overview" class="engagement-metrics"></div>
+              </section>
+              <section aria-labelledby="engagement-activity-title">
+                <div class="engagement-section-heading">
+                  <div>
+                    <p class="engagement-kicker">Trend</p>
+                    <h2 id="engagement-activity-title">Activity over time</h2>
+                  </div>
+                  <p>Visitors, sessions, starts, and completed games on one shared scale.</p>
+                </div>
+                <div id="engagement-activity-chart" class="engagement-chart"></div>
+              </section>
+              <section aria-labelledby="engagement-funnel-title">
+                <div class="engagement-section-heading">
+                  <div>
+                    <p class="engagement-kicker">Journey</p>
+                    <h2 id="engagement-funnel-title">Path to a completed game</h2>
+                  </div>
+                  <p>Distinct sessions; conversion uses sessions with a recorded session start.</p>
+                </div>
+                <div id="engagement-funnel" class="engagement-funnel"></div>
+              </section>
+              <details class="engagement-method">
+                <summary>How these metrics are calculated</summary>
+                <div id="engagement-definitions" class="engagement-definitions"></div>
+              </details>
+            </div>
+
+            <div class="engagement-panel" data-engagement-panel="people" hidden>
+              <section aria-labelledby="engagement-users-title">
+                <div class="engagement-section-heading">
+                  <div>
+                    <p class="engagement-kicker">Accounts</p>
+                    <h2 id="engagement-users-title">Who is engaging</h2>
+                  </div>
+                  <p>Signed-in activity, recent use, games, and experience signals by person.</p>
+                </div>
+                <div id="engagement-users" class="engagement-table engagement-table-roomy"></div>
+              </section>
+              <section aria-labelledby="engagement-recent-title">
+                <div class="engagement-section-heading">
+                  <div>
+                    <p class="engagement-kicker">Live trail</p>
+                    <h2 id="engagement-recent-title">Recent activity</h2>
+                  </div>
+                  <p>The latest 60 events in this filtered view.</p>
+                </div>
+                <div id="engagement-recent" class="engagement-table engagement-table-roomy"></div>
+              </section>
+            </div>
+
+            <div class="engagement-panel" data-engagement-panel="experience" hidden>
+              <section aria-labelledby="engagement-health-title">
+                <div class="engagement-section-heading">
+                  <div>
+                    <p class="engagement-kicker">Experience health</p>
+                    <h2 id="engagement-health-title">Where play gets rough</h2>
+                  </div>
+                  <p>Bounces, repeat actions, rage clicks, errors, and incomplete games.</p>
+                </div>
+                <div id="engagement-health" class="engagement-metrics engagement-health-metrics"></div>
+                <div id="engagement-experience-chart" class="engagement-chart"></div>
+              </section>
+              <div class="engagement-grid engagement-grid-halves">
+                <section aria-labelledby="engagement-interactions-title">
+                  <h2 id="engagement-interactions-title">Interaction hot spots</h2>
+                  <p>Controls generating ordinary, repeated, or rapid clicks.</p>
+                  <div id="engagement-interactions" class="engagement-table"></div>
+                </section>
+                <section aria-labelledby="engagement-errors-title">
+                  <h2 id="engagement-errors-title">Errors</h2>
+                  <p>Sanitized client and server error summaries.</p>
+                  <div id="engagement-errors" class="engagement-table"></div>
+                </section>
+                <section aria-labelledby="engagement-surfaces-title">
+                  <h2 id="engagement-surfaces-title">Screens and pathways</h2>
+                  <p>Where people spend their page views.</p>
+                  <div id="engagement-surfaces" class="engagement-table"></div>
+                </section>
+                <section aria-labelledby="engagement-devices-title">
+                  <h2 id="engagement-devices-title">Device and viewport</h2>
+                  <p>Useful for reproducing problems in the same layout.</p>
+                  <div id="engagement-devices" class="engagement-table"></div>
+                </section>
+              </div>
+            </div>
+
+            <div class="engagement-panel" data-engagement-panel="data" hidden>
+              <div class="engagement-grid engagement-grid-halves">
+              <section aria-labelledby="engagement-pathways-title">
+                <h2 id="engagement-pathways-title">Pathway progression</h2>
+                <p>Page views by pathway, with distinct sessions and visitors.</p>
+                <div id="engagement-pathways" class="engagement-table"></div>
+              </section>
+              <section aria-labelledby="engagement-opponents-title">
+                <h2 id="engagement-opponents-title">Opponent selection</h2>
+                <p>Distinct games with recorded lifecycle activity by opponent/model.</p>
+                <div id="engagement-opponents" class="engagement-table"></div>
+              </section>
+              <section aria-labelledby="engagement-environments-title">
+                <h2 id="engagement-environments-title">Environment and version</h2>
+                <p>Compare production, iOS, LAN review, and local builds.</p>
+                <div id="engagement-environments" class="engagement-table"></div>
+              </section>
+              <section aria-labelledby="engagement-clients-title">
+                <h2 id="engagement-clients-title">Client and platform</h2>
+                <p>Client type, operating platform, and screen dimensions.</p>
+                <div id="engagement-clients" class="engagement-table"></div>
+              </section>
+              <section aria-labelledby="engagement-locations-title">
+                <h2 id="engagement-locations-title">Timezone and language</h2>
+                <p>Regional context reported by the device.</p>
+                <div id="engagement-locations" class="engagement-table"></div>
+              </section>
+              <section aria-labelledby="engagement-events-title">
+                <h2 id="engagement-events-title">Event inventory</h2>
+                <p>Every type of activity recorded in this window.</p>
+                <div id="engagement-events" class="engagement-table"></div>
+              </section>
+              <section aria-labelledby="engagement-states-title">
+                <h2 id="engagement-states-title">State and session signals</h2>
+                <p>Visibility, orientation, sign-in method, logout, and recorded game phases.</p>
+                <div id="engagement-states" class="engagement-table"></div>
+              </section>
+              <section aria-labelledby="engagement-daily-title">
+                <h2 id="engagement-daily-title">Daily activity</h2>
+                <p>The detailed source behind the trend charts and CSV.</p>
+                <div id="engagement-daily" class="engagement-table"></div>
+              </section>
+            </div>
+              <section class="engagement-opportunities" aria-labelledby="engagement-opportunities-title">
+                <div class="engagement-section-heading">
+                  <div>
+                    <p class="engagement-kicker">Tracking roadmap</p>
+                    <h2 id="engagement-opportunities-title">What the current data cannot answer</h2>
+                  </div>
+                  <p>Useful additions, ordered by their likely value to product decisions.</p>
+                </div>
+                <ol>
+                  <li><strong>Game milestone timing</strong><span>Record hand starts, discard completion, pegging completion, hint use, decision time, and final margin to expose exactly where games slow down or stop.</span></li>
+                  <li><strong>Reliable engaged time</strong><span>Add a low-frequency heartbeat while visible so duration survives missing page-exit events and can be split by screen.</span></li>
+                  <li><strong>Request performance</strong><span>Record API route, response status, and duration buckets to connect slow or failed requests with user frustration.</span></li>
+                  <li><strong>Durable anonymous return identity</strong><span>Use a long-lived random browser ID to measure repeat anonymous visits across tabs and days.</span></li>
+                  <li><strong>Lightweight feedback</strong><span>Add an optional one-tap “How did that game feel?” response after completion and attach only the game stage and client context.</span></li>
+                </ol>
+              </section>
+            </div>
+          </div>
+        </div>
       </section>
 
       <div id="thinking-overlay" class="thinking-overlay" role="status" aria-live="polite" hidden>
