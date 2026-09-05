@@ -38,6 +38,22 @@ Store production secrets in `/etc/cribbage/cribbage.env` as documented in
 `nanode-rocky-server-setup.md`. Never put SendGrid keys, the authentication
 pepper, or the invitation admin key in this repository.
 
+Set `CRIBBAGE_EMAIL_DELIVERY_PAUSED=true` to accept outbound messages into the
+durable SQLite delivery queue without contacting SendGrid. Newer sign-in,
+password-reset, and invitation messages supersede older queued messages for the
+same account. Expired authentication messages are discarded instead of being
+sent with unusable credentials. Bug reports, feature requests, and access
+requests remain queued without an expiry.
+
+Production deployments default the pause to `true`. After SendGrid is healthy,
+set `CRIBBAGE_EMAIL_DELIVERY_PAUSED=false` in `/etc/cribbage/cribbage.env` and
+restart the service.
+The delivery worker drains pending messages through SendGrid and retries
+temporary failures every minute. Interrupted delivery claims are eligible for
+retry only after their five-minute lease expires, avoiding overlap during a
+normal service restart. Successfully sent, expired, and superseded messages
+have their stored body and credentials redacted.
+
 ## Preview access requests
 
 The public homepage collects first name, last name, requested username, and

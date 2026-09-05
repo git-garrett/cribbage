@@ -90,14 +90,14 @@ fn submit_bug_report(server: &Server, request: &Request, user: &AuthUser) -> Res
         &clean_page(&input.page),
         screenshot,
     );
-    if let Err(error) = deliver_feedback(&message, user) {
+    if let Err(error) = deliver_feedback(&server.data_dir, &message, user) {
         eprintln!(
             "Feedback delivery failed for user {} (bug-report): {}",
             user.id, error
         );
         return internal_error();
     }
-    created("Bug report sent. Thank you for helping improve Strong Cribbage.")
+    created("Bug report received. Thank you for helping improve Strong Cribbage.")
 }
 
 fn submit_feature_request(server: &Server, request: &Request, user: &AuthUser) -> Response {
@@ -118,23 +118,31 @@ fn submit_feature_request(server: &Server, request: &Request, user: &AuthUser) -
         &description,
         &clean_page(&input.page),
     );
-    if let Err(error) = deliver_feedback(&message, user) {
+    if let Err(error) = deliver_feedback(&server.data_dir, &message, user) {
         eprintln!(
             "Feedback delivery failed for user {} (feature-request): {}",
             user.id, error
         );
         return internal_error();
     }
-    created("Feature request sent. Thank you—I’ll read every one.")
+    created("Feature request received. Thank you—I’ll read every one.")
 }
 
 #[cfg(not(test))]
-fn deliver_feedback(message: &email::EmailMessage, user: &AuthUser) -> Result<(), String> {
-    email::send_feedback(message, &user.email, &user.display_name)
+fn deliver_feedback(
+    data_dir: &std::path::Path,
+    message: &email::EmailMessage,
+    user: &AuthUser,
+) -> Result<(), String> {
+    email::send_feedback(data_dir, message, &user.email, &user.display_name)
 }
 
 #[cfg(test)]
-fn deliver_feedback(_message: &email::EmailMessage, _user: &AuthUser) -> Result<(), String> {
+fn deliver_feedback(
+    _data_dir: &std::path::Path,
+    _message: &email::EmailMessage,
+    _user: &AuthUser,
+) -> Result<(), String> {
     Ok(())
 }
 
