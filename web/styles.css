@@ -1034,6 +1034,11 @@ button:disabled {
   outline-offset: 2px;
 }
 
+.people-list-item .player-handicap {
+  pointer-events: none;
+  cursor: inherit;
+}
+
 .score .player-handicap {
   font-size: 0.72em;
 }
@@ -7869,6 +7874,11 @@ body[data-auth="signed-in"] .pathway-login-note {
   font-weight: 850;
   white-space: nowrap;
   backdrop-filter: blur(14px);
+}
+
+.people-presence-toggle,
+.people-list-item {
+  touch-action: manipulation;
 }
 
 .people-presence-pegs {

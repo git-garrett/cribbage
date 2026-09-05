@@ -5329,6 +5329,55 @@ mod tests {
     }
 
     #[test]
+    fn player_profile_applies_later_cycles_from_the_same_dynamic_session() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-dynamic-multi-cycle-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        auth::initialize(&data_dir).unwrap();
+        let connection = open_game_database(&data_dir).unwrap();
+        let travis = connection
+            .query_row(
+                "SELECT id, username, display_name, email, password_hash
+                 FROM auth_users WHERE username = 'Travis'",
+                [],
+                auth::user_from_row,
+            )
+            .unwrap();
+        drop(connection);
+
+        let mut session = reviewed_cycle_session(ModelId::Dynamic, "dynamic-multi-cycle");
+        let first = sync_dynamic_player_profile(&data_dir, travis.id, &session)
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.complete_cycles, 1);
+
+        session.game.hand_number = 5;
+        session
+            .score_events
+            .extend([completed_hand_event(3, HUMAN), completed_hand_event(4, AI)]);
+        session.decision_reviews.extend([
+            calibration_review("dealer-discard-2", 3, true, ReviewKind::Discard, 0.45, 0.50),
+            calibration_review("dealer-peg-2", 3, true, ReviewKind::Peg, 0.47, 0.50),
+            calibration_review("pone-discard-2", 4, false, ReviewKind::Discard, 0.48, 0.50),
+            calibration_review("pone-peg-2", 4, false, ReviewKind::Peg, 0.49, 0.50),
+        ]);
+
+        let second = sync_dynamic_player_profile(&data_dir, travis.id, &session)
+            .unwrap()
+            .unwrap();
+        assert_eq!(second.complete_cycles, 2);
+        assert_eq!(second.handicap_cycles, 2);
+        assert!(sync_dynamic_player_profile(&data_dir, travis.id, &session)
+            .unwrap()
+            .is_none());
+
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
     fn starting_dynamic_persists_zero_cycle_calibration() {
         let data_dir = std::env::temp_dir().join(format!(
             "cribbage-api-dynamic-start-test-{}-{}",

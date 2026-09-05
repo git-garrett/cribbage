@@ -85,6 +85,7 @@ describe("human clubhouse UI", () => {
     expect(source).toContain("function setPlayerIdentity");
     expect(source).toContain('marker.className = "player-handicap"');
     expect(source).toContain("HANDICAP_EXPLANATION");
+    expect(source).toContain('const HANDICAP_EXPLANATION = "Handicap measures win probability of cribbage decisions."');
     expect(source).toContain("playerHandicaps");
     expect(source).toContain('document.addEventListener("mouseover"');
     expect(source).toContain('document.addEventListener("focusin"');
@@ -127,7 +128,7 @@ describe("human clubhouse UI", () => {
 
   it("uses real activity instead of background polling for 15-minute presence", () => {
     expect(source).toContain("const PEOPLE_IDLE_MS = 15 * 60 * 1000");
-    expect(source).toMatch(/schedulePeoplePoll[\s\S]*await refreshPeople\(\);/);
+    expect(source).toMatch(/schedulePeoplePoll[\s\S]*await refreshPeople\(\{ heartbeat: Boolean\(authenticatedUser && peopleActive\) \}\);/);
     expect(source).toContain("function recordPeopleActivity");
     expect(source).toMatch(/pointerdown[\s\S]*recordPeopleActivity/);
     expect(source).toMatch(/keydown[\s\S]*recordPeopleActivity/);
@@ -173,6 +174,36 @@ describe("human clubhouse UI", () => {
     expect(source).toContain("pathwayUrl(route, true)");
     expect(css).toContain(".people-list-item.is-game");
     expect(css).toContain(".people-presence.has-game:not(.has-challenge)");
+  });
+
+  it("keeps each online row a single tap target and dismisses handicap help before navigation", () => {
+    expect(source).toMatch(/setPlayerIdentity\(name, player\.displayName, player\.dynamicHandicap \?\? null, \{ interactive: false \}\)/);
+    expect(css).toMatch(/\.people-list-item \.player-handicap\s*\{[^}]*pointer-events:\s*none/s);
+    expect(source).toContain("function dismissHandicapTooltip");
+    expect(source).toMatch(/function resumeHumanTable[\s\S]*dismissHandicapTooltip\(\)/);
+    expect(source).toMatch(/async function openPeopleProfile[\s\S]*dismissHandicapTooltip\(\)/);
+  });
+
+  it("does not replace online rows during an in-flight pointer interaction", () => {
+    expect(source).toContain("function beginPeopleDirectoryInteraction");
+    expect(source).toContain("function finishPeopleDirectoryInteraction");
+    expect(source).toMatch(/function applyPeopleDirectory[\s\S]*peopleDirectoryInteractionActive[\s\S]*pendingPeopleDirectory/);
+    expect(source).toMatch(/peoplePresencePanel\.addEventListener\("pointerdown", beginPeopleDirectoryInteraction/);
+    expect(source).toMatch(/document\.addEventListener\("pointerup", finishPeopleDirectoryInteraction/);
+    expect(css).toMatch(/\.people-presence-toggle,[\s\S]*\.people-list-item\s*\{[^}]*touch-action:\s*manipulation/s);
+  });
+
+  it("shows the cached Online directory before starting its refresh", () => {
+    const handler = source.match(/els\.peoplePresenceToggle\.addEventListener\("click", \(\) => \{([\s\S]*?)\n\}\);/)?.[1] ?? "";
+    expect(handler).toContain("renderPeopleDirectory()");
+    expect(handler.indexOf("renderPeopleDirectory()"))
+      .toBeLessThan(handler.indexOf("refreshPeople("));
+  });
+
+  it("uses a visible-only one-minute presence heartbeat", () => {
+    expect(source).toContain("const PEOPLE_POLL_MS = 60_000");
+    expect(source).toMatch(/function schedulePeoplePoll[\s\S]*document\.visibilityState === "visible"[\s\S]*refreshPeople\(\{ heartbeat: Boolean\(authenticatedUser && peopleActive\) \}\)/);
+    expect(source).toMatch(/visibilitychange[\s\S]*document\.visibilityState === "visible"[\s\S]*refreshPeople\(\{ heartbeat: Boolean\(authenticatedUser\) \}\)/);
   });
 
   it("opens a shared table, cuts for first deal, and enters the human game", () => {
