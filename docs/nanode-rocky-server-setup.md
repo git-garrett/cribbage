@@ -49,14 +49,21 @@ scripts/deploy-nanode.sh deploy
 
 By default it targets `root@172.239.170.10` using `../../keys/strongcribbage_admin_ed25519`, builds locally, uploads the artifact, installs the systemd unit, writes the Caddy routes for the game at `cribbage.strongcribbage.com` and the public landing page at `strongcribbage.com`, restarts services, and checks health.
 
+The helper accepts deployments only from a clean local `master` that exactly
+matches `origin/master`. It runs the Python, TypeScript, and Rust checks and
+build, compiles the Git commit into the server binary, and verifies that both
+the host-local and public health endpoints report the same commit.
+
 On the build machine:
 
 ```bash
 cd /path/to/cribbage
-git checkout server
+git switch master
+git pull --ff-only origin master
 npm ci
-npm run build:deploy
-npm run package:server
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev]'
+npm run qa:predeploy
 ```
 
 This creates `cribbage-server-16.0.0.tgz` containing:
@@ -226,20 +233,14 @@ Use the helper:
 scripts/deploy-nanode.sh deploy
 ```
 
-Or, if you already built and packaged locally:
-
-```bash
-scripts/deploy-nanode.sh deploy --skip-build
-```
-
 Manual equivalent on the build machine:
 
 ```bash
 cd /path/to/cribbage
-git pull
+git switch master
+git pull --ff-only origin master
 npm ci
-npm run build:deploy
-npm run package:server
+npm run qa:predeploy
 scp cribbage-server-16.0.0.tgz YOUR_USER@your-domain.example.com:/tmp/
 ```
 

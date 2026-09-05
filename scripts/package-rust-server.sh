@@ -4,6 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 VERSION="$(node -p "require('${ROOT_DIR}/package.json').version")"
 ARCHIVE="${ROOT_DIR}/cribbage-server-${VERSION}.tgz"
+GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+MANIFEST_DIR="$(mktemp -d)"
+trap 'rm -rf "$MANIFEST_DIR"' EXIT
+
+if [[ ! "$GIT_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Could not determine the deployment Git commit." >&2
+  exit 1
+fi
+
+printf '{"version":"%s","gitCommit":"%s"}\n' "$VERSION" "$GIT_COMMIT" \
+  > "${MANIFEST_DIR}/deployment.json"
 
 for required in \
   "${ROOT_DIR}/dist" \
@@ -32,4 +43,5 @@ COPYFILE_DISABLE=1 tar --no-xattrs -czf "$ARCHIVE" \
   rust/cribbage-shadow-engine \
   scripts/migrate-legacy-leaderboard.py \
   scripts/repair_leaderboard_timestamps.py \
-  docs/nanode-rocky-server-setup.md
+  docs/nanode-rocky-server-setup.md \
+  -C "$MANIFEST_DIR" deployment.json

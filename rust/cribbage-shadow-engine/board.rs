@@ -1,5 +1,7 @@
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+
+use crate::board_matrix::{BoardMatrixSeam, BoardWinMatrix};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Role {
@@ -130,6 +132,7 @@ impl BoardDistributions {
 pub struct BoardModel {
     distributions: &'static BoardDistributions,
     memo: BoardMemo,
+    board_matrix: Option<Arc<BoardWinMatrix>>,
     use_heuristic_before_90: bool,
     joint_future_pegging: bool,
     joint_only_when_terminal_ambiguity_possible: bool,
@@ -201,6 +204,36 @@ impl BoardModel {
         BoardModel::with_options(false, true, true)
     }
 
+    /// Use empirical continuation values at the four supported phase seams.
+    pub fn from_board_matrix(board_matrix: Arc<BoardWinMatrix>) -> BoardModel {
+        let mut board = BoardModel::with_options(false, false, false);
+        board.board_matrix = Some(board_matrix);
+        board
+    }
+
+    pub fn matrix_win_probability_from_scores(
+        &self,
+        my_score: i32,
+        opponent_score: i32,
+        perspective_role: Role,
+        seam: BoardMatrixSeam,
+    ) -> Option<f64> {
+        if my_score >= 121 {
+            return Some(1.0);
+        }
+        if opponent_score >= 121 {
+            return Some(0.0);
+        }
+        let my = my_score.clamp(0, 120) as u8;
+        let opponent = opponent_score.clamp(0, 120) as u8;
+        self.board_matrix
+            .as_ref()
+            .map(|matrix| match perspective_role {
+                Role::Dealer => matrix.dealer_win_probability(seam, my, opponent),
+                Role::Pone => 1.0 - matrix.dealer_win_probability(seam, opponent, my),
+            })
+    }
+
     fn with_options(
         use_heuristic_before_90: bool,
         joint_future_pegging: bool,
@@ -209,6 +242,7 @@ impl BoardModel {
         BoardModel {
             distributions: BoardDistributions::standard(),
             memo: BoardMemo::new(),
+            board_matrix: None,
             use_heuristic_before_90,
             joint_future_pegging,
             joint_only_when_terminal_ambiguity_possible,
@@ -252,6 +286,22 @@ impl BoardModel {
         }
         if opponent >= 121 {
             return 0.0;
+        }
+        let seam = match phase {
+            ScorePhase::PeggingPone => Some(BoardMatrixSeam::Discard),
+            ScorePhase::HandPone => Some(BoardMatrixSeam::AfterPegging),
+            ScorePhase::HandDealer => Some(BoardMatrixSeam::AfterPone),
+            ScorePhase::PeggingDealer | ScorePhase::Crib => None,
+        };
+        if let Some(probability) = seam.and_then(|seam| {
+            self.matrix_win_probability_from_scores(
+                i32::from(my),
+                i32::from(opponent),
+                perspective_role,
+                seam,
+            )
+        }) {
+            return probability;
         }
         if self.use_heuristic_before_90 && my < 90 && opponent < 90 {
             return heuristic_win_probability(my as f64, opponent as f64, perspective_role);
@@ -729,6 +779,7 @@ mod tests {
         BoardModel {
             distributions: Box::leak(Box::new(BoardDistributions::from_phase_map(distributions))),
             memo: BoardMemo::new(),
+            board_matrix: None,
             use_heuristic_before_90: false,
             joint_future_pegging: true,
             joint_only_when_terminal_ambiguity_possible,
@@ -764,6 +815,44 @@ mod tests {
             board_memo_index(12, 34, Role::Dealer, ScorePhase::HandPone),
             board_memo_index(12, 34, Role::Dealer, ScorePhase::HandDealer)
         );
+    }
+
+    #[test]
+    fn matrix_lookup_uses_dealer_perspective_for_both_roles() {
+        let matrix = Arc::new(BoardWinMatrix::from_function(|_, dealer, pone| {
+            ((dealer as usize * 121) + pone as usize) as f64 / 14_640.0
+        }));
+        let mut dealer_board = BoardModel::from_board_matrix(Arc::clone(&matrix));
+        let mut pone_board = BoardModel::from_board_matrix(matrix);
+
+        let dealer = dealer_board.future_win_probability_from_scores(
+            30,
+            40,
+            Role::Dealer,
+            ScorePhase::PeggingPone,
+        );
+        let pone = pone_board.future_win_probability_from_scores(
+            40,
+            30,
+            Role::Pone,
+            ScorePhase::PeggingPone,
+        );
+        assert!((dealer - (1.0 - pone)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn matrix_board_selects_the_matching_phase_seam() {
+        let matrix = Arc::new(BoardWinMatrix::from_function(|seam, _, _| match seam {
+            BoardMatrixSeam::Discard => 0.1,
+            BoardMatrixSeam::AfterDiscard => 0.2,
+            BoardMatrixSeam::AfterPegging => 0.3,
+            BoardMatrixSeam::AfterPone => 0.4,
+        }));
+        let mut board = BoardModel::from_board_matrix(matrix);
+
+        let probability =
+            board.future_win_probability_from_scores(10, 20, Role::Pone, ScorePhase::HandPone);
+        assert!((probability - 0.7).abs() < 1e-12);
     }
 
     #[test]

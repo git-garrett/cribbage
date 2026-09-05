@@ -6,6 +6,12 @@ runtime data, not independently selectable browser models. In particular,
 directory; keeping it here preserves the 13.0 Rust evaluator without retaining
 any pre-13.0 model surface.
 
+`board-win-matrix.bin` (`BWM2`) contains the four pooled phase-seam matrices
+used by Model 13.215: discard, after discard, after pegging, and after pone's
+count. The after-discard seam is after starter reveal and any heels points.
+Generate it from the verified matrix SQLite database with
+`scripts/export-board-win-matrix.py`; do not hand-edit it.
+
 Model 16's offline-trained pegging policy is packed to
 `model16-pegging-policy.bin` by the `pack_policy` binary. The artifact records
 its key schema, training seed and iterations, source checkpoint checksum,

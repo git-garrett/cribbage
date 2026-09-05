@@ -468,7 +468,6 @@ def new_game(opponent="expert"):
 
 
 def current_state():
-    global GAME
     if GAME is None:
         new_game("expert")
     return GAME.state()
