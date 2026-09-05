@@ -67,6 +67,18 @@
       </section>
     </aside>
 
+    <div class="bug-report-dock">
+      <button id="bug-report-open" class="feedback-trigger feedback-bug-trigger" type="button" aria-describedby="bug-report-help" aria-haspopup="dialog">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 5.5h6M10 3h4M8 9H4m16 0h-4M7 14H3m18 0h-4M8 18l-3 3m11-3 3 3"></path>
+          <rect x="7" y="6" width="10" height="13" rx="5"></rect>
+          <path d="M12 6v13"></path>
+        </svg>
+        <span>Bug report</span>
+      </button>
+      <span id="bug-report-help" class="feedback-tooltip" role="tooltip">Use this anytime anything looks wrong—your note helps me fix it.</span>
+    </div>
+
     <section id="pathway-page" class="pathway-page" aria-labelledby="pathway-title" hidden>
       <div class="pathway-shell">
         <header class="pathway-brandbar">
@@ -88,7 +100,13 @@
           <section class="pathway-view pathway-home" data-pathway-view="home" aria-labelledby="pathway-title">
             <div class="pathway-intro">
               <p class="pathway-eyebrow">Welcome to Strong Cribbage</p>
-              <h1 id="pathway-title">Choose your path to the table.</h1>
+              <div class="pathway-title-row">
+                <h1 id="pathway-title">Choose your path to the table.</h1>
+                <div class="feature-request-dock">
+                  <button id="feature-request-open" class="feedback-trigger feature-request-trigger" type="button" aria-describedby="feature-request-help" aria-haspopup="dialog">Feature Request</button>
+                  <span id="feature-request-help" class="feedback-tooltip" role="tooltip">Ask for a feature that will make playing strong cribbage better! I'll read every one and build as many as I can</span>
+                </div>
+              </div>
               <p>Play, learn, review your progress, or adjust settings.</p>
             </div>
             <nav class="pathway-primary-grid" aria-label="Strong Cribbage sections">
@@ -392,6 +410,54 @@
         </div>
         <button id="size-dialog-save" class="people-primary-action" type="submit">Use this size</button>
         <p id="size-dialog-status" class="people-form-status" role="status" aria-live="polite"></p>
+      </form>
+    </dialog>
+
+    <dialog id="bug-report-dialog" class="feedback-dialog" aria-labelledby="bug-report-title">
+      <form id="bug-report-form" class="feedback-form">
+        <header>
+          <div>
+            <p class="feedback-eyebrow">Help improve the table</p>
+            <h2 id="bug-report-title">Report a bug</h2>
+          </div>
+          <button id="bug-report-close" class="feedback-close" type="button" aria-label="Close bug report">×</button>
+        </header>
+        <p>Tell me what went wrong and what you expected to happen. A screenshot is welcome but optional.</p>
+        <label>
+          <span>What happened?</span>
+          <textarea id="bug-report-description" rows="6" minlength="10" maxlength="2000" required placeholder="I was counting my hand when…"></textarea>
+        </label>
+        <label class="feedback-upload">
+          <span>Screenshot <small>Optional · PNG, JPEG, or WebP · 5 MB max</small></span>
+          <input id="bug-report-screenshot" type="file" accept="image/png,image/jpeg,image/webp">
+        </label>
+        <p id="bug-report-status" class="feedback-status" role="status" aria-live="polite"></p>
+        <div class="feedback-actions">
+          <button id="bug-report-cancel" class="feedback-secondary" type="button">Cancel</button>
+          <button id="bug-report-submit" class="feedback-primary" type="submit">Send bug report</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="feature-request-dialog" class="feedback-dialog" aria-labelledby="feature-request-title">
+      <form id="feature-request-form" class="feedback-form">
+        <header>
+          <div>
+            <p class="feedback-eyebrow">Shape Strong Cribbage</p>
+            <h2 id="feature-request-title">Request a feature</h2>
+          </div>
+          <button id="feature-request-close" class="feedback-close" type="button" aria-label="Close feature request">×</button>
+        </header>
+        <p>What would make playing and learning strong cribbage better for you?</p>
+        <label>
+          <span>Your idea</span>
+          <textarea id="feature-request-description" rows="7" minlength="10" maxlength="2000" required placeholder="It would help me if…"></textarea>
+        </label>
+        <p id="feature-request-status" class="feedback-status" role="status" aria-live="polite"></p>
+        <div class="feedback-actions">
+          <button id="feature-request-cancel" class="feedback-secondary" type="button">Cancel</button>
+          <button id="feature-request-submit" class="feedback-primary" type="submit">Send feature request</button>
+        </div>
       </form>
     </dialog>
 

@@ -34,6 +34,7 @@ use serde_json::{json, Value};
 mod activity;
 mod auth;
 mod email;
+mod feedback;
 mod people;
 
 const HUMAN: Side = Side::Left;
@@ -318,6 +319,8 @@ fn main() {
         .unwrap_or_else(|error| panic!("could not initialize authentication storage: {}", error));
     activity::initialize(&data_dir)
         .unwrap_or_else(|error| panic!("could not initialize activity storage: {}", error));
+    feedback::initialize(&data_dir)
+        .unwrap_or_else(|error| panic!("could not initialize feedback storage: {}", error));
     people::initialize(&data_dir)
         .unwrap_or_else(|error| panic!("could not initialize people storage: {}", error));
     auth::validate_configuration()
@@ -374,6 +377,9 @@ fn handle_connection(mut stream: TcpStream, server: &Server) -> Result<(), Strin
         );
     }
     if let Some(response) = activity::handle(server, &request, authenticated_user.as_ref()) {
+        return write_response(&mut stream, response);
+    }
+    if let Some(response) = feedback::handle(server, &request, authenticated_user.as_ref()) {
         return write_response(&mut stream, response);
     }
     if let Some(response) = people::handle(server, &request, authenticated_user.as_ref()) {
@@ -466,7 +472,12 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
             })
         })
         .unwrap_or(0);
-    if content_length > 1_000_000 {
+    let max_body = if path == "/api/feedback/bug-report" {
+        7_250_000
+    } else {
+        1_000_000
+    };
+    if content_length > max_body {
         return Err("request body is too large".to_string());
     }
     while bytes.len() < header_end + content_length {
