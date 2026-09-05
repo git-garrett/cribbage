@@ -19,6 +19,7 @@ describe("statistics opponent scopes", () => {
     expect(statsOpponentForModel("schell_table-peg_table-9.1")).toBe("tough");
     expect(statsOpponentForModel("schell_table-peg_table-9.11")).toBe("tough");
     expect(statsOpponentForModel("schell_table-peg_table-13.0")).toBe("master");
+    expect(statsOpponentForModel("schell_table-peg_table-13.215")).toBe("master");
     expect(statsOpponentForModel("schell_table-peg_table-16.3")).toBe("master");
     expect(statsOpponentForModel("human:table-1")).toBe("human");
   });

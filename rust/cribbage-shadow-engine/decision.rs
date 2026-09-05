@@ -104,9 +104,9 @@ pub fn recommend_peg_for_side_with_model911_cache(
     }
 }
 
-/// Compare a saved discard against the native 13.0 decision at that exact
-/// game state. Reviews intentionally use a fixed model so their results stay
-/// comparable across games.
+/// Compare a saved discard against the requested Ace decision at that exact
+/// game state. Callers use the production Ace version so results remain
+/// comparable within an evaluator version.
 pub fn review_discard_for_side(
     game: &CribbageGame,
     side: Side,
@@ -135,7 +135,7 @@ pub fn review_discard_for_side_with_recommendation(
     )
 }
 
-/// Compare a saved peg play against the native 13.0 decision at that exact
+/// Compare a saved peg play against the requested Ace decision at that exact
 /// game state.
 pub fn review_peg_for_side(
     game: &CribbageGame,

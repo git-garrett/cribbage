@@ -654,9 +654,7 @@ pub fn evaluate_decision_with_caches(
     }
 }
 
-/// Evaluate a user's already-selected action against the native 13.0 model.
-/// Model 13.0 remains the explicit review model even if a developer-only game
-/// was played against another model.
+/// Evaluate a user's already-selected action against a supported Ace model.
 pub fn review_decision(
     input: &DecisionInput,
     selected_card_ids: &[u8],
@@ -675,8 +673,8 @@ pub fn evaluate_selected_decision(
     selected_card_ids: &[u8],
     root: &str,
 ) -> Result<Decision, String> {
-    if input.model != MODEL_13_0 {
-        return Err("saved decision review currently supports model 13.0 only".to_string());
+    if input.model != MODEL_13_0 && input.model != MODEL_13_215 {
+        return Err("saved decision review currently supports Ace models only".to_string());
     }
     let selected = match input.kind {
         DecisionKind::Discard => review_discard_model13(input, selected_card_ids, root)?,
@@ -2048,7 +2046,14 @@ fn review_discard_model13(
         .filter(|card| !seen_cards[card.id as usize])
         .collect::<Vec<_>>();
     let crib_flush_bonus_by_suit = crib_flush_bonuses_by_suit(&input.ai_hand);
-    let mut board = BoardModel::new();
+    let (mut board, preserve_scoring_order) = if input.model == MODEL_13_215 {
+        (
+            BoardModel::from_board_matrix(Arc::clone(tables.board_matrix13215()?)),
+            true,
+        )
+    } else {
+        (BoardModel::new(), false)
+    };
     let evaluation = evaluate_discard_candidate_model13(
         &input.ai_hand,
         &keep,
@@ -2061,7 +2066,7 @@ fn review_discard_model13(
         crib_rank,
         pairwise,
         &mut board,
-        false,
+        preserve_scoring_order,
     )
     .ok_or_else(|| "selected discard could not be evaluated".to_string())?;
     Ok(Decision::Discard {
@@ -2454,7 +2459,16 @@ fn review_peg_model13(
         hold,
         false,
     );
-    let mut evaluator = historic_phase_pegging_win_evaluator(input, BoardModel::new());
+    let mut evaluator = if input.model == MODEL_13_215 {
+        known_card_pegging_win_evaluator_with_board(
+            input,
+            hold,
+            BoardModel::from_board_matrix(Arc::clone(tables.board_matrix13215()?)),
+            Some(tables.crib_rank()?),
+        )
+    } else {
+        historic_phase_pegging_win_evaluator(input, BoardModel::new())
+    };
     let distribution = optimal_pegging_outcome_distribution_for_candidate(
         input,
         selected,
