@@ -5,11 +5,11 @@
 //! observation-to-action table or a pegging path graph.
 
 use crate::game::Side;
-use crate::model_id::{ModelId, MODEL_13_0};
+use crate::model_id::{ModelId, ACE_MODEL, ACE_MODEL_ID};
 use serde::{Deserialize, Serialize};
 
 pub const DYNAMIC_PROFILE_VERSION: u8 = 4;
-pub const DYNAMIC_EVALUATOR_VERSION: &str = MODEL_13_0;
+pub const DYNAMIC_EVALUATOR_VERSION: &str = ACE_MODEL;
 pub const MIN_COMPLETE_CYCLES: u32 = 6;
 pub const MIN_COMPLETE_GAMES_FOR_PERSONAL_LENGTH: u32 = 6;
 pub const MOVING_AVERAGE_HALF_LIFE_CYCLES: f64 = 18.0;
@@ -263,7 +263,7 @@ impl DynamicDelegate {
         match self {
             Self::Easy => ModelId::Myrmidon5,
             Self::Tough => ModelId::Schell911,
-            Self::Ace => ModelId::Schell13,
+            Self::Ace => ACE_MODEL_ID,
         }
     }
 }

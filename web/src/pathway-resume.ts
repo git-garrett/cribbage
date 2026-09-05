@@ -1,4 +1,5 @@
 import type { Opponent, Phase } from "./api-types";
+import { isAceOpponent } from "./ace-opponent";
 
 export type ResumablePathwayDestination = "easy" | "tough" | "master" | "dynamic" | "human";
 
@@ -10,7 +11,7 @@ export interface ResumableModelGame {
 function modelDestination(opponent: Opponent | undefined): ResumablePathwayDestination | null {
   if (opponent === "myrmidon-5") return "easy";
   if (opponent === "schell_table-peg_table-9.1" || opponent === "schell_table-peg_table-9.11") return "tough";
-  if (opponent === "schell_table-peg_table-13.0") return "master";
+  if (isAceOpponent(opponent)) return "master";
   if (opponent === "dynamic") return "dynamic";
   return null;
 }

@@ -18,6 +18,7 @@ import {
   mistakeAdviceForChoice,
   type AceAdviceAction,
 } from "./ace-advice";
+import { ACE_OPPONENTS, isAceOpponent, PRODUCTION_ACE_OPPONENT } from "./ace-opponent";
 import aiBenchmarkSummary from "./ai-benchmark-summary.json";
 import { maybeLoadAdSense } from "./adsense";
 import {
@@ -86,7 +87,7 @@ import {
 } from "./ui-visibility";
 import { shouldUploadCompletedGame } from "./upload-policy";
 
-const DEFAULT_OPPONENT: Opponent = "schell_table-peg_table-13.0";
+const DEFAULT_OPPONENT: Opponent = PRODUCTION_ACE_OPPONENT;
 const DECISION_REVIEWER_NAME = "Ace";
 const MAX_FEEDBACK_SCREENSHOT_BYTES = 5 * 1024 * 1024;
 const FEEDBACK_SCREENSHOT_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -860,13 +861,13 @@ const ANALYTICS_KEY = "strong-cribbage.analytics.v1";
 const PHONE_GAME_DB_NAME = "cribbage-game-log";
 const PHONE_GAME_DB_VERSION = 1;
 const NOTICE_VISIBLE_MS = 2_200;
-const SIMPLE_NETWORK_OPPONENT: Opponent = "schell_table-peg_table-13.0";
+const SIMPLE_NETWORK_OPPONENT: Opponent = DEFAULT_OPPONENT;
 const SIMPLE_NETWORK_PUBLIC_OPPONENTS = new Set<string>([
   "dynamic",
   "myrmidon-5",
   "schell_table-peg_table-9.1",
   "schell_table-peg_table-9.11",
-  "schell_table-peg_table-13.0",
+  ...ACE_OPPONENTS,
 ]);
 const SIMPLE_NETWORK_LOCAL_OPPONENTS = new Set<string>([
   ...SIMPLE_NETWORK_PUBLIC_OPPONENTS,
@@ -1233,7 +1234,9 @@ if (savedGame) {
   currentSnapshot = savedGame.snapshot;
   state.game = savedGame.state;
   gameStateGeneration = 1;
-  if (isPathwayOpponent(savedGame.snapshot.opponent)) {
+  if (isAceOpponent(savedGame.snapshot.opponent)) {
+    selectedPathwayOpponent = DEFAULT_OPPONENT;
+  } else if (isPathwayOpponent(savedGame.snapshot.opponent)) {
     selectedPathwayOpponent = savedGame.snapshot.opponent;
   }
 }
@@ -3201,7 +3204,7 @@ function clearForfeitedLocalGame(gameId: string): void {
 }
 
 function leaveActivePathwayGame(route: PathwayRoute): void {
-  const gameId = currentSnapshot?.opponent === DEFAULT_OPPONENT && isActiveGame(state.game)
+  const gameId = currentSnapshot && isAceOpponent(currentSnapshot.opponent) && isActiveGame(state.game)
     ? currentSnapshot.gameId
     : null;
   if (!gameId) {
@@ -7653,7 +7656,7 @@ function analyticsEngineSortKey(engine: Opponent): number {
     "myrmidon-5",
     "schell_table-peg_table-9.1",
     "schell_table-peg_table-9.11",
-    "schell_table-peg_table-13.0",
+    ...ACE_OPPONENTS,
     "schell_table-peg_table-16.3",
     "schell_table-peg_table-16.1",
     "schell_table-peg_table-16.0",

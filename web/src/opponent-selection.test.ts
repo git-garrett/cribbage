@@ -11,6 +11,7 @@ describe("curated opponent selection", () => {
   });
 
   it("maps the available pathway tiers to server opponents", () => {
+    expect(source).toContain("const DEFAULT_OPPONENT: Opponent = PRODUCTION_ACE_OPPONENT");
     expect(source).toMatch(/const PATHWAY_OPPONENTS = \{\s*easy: "myrmidon-5",\s*tough: "schell_table-peg_table-9\.11",\s*master: DEFAULT_OPPONENT,\s*dynamic: "dynamic"/);
     expect(source).toMatch(/function selectedMenuOpponent\(\): Opponent \{\s*return SIMPLE_NETWORK_MODE \? selectedPathwayOpponent \?\? SIMPLE_NETWORK_OPPONENT : DEFAULT_OPPONENT;/);
     expect(source).toMatch(/pathwayDestinationButtons[\s\S]*const destination = button\.dataset\.pathwayDestination;[\s\S]*pathwayOpponent\(destination\)[\s\S]*launchPathwayOpponent\(opponent\)/);

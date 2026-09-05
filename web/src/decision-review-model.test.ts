@@ -14,7 +14,7 @@ describe("postgame decision reviewer", () => {
     expect(mainSource).not.toContain('`Analyze with ${playerName("ai")}`');
 
     const reviewImplementation = apiSource.match(/fn evaluate_saved_decision_review\([\s\S]*?\n}\n\nfn completed_review/)?.[0] ?? "";
-    expect(reviewImplementation.match(/ModelId::Schell13/g)).toHaveLength(2);
+    expect(reviewImplementation.match(/ACE_MODEL_ID/g)).toHaveLength(2);
   });
 
   it("gives both postgame calls to action the branded rounded treatment", () => {

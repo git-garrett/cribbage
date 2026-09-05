@@ -25,7 +25,8 @@ use cribbage_shadow_engine::dynamic::{
 use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
 use cribbage_shadow_engine::model::Model911HandCache;
 use cribbage_shadow_engine::model_id::{
-    ModelId, DYNAMIC, MODEL_13_0, MODEL_9_1, MODEL_9_11, MYRMIDON_5,
+    ModelId, ACE_MODEL, ACE_MODEL_ID, DYNAMIC, MODEL_13_0, MODEL_13_215, MODEL_9_1, MODEL_9_11,
+    MYRMIDON_5,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -581,14 +582,14 @@ fn write_response(stream: &mut TcpStream, response: Response) -> Result<(), Stri
 fn health_json() -> String {
     format!(
         "{{\"ok\":true,\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"gitCommit\":\"{}\"}}",
-        APP_VERSION, MODEL_13_0, GIT_COMMIT
+        APP_VERSION, ACE_MODEL, GIT_COMMIT
     )
 }
 
 fn model_json() -> String {
     format!(
-        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"{}\",\"{}\",\"{}\",\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\",\"{}\"]}}",
-        APP_VERSION, MODEL_13_0, MYRMIDON_5, MODEL_9_1, MODEL_9_11, DYNAMIC
+        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"{}\",\"{}\",\"{}\",\"{}\",\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\",\"{}\"]}}",
+        APP_VERSION, ACE_MODEL, MYRMIDON_5, MODEL_9_1, MODEL_9_11, MODEL_13_215, DYNAMIC
     )
 }
 
@@ -622,6 +623,10 @@ fn guest_model(model: ModelId) -> bool {
     )
 }
 
+fn same_session_opponent(existing: ModelId, requested: ModelId) -> bool {
+    existing == requested || existing.is_ace() && requested.is_ace()
+}
+
 fn game_action(
     server: &Server,
     body: &str,
@@ -644,14 +649,14 @@ fn game_action(
         if action == "new" || action == "state" && json_string(body, "gameId").is_none() {
             let model = json_string(body, "opponent")
                 .and_then(|value| ModelId::from_str(&value).ok())
-                .unwrap_or(ModelId::Schell13);
+                .unwrap_or(ACE_MODEL_ID);
             if let Some(existing) = tag.as_deref().and_then(|tag| {
                 app.sessions
                     .values()
                     .filter(|session| {
                         session.tag.as_deref() == Some(tag)
                             && session_status(session) == "active"
-                            && session.model == model
+                            && same_session_opponent(session.model, model)
                     })
                     .max_by_key(|session| &session.updated_at)
             }) {
@@ -1307,6 +1312,14 @@ fn load_session_by_tag(
 ) -> Result<Option<Session>, String> {
     let connection = open_game_database(data_dir)?;
     let saved = match model {
+        Some(model) if model.is_ace() => connection
+            .query_row(
+                "SELECT session_json FROM cribbage_game_sessions
+             WHERE tag = ?1 AND model IN (?2, ?3) AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
+                params![tag, MODEL_13_0, MODEL_13_215],
+                |row| row.get::<_, String>(0),
+            )
+            .optional(),
         Some(model) => connection
             .query_row(
                 "SELECT session_json FROM cribbage_game_sessions
@@ -1842,7 +1855,7 @@ fn apply_action(
         }
         "prepare-ai-discard" => Ok(()),
         "master-hint" => {
-            if session.model == ModelId::Schell13 {
+            if session.model.is_ace() {
                 return Err("Ace is already your opponent.".to_string());
             }
             match session.game.phase {
@@ -1879,7 +1892,7 @@ fn apply_action(
             Ok(())
         }
         "forfeit" => {
-            if session.model != ModelId::Schell13 {
+            if !session.model.is_ace() {
                 return Err("Only an Ace game can be forfeited here.".to_string());
             }
             session.forfeited = true;
@@ -2392,7 +2405,7 @@ fn evaluate_saved_decision_review(
             review_discard_for_side_with_recommendation(
                 &pending.game,
                 HUMAN,
-                ModelId::Schell13,
+                ACE_MODEL_ID,
                 [pending.selected_card_ids[0], pending.selected_card_ids[1]],
                 prepared,
                 model_root,
@@ -2405,7 +2418,7 @@ fn evaluate_saved_decision_review(
             review_peg_for_side_with_recommendation(
                 &pending.game,
                 HUMAN,
-                ModelId::Schell13,
+                ACE_MODEL_ID,
                 selected,
                 prepared,
                 model_root,
@@ -2510,7 +2523,7 @@ fn evaluate_master_hint(
 
     let (kind, review_kind, recommended) = match game.phase {
         Phase::Discard => {
-            let decision = recommend_discard_for_side(game, HUMAN, ModelId::Schell13, model_root)?;
+            let decision = recommend_discard_for_side(game, HUMAN, ACE_MODEL_ID, model_root)?;
             (
                 "discard",
                 ReviewKind::Discard,
@@ -2522,7 +2535,7 @@ fn evaluate_master_hint(
             )
         }
         Phase::Pegging => {
-            match recommend_peg_for_side(game, HUMAN, ModelId::Schell13, None, model_root)? {
+            match recommend_peg_for_side(game, HUMAN, ACE_MODEL_ID, None, model_root)? {
                 PegDecision::Play {
                     card_id,
                     ev,
@@ -3143,7 +3156,7 @@ fn decision_review_event_json(session: &Session, review: &SavedDecisionReview) -
                 game.player(HUMAN).score,
                 game.player(AI).score,
                 if game.dealer == HUMAN { "human" } else { "ai" },
-                MODEL_13_0,
+                ACE_MODEL,
                 review_json,
             )
         }
@@ -3174,7 +3187,7 @@ fn decision_review_event_json(session: &Session, review: &SavedDecisionReview) -
                 game.player(HUMAN).score,
                 game.player(AI).score,
                 json_escape(selected.first().map(String::as_str).unwrap_or("card")),
-                MODEL_13_0,
+                ACE_MODEL,
                 review_json,
             )
         }
@@ -3439,7 +3452,8 @@ fn load_session(server: &Server, body: &str) -> Response {
             .filter(|session| {
                 session.tag.as_deref() == Some(tag.as_str())
                     && session_status(session) == "active"
-                    && requested_model.is_none_or(|model| session.model == model)
+                    && requested_model
+                        .is_none_or(|model| same_session_opponent(session.model, model))
             })
             .max_by_key(|session| &session.updated_at)
             .map(|session| session.id.clone());
@@ -3458,7 +3472,8 @@ fn load_session(server: &Server, body: &str) -> Response {
                     .filter(|session| {
                         session.tag.as_deref() == Some(tag.as_str())
                             && session_status(session) == "active"
-                            && requested_model.is_none_or(|model| session.model == model)
+                            && requested_model
+                                .is_none_or(|model| same_session_opponent(session.model, model))
                     })
                     .max_by_key(|session| &session.updated_at)
             });
@@ -3486,7 +3501,7 @@ fn upload_game(server: &Server, body: &str) -> Response {
         let player = json_string(body, "tag").unwrap_or_else(|| "Anonymous".to_string());
         let winner = json_string(body, "winner");
         let result = json_string(body, "result").unwrap_or_else(|| "regular".to_string());
-        let model = json_string(body, "model").unwrap_or_else(|| MODEL_13_0.to_string());
+        let model = json_string(body, "model").unwrap_or_else(|| ACE_MODEL.to_string());
         let human_score = json_number_after(body, "human").unwrap_or(0) as i32;
         let ai_score = json_number_after(body, "ai").unwrap_or(0) as i32;
         let ended_at = completed_game_timestamp(body)
@@ -4239,6 +4254,7 @@ mod tests {
     #[test]
     fn health_reports_the_commit_compiled_into_the_binary() {
         assert!(health_json().contains(&format!("\"gitCommit\":\"{}\"", GIT_COMMIT)));
+        assert!(health_json().contains(&format!("\"model\":\"{}\"", ACE_MODEL)));
     }
 
     #[test]
@@ -4246,6 +4262,7 @@ mod tests {
         assert!(model_json().contains(MYRMIDON_5));
         assert!(model_json().contains(MODEL_9_1));
         assert!(model_json().contains(MODEL_9_11));
+        assert!(model_json().contains(MODEL_13_215));
         assert!(model_json().contains("schell_table-peg_table-13.1"));
         assert!(model_json().contains("schell_table-peg_table-16.0"));
         assert!(model_json().contains("schell_table-peg_table-16.1"));
@@ -4260,6 +4277,7 @@ mod tests {
             ModelId::Schell91,
             ModelId::Schell911,
             ModelId::Schell13,
+            ModelId::Schell13215,
             ModelId::Dynamic,
         ] {
             let session = new_session_from_seed(model, Some("Player".to_string()), 0x1234_5678, 1);
@@ -4271,7 +4289,7 @@ mod tests {
     }
 
     #[test]
-    fn lower_opponent_new_does_not_resume_a_saved_master_game() {
+    fn ace_promotion_resumes_legacy_ace_without_blocking_lower_opponents() {
         let data_dir = std::env::temp_dir().join(format!(
             "cribbage-api-model-session-test-{}-{}",
             std::process::id(),
@@ -4298,6 +4316,16 @@ mod tests {
             None,
         );
         assert_eq!(cut.status, 200);
+
+        let loaded_legacy_ace = load_session(
+            &server,
+            &json!({"opponent": ACE_MODEL, "tag": "Garrett"}).to_string(),
+        );
+        assert_eq!(loaded_legacy_ace.status, 200);
+        let loaded = serde_json::from_str::<Value>(&loaded_legacy_ace.body).unwrap();
+        assert_eq!(loaded["session"]["gameId"], master_game_id);
+        assert_eq!(loaded["session"]["snapshot"]["opponent"], MODEL_13_0);
+
         let easy = game_action(
             &server,
             &json!({"action": "new", "opponent": MYRMIDON_5, "tag": "Garrett"}).to_string(),
@@ -4309,7 +4337,7 @@ mod tests {
 
         let resumed_master = game_action(
             &server,
-            &json!({"action": "new", "opponent": MODEL_13_0, "tag": "Garrett"}).to_string(),
+            &json!({"action": "new", "opponent": ACE_MODEL, "tag": "Garrett"}).to_string(),
             None,
         );
         let resumed = serde_json::from_str::<Value>(&resumed_master.body).unwrap();
@@ -4323,11 +4351,12 @@ mod tests {
         assert_eq!(forfeit.status, 200);
         let replacement_master = game_action(
             &server,
-            &json!({"action": "new", "opponent": MODEL_13_0, "tag": "Garrett"}).to_string(),
+            &json!({"action": "new", "opponent": ACE_MODEL, "tag": "Garrett"}).to_string(),
             None,
         );
         let replacement = serde_json::from_str::<Value>(&replacement_master.body).unwrap();
         assert_ne!(replacement["snapshot"]["gameId"], master_game_id);
+        assert_eq!(replacement["snapshot"]["opponent"], ACE_MODEL);
         std::fs::remove_dir_all(data_dir).unwrap();
     }
 

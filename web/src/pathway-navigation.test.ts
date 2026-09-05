@@ -180,7 +180,7 @@ describe("local pathway navigation", () => {
     expect(html).toContain('id="master-session-save"');
     expect(html).toContain('id="master-session-forfeit"');
     expect(source).toMatch(/appBack\.addEventListener\("click"[\s\S]*leaveActivePathwayGame\("play"\)/);
-    expect(source).toMatch(/function leaveActivePathwayGame[\s\S]*currentSnapshot\?\.opponent === DEFAULT_OPPONENT[\s\S]*masterSessionDialog\.hidden = false/);
+    expect(source).toMatch(/function leaveActivePathwayGame[\s\S]*isAceOpponent\(currentSnapshot\.opponent\)[\s\S]*masterSessionDialog\.hidden = false/);
     expect(source).not.toMatch(/function launchPathwayOpponent[\s\S]*findRemoteActiveGameSession\(DEFAULT_OPPONENT\)[\s\S]*function dismissMasterSessionDialog/);
     expect(source).toMatch(/function suspendActiveGameForPathway[\s\S]*state\.pending = false[\s\S]*resetTransientGameUi\(\)/);
     expect(source).toContain('action: "forfeit"');

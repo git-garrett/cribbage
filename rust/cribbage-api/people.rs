@@ -15,7 +15,9 @@ use cribbage_shadow_engine::dynamic::{
     UNIVERSAL_CYCLES_PER_GAME,
 };
 use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
+#[cfg(test)]
 use cribbage_shadow_engine::model_id::ModelId;
+use cribbage_shadow_engine::model_id::ACE_MODEL_ID;
 use rand_core::{OsRng, RngCore};
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
@@ -1830,7 +1832,7 @@ fn evaluate_human_decision_review(
             review_discard_for_side_with_recommendation(
                 &pending.game,
                 pending.player,
-                ModelId::Schell13,
+                ACE_MODEL_ID,
                 [pending.selected_card_ids[0], pending.selected_card_ids[1]],
                 None,
                 model_root,
@@ -1843,7 +1845,7 @@ fn evaluate_human_decision_review(
             review_peg_for_side_with_recommendation(
                 &pending.game,
                 pending.player,
-                ModelId::Schell13,
+                ACE_MODEL_ID,
                 selected,
                 None,
                 model_root,

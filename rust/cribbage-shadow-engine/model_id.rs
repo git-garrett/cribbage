@@ -26,6 +26,9 @@ pub const MODEL_13_21: &str = "schell_table-peg_table-13.21";
 /// board recursion with empirical phase-seam board matrices. Known and
 /// predicted current-hand scores are applied before the continuation lookup.
 pub const MODEL_13_215: &str = "schell_table-peg_table-13.215";
+/// Current production Ace model. Keep the versioned model ID available so
+/// existing games can retain the exact engine they started with.
+pub const ACE_MODEL: &str = MODEL_13_215;
 pub const MODEL_14_3: &str = "schell_table-peg_table-14.3";
 pub const MODEL_14_8: &str = "schell_table-peg_table-14.8";
 pub const MODEL_14_8_1: &str = "schell_table-peg_table-14.8.1";
@@ -68,6 +71,8 @@ pub enum ModelId {
     Myrmidon5,
     Dynamic,
 }
+
+pub const ACE_MODEL_ID: ModelId = ModelId::Schell13215;
 
 impl ModelId {
     pub fn as_str(self) -> &'static str {
@@ -153,6 +158,10 @@ impl ModelId {
                 | ModelId::Schell163
         )
     }
+
+    pub fn is_ace(self) -> bool {
+        matches!(self, ModelId::Schell13 | ModelId::Schell13215)
+    }
 }
 
 impl fmt::Display for ModelId {
@@ -220,6 +229,10 @@ mod tests {
         );
         assert!(ModelId::Schell13215.has_native_rust_decisions());
         assert!(!ModelId::Schell13215.is_strength_model());
+        assert_eq!(ACE_MODEL_ID.as_str(), ACE_MODEL);
+        assert!(ACE_MODEL_ID.is_ace());
+        assert!(ModelId::Schell13.is_ace());
+        assert!(!ModelId::Schell911.is_ace());
         assert_eq!(MODEL_14_3.parse::<ModelId>().unwrap(), ModelId::Schell143);
         assert_eq!(
             MODEL_14_8_1.parse::<ModelId>().unwrap().as_str(),

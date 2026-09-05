@@ -1,10 +1,10 @@
 use cribbage_shadow_engine::dynamic::{
-    DynamicCycleSample, DynamicProfile, DynamicState, EASY_CALIBRATED_REGRET_PER_DECISION,
-    HANDICAP_HALF_LIFE_CYCLES, MIN_COMPLETE_CYCLES, MOVING_AVERAGE_HALF_LIFE_CYCLES,
-    REGRET_DEADBAND, UNIVERSAL_CYCLES_PER_GAME,
+    DynamicCycleSample, DynamicProfile, DynamicState, DYNAMIC_EVALUATOR_VERSION,
+    EASY_CALIBRATED_REGRET_PER_DECISION, HANDICAP_HALF_LIFE_CYCLES, MIN_COMPLETE_CYCLES,
+    MOVING_AVERAGE_HALF_LIFE_CYCLES, REGRET_DEADBAND, UNIVERSAL_CYCLES_PER_GAME,
 };
 use cribbage_shadow_engine::game::Side;
-use cribbage_shadow_engine::model_id::ModelId;
+use cribbage_shadow_engine::model_id::{ModelId, ACE_MODEL, ACE_MODEL_ID};
 
 fn sample(regret: f64) -> DynamicCycleSample {
     DynamicCycleSample {
@@ -30,6 +30,15 @@ fn dynamic_starts_easy_and_waits_for_six_complete_cycles() {
     profile.observe_cycle(sample(0.0));
     assert_eq!(profile.complete_cycles, MIN_COMPLETE_CYCLES);
     assert_eq!(profile.strength, 5);
+}
+
+#[test]
+fn dynamic_uses_the_production_ace_for_evaluation_and_top_strength() {
+    assert_eq!(DYNAMIC_EVALUATOR_VERSION, ACE_MODEL);
+    let mut profile = DynamicProfile::default();
+    profile.strength = 200;
+    let state = DynamicState::new(profile, 7, [0, 0]);
+    assert_eq!(state.decision_model(), ACE_MODEL_ID);
 }
 
 #[test]
@@ -126,7 +135,7 @@ fn restored_legacy_state_is_normalized_before_play() {
 #[test]
 fn older_profile_keeps_strength_but_starts_fresh_cycle_handicap_evidence() {
     let mut state: DynamicState = serde_json::from_str(
-        r#"{"profile":{"profile_version":2,"evaluator_version":"schell_table-peg_table-13.0","started_dynamic":true,"complete_cycles":20,"regret":{"dealer_discard":0.01,"dealer_pegging":0.01,"pone_discard":0.01,"pone_pegging":0.01},"ewma_handicap":-0.01,"strength":100},"first_completed_dealer":null,"delegate_cycles":4,"delegate":"Tough"}"#,
+        r#"{"profile":{"profile_version":2,"evaluator_version":"schell_table-peg_table-13.215","started_dynamic":true,"complete_cycles":20,"regret":{"dealer_discard":0.01,"dealer_pegging":0.01,"pone_discard":0.01,"pone_pegging":0.01},"ewma_handicap":-0.01,"strength":100},"first_completed_dealer":null,"delegate_cycles":4,"delegate":"Tough"}"#,
     )
     .unwrap();
 
@@ -140,7 +149,7 @@ fn older_profile_keeps_strength_but_starts_fresh_cycle_handicap_evidence() {
 #[test]
 fn game_based_profile_preserves_its_published_handicap_during_migration() {
     let profile: DynamicProfile = serde_json::from_str(
-        r#"{"profile_version":3,"evaluator_version":"schell_table-peg_table-13.0","started_dynamic":true,"complete_cycles":20,"regret":{"dealer_discard":0.01,"dealer_pegging":0.01,"pone_discard":0.01,"pone_pegging":0.01},"complete_games":2,"ewma_game_handicap":-0.125,"strength":100}"#,
+        r#"{"profile_version":3,"evaluator_version":"schell_table-peg_table-13.215","started_dynamic":true,"complete_cycles":20,"regret":{"dealer_discard":0.01,"dealer_pegging":0.01,"pone_discard":0.01,"pone_pegging":0.01},"complete_games":2,"ewma_game_handicap":-0.125,"strength":100}"#,
     )
     .unwrap();
 
