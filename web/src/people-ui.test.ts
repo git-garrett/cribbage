@@ -126,12 +126,12 @@ describe("human clubhouse UI", () => {
     expect(css).toContain("@keyframes people-challenge-badge-arrived");
   });
 
-  it("uses real activity instead of background polling for 15-minute presence", () => {
+  it("keeps ordinary presence activity-based while treating an open Human directory as ready to play", () => {
     expect(source).toContain("const PEOPLE_IDLE_MS = 15 * 60 * 1000");
-    expect(source).toMatch(/schedulePeoplePoll[\s\S]*await refreshPeople\(\{ heartbeat: Boolean\(authenticatedUser && peopleActive\) \}\);/);
     expect(source).toContain("function recordPeopleActivity");
     expect(source).toMatch(/pointerdown[\s\S]*recordPeopleActivity/);
     expect(source).toMatch(/keydown[\s\S]*recordPeopleActivity/);
+    expect(source).toMatch(/function shouldHeartbeatPeoplePresence[\s\S]*peopleActive \|\| isLookingForHumanGame\(\)/);
   });
 
   it("supports public profiles and authenticated profile editing", () => {
@@ -200,10 +200,26 @@ describe("human clubhouse UI", () => {
       .toBeLessThan(handler.indexOf("refreshPeople("));
   });
 
+  it("settles changed Online and Human directories instead of replacing their rows abruptly", () => {
+    expect(source).toContain("function peopleDirectoryPresentationKey");
+    expect(source).toContain("renderPeopleDirectory({ animate: changed })");
+    expect(css).toContain("@keyframes people-directory-settle");
+    expect(css).toContain(".people-list.people-directory-updated .people-list-item");
+    expect(css).toContain(".human-directory.people-directory-updated > *");
+  });
+
   it("uses a visible-only one-minute presence heartbeat", () => {
     expect(source).toContain("const PEOPLE_POLL_MS = 60_000");
-    expect(source).toMatch(/function schedulePeoplePoll[\s\S]*document\.visibilityState === "visible"[\s\S]*refreshPeople\(\{ heartbeat: Boolean\(authenticatedUser && peopleActive\) \}\)/);
+    expect(source).toMatch(/function schedulePeoplePoll[\s\S]*document\.visibilityState === "visible"[\s\S]*refreshPeople\(\{ heartbeat: shouldHeartbeatPeoplePresence\(\) \}\)/);
     expect(source).toMatch(/visibilitychange[\s\S]*document\.visibilityState === "visible"[\s\S]*refreshPeople\(\{ heartbeat: Boolean\(authenticatedUser\) \}\)/);
+  });
+
+  it("shows the cached human directory before its shared presence heartbeat refreshes it", () => {
+    const pathwayView = source.match(/function showPathwayView\(view: PathwayView\): void \{([\s\S]*?)\n\}/)?.[1] ?? "";
+    expect(pathwayView).toContain('if (view === "human") renderPeopleDirectory()');
+    expect(pathwayView.indexOf('if (view === "human") renderPeopleDirectory()'))
+      .toBeLessThan(pathwayView.indexOf("refreshPeople({ heartbeat: true })"));
+    expect(source).toMatch(/function shouldHeartbeatPeoplePresence[\s\S]*peopleActive \|\| isLookingForHumanGame\(\)/);
   });
 
   it("opens a shared table, cuts for first deal, and enters the human game", () => {

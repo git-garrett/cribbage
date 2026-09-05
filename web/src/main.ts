@@ -1936,6 +1936,26 @@ function challengeIds(directory: PeopleDirectoryResponse): string[] {
   return directory.incomingChallenges.map((challenge) => challenge.id).sort();
 }
 
+function peopleDirectoryPresentationKey(directory: PeopleDirectoryResponse): string {
+  return JSON.stringify({
+    onlineCount: directory.onlineCount,
+    players: directory.players.map((player) => [
+      player.username,
+      player.displayName,
+      player.lookingForGame,
+      player.dynamicHandicap?.wpPerGame ?? null,
+    ]),
+    incomingChallenges: directory.incomingChallenges.map((challenge) => [
+      challenge.id,
+      challenge.status,
+      challenge.player.username,
+    ]),
+    activeTable: directory.activeTable
+      ? [directory.activeTable.id, directory.activeTable.phase, directory.activeTable.dealerUsername]
+      : null,
+  });
+}
+
 function announceIncomingChallenge(challenge: PeopleChallenge): void {
   els.peoplePresenceAlert.setAttribute(
     "aria-label",
@@ -1978,16 +1998,21 @@ function applyPeopleDirectory(directory: PeopleDirectoryResponse): void {
     pendingPeopleDirectory = directory;
     return;
   }
+  const changed = peopleDirectoryPresentationKey(directory) !== peopleDirectoryPresentationKey(peopleDirectory);
   const previousIds = new Set(challengeIds(peopleDirectory));
   const arrived = directory.incomingChallenges.find((challenge) => !previousIds.has(challenge.id));
   peopleDirectory = directory;
-  renderPeopleDirectory();
+  renderPeopleDirectory({ animate: changed });
   if (arrived) announceIncomingChallenge(arrived);
 }
 
-function renderPeopleDirectory(): void {
+function renderPeopleDirectory(options: { animate?: boolean } = {}): void {
+  const animate = options.animate === true;
   dismissHandicapTooltip();
   els.peoplePresence.hidden = false;
+  els.peoplePresence.classList.toggle("directory-updated", animate);
+  els.peopleOnlineList.classList.toggle("people-directory-updated", animate);
+  els.humanDirectory.classList.toggle("people-directory-updated", animate);
   const activeTable = resumableHumanTable();
   els.peoplePresenceLabel.textContent = activeTable
     ? `${peopleDirectory.onlineCount} online · Resume`
@@ -2076,6 +2101,10 @@ function isLookingForHumanGame(): boolean {
   return !els.pathwayPage.hidden && els.pathwayPage.dataset.view === "human" && els.humanTablePage.hidden;
 }
 
+function shouldHeartbeatPeoplePresence(): boolean {
+  return Boolean(authenticatedUser && (peopleActive || isLookingForHumanGame()));
+}
+
 function schedulePeopleIdleTimeout(): void {
   if (peopleIdleTimer !== null) window.clearTimeout(peopleIdleTimer);
   peopleIdleTimer = null;
@@ -2145,7 +2174,7 @@ function schedulePeoplePoll(): void {
   if (peoplePollTimer !== null) window.clearTimeout(peoplePollTimer);
   peoplePollTimer = window.setTimeout(async () => {
     if (document.visibilityState === "visible") {
-      await refreshPeople({ heartbeat: Boolean(authenticatedUser && peopleActive) });
+      await refreshPeople({ heartbeat: shouldHeartbeatPeoplePresence() });
     }
     schedulePeoplePoll();
   }, PEOPLE_POLL_MS);
@@ -3068,6 +3097,7 @@ function showPathwayView(view: PathwayView): void {
     pathwayView.hidden = pathwayView.dataset.pathwayView !== view;
   }
   els.pathwayPage.scrollTo({ top: 0, left: 0 });
+  if (view === "human") renderPeopleDirectory();
   if (authenticatedUser) void refreshPeople({ heartbeat: true });
   if (view === "play") void refreshPathwayResumeSessions();
 }
