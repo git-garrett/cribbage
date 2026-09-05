@@ -69,10 +69,12 @@
           <button id="pathway-header-home" class="pathway-back pathway-header-home" type="button">
             <span aria-hidden="true">←</span> <span id="pathway-header-parent-label">Home</span>
           </button>
-          <picture class="pathway-logo">
-            <source media="(prefers-color-scheme: dark)" srcset="/brand/strong-cribbage-lockup-dark.svg">
-            <img src="/brand/strong-cribbage-lockup-light.svg" alt="Strong Cribbage">
-          </picture>
+          <a id="pathway-logo-home" class="pathway-logo" href="/" aria-label="Strong Cribbage home">
+            <picture class="pathway-logo-picture">
+              <source media="(prefers-color-scheme: dark)" srcset="/brand/strong-cribbage-lockup-dark.svg">
+              <img src="/brand/strong-cribbage-lockup-light.svg" alt="">
+            </picture>
+          </a>
         </header>
         <div class="pathway-rail" aria-hidden="true">
           <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
@@ -96,6 +98,7 @@
                 <span class="pathway-card-kicker">Build your game</span>
                 <strong>Training</strong>
                 <span>Whether you're a beginner or want strategies for mastering the game.</span>
+                <em class="pathway-coming-soon">Coming soon</em>
                 <b aria-hidden="true">→</b>
               </button>
               <button id="pathway-statistics" class="pathway-card" type="button">
@@ -460,10 +463,10 @@
         <button id="mobile-header-reveal" class="mobile-header-reveal" type="button" aria-label="Show navigation">
           <span aria-hidden="true"></span>
         </button>
-        <div class="app-brand">
+        <a id="app-brand-home" class="app-brand" href="/" aria-label="Strong Cribbage home">
           <img class="app-brand-logo" src="/brand/strong-cribbage-lockup-dark.svg" alt="">
           <h1 class="visually-hidden">Strong Cribbage</h1>
-        </div>
+        </a>
         <button id="app-back" class="pathway-back app-back" type="button">
           <span aria-hidden="true">←</span> Play
         </button>
@@ -578,6 +581,7 @@
           <h2 id="scoring-title">Hand score</h2>
           <div id="scoring-cards" class="cards"></div>
         </div>
+        <button id="skip-counting" class="skip-counting" type="button" hidden>Skip to summary</button>
         <div id="score-summary-dialog" class="score-summary-dialog" role="dialog" aria-modal="true" aria-labelledby="score-summary-title" hidden>
           <div class="score-summary-card">
             <span id="score-summary-eyebrow" class="score-summary-eyebrow">Hand counted</span>

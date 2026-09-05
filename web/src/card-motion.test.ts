@@ -38,9 +38,11 @@ describe("physical card motion", () => {
   it("flies each pegging play from its hand position into the active series", () => {
     expect(mainSource).toMatch(/function capturePeggingPlaySource[\s\S]*els\.humanHand[\s\S]*els\.aiHand/s);
     expect(mainSource).toMatch(/function animatePeggingPlay[\s\S]*pegging-play-flight-layer[\s\S]*pegging-card-arriving/s);
+    expect(mainSource).toMatch(/flyingCard\.style\.opacity = "0\.92";[\s\S]*flyingCard\.style\.transform = `translate3d\(\$\{startX\}px, \$\{startY\}px, 0\)[\s\S]*document\.body\.append\(layer\);[\s\S]*flyingCard\.animate/s);
     expect(mainSource).toMatch(/renderPeggingPlayWithMotion\(previous, current, "ai", source\)/);
     expect(mainSource).toMatch(/const playSource = capturePeggingPlaySource\("human", card\.id\)[\s\S]*renderPeggingPlayWithMotion\(previous, next, "human", playSource\)/s);
     expect(css).toMatch(/\.pegging-play-flight-layer\s*\{[^}]*position:\s*fixed[^}]*pointer-events:\s*none/s);
+    expect(css).toMatch(/\.pegging-card-arriving\s*\{[^}]*opacity:\s*0\s*!important/s);
   });
 
   it("keeps the full deal-cut deck in one stable 52-card ribbon", () => {
@@ -65,5 +67,10 @@ describe("physical card motion", () => {
   it("keeps normal-mobile pegging marks readable without expanding the card row", () => {
     expect(css).toMatch(/body\[data-font-size="normal"\][\s\S]*pegging-row:not\(\.turn-cut-row\)[\s\S]*\.corner > span:first-child\s*\{[^}]*font-size:\s*14px/s);
     expect(css).toMatch(/body\[data-font-size="normal"\][\s\S]*pegging-row:not\(\.turn-cut-row\)[\s\S]*\.corner > span:last-child\s*\{[^}]*font-size:\s*13px/s);
+  });
+
+  it("keeps a complete desktop pegging series on one more-tightly overlapped row", () => {
+    expect(css).toMatch(/@media \(min-width: 960px\)[\s\S]*#plays \.played-active\.pegging-row\s*\{[^}]*flex-wrap:\s*nowrap/s);
+    expect(css).toMatch(/@media \(min-width: 960px\)[\s\S]*#plays \.played-active\.pegging-row \.card \+ \.card\s*\{[^}]*margin-left:\s*calc\(var\(--game-card-width\) \* -0\.68\)/s);
   });
 });

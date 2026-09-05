@@ -22,7 +22,7 @@ describe("browser color-scheme support", () => {
   });
 
   it("routes every entry lockup through picture source selection", () => {
-    for (const className of ["pathway-logo", "auth-logo", "splash-logo"]) {
+    for (const className of ["pathway-logo-picture", "auth-logo", "splash-logo"]) {
       expect(appHtml).toMatch(new RegExp(`<picture class="${className}">[\\s\\S]*?prefers-color-scheme: dark[\\s\\S]*?lockup-dark\\.svg[\\s\\S]*?lockup-light\\.svg[\\s\\S]*?<\\/picture>`));
     }
     expect(homepageHtml).toMatch(/<picture class="homepage-logo">[\s\S]*?lockup-dark\.svg[\s\S]*?lockup-light\.svg[\s\S]*?<\/picture>/);
