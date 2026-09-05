@@ -321,6 +321,8 @@ fn main() {
     });
     auth::initialize(&data_dir)
         .unwrap_or_else(|error| panic!("could not initialize authentication storage: {}", error));
+    email::initialize(&data_dir)
+        .unwrap_or_else(|error| panic!("could not initialize email delivery queue: {}", error));
     let migrated_legacy_sessions = migrate_legacy_session_owners(&data_dir)
         .unwrap_or_else(|error| panic!("could not migrate legacy game ownership: {}", error));
     if migrated_legacy_sessions > 0 {
@@ -337,6 +339,8 @@ fn main() {
         .unwrap_or_else(|error| panic!("could not initialize people storage: {}", error));
     auth::validate_configuration()
         .unwrap_or_else(|error| panic!("invalid authentication configuration: {}", error));
+    let email_data_dir = data_dir.clone();
+    std::thread::spawn(move || email::run_delivery_worker(email_data_dir));
     let uploads = load_uploads(&data_dir).unwrap_or_else(|error| {
         eprintln!("Rust API leaderboard history was not loaded: {}", error);
         HashMap::new()

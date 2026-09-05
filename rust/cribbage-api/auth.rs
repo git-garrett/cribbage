@@ -161,7 +161,12 @@ pub fn validate_configuration() -> Result<(), String> {
     if !auth_required() {
         return Ok(());
     }
-    for name in ["CRIBBAGE_AUTH_PEPPER", "SENDGRID_API_KEY"] {
+    let required = if email::delivery_paused() {
+        &["CRIBBAGE_AUTH_PEPPER"][..]
+    } else {
+        &["CRIBBAGE_AUTH_PEPPER", "SENDGRID_API_KEY"][..]
+    };
+    for name in required {
         if env::var(name)
             .map(|value| value.trim().is_empty())
             .unwrap_or(true)
@@ -300,13 +305,18 @@ fn otp_request(server: &Server, request: &Request) -> Response {
         return message;
     };
     let code = random_code();
-    if let Err(error) = create_challenge(server, &user, "otp", &code, OTP_SECONDS) {
-        return internal_error(error);
-    }
+    let expires_at = match create_challenge(server, &user, "otp", &code, OTP_SECONDS) {
+        Ok(expires_at) => expires_at,
+        Err(error) => return internal_error(error),
+    };
+    let dedupe_key = format!("otp:{}", user.id);
     if let Err(error) = email::send(
+        &server.data_dir,
         &user.email,
         &user.display_name,
         &email::one_time_code(&user.display_name, &code),
+        &dedupe_key,
+        expires_at,
     ) {
         eprintln!(
             "Could not send one-time code for user {}: {}",
@@ -367,14 +377,20 @@ fn password_request(server: &Server, request: &Request) -> Response {
         return message;
     };
     let token = random_token(32);
-    if let Err(error) = create_challenge(server, &user, "password-reset", &token, RESET_SECONDS) {
-        return internal_error(error);
-    }
+    let expires_at = match create_challenge(server, &user, "password-reset", &token, RESET_SECONDS)
+    {
+        Ok(expires_at) => expires_at,
+        Err(error) => return internal_error(error),
+    };
     let url = format!("{}/?reset={}", public_origin(), token);
+    let dedupe_key = format!("password-reset:{}", user.id);
     if let Err(error) = email::send(
+        &server.data_dir,
         &user.email,
         &user.display_name,
         &email::password_reset(&user.display_name, &url),
+        &dedupe_key,
+        expires_at,
     ) {
         eprintln!(
             "Could not send password reset for user {}: {}",
@@ -455,9 +471,13 @@ fn request_access(server: &Server, request: &Request) -> Response {
         return internal_error(error);
     }
 
-    if let Err(error) =
-        email::send_access_request(&first_name, &last_name, &username, &email_address)
-    {
+    if let Err(error) = email::send_access_request(
+        &server.data_dir,
+        &first_name,
+        &last_name,
+        &username,
+        &email_address,
+    ) {
         eprintln!(
             "Could not send preview access notification for {}: {}",
             normalized_email, error
@@ -515,14 +535,19 @@ fn invite_send(server: &Server, request: &Request) -> Response {
         return Response::json(404, "{\"error\":\"Account not found.\"}".to_string());
     };
     let token = random_token(32);
-    if let Err(error) = create_challenge(server, &user, "invite", &token, INVITE_SECONDS) {
-        return internal_error(error);
-    }
+    let expires_at = match create_challenge(server, &user, "invite", &token, INVITE_SECONDS) {
+        Ok(expires_at) => expires_at,
+        Err(error) => return internal_error(error),
+    };
     let url = format!("{}/?invite={}", public_origin(), token);
+    let dedupe_key = format!("invite:{}", user.id);
     if let Err(error) = email::send(
+        &server.data_dir,
         &user.email,
         &user.display_name,
         &email::invitation(&user.display_name, &url),
+        &dedupe_key,
+        expires_at,
     ) {
         return internal_error(error);
     }
@@ -615,9 +640,10 @@ fn create_challenge(
     purpose: &str,
     secret: &str,
     ttl: i64,
-) -> Result<(), String> {
+) -> Result<i64, String> {
     let connection = open_game_database(&server.data_dir)?;
     let now = unix_seconds();
+    let expires_at = now + ttl;
     connection
         .execute(
             "UPDATE auth_challenges SET consumed_at = ?3
@@ -635,12 +661,12 @@ fn create_challenge(
                 user.id,
                 purpose,
                 challenge_digest(purpose, secret),
-                now + ttl,
+                expires_at,
                 now
             ],
         )
         .map_err(|error| format!("create authentication challenge: {}", error))?;
-    Ok(())
+    Ok(expires_at)
 }
 
 fn consume_challenge(

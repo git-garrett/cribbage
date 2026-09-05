@@ -135,6 +135,7 @@ Environment=CRIBBAGE_PUBLIC_ORIGIN=https://${GAME_DOMAIN}
 Environment=CRIBBAGE_MAIL_FROM=hello@strongcribbage.com
 Environment="CRIBBAGE_MAIL_FROM_NAME=Strong Cribbage"
 Environment=CRIBBAGE_MAIL_REPLY_TO=founder@evenvision.com
+Environment=CRIBBAGE_EMAIL_DELIVERY_PAUSED=true
 EnvironmentFile=-/etc/cribbage/cribbage.env
 ExecStart=${REMOTE_APP_DIR}/rust/target/release/cribbage-api
 Restart=always
