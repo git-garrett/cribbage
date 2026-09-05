@@ -9,18 +9,18 @@ const source = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 describe("private engagement administration", () => {
   it("exposes the report only when the authenticated session grants admin access", () => {
     expect(source).toContain("authenticatedUser?.engagementAdmin");
-    expect(source).toContain('authJson<EngagementReport>("/api/admin/engagement", { days })');
+    expect(source).toContain('authJson<EngagementReport>("/api/admin/engagement", { days, environment, audience })');
     expect(html).toMatch(/id="engagement-pathway-open"[^>]*hidden/);
     expect(html).toMatch(/id="engagement-menu-open"/);
   });
 
   it("reports the planned engagement dimensions and their denominators", () => {
-    for (const id of ["overview", "funnel", "pathways", "opponents", "devices", "daily"]) {
+    for (const id of ["overview", "funnel", "pathways", "opponents", "devices", "daily", "users", "errors", "interactions"]) {
       expect(html).toContain(`id="engagement-${id}"`);
     }
-    expect(source).toContain("Distinct signed-in accounts plus anonymous tab sessions.");
-    expect(source).toContain("Signed-in accounts active on at least two UTC dates.");
-    expect(source).toContain("Unresolved page-exit abandonment candidates.");
+    expect(html).toContain("Game milestone timing");
+    expect(source).toContain("Signed-in on at least two distinct UTC dates.");
+    expect(source).toContain("repeat/rage-click signals");
   });
 
   it("supports every planned date window, empty states, and CSV export", () => {
@@ -29,12 +29,24 @@ describe("private engagement administration", () => {
     }
     expect(source).toContain('type: "text/csv;charset=utf-8"');
     expect(source).toContain("No activity was recorded in this window.");
+    expect(html).toContain('id="engagement-environment"');
+    expect(html).toContain('id="engagement-audience"');
     expect(css).toContain(".engagement-empty");
+  });
+
+  it("renders interactive trend charts and dashboard tabs", () => {
+    expect(source).toContain("renderEngagementLineChart");
+    expect(source).toContain('createElementNS(SVG_NS, name)');
+    expect(source).toContain('button.dataset.series = item.key');
+    for (const tab of ["overview", "people", "experience", "data"]) {
+      expect(html).toContain(`data-engagement-tab="${tab}"`);
+      expect(html).toContain(`data-engagement-panel="${tab}"`);
+    }
   });
 
   it("keeps the report readable on desktop and phone layouts", () => {
     expect(css).toContain('.app[data-view="engagement"] > .scoreboard');
-    expect(css).toMatch(/\.engagement-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(4/s);
+    expect(css).toMatch(/\.engagement-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(3/s);
     expect(css).toMatch(/@media \(max-width:\s*560px\)[\s\S]*\.engagement-metrics,[\s\S]*grid-template-columns:\s*1fr/s);
   });
 });

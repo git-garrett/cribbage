@@ -1,29 +1,47 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use rusqlite::params;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{auth, isoish_now, open_game_database, Request, Response, Server};
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct EngagementRequest {
     #[serde(default = "default_days")]
     days: i64,
+    #[serde(default = "default_all")]
+    environment: String,
+    #[serde(default = "default_all")]
+    audience: String,
 }
 
 #[derive(Clone)]
 struct EventRow {
     user_id: Option<i64>,
+    username: Option<String>,
+    display_name: Option<String>,
     session_id: String,
     event_name: String,
     received_at: String,
+    page: String,
     game_id: Option<String>,
+    environment: String,
+    app_version: String,
+    client_type: String,
     browser: String,
     device_type: String,
     viewport_width: i64,
     viewport_height: i64,
+    screen_width: i64,
+    screen_height: i64,
+    language: String,
+    timezone: String,
+    platform: String,
     metadata: Value,
+    active_now: bool,
+    active_last_24_hours: bool,
 }
 
 #[derive(Default)]
@@ -33,8 +51,71 @@ struct Breakdown {
     visitors: HashSet<String>,
 }
 
+#[derive(Default)]
+struct TimeBucket {
+    events: usize,
+    visitors: HashSet<String>,
+    sessions: HashSet<String>,
+    game_starts: usize,
+    game_completions: usize,
+    game_forfeits: usize,
+    bounces: usize,
+    error_events: usize,
+    friction_events: usize,
+    abandonment_candidates: usize,
+}
+
+#[derive(Default)]
+struct UserActivity {
+    username: String,
+    display_name: String,
+    last_active: String,
+    active_days: HashSet<String>,
+    sessions: HashSet<String>,
+    events: usize,
+    page_views: usize,
+    game_starts: usize,
+    game_completions: usize,
+    errors: usize,
+    friction_events: usize,
+    clients: HashMap<String, usize>,
+}
+
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Totals {
+    active_visitors: usize,
+    registered_users: usize,
+    anonymous_sessions: usize,
+    signed_in_sessions: usize,
+    sessions: usize,
+    returning_users: usize,
+    events: usize,
+    page_views: usize,
+    interactions: usize,
+    active_now: usize,
+    active_last_24_hours: usize,
+    game_starts: usize,
+    game_resumes: usize,
+    game_completions: usize,
+    game_forfeits: usize,
+    game_abandons: usize,
+    completion_percent: f64,
+    bounce_sessions: usize,
+    bounce_percent: f64,
+    error_events: usize,
+    error_sessions: usize,
+    friction_events: usize,
+    friction_sessions: usize,
+    average_exit_seconds: f64,
+}
+
 fn default_days() -> i64 {
     30
+}
+
+fn default_all() -> String {
+    "all".to_string()
 }
 
 pub fn handle(
@@ -67,60 +148,342 @@ pub fn handle(
         ));
     }
     let input = match serde_json::from_str::<EngagementRequest>(&request.body) {
-        Ok(input) if matches!(input.days, 0 | 1 | 7 | 30 | 90) => input,
+        Ok(input)
+            if matches!(input.days, 0 | 1 | 7 | 30 | 90)
+                && matches!(
+                    input.environment.as_str(),
+                    "all" | "local" | "lan" | "prod" | "ios"
+                )
+                && matches!(input.audience.as_str(), "all" | "registered" | "anonymous") =>
+        {
+            input
+        }
         _ => {
             return Some(Response::json(
                 400,
-                json!({"error": "Choose a supported reporting window."}).to_string(),
+                json!({"error": "Choose supported report filters."}).to_string(),
             ))
         }
     };
-    Some(match report(&server.data_dir, input.days) {
-        Ok(report) => Response::json(200, report.to_string()),
-        Err(error) => {
-            eprintln!("Engagement reporting error: {error}");
-            Response::json(
-                500,
-                json!({"error": "Engagement reporting is temporarily unavailable."}).to_string(),
-            )
-        }
-    })
+    Some(
+        match report(
+            &server.data_dir,
+            input.days,
+            &input.environment,
+            &input.audience,
+        ) {
+            Ok(report) => Response::json(200, report.to_string()),
+            Err(error) => {
+                eprintln!("Engagement reporting error: {error}");
+                Response::json(
+                    500,
+                    json!({"error": "Engagement reporting is temporarily unavailable."})
+                        .to_string(),
+                )
+            }
+        },
+    )
 }
 
-fn report(data_dir: &std::path::Path, days: i64) -> Result<Value, String> {
+fn report(
+    data_dir: &std::path::Path,
+    days: i64,
+    environment: &str,
+    audience: &str,
+) -> Result<Value, String> {
+    let rows = load_events(data_dir, days, environment, audience, false)?;
+    let previous_rows = if days == 0 {
+        Vec::new()
+    } else {
+        load_events(data_dir, days, environment, audience, true)?
+    };
+    let report_totals = totals(&rows);
+    let previous_totals = totals(&previous_rows);
+    let comparison_value = if days == 0 {
+        Value::Null
+    } else {
+        comparison(&report_totals, &previous_totals)
+    };
+
+    let pathways = breakdown(rows.iter().filter_map(|event| {
+        if event.event_name != "page_view" {
+            return None;
+        }
+        metadata_string(event, "surface")
+            .filter(|surface| surface.starts_with("pathway:"))
+            .map(|surface| (title_case(surface.trim_start_matches("pathway:")), event))
+    }));
+    let opponents = breakdown(rows.iter().filter_map(|event| {
+        (event.event_name == "game_start").then(|| {
+            (
+                title_case(metadata_string(event, "opponent").unwrap_or("Unknown")),
+                event,
+            )
+        })
+    }));
+    let devices = breakdown(rows.iter().map(|event| {
+        (
+            format!(
+                "{} · {} · {}×{}",
+                title_case(&event.device_type),
+                title_case(&event.browser),
+                event.viewport_width,
+                event.viewport_height
+            ),
+            event,
+        )
+    }));
+    let clients = breakdown(rows.iter().map(|event| {
+        (
+            format!(
+                "{} · {} · {}×{} screen",
+                title_case(&event.client_type),
+                title_case(&event.platform),
+                event.screen_width,
+                event.screen_height
+            ),
+            event,
+        )
+    }));
+    let environments = breakdown(rows.iter().map(|event| {
+        (
+            format!(
+                "{} · v{}",
+                title_case(&event.environment),
+                event.app_version
+            ),
+            event,
+        )
+    }));
+    let locations = breakdown(rows.iter().map(|event| {
+        (
+            format!(
+                "{} · {}",
+                if event.timezone.is_empty() {
+                    "Unknown timezone"
+                } else {
+                    &event.timezone
+                },
+                if event.language.is_empty() {
+                    "Unknown language"
+                } else {
+                    &event.language
+                }
+            ),
+            event,
+        )
+    }));
+    let surfaces = breakdown(rows.iter().filter_map(|event| {
+        (event.event_name == "page_view").then(|| {
+            (
+                metadata_string(event, "surface")
+                    .map(title_case)
+                    .unwrap_or_else(|| event.page.clone()),
+                event,
+            )
+        })
+    }));
+    let event_types = breakdown(
+        rows.iter()
+            .map(|event| (title_case(&event.event_name), event)),
+    );
+    let interactions = breakdown(rows.iter().filter_map(|event| {
+        matches!(
+            event.event_name.as_str(),
+            "ui_interaction" | "repeat_ui_action" | "rage_click"
+        )
+        .then(|| {
+            (
+                metadata_string(event, "target")
+                    .map(friendly_target)
+                    .unwrap_or_else(|| "Unknown control".to_string()),
+                event,
+            )
+        })
+    }));
+    let errors = breakdown(rows.iter().filter_map(|event| {
+        matches!(
+            event.event_name.as_str(),
+            "client_error" | "server_error_ui"
+        )
+        .then(|| {
+            let kind = if event.event_name == "client_error" {
+                "Client"
+            } else {
+                "Server"
+            };
+            (
+                format!(
+                    "{kind} · {}",
+                    metadata_string(event, "error").unwrap_or("No error summary")
+                ),
+                event,
+            )
+        })
+    }));
+
+    let session_starts = sessions_for(&rows, |event| event.event_name == "session_start");
+    let home_views = sessions_for(&rows, |event| {
+        event.event_name == "page_view"
+            && matches!(
+                metadata_string(event, "surface"),
+                Some("pathway:home") | Some("home")
+            )
+    });
+    let play_views = sessions_for(&rows, |event| {
+        event.event_name == "page_view" && metadata_string(event, "surface") == Some("pathway:play")
+    });
+    let started_sessions = sessions_for(&rows, |event| event.event_name == "game_start");
+    let completed_sessions = sessions_for(&rows, |event| event.event_name == "game_complete");
+    let funnel_base = session_starts.len();
+    let funnel = [
+        ("Sessions started", session_starts.len()),
+        ("Reached home", home_views.len()),
+        ("Reached Play Now", play_views.len()),
+        ("Started a game", started_sessions.len()),
+        ("Completed a game", completed_sessions.len()),
+    ]
+    .into_iter()
+    .scan(None, |previous: &mut Option<usize>, (label, count)| {
+        let drop_off = previous.map(|value| value.saturating_sub(count));
+        *previous = Some(count);
+        Some(json!({
+            "label": label,
+            "sessions": count,
+            "conversionPercent": percent(count, funnel_base),
+            "dropOff": drop_off,
+            "denominator": "sessions with session_start in this window"
+        }))
+    })
+    .collect::<Vec<_>>();
+
+    let daily = time_series(&rows, false);
+    let hourly = time_series(&rows, true);
+    let users = user_activity(&rows);
+    let recent_activity = recent_activity(&rows);
+    let csv = engagement_csv(&daily);
+    let first_event = rows.first().map(|event| event.received_at.clone());
+
+    Ok(json!({
+        "range": {
+            "days": days,
+            "label": if days == 0 { "All time".to_string() } else { format!("Last {days} day{}", if days == 1 { "" } else { "s" }) },
+            "from": first_event,
+            "to": isoish_now(),
+            "environment": environment,
+            "audience": audience
+        },
+        "totals": report_totals,
+        "comparison": comparison_value,
+        "definitions": {
+            "activeVisitors": "Distinct signed-in accounts plus distinct anonymous tab sessions with an event in the selected window.",
+            "activeNow": "Distinct visitors with an event received in the last 15 minutes.",
+            "returningUsers": "Signed-in accounts active on at least two distinct UTC dates in the selected window.",
+            "gameAbandons": "Games whose latest abandonment candidate has no later resume, completion, or forfeit event in the selected window.",
+            "completionPercent": "Game completions divided by game starts in the selected window.",
+            "bouncePercent": "Sessions with a bounce event divided by all sessions in the selected window.",
+            "averageExitSeconds": "Average observed page lifetime from page_exit events; exits the browser could not send are absent."
+        },
+        "funnel": funnel,
+        "pathways": pathways,
+        "opponents": opponents,
+        "devices": devices,
+        "clients": clients,
+        "environments": environments,
+        "locations": locations,
+        "surfaces": surfaces,
+        "eventTypes": event_types,
+        "interactions": interactions,
+        "errors": errors,
+        "users": users,
+        "recentActivity": recent_activity,
+        "daily": daily,
+        "hourly": hourly,
+        "csv": csv
+    }))
+}
+
+fn load_events(
+    data_dir: &std::path::Path,
+    days: i64,
+    environment: &str,
+    audience: &str,
+    previous: bool,
+) -> Result<Vec<EventRow>, String> {
     let connection = open_game_database(data_dir)?;
     let modifier = format!("-{days} days");
+    let previous_modifier = format!("-{} days", days * 2);
+    let window = if previous {
+        "?1 > 0 AND e.received_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?3)
+         AND e.received_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?2)"
+    } else {
+        "(?1 = 0 OR e.received_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?2))"
+    };
+    let sql = format!(
+        "SELECT e.user_id, u.username, u.display_name, e.client_session_id,
+                e.event_name, e.received_at, e.page, e.game_id, e.environment,
+                e.app_version, e.client_type, e.browser, e.device_type,
+                e.viewport_width, e.viewport_height, e.screen_width, e.screen_height,
+                e.language, e.timezone, e.platform, e.metadata_json,
+                e.received_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-15 minutes'),
+                e.received_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
+         FROM user_activity_events e
+         LEFT JOIN auth_users u ON u.id = e.user_id
+         WHERE {window}
+           AND (?4 = 'all' OR e.environment = ?4)
+           AND (?5 = 'all' OR (?5 = 'registered' AND e.user_id IS NOT NULL)
+                OR (?5 = 'anonymous' AND e.user_id IS NULL))
+         ORDER BY e.received_at, e.id"
+    );
     let mut statement = connection
-        .prepare(
-            "SELECT user_id, client_session_id, event_name, received_at, game_id,
-                    browser, device_type, viewport_width, viewport_height, metadata_json
-             FROM user_activity_events
-             WHERE ?1 = 0 OR received_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?2)
-             ORDER BY received_at, id",
-        )
+        .prepare(&sql)
         .map_err(|error| format!("prepare engagement events: {error}"))?;
     let rows = statement
-        .query_map(params![days, modifier], |row| {
-            let metadata_json = row.get::<_, String>(9)?;
-            Ok(EventRow {
-                user_id: row.get(0)?,
-                session_id: row.get(1)?,
-                event_name: row.get(2)?,
-                received_at: row.get(3)?,
-                game_id: row.get(4)?,
-                browser: row.get(5)?,
-                device_type: row.get(6)?,
-                viewport_width: row.get(7)?,
-                viewport_height: row.get(8)?,
-                metadata: serde_json::from_str(&metadata_json).unwrap_or_else(|_| json!({})),
-            })
-        })
+        .query_map(
+            params![days, modifier, previous_modifier, environment, audience],
+            |row| {
+                let metadata_json = row.get::<_, String>(20)?;
+                Ok(EventRow {
+                    user_id: row.get(0)?,
+                    username: row.get(1)?,
+                    display_name: row.get(2)?,
+                    session_id: row.get(3)?,
+                    event_name: row.get(4)?,
+                    received_at: row.get(5)?,
+                    page: row.get(6)?,
+                    game_id: row.get(7)?,
+                    environment: row.get(8)?,
+                    app_version: row.get(9)?,
+                    client_type: row.get(10)?,
+                    browser: row.get(11)?,
+                    device_type: row.get(12)?,
+                    viewport_width: row.get(13)?,
+                    viewport_height: row.get(14)?,
+                    screen_width: row.get(15)?,
+                    screen_height: row.get(16)?,
+                    language: row.get(17)?,
+                    timezone: row.get(18)?,
+                    platform: row.get(19)?,
+                    metadata: serde_json::from_str(&metadata_json).unwrap_or_else(|_| json!({})),
+                    active_now: row.get::<_, i64>(21)? != 0,
+                    active_last_24_hours: row.get::<_, i64>(22)? != 0,
+                })
+            },
+        )
         .map_err(|error| format!("query engagement events: {error}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("read engagement events: {error}"))?;
+    Ok(rows)
+}
 
+fn totals(rows: &[EventRow]) -> Totals {
     let sessions = rows
         .iter()
+        .map(|event| event.session_id.clone())
+        .collect::<HashSet<_>>();
+    let signed_in_sessions = rows
+        .iter()
+        .filter(|event| event.user_id.is_some())
         .map(|event| event.session_id.clone())
         .collect::<HashSet<_>>();
     let registered_users = rows
@@ -134,7 +497,7 @@ fn report(data_dir: &std::path::Path, days: i64) -> Result<Value, String> {
         .map(|event| event.session_id.clone())
         .collect::<HashSet<_>>();
     let mut user_days: HashMap<i64, HashSet<String>> = HashMap::new();
-    for event in &rows {
+    for event in rows {
         if let Some(user_id) = event.user_id {
             user_days
                 .entry(user_id)
@@ -143,137 +506,218 @@ fn report(data_dir: &std::path::Path, days: i64) -> Result<Value, String> {
         }
     }
     let returning_users = user_days.values().filter(|dates| dates.len() >= 2).count();
-    let game_starts = rows
+    let game_starts = count_events(rows, &["game_start"]);
+    let game_completions = count_events(rows, &["game_complete"]);
+    let bounce_sessions = sessions_for(rows, |event| event.event_name == "bounce");
+    let error_sessions = sessions_for(rows, is_error);
+    let friction_sessions = sessions_for(rows, is_friction);
+    let exit_durations = rows
         .iter()
-        .filter(|event| event.event_name == "game_start")
-        .count();
-    let game_completions = rows
-        .iter()
-        .filter(|event| event.event_name == "game_complete")
-        .count();
-    let game_forfeits = rows
-        .iter()
-        .filter(|event| event.event_name == "game_forfeit")
-        .count();
-    let game_abandons = unresolved_abandonments(&rows);
+        .filter(|event| event.event_name == "page_exit")
+        .filter_map(|event| metadata_number(event, "durationMs"))
+        .collect::<Vec<_>>();
+    Totals {
+        active_visitors: visitors.len(),
+        registered_users: registered_users.len(),
+        anonymous_sessions: anonymous_sessions.len(),
+        signed_in_sessions: signed_in_sessions.len(),
+        sessions: sessions.len(),
+        returning_users,
+        events: rows.len(),
+        page_views: count_events(rows, &["page_view"]),
+        interactions: count_events(rows, &["ui_interaction"]),
+        active_now: rows
+            .iter()
+            .filter(|event| event.active_now)
+            .map(visitor_key)
+            .collect::<HashSet<_>>()
+            .len(),
+        active_last_24_hours: rows
+            .iter()
+            .filter(|event| event.active_last_24_hours)
+            .map(visitor_key)
+            .collect::<HashSet<_>>()
+            .len(),
+        game_starts,
+        game_resumes: count_events(rows, &["game_resume"]),
+        game_completions,
+        game_forfeits: count_events(rows, &["game_forfeit"]),
+        game_abandons: unresolved_abandonments(rows),
+        completion_percent: percent(game_completions, game_starts),
+        bounce_sessions: bounce_sessions.len(),
+        bounce_percent: percent(bounce_sessions.len(), sessions.len()),
+        error_events: rows.iter().filter(|event| is_error(event)).count(),
+        error_sessions: error_sessions.len(),
+        friction_events: rows.iter().filter(|event| is_friction(event)).count(),
+        friction_sessions: friction_sessions.len(),
+        average_exit_seconds: if exit_durations.is_empty() {
+            0.0
+        } else {
+            ((exit_durations.iter().sum::<f64>() / exit_durations.len() as f64) / 100.0).round()
+                / 10.0
+        },
+    }
+}
 
-    let pathways = breakdown(rows.iter().filter_map(|event| {
-        if event.event_name != "page_view" {
-            return None;
-        }
-        metadata_string(event, "surface")
-            .filter(|surface| surface.starts_with("pathway:"))
-            .map(|surface| (surface.trim_start_matches("pathway:").to_string(), event))
-    }));
-    let opponents = breakdown(rows.iter().filter_map(|event| {
-        (event.event_name == "game_start").then(|| {
-            (
-                metadata_string(event, "opponent")
-                    .unwrap_or("Unknown")
-                    .to_string(),
-                event,
-            )
-        })
-    }));
-    let devices = breakdown(rows.iter().map(|event| {
-        (
-            format!(
-                "{} · {} · {}×{}",
-                title_case(&event.device_type),
-                event.browser,
-                event.viewport_width,
-                event.viewport_height
-            ),
-            event,
-        )
-    }));
-
-    let session_starts = sessions_for(&rows, |event| event.event_name == "session_start");
-    let play_views = sessions_for(&rows, |event| {
-        event.event_name == "page_view" && metadata_string(event, "surface") == Some("pathway:play")
-    });
-    let started_sessions = sessions_for(&rows, |event| event.event_name == "game_start");
-    let completed_sessions = sessions_for(&rows, |event| event.event_name == "game_complete");
-    let funnel_base = session_starts.len();
-    let funnel = [
-        ("Sessions started", session_starts.len()),
-        ("Reached Play Now", play_views.len()),
-        ("Started a game", started_sessions.len()),
-        ("Completed a game", completed_sessions.len()),
-    ]
-    .into_iter()
-    .map(|(label, count)| {
-        json!({
-            "label": label,
-            "sessions": count,
-            "conversionPercent": percent(count, funnel_base),
-            "denominator": "sessions with session_start in this window"
-        })
+fn comparison(current: &Totals, previous: &Totals) -> Value {
+    json!({
+        "activeVisitors": percent_change(current.active_visitors as f64, previous.active_visitors as f64),
+        "sessions": percent_change(current.sessions as f64, previous.sessions as f64),
+        "gameStarts": percent_change(current.game_starts as f64, previous.game_starts as f64),
+        "completionPercent": point_change(current.completion_percent, previous.completion_percent),
+        "bouncePercent": point_change(current.bounce_percent, previous.bounce_percent),
+        "errorSessions": percent_change(current.error_sessions as f64, previous.error_sessions as f64)
     })
-    .collect::<Vec<_>>();
+}
 
-    let mut daily: BTreeMap<String, (HashSet<String>, HashSet<String>, usize, usize)> =
-        BTreeMap::new();
-    for event in &rows {
-        let entry = daily.entry(day(&event.received_at)).or_default();
-        entry.0.insert(visitor_key(event));
-        entry.1.insert(event.session_id.clone());
-        if event.event_name == "game_start" {
-            entry.2 += 1;
-        } else if event.event_name == "game_complete" {
-            entry.3 += 1;
+fn percent_change(current: f64, previous: f64) -> Option<f64> {
+    if previous == 0.0 {
+        None
+    } else {
+        Some((((current - previous) / previous) * 1000.0).round() / 10.0)
+    }
+}
+
+fn point_change(current: f64, previous: f64) -> f64 {
+    ((current - previous) * 10.0).round() / 10.0
+}
+
+fn time_series(rows: &[EventRow], hourly: bool) -> Vec<Value> {
+    let mut buckets: BTreeMap<String, TimeBucket> = BTreeMap::new();
+    for event in rows {
+        let key = if hourly {
+            event.received_at.chars().take(13).collect()
+        } else {
+            day(&event.received_at)
+        };
+        let bucket = buckets.entry(key).or_default();
+        bucket.events += 1;
+        bucket.visitors.insert(visitor_key(event));
+        bucket.sessions.insert(event.session_id.clone());
+        match event.event_name.as_str() {
+            "game_start" => bucket.game_starts += 1,
+            "game_complete" => bucket.game_completions += 1,
+            "game_forfeit" => bucket.game_forfeits += 1,
+            "bounce" => bucket.bounces += 1,
+            "client_error" | "server_error_ui" => bucket.error_events += 1,
+            "rage_click" | "repeat_ui_action" => bucket.friction_events += 1,
+            "game_abandonment_candidate" => bucket.abandonment_candidates += 1,
+            _ => {}
         }
     }
-    let daily = daily
+    buckets
         .into_iter()
-        .map(
-            |(date, (daily_visitors, daily_sessions, starts, completions))| {
-                json!({
-                    "date": date,
-                    "activeVisitors": daily_visitors.len(),
-                    "sessions": daily_sessions.len(),
-                    "gameStarts": starts,
-                    "gameCompletions": completions
-                })
-            },
-        )
-        .collect::<Vec<_>>();
-    let csv = daily_csv(&daily);
-    let first_event = rows.first().map(|event| event.received_at.clone());
+        .map(|(period, bucket)| {
+            json!({
+                "period": period,
+                "activeVisitors": bucket.visitors.len(),
+                "sessions": bucket.sessions.len(),
+                "events": bucket.events,
+                "gameStarts": bucket.game_starts,
+                "gameCompletions": bucket.game_completions,
+                "gameForfeits": bucket.game_forfeits,
+                "bounces": bucket.bounces,
+                "errorEvents": bucket.error_events,
+                "frictionEvents": bucket.friction_events,
+                "abandonmentCandidates": bucket.abandonment_candidates
+            })
+        })
+        .collect()
+}
 
-    Ok(json!({
-        "range": {
-            "days": days,
-            "label": if days == 0 { "All time".to_string() } else { format!("Last {days} day{}", if days == 1 { "" } else { "s" }) },
-            "from": first_event,
-            "to": isoish_now()
-        },
-        "totals": {
-            "activeVisitors": visitors.len(),
-            "registeredUsers": registered_users.len(),
-            "anonymousSessions": anonymous_sessions.len(),
-            "sessions": sessions.len(),
-            "returningUsers": returning_users,
-            "events": rows.len(),
-            "gameStarts": game_starts,
-            "gameCompletions": game_completions,
-            "gameForfeits": game_forfeits,
-            "gameAbandons": game_abandons,
-            "completionPercent": percent(game_completions, game_starts)
-        },
-        "definitions": {
-            "activeVisitors": "Distinct signed-in accounts plus distinct anonymous tab sessions with an event in the selected window.",
-            "returningUsers": "Signed-in accounts active on at least two distinct UTC dates in the selected window.",
-            "gameAbandons": "Games whose latest abandonment candidate has no later resume, completion, or forfeit event in the selected window.",
-            "completionPercent": "Game completions divided by game starts in the selected window."
-        },
-        "funnel": funnel,
-        "pathways": pathways,
-        "opponents": opponents,
-        "devices": devices,
-        "daily": daily,
-        "csv": csv
-    }))
+fn user_activity(rows: &[EventRow]) -> Vec<Value> {
+    let mut users: HashMap<i64, UserActivity> = HashMap::new();
+    for event in rows {
+        let Some(user_id) = event.user_id else {
+            continue;
+        };
+        let user = users.entry(user_id).or_insert_with(|| UserActivity {
+            username: event
+                .username
+                .clone()
+                .unwrap_or_else(|| "Unknown".to_string()),
+            display_name: event
+                .display_name
+                .clone()
+                .unwrap_or_else(|| "Unknown".to_string()),
+            ..Default::default()
+        });
+        if event.received_at > user.last_active {
+            user.last_active = event.received_at.clone();
+        }
+        user.active_days.insert(day(&event.received_at));
+        user.sessions.insert(event.session_id.clone());
+        user.events += 1;
+        match event.event_name.as_str() {
+            "page_view" => user.page_views += 1,
+            "game_start" => user.game_starts += 1,
+            "game_complete" => user.game_completions += 1,
+            "client_error" | "server_error_ui" => user.errors += 1,
+            "rage_click" | "repeat_ui_action" => user.friction_events += 1,
+            _ => {}
+        }
+        *user
+            .clients
+            .entry(format!(
+                "{} · {}",
+                title_case(&event.device_type),
+                title_case(&event.browser)
+            ))
+            .or_default() += 1;
+    }
+    let mut result = users
+        .into_values()
+        .map(|user| {
+            let primary_client = user
+                .clients
+                .into_iter()
+                .max_by_key(|(_, count)| *count)
+                .map(|(label, _)| label)
+                .unwrap_or_else(|| "Unknown".to_string());
+            json!({
+                "username": user.username,
+                "displayName": user.display_name,
+                "lastActive": user.last_active,
+                "activeDays": user.active_days.len(),
+                "sessions": user.sessions.len(),
+                "events": user.events,
+                "pageViews": user.page_views,
+                "gameStarts": user.game_starts,
+                "gameCompletions": user.game_completions,
+                "errors": user.errors,
+                "frictionEvents": user.friction_events,
+                "primaryClient": primary_client
+            })
+        })
+        .collect::<Vec<_>>();
+    result.sort_by(|left, right| {
+        right["lastActive"]
+            .as_str()
+            .cmp(&left["lastActive"].as_str())
+    });
+    result
+}
+
+fn recent_activity(rows: &[EventRow]) -> Vec<Value> {
+    rows.iter()
+        .rev()
+        .take(60)
+        .map(|event| {
+            let detail = ["surface", "target", "opponent", "reason", "resumedPhase"]
+                .iter()
+                .find_map(|key| metadata_string(event, key))
+                .unwrap_or(&event.page);
+            json!({
+                "at": event.received_at,
+                "person": event.display_name.as_deref().unwrap_or("Anonymous"),
+                "username": event.username,
+                "event": event.event_name,
+                "detail": detail,
+                "environment": event.environment,
+                "client": format!("{} · {}", title_case(&event.device_type), title_case(&event.browser))
+            })
+        })
+        .collect()
 }
 
 fn visitor_key(event: &EventRow) -> String {
@@ -291,6 +735,10 @@ fn metadata_string<'a>(event: &'a EventRow, key: &str) -> Option<&'a str> {
     event.metadata.get(key).and_then(Value::as_str)
 }
 
+fn metadata_number(event: &EventRow, key: &str) -> Option<f64> {
+    event.metadata.get(key).and_then(Value::as_f64)
+}
+
 fn percent(numerator: usize, denominator: usize) -> f64 {
     if denominator == 0 {
         0.0
@@ -300,11 +748,44 @@ fn percent(numerator: usize, denominator: usize) -> f64 {
 }
 
 fn title_case(value: &str) -> String {
-    let mut chars = value.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => "Unknown".to_string(),
-    }
+    value
+        .split(['_', ':'])
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn friendly_target(value: &str) -> String {
+    title_case(
+        value
+            .trim_start_matches('#')
+            .trim_start_matches("button.")
+            .trim_start_matches("pathway:"),
+    )
+}
+
+fn count_events(rows: &[EventRow], names: &[&str]) -> usize {
+    rows.iter()
+        .filter(|event| names.contains(&event.event_name.as_str()))
+        .count()
+}
+
+fn is_error(event: &EventRow) -> bool {
+    matches!(
+        event.event_name.as_str(),
+        "client_error" | "server_error_ui"
+    )
+}
+
+fn is_friction(event: &EventRow) -> bool {
+    matches!(event.event_name.as_str(), "rage_click" | "repeat_ui_action")
 }
 
 fn sessions_for(rows: &[EventRow], predicate: impl Fn(&EventRow) -> bool) -> HashSet<String> {
@@ -325,13 +806,11 @@ fn unresolved_abandonments(rows: &[EventRow]) -> usize {
         } else if matches!(
             event.event_name.as_str(),
             "game_resume" | "game_complete" | "game_forfeit"
-        ) {
-            if candidates
-                .get(game_id)
-                .is_some_and(|candidate| *candidate < index)
-            {
-                candidates.remove(game_id);
-            }
+        ) && candidates
+            .get(game_id)
+            .is_some_and(|candidate| *candidate < index)
+        {
+            candidates.remove(game_id);
         }
     }
     candidates.len()
@@ -362,19 +841,26 @@ fn breakdown<'a>(rows: impl Iterator<Item = (String, &'a EventRow)>) -> Vec<Valu
             .cmp(&left["events"].as_u64())
             .then_with(|| left["label"].as_str().cmp(&right["label"].as_str()))
     });
+    result.truncate(40);
     result
 }
 
-fn daily_csv(daily: &[Value]) -> String {
-    let mut csv = "date,active_visitors,sessions,game_starts,game_completions\n".to_string();
+fn engagement_csv(daily: &[Value]) -> String {
+    let mut csv = "date,active_visitors,sessions,events,game_starts,game_completions,game_forfeits,bounces,error_events,friction_events,abandonment_candidates\n".to_string();
     for row in daily {
         csv.push_str(&format!(
-            "{},{},{},{},{}\n",
-            row["date"].as_str().unwrap_or_default(),
+            "{},{},{},{},{},{},{},{},{},{},{}\n",
+            row["period"].as_str().unwrap_or_default(),
             row["activeVisitors"].as_u64().unwrap_or_default(),
             row["sessions"].as_u64().unwrap_or_default(),
+            row["events"].as_u64().unwrap_or_default(),
             row["gameStarts"].as_u64().unwrap_or_default(),
             row["gameCompletions"].as_u64().unwrap_or_default(),
+            row["gameForfeits"].as_u64().unwrap_or_default(),
+            row["bounces"].as_u64().unwrap_or_default(),
+            row["errorEvents"].as_u64().unwrap_or_default(),
+            row["frictionEvents"].as_u64().unwrap_or_default(),
+            row["abandonmentCandidates"].as_u64().unwrap_or_default(),
         ));
     }
     csv
@@ -404,7 +890,7 @@ mod tests {
             method: "POST".to_string(),
             path: "/api/admin/engagement".to_string(),
             headers: HashMap::new(),
-            body: json!({"days": days}).to_string(),
+            body: json!({"days": days, "environment": "all", "audience": "all"}).to_string(),
         }
     }
 
@@ -482,10 +968,10 @@ mod tests {
         owner_value["range"]["to"] = Value::Null;
         tester_value["range"]["to"] = Value::Null;
         assert_eq!(owner_value, tester_value);
-        let value = owner_value;
-        assert_eq!(value["totals"]["gameStarts"], 1);
-        assert_eq!(value["totals"]["gameCompletions"], 1);
-        assert_eq!(value["totals"]["completionPercent"], 100.0);
+        assert_eq!(owner_value["totals"]["gameStarts"], 1);
+        assert_eq!(owner_value["totals"]["gameCompletions"], 1);
+        assert_eq!(owner_value["users"][0]["displayName"], "Garrett");
+        assert_eq!(owner_value["daily"][0]["gameCompletions"], 1);
         std::fs::remove_dir_all(server.data_dir).unwrap();
     }
 
@@ -509,44 +995,70 @@ mod tests {
     }
 
     #[test]
+    fn filters_are_validated_and_applied() {
+        let server = test_server("filters");
+        add_event(
+            &server,
+            "1",
+            Some(1),
+            "signed",
+            "session_start",
+            None,
+            json!({}),
+        );
+        add_event(&server, "2", None, "anon", "session_start", None, json!({}));
+        let owner = auth::test_auth_user(1, "Garrett");
+        let mut filtered = request(30);
+        filtered.body =
+            json!({"days": 30, "environment": "prod", "audience": "registered"}).to_string();
+        let response = handle(&server, &filtered, Some(&owner)).unwrap();
+        let value: Value = serde_json::from_str(&response.body).unwrap();
+        assert_eq!(value["totals"]["sessions"], 1);
+        assert_eq!(value["totals"]["anonymousSessions"], 0);
+
+        filtered.body =
+            json!({"days": 30, "environment": "everywhere", "audience": "all"}).to_string();
+        assert_eq!(
+            handle(&server, &filtered, Some(&owner)).unwrap().status,
+            400
+        );
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    fn event(name: &str, game_id: &str, at: &str) -> EventRow {
+        EventRow {
+            user_id: Some(1),
+            username: Some("Garrett".into()),
+            display_name: Some("Garrett".into()),
+            session_id: "s".into(),
+            event_name: name.into(),
+            received_at: at.into(),
+            page: "/".into(),
+            game_id: Some(game_id.into()),
+            environment: "prod".into(),
+            app_version: "1".into(),
+            client_type: "web".into(),
+            browser: "safari".into(),
+            device_type: "desktop".into(),
+            viewport_width: 1,
+            viewport_height: 1,
+            screen_width: 1,
+            screen_height: 1,
+            language: "en".into(),
+            timezone: "UTC".into(),
+            platform: "Mac".into(),
+            metadata: json!({}),
+            active_now: false,
+            active_last_24_hours: false,
+        }
+    }
+
+    #[test]
     fn abandonment_candidates_are_cleared_by_later_activity() {
         let rows = vec![
-            EventRow {
-                user_id: Some(1),
-                session_id: "s".into(),
-                event_name: "game_abandonment_candidate".into(),
-                received_at: "1".into(),
-                game_id: Some("resumed".into()),
-                browser: "x".into(),
-                device_type: "desktop".into(),
-                viewport_width: 1,
-                viewport_height: 1,
-                metadata: json!({}),
-            },
-            EventRow {
-                user_id: Some(1),
-                session_id: "s".into(),
-                event_name: "game_resume".into(),
-                received_at: "2".into(),
-                game_id: Some("resumed".into()),
-                browser: "x".into(),
-                device_type: "desktop".into(),
-                viewport_width: 1,
-                viewport_height: 1,
-                metadata: json!({}),
-            },
-            EventRow {
-                user_id: Some(1),
-                session_id: "s".into(),
-                event_name: "game_abandonment_candidate".into(),
-                received_at: "3".into(),
-                game_id: Some("abandoned".into()),
-                browser: "x".into(),
-                device_type: "desktop".into(),
-                viewport_width: 1,
-                viewport_height: 1,
-                metadata: json!({}),
-            },
+            event("game_abandonment_candidate", "resumed", "1"),
+            event("game_resume", "resumed", "2"),
+            event("game_abandonment_candidate", "abandoned", "3"),
         ];
         assert_eq!(unresolved_abandonments(&rows), 1);
     }

@@ -633,16 +633,34 @@ const els = {
   engagementPage: document.querySelector("#engagement-page") as HTMLElement,
   engagementClose: document.querySelector("#engagement-close") as HTMLButtonElement,
   engagementRange: document.querySelector("#engagement-range") as HTMLSelectElement,
+  engagementEnvironment: document.querySelector("#engagement-environment") as HTMLSelectElement,
+  engagementAudience: document.querySelector("#engagement-audience") as HTMLSelectElement,
+  engagementRefresh: document.querySelector("#engagement-refresh") as HTMLButtonElement,
   engagementExport: document.querySelector("#engagement-export") as HTMLButtonElement,
   engagementSummary: document.querySelector("#engagement-summary") as HTMLElement,
   engagementStatus: document.querySelector("#engagement-status") as HTMLElement,
   engagementContent: document.querySelector("#engagement-content") as HTMLElement,
+  engagementTabButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-engagement-tab]")],
+  engagementPanels: [...document.querySelectorAll<HTMLElement>("[data-engagement-panel]")],
+  engagementInsights: document.querySelector("#engagement-insights") as HTMLElement,
   engagementOverview: document.querySelector("#engagement-overview") as HTMLElement,
   engagementDefinitions: document.querySelector("#engagement-definitions") as HTMLElement,
+  engagementActivityChart: document.querySelector("#engagement-activity-chart") as HTMLElement,
   engagementFunnel: document.querySelector("#engagement-funnel") as HTMLElement,
+  engagementUsers: document.querySelector("#engagement-users") as HTMLElement,
+  engagementRecent: document.querySelector("#engagement-recent") as HTMLElement,
+  engagementHealth: document.querySelector("#engagement-health") as HTMLElement,
+  engagementExperienceChart: document.querySelector("#engagement-experience-chart") as HTMLElement,
+  engagementInteractions: document.querySelector("#engagement-interactions") as HTMLElement,
+  engagementErrors: document.querySelector("#engagement-errors") as HTMLElement,
+  engagementSurfaces: document.querySelector("#engagement-surfaces") as HTMLElement,
   engagementPathways: document.querySelector("#engagement-pathways") as HTMLElement,
   engagementOpponents: document.querySelector("#engagement-opponents") as HTMLElement,
   engagementDevices: document.querySelector("#engagement-devices") as HTMLElement,
+  engagementClients: document.querySelector("#engagement-clients") as HTMLElement,
+  engagementEnvironments: document.querySelector("#engagement-environments") as HTMLElement,
+  engagementLocations: document.querySelector("#engagement-locations") as HTMLElement,
+  engagementEvents: document.querySelector("#engagement-events") as HTMLElement,
   engagementDaily: document.querySelector("#engagement-daily") as HTMLElement,
   exportGameLog: document.querySelector("#export-game-log") as HTMLButtonElement,
   troubleGame: document.querySelector("#trouble-game") as HTMLButtonElement,
@@ -941,31 +959,102 @@ interface EngagementBreakdown {
   visitors: number;
 }
 
+interface EngagementTrendPoint {
+  period: string;
+  activeVisitors: number;
+  sessions: number;
+  events: number;
+  gameStarts: number;
+  gameCompletions: number;
+  gameForfeits: number;
+  bounces: number;
+  errorEvents: number;
+  frictionEvents: number;
+  abandonmentCandidates: number;
+}
+
+interface EngagementUserActivity {
+  username: string;
+  displayName: string;
+  lastActive: string;
+  activeDays: number;
+  sessions: number;
+  events: number;
+  pageViews: number;
+  gameStarts: number;
+  gameCompletions: number;
+  errors: number;
+  frictionEvents: number;
+  primaryClient: string;
+}
+
+interface EngagementRecentActivity {
+  at: string;
+  person: string;
+  username: string | null;
+  event: string;
+  detail: string;
+  environment: string;
+  client: string;
+}
+
 interface EngagementReport {
-  range: { days: number; label: string; from: string | null; to: string };
+  range: {
+    days: number;
+    label: string;
+    from: string | null;
+    to: string;
+    environment: string;
+    audience: string;
+  };
   totals: {
     activeVisitors: number;
     registeredUsers: number;
     anonymousSessions: number;
+    signedInSessions: number;
     sessions: number;
     returningUsers: number;
     events: number;
+    pageViews: number;
+    interactions: number;
+    activeNow: number;
+    activeLast24Hours: number;
     gameStarts: number;
+    gameResumes: number;
     gameCompletions: number;
     gameForfeits: number;
     gameAbandons: number;
     completionPercent: number;
+    bounceSessions: number;
+    bouncePercent: number;
+    errorEvents: number;
+    errorSessions: number;
+    frictionEvents: number;
+    frictionSessions: number;
+    averageExitSeconds: number;
   };
+  comparison: null | Record<string, number | null>;
   definitions: Record<string, string>;
-  funnel: Array<{ label: string; sessions: number; conversionPercent: number; denominator: string }>;
+  funnel: Array<{ label: string; sessions: number; conversionPercent: number; dropOff: number | null; denominator: string }>;
   pathways: EngagementBreakdown[];
   opponents: EngagementBreakdown[];
   devices: EngagementBreakdown[];
-  daily: Array<{ date: string; activeVisitors: number; sessions: number; gameStarts: number; gameCompletions: number }>;
+  clients: EngagementBreakdown[];
+  environments: EngagementBreakdown[];
+  locations: EngagementBreakdown[];
+  surfaces: EngagementBreakdown[];
+  eventTypes: EngagementBreakdown[];
+  interactions: EngagementBreakdown[];
+  errors: EngagementBreakdown[];
+  users: EngagementUserActivity[];
+  recentActivity: EngagementRecentActivity[];
+  daily: EngagementTrendPoint[];
+  hourly: EngagementTrendPoint[];
   csv: string;
 }
 
 let engagementReport: EngagementReport | null = null;
+let engagementTab: "overview" | "people" | "experience" | "data" = "overview";
 
 interface PeopleProfile {
   username: string;
@@ -9058,7 +9147,12 @@ document.addEventListener("keydown", (event) => {
   if (parent) navigatePathway(parent);
 });
 
-function engagementMetric(label: string, value: string, note: string): HTMLElement {
+function engagementMetric(
+  label: string,
+  value: string,
+  note: string,
+  change?: { value: number | null; points?: boolean; lowerIsBetter?: boolean },
+): HTMLElement {
   const card = document.createElement("article");
   card.className = "engagement-metric";
   const heading = document.createElement("span");
@@ -9067,7 +9161,21 @@ function engagementMetric(label: string, value: string, note: string): HTMLEleme
   strong.textContent = value;
   const detail = document.createElement("small");
   detail.textContent = note;
-  card.append(heading, strong, detail);
+  card.append(heading, strong);
+  if (change) {
+    const comparison = document.createElement("em");
+    if (change.value === null) {
+      comparison.textContent = "No prior baseline";
+      comparison.dataset.tone = "neutral";
+    } else {
+      const positive = change.value > 0;
+      comparison.textContent = `${positive ? "+" : ""}${change.value}${change.points ? " pts" : "%"} vs prior`;
+      const improved = change.lowerIsBetter ? !positive : positive;
+      comparison.dataset.tone = change.value === 0 ? "neutral" : improved ? "good" : "watch";
+    }
+    card.append(comparison);
+  }
+  card.append(detail);
   return card;
 }
 
@@ -9110,19 +9218,214 @@ function engagementTable(
   container.append(table);
 }
 
+type EngagementChartKey = keyof Omit<EngagementTrendPoint, "period">;
+
+interface EngagementChartSeries {
+  key: EngagementChartKey;
+  label: string;
+  color: string;
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function engagementSvgElement<K extends keyof SVGElementTagNameMap>(name: K): SVGElementTagNameMap[K] {
+  return document.createElementNS(SVG_NS, name);
+}
+
+function filledEngagementTrend(report: EngagementReport): EngagementTrendPoint[] {
+  const hourly = report.range.days === 1;
+  const source = hourly ? report.hourly : report.daily;
+  if (report.range.days === 0) return source;
+  const values = new Map(source.map((point) => [point.period, point]));
+  const count = hourly ? 24 : report.range.days;
+  const now = new Date(report.range.to);
+  if (hourly) now.setUTCMinutes(0, 0, 0);
+  else now.setUTCHours(0, 0, 0, 0);
+  return Array.from({ length: count }, (_, index) => {
+    const value = new Date(now);
+    if (hourly) value.setUTCHours(value.getUTCHours() - (count - index - 1));
+    else value.setUTCDate(value.getUTCDate() - (count - index - 1));
+    const period = value.toISOString().slice(0, hourly ? 13 : 10);
+    return values.get(period) ?? {
+      period,
+      activeVisitors: 0,
+      sessions: 0,
+      events: 0,
+      gameStarts: 0,
+      gameCompletions: 0,
+      gameForfeits: 0,
+      bounces: 0,
+      errorEvents: 0,
+      frictionEvents: 0,
+      abandonmentCandidates: 0,
+    };
+  });
+}
+
+function engagementPeriodLabel(period: string, hourly: boolean): string {
+  if (hourly) return `${period.slice(11, 13)}:00`;
+  const date = new Date(`${period}T00:00:00Z`);
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+function renderEngagementLineChart(
+  container: HTMLElement,
+  report: EngagementReport,
+  series: EngagementChartSeries[],
+): void {
+  container.replaceChildren();
+  const points = filledEngagementTrend(report);
+  if (!report.totals.events || !points.length) {
+    const empty = document.createElement("p");
+    empty.className = "engagement-empty";
+    empty.textContent = "No activity was recorded for this chart.";
+    container.append(empty);
+    return;
+  }
+
+  const hidden = new Set((container.dataset.hiddenSeries || "").split(",").filter(Boolean));
+  if (series.every((item) => hidden.has(item.key))) hidden.delete(series[0].key);
+  const legend = document.createElement("div");
+  legend.className = "engagement-chart-legend";
+  for (const item of series) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.series = item.key;
+    button.setAttribute("aria-pressed", String(!hidden.has(item.key)));
+    const swatch = document.createElement("i");
+    swatch.style.setProperty("--series-color", item.color);
+    button.append(swatch, document.createTextNode(item.label));
+    button.addEventListener("click", () => {
+      if (hidden.has(item.key)) hidden.delete(item.key);
+      else if (series.length - hidden.size > 1) hidden.add(item.key);
+      container.dataset.hiddenSeries = [...hidden].join(",");
+      renderEngagementLineChart(container, report, series);
+    });
+    legend.append(button);
+  }
+
+  const visible = series.filter((item) => !hidden.has(item.key));
+  const width = 900;
+  const height = 310;
+  const bounds = { top: 20, right: 18, bottom: 42, left: 48 };
+  const plotWidth = width - bounds.left - bounds.right;
+  const plotHeight = height - bounds.top - bounds.bottom;
+  const maximum = Math.max(1, ...points.flatMap((point) => visible.map((item) => Number(point[item.key]))));
+  const roundedMaximum = maximum <= 4 ? maximum : Math.ceil(maximum / 5) * 5;
+  const x = (index: number) => bounds.left + (points.length === 1 ? plotWidth / 2 : (index / (points.length - 1)) * plotWidth);
+  const y = (value: number) => bounds.top + plotHeight - (value / roundedMaximum) * plotHeight;
+
+  const scroller = document.createElement("div");
+  scroller.className = "engagement-chart-scroll";
+  const svg = engagementSvgElement("svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `${series.map((item) => item.label).join(", ")} over ${report.range.label.toLowerCase()}`);
+  for (let tick = 0; tick <= 4; tick += 1) {
+    const value = (roundedMaximum / 4) * tick;
+    const tickY = y(value);
+    const line = engagementSvgElement("line");
+    line.setAttribute("x1", String(bounds.left));
+    line.setAttribute("x2", String(width - bounds.right));
+    line.setAttribute("y1", String(tickY));
+    line.setAttribute("y2", String(tickY));
+    line.classList.add("engagement-chart-gridline");
+    const label = engagementSvgElement("text");
+    label.setAttribute("x", String(bounds.left - 10));
+    label.setAttribute("y", String(tickY + 4));
+    label.setAttribute("text-anchor", "end");
+    label.classList.add("engagement-chart-axis");
+    label.textContent = String(Number(value.toFixed(1)));
+    svg.append(line, label);
+  }
+  const labelIndexes = [...new Set([0, Math.floor((points.length - 1) / 2), points.length - 1])];
+  for (const index of labelIndexes) {
+    const label = engagementSvgElement("text");
+    label.setAttribute("x", String(x(index)));
+    label.setAttribute("y", String(height - 12));
+    label.setAttribute("text-anchor", index === 0 ? "start" : index === points.length - 1 ? "end" : "middle");
+    label.classList.add("engagement-chart-axis");
+    label.textContent = engagementPeriodLabel(points[index].period, report.range.days === 1);
+    svg.append(label);
+  }
+  for (const item of visible) {
+    const path = engagementSvgElement("path");
+    path.setAttribute("d", points.map((point, index) => `${index ? "L" : "M"}${x(index)},${y(Number(point[item.key]))}`).join(" "));
+    path.style.setProperty("--series-color", item.color);
+    path.classList.add("engagement-chart-line");
+    svg.append(path);
+    points.forEach((point, index) => {
+      const circle = engagementSvgElement("circle");
+      circle.setAttribute("cx", String(x(index)));
+      circle.setAttribute("cy", String(y(Number(point[item.key]))));
+      circle.setAttribute("r", points.length > 45 ? "2.25" : "4");
+      circle.style.setProperty("--series-color", item.color);
+      circle.classList.add("engagement-chart-point");
+      const title = engagementSvgElement("title");
+      title.textContent = `${item.label}: ${point[item.key]} · ${engagementPeriodLabel(point.period, report.range.days === 1)}`;
+      circle.append(title);
+      svg.append(circle);
+    });
+  }
+  scroller.append(svg);
+  container.append(legend, scroller);
+}
+
+function engagementInsight(title: string, value: string, detail: string, tone: "good" | "watch" | "neutral"): HTMLElement {
+  const item = document.createElement("article");
+  item.dataset.tone = tone;
+  const label = document.createElement("span");
+  label.textContent = title;
+  const strong = document.createElement("strong");
+  strong.textContent = value;
+  const copy = document.createElement("p");
+  copy.textContent = detail;
+  item.append(label, strong, copy);
+  return item;
+}
+
+function comparisonValue(report: EngagementReport, key: string): number | null {
+  return report.comparison?.[key] ?? null;
+}
+
+function renderEngagementTabs(): void {
+  for (const button of els.engagementTabButtons) {
+    const selected = button.dataset.engagementTab === engagementTab;
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  }
+  for (const panel of els.engagementPanels) {
+    panel.hidden = panel.dataset.engagementPanel !== engagementTab;
+  }
+}
+
 function renderEngagementReport(report: EngagementReport): void {
   const totals = report.totals;
-  els.engagementSummary.textContent = `${report.range.label} · through ${shortDate(report.range.to)}`;
-  els.engagementOverview.replaceChildren(
-    engagementMetric("Active visitors", String(totals.activeVisitors), "Distinct signed-in accounts plus anonymous tab sessions."),
-    engagementMetric("Registered users", String(totals.registeredUsers), "Signed-in accounts active during this window."),
-    engagementMetric("Sessions", String(totals.sessions), "Distinct browser-tab sessions with at least one event."),
-    engagementMetric("Returning users", String(totals.returningUsers), "Signed-in accounts active on at least two UTC dates."),
-    engagementMetric("Game starts", String(totals.gameStarts), "All game_start events in this window."),
-    engagementMetric("Completions", String(totals.gameCompletions), `${totals.completionPercent}% of starts in this window.`),
-    engagementMetric("Abandons", String(totals.gameAbandons), "Unresolved page-exit abandonment candidates."),
-    engagementMetric("Forfeits", String(totals.gameForfeits), "Explicit game forfeits in this window."),
+  const environment = report.range.environment === "all" ? "all environments" : report.range.environment;
+  const audience = report.range.audience === "all" ? "everyone" : report.range.audience;
+  els.engagementSummary.textContent = `${report.range.label} · ${environment} · ${audience} · refreshed ${new Date(report.range.to).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  const visitorChange = comparisonValue(report, "activeVisitors");
+  const completionChange = comparisonValue(report, "completionPercent");
+  els.engagementInsights.replaceChildren(
+    engagementInsight("Active now", String(totals.activeNow), `${totals.activeLast24Hours} visitor${totals.activeLast24Hours === 1 ? "" : "s"} in the last 24 hours.`, totals.activeNow ? "good" : "neutral"),
+    engagementInsight("Audience trend", visitorChange === null ? "No baseline" : `${visitorChange > 0 ? "+" : ""}${visitorChange}%`, "Active visitors compared with the prior matching window.", visitorChange === null || visitorChange === 0 ? "neutral" : visitorChange > 0 ? "good" : "watch"),
+    engagementInsight("Game follow-through", `${totals.completionPercent}%`, `${totals.gameCompletions} completions from ${totals.gameStarts} starts; ${totals.gameAbandons} unresolved abandonments.`, totals.gameStarts === 0 ? "neutral" : totals.completionPercent >= 70 ? "good" : "watch"),
+    engagementInsight("UX signals", String(totals.errorEvents + totals.frictionEvents), `${totals.errorEvents} errors and ${totals.frictionEvents} repeat/rage-click signals.`, totals.errorEvents + totals.frictionEvents ? "watch" : "good"),
   );
+  els.engagementOverview.replaceChildren(
+    engagementMetric("Active visitors", String(totals.activeVisitors), `${totals.registeredUsers} signed-in people; ${totals.anonymousSessions} anonymous sessions.`, { value: visitorChange }),
+    engagementMetric("Sessions", String(totals.sessions), `${totals.signedInSessions} sessions included a signed-in account.`, { value: comparisonValue(report, "sessions") }),
+    engagementMetric("Returning people", String(totals.returningUsers), "Signed-in on at least two distinct UTC dates."),
+    engagementMetric("Game starts", String(totals.gameStarts), `${totals.gameResumes} game resume events.`, { value: comparisonValue(report, "gameStarts") }),
+    engagementMetric("Completed games", String(totals.gameCompletions), `${totals.completionPercent}% of starts completed.`, { value: completionChange, points: true }),
+    engagementMetric("Observed time", totals.averageExitSeconds ? `${Math.round(totals.averageExitSeconds / 60)}m` : "—", "Average page lifetime when a page-exit event arrived."),
+  );
+  renderEngagementLineChart(els.engagementActivityChart, report, [
+    { key: "activeVisitors", label: "Visitors", color: "#71c9a9" },
+    { key: "sessions", label: "Sessions", color: "#e8c575" },
+    { key: "gameStarts", label: "Game starts", color: "#7eb7e8" },
+    { key: "gameCompletions", label: "Completions", color: "#ee826b" },
+  ]);
   els.engagementDefinitions.replaceChildren(...Object.entries(report.definitions).map(([key, definition]) => {
     const item = document.createElement("p");
     const term = document.createElement("strong");
@@ -9136,7 +9439,7 @@ function renderEngagementReport(report: EngagementReport): void {
     const label = document.createElement("strong");
     label.textContent = step.label;
     const detail = document.createElement("span");
-    detail.textContent = `${step.sessions} sessions · ${step.conversionPercent}%`;
+    detail.textContent = `${step.sessions} sessions · ${step.conversionPercent}%${step.dropOff ? ` · ${step.dropOff} dropped before this step` : ""}`;
     copy.append(label, detail);
     const bar = document.createElement("i");
     bar.style.setProperty("--engagement-width", `${Math.min(100, step.conversionPercent)}%`);
@@ -9144,15 +9447,47 @@ function renderEngagementReport(report: EngagementReport): void {
     return item;
   }));
   const breakdownRows = (rows: EngagementBreakdown[]) => rows.map((row) => [row.label, row.events, row.sessions, row.visitors]);
+  els.engagementHealth.replaceChildren(
+    engagementMetric("Bounce rate", `${totals.bouncePercent}%`, `${totals.bounceSessions} sessions ended in under 10 seconds without an interaction.`, { value: comparisonValue(report, "bouncePercent"), points: true, lowerIsBetter: true }),
+    engagementMetric("Error sessions", String(totals.errorSessions), `${totals.errorEvents} client or server errors.`, { value: comparisonValue(report, "errorSessions"), lowerIsBetter: true }),
+    engagementMetric("Friction sessions", String(totals.frictionSessions), `${totals.frictionEvents} repeated-action or rage-click signals.`),
+    engagementMetric("Unresolved abandons", String(totals.gameAbandons), `${totals.gameForfeits} explicit forfeits in the same window.`),
+  );
+  renderEngagementLineChart(els.engagementExperienceChart, report, [
+    { key: "bounces", label: "Bounces", color: "#e8c575" },
+    { key: "errorEvents", label: "Errors", color: "#ee826b" },
+    { key: "frictionEvents", label: "Friction", color: "#b893e6" },
+    { key: "abandonmentCandidates", label: "Abandon signals", color: "#7eb7e8" },
+  ]);
+  engagementTable(
+    els.engagementUsers,
+    ["Person", "Last active", "Days", "Sessions", "Starts", "Completed", "Errors", "Friction", "Primary client"],
+    report.users.map((user) => [user.displayName, new Date(user.lastActive).toLocaleString(), user.activeDays, user.sessions, user.gameStarts, user.gameCompletions, user.errors, user.frictionEvents, user.primaryClient]),
+    "No signed-in people were active in this window.",
+  );
+  engagementTable(
+    els.engagementRecent,
+    ["Received", "Person", "Event", "Context", "Environment", "Client"],
+    report.recentActivity.map((activity) => [new Date(activity.at).toLocaleString(), activity.person, activity.event.replaceAll("_", " "), activity.detail, activity.environment, activity.client]),
+    "No recent activity matches these filters.",
+  );
+  engagementTable(els.engagementInteractions, ["Control", "Events", "Sessions", "Visitors"], breakdownRows(report.interactions), "No tracked interactions in this window.");
+  engagementTable(els.engagementErrors, ["Error", "Events", "Sessions", "Visitors"], breakdownRows(report.errors), "No client or server errors in this window.");
+  engagementTable(els.engagementSurfaces, ["Screen", "Views", "Sessions", "Visitors"], breakdownRows(report.surfaces), "No screen views in this window.");
   engagementTable(els.engagementPathways, ["Pathway", "Views", "Sessions", "Visitors"], breakdownRows(report.pathways), "No pathway views in this window.");
   engagementTable(els.engagementOpponents, ["Opponent/model", "Starts", "Sessions", "Visitors"], breakdownRows(report.opponents), "No games started in this window.");
   engagementTable(els.engagementDevices, ["Device · browser · viewport", "Events", "Sessions", "Visitors"], breakdownRows(report.devices), "No client activity in this window.");
+  engagementTable(els.engagementClients, ["Client · platform · screen", "Events", "Sessions", "Visitors"], breakdownRows(report.clients), "No client activity in this window.");
+  engagementTable(els.engagementEnvironments, ["Environment · version", "Events", "Sessions", "Visitors"], breakdownRows(report.environments), "No environment data in this window.");
+  engagementTable(els.engagementLocations, ["Timezone · language", "Events", "Sessions", "Visitors"], breakdownRows(report.locations), "No regional context in this window.");
+  engagementTable(els.engagementEvents, ["Event", "Count", "Sessions", "Visitors"], breakdownRows(report.eventTypes), "No events in this window.");
   engagementTable(
     els.engagementDaily,
-    ["UTC date", "Visitors", "Sessions", "Starts", "Completions"],
-    report.daily.map((row) => [row.date, row.activeVisitors, row.sessions, row.gameStarts, row.gameCompletions]),
+    ["UTC date", "Visitors", "Sessions", "Events", "Starts", "Completed", "Bounces", "Errors", "Friction", "Abandon signals"],
+    report.daily.map((row) => [row.period, row.activeVisitors, row.sessions, row.events, row.gameStarts, row.gameCompletions, row.bounces, row.errorEvents, row.frictionEvents, row.abandonmentCandidates]),
     "No daily activity in this window.",
   );
+  renderEngagementTabs();
   els.engagementContent.hidden = false;
   els.engagementExport.disabled = report.daily.length === 0;
 }
@@ -9161,9 +9496,12 @@ async function loadEngagementReport(): Promise<void> {
   els.engagementStatus.textContent = "Loading engagement data…";
   els.engagementContent.hidden = true;
   els.engagementExport.disabled = true;
+  els.engagementRefresh.disabled = true;
   try {
     const days = Number(els.engagementRange.value);
-    engagementReport = await authJson<EngagementReport>("/api/admin/engagement", { days });
+    const environment = els.engagementEnvironment.value;
+    const audience = els.engagementAudience.value;
+    engagementReport = await authJson<EngagementReport>("/api/admin/engagement", { days, environment, audience });
     renderEngagementReport(engagementReport);
     els.engagementStatus.textContent = engagementReport.totals.events
       ? ""
@@ -9172,6 +9510,8 @@ async function loadEngagementReport(): Promise<void> {
     engagementReport = null;
     els.engagementSummary.textContent = "Engagement report unavailable";
     els.engagementStatus.textContent = error instanceof Error ? error.message : "The report could not be loaded.";
+  } finally {
+    els.engagementRefresh.disabled = false;
   }
 }
 
@@ -9202,6 +9542,23 @@ els.engagementPathwayOpen.addEventListener("click", openEngagementReport);
 els.engagementMenuOpen.addEventListener("click", openEngagementReport);
 els.engagementClose.addEventListener("click", closeEngagementReport);
 els.engagementRange.addEventListener("change", () => void loadEngagementReport());
+els.engagementEnvironment.addEventListener("change", () => void loadEngagementReport());
+els.engagementAudience.addEventListener("change", () => void loadEngagementReport());
+els.engagementRefresh.addEventListener("click", () => void loadEngagementReport());
+for (const button of els.engagementTabButtons) {
+  button.addEventListener("click", () => {
+    engagementTab = button.dataset.engagementTab as typeof engagementTab;
+    renderEngagementTabs();
+  });
+  button.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const index = els.engagementTabButtons.indexOf(button);
+    const next = event.key === "ArrowRight" ? index + 1 : index - 1;
+    els.engagementTabButtons[(next + els.engagementTabButtons.length) % els.engagementTabButtons.length].click();
+    els.engagementTabButtons[(next + els.engagementTabButtons.length) % els.engagementTabButtons.length].focus();
+  });
+}
 els.engagementExport.addEventListener("click", () => {
   if (!engagementReport?.csv) return;
   const blob = new Blob([engagementReport.csv], { type: "text/csv;charset=utf-8" });

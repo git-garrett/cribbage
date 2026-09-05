@@ -14,9 +14,10 @@ persistent anonymous identifier.
 Each row stores the event and tab-session IDs, optional account ID, environment,
 application version, event name, client occurrence time, server receipt time,
 sanitized page, optional game ID, normalized client/device dimensions, and a
-small JSON metadata object. The reporting interface exposes aggregates only; it
-does not return account IDs, session IDs, game IDs, email addresses, or raw
-metadata.
+small JSON metadata object. The private reporting interface exposes aggregates,
+account display names, and a sanitized recent-activity trail to designated
+administrators. It does not return account IDs, session IDs, game IDs, email
+addresses, or raw metadata.
 
 There is currently no automatic retention or deletion schedule. “All time”
 therefore means all rows still present in the server database, not necessarily
@@ -61,7 +62,9 @@ retained in page paths.
 ## Private engagement report
 
 `POST /api/admin/engagement` accepts `days` as `1`, `7`, `30`, `90`, or `0`
-for all available history. The server authorizes only usernames listed in
+for all available history, plus `environment` (`all`, `prod`, `ios`, `lan`, or
+`local`) and `audience` (`all`, `registered`, or `anonymous`) filters. The
+server authorizes only usernames listed in
 `CRIBBAGE_ENGAGEMENT_ADMINS`; the default designated accounts are `Garrett` and
 `Test`. Hiding the client link is only a convenience—the API independently
 returns `403` to every other signed-in account.
@@ -73,7 +76,27 @@ Completion rate divides completion events by start events in the same window.
 An abandonment is a game's latest abandonment candidate with no later resume,
 completion, or forfeit event in the selected window. Funnel conversion uses
 sessions with a recorded `session_start` as its denominator. Daily aggregates
-are available as a CSV download.
+are available as a CSV download. The report also provides hourly and daily
+trend series, previous-window comparisons, active-now and last-24-hour visitors,
+account-level engagement, recent activity, screen and pathway use, interaction
+hot spots, sanitized error groups, event inventory, and client, platform,
+version, timezone, and language breakdowns.
+
+## Known measurement gaps
+
+- A `page_exit` event can be lost when the browser terminates abruptly, so the
+  current average duration is observed page lifetime rather than authoritative
+  engaged time. A low-frequency visible-page heartbeat would close this gap.
+- Gameplay currently records starts, resumes, completions, forfeits, and exit
+  candidates, but not the timing of each hand, discard, pegging, hint, or score
+  review. Milestone events would identify the precise stage where play slows or
+  stops.
+- Client-visible errors are recorded, but API route latency and response status
+  are not. Duration/status buckets would connect performance to frustration.
+- Anonymous identity lives only for a browser tab. A durable random browser ID
+  would make anonymous return usage measurable across tabs and days.
+- No explicit satisfaction signal is collected. An optional one-tap response
+  after a completed game would complement behavioral inference.
 
 ## Interim queries
 

@@ -192,10 +192,12 @@ Every PR must:
 
 ### Verification evidence
 
-- `npm test --silent`: 271 Rust tests across 18 targets passed.
+- `npm test --silent`: 272 Rust tests across 18 targets passed.
 - `npm run test:web`, `npm run typecheck`, and `npm run build`: passed.
 - The live API returns `401` for an unauthenticated engagement request.
-- Chromium visual checks passed at 1440×1050 and 390×844.
+- Chromium interaction and visual checks passed at 1440×1050 and 390×844,
+  including dashboard tabs, line charts, account activity, and server-side
+  environment filters.
 - The shared LAN runtime serves the current branch at
   `http://192.168.88.17:8765/?engagement=1`.
 

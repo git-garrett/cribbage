@@ -11224,12 +11224,25 @@ body:has(.app[data-view="engagement"]) .bug-report-dock {
 }
 
 .engagement-page {
+  --engagement-canvas: #061b2d;
+  --engagement-panel: #0a2940;
+  --engagement-panel-raised: #10364e;
+  --engagement-ink: #f7f1e3;
+  --engagement-muted: #a9bec3;
+  --engagement-line: rgba(211, 230, 226, 0.16);
+  --engagement-gold: #e8c575;
+  --engagement-mint: #71c9a9;
+  --engagement-coral: #ee826b;
   min-height: 100vh;
   padding: clamp(1rem, 3vw, 2.5rem);
-  color: var(--text);
+  color: var(--engagement-ink);
   background:
-    radial-gradient(circle at 90% 0, color-mix(in srgb, var(--accent) 18%, transparent), transparent 32rem),
-    var(--background);
+    radial-gradient(circle at 14% -8%, rgba(113, 201, 169, 0.17), transparent 35rem),
+    linear-gradient(rgba(232, 197, 117, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(232, 197, 117, 0.025) 1px, transparent 1px),
+    var(--engagement-canvas);
+  background-size: auto, 36px 36px, 36px 36px, auto;
+  color-scheme: dark;
 }
 
 .engagement-page[hidden] {
@@ -11237,7 +11250,7 @@ body:has(.app[data-view="engagement"]) .bug-report-dock {
 }
 
 .engagement-shell {
-  width: min(1180px, 100%);
+  width: min(1320px, 100%);
   margin: 0 auto;
 }
 
@@ -11250,106 +11263,399 @@ body:has(.app[data-view="engagement"]) .bug-report-dock {
 }
 
 .engagement-header {
-  margin-bottom: 1.25rem;
+  margin-bottom: 1rem;
 }
 
 .engagement-header .people-page-back {
   position: static;
   padding: 0.65rem 0.9rem;
-  color: var(--text);
-  border: 1px solid var(--line);
+  color: var(--engagement-ink);
+  border: 1px solid var(--engagement-line);
   border-radius: 999px;
-  background: var(--surface);
+  background: rgba(10, 41, 64, 0.9);
 }
 
 .engagement-header h1 {
   margin: 0.2rem 0;
-  font-size: clamp(2rem, 5vw, 4rem);
+  color: var(--engagement-ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2.2rem, 5vw, 4.5rem);
+  font-weight: 700;
+  letter-spacing: -0.045em;
 }
 
 .engagement-header p,
 .engagement-grid section > p,
-.engagement-content > section > p {
-  color: var(--muted);
+.engagement-content section > p,
+.engagement-section-heading > p {
+  color: var(--engagement-muted);
 }
 
 .engagement-toolbar {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 8;
   justify-content: flex-start;
   flex-wrap: wrap;
-  padding: 1rem;
-  border: 1px solid var(--line);
+  padding: 0.75rem;
+  border: 1px solid var(--engagement-line);
   border-radius: 1rem;
-  background: var(--surface);
+  background: rgba(6, 27, 45, 0.9);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(18px);
 }
 
 .engagement-toolbar label {
-  font-weight: 800;
+  display: grid;
+  gap: 0.3rem;
+  color: var(--engagement-muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .engagement-toolbar select,
 .engagement-toolbar button {
   min-height: 2.75rem;
+  color: var(--engagement-ink);
+  border: 1px solid var(--engagement-line);
+  border-radius: 0.7rem;
+  background: var(--engagement-panel);
+  font: inherit;
+  font-weight: 800;
+}
+
+.engagement-toolbar select {
+  min-width: 10.5rem;
+  padding-inline: 0.7rem 2rem;
+}
+
+.engagement-toolbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-self: end;
+  gap: 0.5rem;
 }
 
 .engagement-toolbar button {
-  margin-left: auto;
+  padding-inline: 1rem;
+}
+
+.engagement-toolbar button:last-child {
+  color: var(--engagement-canvas);
+  border-color: var(--engagement-gold);
+  background: var(--engagement-gold);
+}
+
+.engagement-toolbar button:disabled {
+  opacity: 0.48;
+}
+
+.engagement-page :focus-visible {
+  outline: 3px solid #8bcbff;
+  outline-offset: 3px;
 }
 
 .engagement-content {
   display: grid;
-  gap: 1.5rem;
-  margin-top: 1rem;
+  gap: 1rem;
+  margin-top: 0.4rem;
 }
 
-.engagement-content > section,
+.engagement-tabs {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.35rem;
+  overflow-x: auto;
+  border: 1px solid var(--engagement-line);
+  border-radius: 0.85rem;
+  background: rgba(10, 41, 64, 0.72);
+}
+
+.engagement-tabs button {
+  min-height: 2.6rem;
+  padding: 0.55rem 1rem;
+  color: var(--engagement-muted);
+  border: 0;
+  border-radius: 0.6rem;
+  background: transparent;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 850;
+}
+
+.engagement-tabs button[aria-selected="true"] {
+  color: var(--engagement-canvas);
+  background: var(--engagement-gold);
+}
+
+.engagement-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.engagement-panel[hidden] {
+  display: none;
+}
+
+.engagement-panel > section,
+.engagement-panel > details,
 .engagement-grid > section {
   padding: clamp(1rem, 2vw, 1.5rem);
-  border: 1px solid var(--line);
-  border-radius: 1.15rem;
-  background: var(--surface);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--engagement-line);
+  border-radius: 1rem;
+  background: var(--engagement-panel);
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.12);
 }
 
 .engagement-content h2 {
   margin: 0 0 0.35rem;
+  color: var(--engagement-ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.35rem, 2.4vw, 1.9rem);
+  letter-spacing: -0.025em;
+}
+
+.engagement-section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.engagement-section-heading > p {
+  max-width: 34rem;
+  margin: 0 0 0.25rem;
+  text-align: right;
+}
+
+.engagement-kicker {
+  margin: 0 0 0.25rem !important;
+  color: var(--engagement-gold) !important;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.engagement-insights {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.engagement-insights article {
+  position: relative;
+  min-height: 9rem;
+  padding: 1rem;
+  overflow: hidden;
+  border: 1px solid var(--engagement-line);
+  border-radius: 0.9rem;
+  background: var(--engagement-panel-raised);
+}
+
+.engagement-insights article::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 4px;
+  background: var(--engagement-muted);
+  content: "";
+}
+
+.engagement-insights article[data-tone="good"]::before {
+  background: var(--engagement-mint);
+}
+
+.engagement-insights article[data-tone="watch"]::before {
+  background: var(--engagement-coral);
+}
+
+.engagement-insights span {
+  color: var(--engagement-muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.engagement-insights strong {
+  display: block;
+  margin: 0.4rem 0;
+  color: var(--engagement-ink);
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+}
+
+.engagement-insights p {
+  margin: 0;
+  color: var(--engagement-muted);
+  font-size: 0.84rem;
+  line-height: 1.4;
 }
 
 .engagement-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.8rem;
+}
+
+.engagement-health-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .engagement-metric {
   display: grid;
   gap: 0.25rem;
   padding: 1rem;
+  border: 1px solid var(--engagement-line);
   border-radius: 0.9rem;
-  background: color-mix(in srgb, var(--surface) 78%, var(--accent) 22%);
+  background: var(--engagement-panel-raised);
 }
 
 .engagement-metric span {
-  color: var(--muted);
+  color: var(--engagement-muted);
   font-weight: 800;
 }
 
 .engagement-metric strong {
+  color: var(--engagement-ink);
   font-size: clamp(1.7rem, 4vw, 2.6rem);
+  font-variant-numeric: tabular-nums;
+}
+
+.engagement-metric em {
+  width: fit-content;
+  padding: 0.18rem 0.45rem;
+  color: var(--engagement-muted);
+  border-radius: 999px;
+  background: rgba(169, 190, 195, 0.12);
+  font-size: 0.7rem;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.engagement-metric em[data-tone="good"] {
+  color: var(--engagement-mint);
+  background: rgba(113, 201, 169, 0.12);
+}
+
+.engagement-metric em[data-tone="watch"] {
+  color: #ff9f8d;
+  background: rgba(238, 130, 107, 0.12);
 }
 
 .engagement-metric small,
 .engagement-definitions {
-  color: var(--muted);
+  color: var(--engagement-muted);
   line-height: 1.45;
 }
 
+.engagement-chart {
+  min-width: 0;
+}
+
+.engagement-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
+}
+
+.engagement-chart-legend button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.25rem;
+  padding: 0.35rem 0.65rem;
+  color: var(--engagement-muted);
+  border: 1px solid var(--engagement-line);
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.engagement-chart-legend button[aria-pressed="true"] {
+  color: var(--engagement-ink);
+  background: var(--engagement-panel-raised);
+}
+
+.engagement-chart-legend i {
+  width: 0.7rem;
+  height: 0.7rem;
+  border: 2px solid var(--series-color);
+  border-radius: 50%;
+}
+
+.engagement-chart-legend button[aria-pressed="true"] i {
+  background: var(--series-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--series-color) 20%, transparent);
+}
+
+.engagement-chart-scroll {
+  min-width: 0;
+  overflow-x: auto;
+  border: 1px solid var(--engagement-line);
+  border-radius: 0.85rem;
+  background:
+    radial-gradient(circle at 50% 100%, rgba(113, 201, 169, 0.08), transparent 60%),
+    rgba(4, 20, 34, 0.72);
+}
+
+.engagement-chart svg {
+  display: block;
+  width: 100%;
+  min-width: 640px;
+  height: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.engagement-chart-gridline {
+  stroke: rgba(211, 230, 226, 0.13);
+  stroke-dasharray: 3 6;
+}
+
+.engagement-chart-axis {
+  fill: var(--engagement-muted);
+  font-size: 11px;
+}
+
+.engagement-chart-line {
+  fill: none;
+  stroke: var(--series-color);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.engagement-chart-point {
+  fill: var(--engagement-canvas);
+  stroke: var(--series-color);
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+}
+
 .engagement-definitions {
-  margin-top: 1rem;
   font-size: 0.88rem;
 }
 
 .engagement-definitions p {
   margin: 0.35rem 0;
+}
+
+.engagement-method summary {
+  color: var(--engagement-ink);
+  cursor: pointer;
+  font-weight: 850;
+}
+
+.engagement-method .engagement-definitions {
+  margin-top: 1rem;
 }
 
 .engagement-funnel {
@@ -11371,7 +11677,7 @@ body:has(.app[data-view="engagement"]) .bug-report-dock {
 }
 
 .engagement-funnel article span {
-  color: var(--muted);
+  color: var(--engagement-muted);
 }
 
 .engagement-funnel i {
@@ -11379,7 +11685,7 @@ body:has(.app[data-view="engagement"]) .bug-report-dock {
   height: 0.7rem;
   overflow: hidden;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--line) 65%, transparent);
+  background: rgba(211, 230, 226, 0.12);
 }
 
 .engagement-funnel i::after {
@@ -11387,14 +11693,18 @@ body:has(.app[data-view="engagement"]) .bug-report-dock {
   width: var(--engagement-width);
   height: 100%;
   border-radius: inherit;
-  background: var(--accent);
+  background: linear-gradient(90deg, var(--engagement-mint), var(--engagement-gold));
   content: "";
 }
 
 .engagement-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1.5rem;
+  gap: 1rem;
+}
+
+.engagement-grid-halves {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .engagement-table {
@@ -11408,10 +11718,15 @@ body:has(.app[data-view="engagement"]) .bug-report-dock {
   font-variant-numeric: tabular-nums;
 }
 
+.engagement-table-roomy {
+  max-height: 34rem;
+}
+
 .engagement-table th,
 .engagement-table td {
   padding: 0.65rem 0.55rem;
-  border-bottom: 1px solid var(--line);
+  color: var(--engagement-ink);
+  border-bottom: 1px solid var(--engagement-line);
   text-align: right;
   white-space: nowrap;
 }
@@ -11424,19 +11739,64 @@ body:has(.app[data-view="engagement"]) .bug-report-dock {
 .engagement-table thead th {
   position: sticky;
   top: 0;
-  color: var(--muted);
-  background: var(--surface);
+  z-index: 1;
+  color: var(--engagement-muted);
+  background: var(--engagement-panel);
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
+.engagement-table tbody tr:hover {
+  background: rgba(113, 201, 169, 0.07);
+}
+
 .engagement-empty {
   margin: 1rem 0 0;
   padding: 1rem;
-  color: var(--muted);
-  border: 1px dashed var(--line);
+  color: var(--engagement-muted);
+  border: 1px dashed var(--engagement-line);
   border-radius: 0.8rem;
+}
+
+.engagement-opportunities ol {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  counter-reset: opportunity;
+  list-style: none;
+}
+
+.engagement-opportunities li {
+  display: grid;
+  align-content: start;
+  gap: 0.55rem;
+  padding: 1rem;
+  border-left: 1px solid var(--engagement-line);
+  counter-increment: opportunity;
+}
+
+.engagement-opportunities li:first-child {
+  border-left: 0;
+}
+
+.engagement-opportunities li::before {
+  color: var(--engagement-gold);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.5rem;
+  content: counter(opportunity, decimal-leading-zero);
+}
+
+.engagement-opportunities strong {
+  color: var(--engagement-ink);
+}
+
+.engagement-opportunities span {
+  color: var(--engagement-muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
 }
 
 .pathway-card-admin {
@@ -11444,8 +11804,21 @@ body:has(.app[data-view="engagement"]) .bug-report-dock {
 }
 
 @media (max-width: 850px) {
-  .engagement-metrics {
+  .engagement-metrics,
+  .engagement-insights {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .engagement-grid-halves {
+    grid-template-columns: 1fr;
+  }
+
+  .engagement-opportunities ol {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .engagement-opportunities li:nth-child(odd) {
+    border-left: 0;
   }
 
   .engagement-funnel article {
@@ -11455,18 +11828,83 @@ body:has(.app[data-view="engagement"]) .bug-report-dock {
 }
 
 @media (max-width: 560px) {
+  .engagement-page {
+    padding: max(0.75rem, env(safe-area-inset-top)) 0.75rem max(1rem, env(safe-area-inset-bottom));
+  }
+
   .engagement-header {
     align-items: flex-start;
     flex-direction: column-reverse;
   }
 
+  .engagement-header .people-page-back {
+    width: auto;
+    align-self: flex-start;
+  }
+
+  .engagement-toolbar {
+    position: static;
+  }
+
+  .engagement-toolbar label {
+    width: calc(50% - 0.5rem);
+  }
+
+  .engagement-toolbar label:first-child {
+    width: 100%;
+  }
+
+  .engagement-toolbar select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .engagement-toolbar-actions,
   .engagement-toolbar button {
     width: 100%;
     margin-left: 0;
   }
 
   .engagement-metrics,
-  .engagement-grid {
+  .engagement-insights,
+  .engagement-grid,
+  .engagement-opportunities ol {
     grid-template-columns: 1fr;
+  }
+
+  .engagement-opportunities li,
+  .engagement-opportunities li:nth-child(odd) {
+    border-top: 1px solid var(--engagement-line);
+    border-left: 0;
+  }
+
+  .engagement-opportunities li:first-child {
+    border-top: 0;
+  }
+
+  .engagement-section-heading {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .engagement-section-heading > p {
+    text-align: left;
+  }
+
+  .engagement-tabs button {
+    width: 100%;
+    padding-inline: 0.45rem;
+  }
+
+  .engagement-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    overflow: visible;
+  }
+
+  .engagement-funnel article div {
+    align-items: start;
+    flex-direction: column;
+    gap: 0.15rem;
   }
 }
