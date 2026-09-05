@@ -516,6 +516,8 @@ const els = {
   peoplePresenceAlert: document.querySelector("#people-presence-alert") as HTMLElement,
   peoplePresencePanel: document.querySelector("#people-presence-panel") as HTMLElement,
   peoplePresenceClose: document.querySelector("#people-presence-close") as HTMLButtonElement,
+  peopleTableSection: document.querySelector("#people-table-section") as HTMLElement,
+  peopleTableList: document.querySelector("#people-table-list") as HTMLElement,
   peopleChallengeSection: document.querySelector("#people-challenge-section") as HTMLElement,
   peopleChallengeList: document.querySelector("#people-challenge-list") as HTMLElement,
   peopleOnlineList: document.querySelector("#people-online-list") as HTMLElement,
@@ -929,6 +931,7 @@ interface PeopleDirectoryResponse {
   players: PeoplePlayer[];
   incomingChallenges: PeopleChallenge[];
   outgoingChallenges: PeopleChallenge[];
+  activeTable: HumanTable | null;
 }
 
 interface PeopleProfileResponse {
@@ -1000,6 +1003,7 @@ let peopleDirectory: PeopleDirectoryResponse = {
   players: [],
   incomingChallenges: [],
   outgoingChallenges: [],
+  activeTable: null,
 };
 let ownPeopleProfile: PeopleProfile | null = null;
 let selectedPeopleProfile: PeopleProfile | null = null;
@@ -1599,6 +1603,8 @@ function handicapForPlayer(
     selectedPeopleProfile,
     activeHumanTable?.challenger,
     activeHumanTable?.challenged,
+    peopleDirectory.activeTable?.challenger,
+    peopleDirectory.activeTable?.challenged,
     ...peopleDirectory.players,
     ...peopleDirectory.incomingChallenges.map((challenge) => challenge.player),
     ...peopleDirectory.outgoingChallenges.map((challenge) => challenge.player),
@@ -1720,12 +1726,13 @@ function renderPeopleAvatar(element: HTMLElement, player: Pick<PeoplePlayer, "di
 
 function peopleListItem(
   player: PeoplePlayer,
-  options: { challenge?: boolean; looking?: boolean; actionLabel?: string } = {},
+  options: { challenge?: boolean; game?: boolean; looking?: boolean; actionLabel?: string; statusText?: string } = {},
 ): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "people-list-item";
   if (options.challenge) button.classList.add("is-challenge");
+  if (options.game) button.classList.add("is-game");
   if (options.looking) button.classList.add("is-looking");
   const avatar = document.createElement("span");
   avatar.className = "people-avatar people-list-avatar";
@@ -1735,17 +1742,47 @@ function peopleListItem(
   const name = document.createElement("strong");
   setPlayerIdentity(name, player.displayName, player.dynamicHandicap ?? null);
   const status = document.createElement("small");
-  status.textContent = options.challenge
+  status.textContent = options.statusText ?? (options.challenge
     ? "Wants to play you"
     : options.looking
       ? "Looking for a game"
-      : "Online now";
+      : "Online now");
   copy.append(name, status);
   const action = document.createElement("span");
   action.className = "people-list-action";
   action.textContent = options.actionLabel || "View";
   button.append(avatar, copy, action);
   return button;
+}
+
+function resumableHumanTable(): HumanTable | null {
+  if (activeHumanTable && activeHumanTable.phase !== "complete") return activeHumanTable;
+  if (peopleDirectory.activeTable?.phase !== "complete") return peopleDirectory.activeTable;
+  return null;
+}
+
+function humanTableOpponent(table: HumanTable): PeoplePlayer {
+  return table.viewerSeat === "challenger" ? table.challenged : table.challenger;
+}
+
+function humanTableResumeStatus(table: HumanTable): string {
+  if (table.phase === "waiting") return "Waiting for them to join";
+  if (table.phase === "cut_for_deal") return "Game ready · Cut for deal";
+  return "Game in progress";
+}
+
+function humanTableResumeItem(table: HumanTable): HTMLButtonElement {
+  return peopleListItem(humanTableOpponent(table), {
+    game: true,
+    actionLabel: "Resume",
+    statusText: humanTableResumeStatus(table),
+  });
+}
+
+function resumeHumanTable(table: HumanTable): void {
+  els.peoplePresencePanel.hidden = true;
+  els.peoplePresenceToggle.setAttribute("aria-expanded", "false");
+  void openHumanTable(table.id);
 }
 
 function challengeIds(directory: PeopleDirectoryResponse): string[] {
@@ -1777,7 +1814,10 @@ function applyPeopleDirectory(directory: PeopleDirectoryResponse): void {
 
 function renderPeopleDirectory(): void {
   els.peoplePresence.hidden = false;
-  els.peoplePresenceLabel.textContent = `${peopleDirectory.onlineCount} online`;
+  const activeTable = resumableHumanTable();
+  els.peoplePresenceLabel.textContent = activeTable
+    ? `${peopleDirectory.onlineCount} online · Resume`
+    : `${peopleDirectory.onlineCount} online`;
   const challengeCount = peopleDirectory.incomingChallenges.length;
   els.peoplePresenceAlert.hidden = challengeCount === 0;
   els.peoplePresenceAlert.textContent = String(challengeCount);
@@ -1791,12 +1831,23 @@ function renderPeopleDirectory(): void {
     );
   }
   els.peoplePresence.classList.toggle("has-challenge", challengeCount > 0);
+  els.peoplePresence.classList.toggle("has-game", Boolean(activeTable));
   els.peoplePresenceToggle.setAttribute(
     "aria-label",
     challengeCount
       ? `${challengeCount} player challenge${challengeCount === 1 ? "" : "s"}; ${peopleDirectory.onlineCount} players online`
+      : activeTable
+        ? `Resume game with ${humanTableOpponent(activeTable).displayName}; ${peopleDirectory.onlineCount} players online`
       : `${peopleDirectory.onlineCount} players online`,
   );
+
+  els.peopleTableSection.hidden = !activeTable;
+  els.peopleTableList.replaceChildren();
+  if (activeTable) {
+    const row = humanTableResumeItem(activeTable);
+    row.addEventListener("click", () => resumeHumanTable(activeTable));
+    els.peopleTableList.append(row);
+  }
 
   els.peopleChallengeSection.hidden = challengeCount === 0;
   els.peopleChallengeList.replaceChildren();
@@ -1821,7 +1872,12 @@ function renderPeopleDirectory(): void {
   }
 
   els.humanDirectory.replaceChildren();
-  if (!peopleDirectory.players.length) {
+  if (activeTable) {
+    const row = humanTableResumeItem(activeTable);
+    row.addEventListener("click", () => resumeHumanTable(activeTable));
+    els.humanDirectory.append(row);
+  }
+  if (!peopleDirectory.players.length && !activeTable) {
     const empty = document.createElement("div");
     empty.className = "human-directory-empty";
     const title = document.createElement("strong");
@@ -2070,6 +2126,7 @@ function humanCutElement(card: HumanCutCard, label: string): HTMLElement {
 
 function renderHumanTable(table: HumanTable): void {
   activeHumanTable = table;
+  peopleDirectory.activeTable = table.phase === "complete" ? null : table;
   syncPathwayResumePresentation();
   els.humanTableChallenger.replaceChildren(...playerSeat(table.challenger, "Challenger"));
   els.humanTableChallenged.replaceChildren(...playerSeat(table.challenged, "Invited player"));
@@ -2102,8 +2159,15 @@ function applyHumanGameResponse(response: HumanGameResponse): GameState {
   humanGameRevision = response.revision;
   humanGameCanContinueScoring = response.canContinueScoring;
   humanGameCanAcknowledgePeggingReset = response.canAcknowledgePeggingReset;
+  const currentScoreEvent = currentScoringScoreEvent(response.snapshot.gameId ?? null, response.state);
+  state.scoreSummaryQueue = state.scoreSummaryQueue.filter((summary) => summary.key === currentScoreEvent?.id);
+  if (state.activeScoreSummary && state.activeScoreSummary.key !== currentScoreEvent?.id) {
+    state.activeScoreSummary = null;
+    renderScoreSummaryDialog();
+  }
   if (activeHumanTable && response.state.phase === "game_over") {
     activeHumanTable.phase = "complete";
+    if (peopleDirectory.activeTable?.id === activeHumanTable.id) peopleDirectory.activeTable = null;
   }
   applyAuthoritativeGameState(response.snapshot, response.state);
   syncPathwayResumePresentation();
@@ -2778,7 +2842,7 @@ function syncPathwayResumePresentation(): void {
   }
   const resumable = new Set(resumablePathwayDestinations({
     modelGames,
-    humanGameActive: activeHumanTable !== null && activeHumanTable.phase !== "complete",
+    humanGameActive: resumableHumanTable() !== null,
   }));
   for (const button of els.pathwayDestinationButtons) {
     const destination = button.dataset.pathwayDestination as "easy" | "tough" | "master" | "dynamic" | "human";
@@ -2977,8 +3041,12 @@ function pathwayHistoryState(route: PathwayRoute): Record<string, unknown> {
   return { ...state, [PATHWAY_HISTORY_STATE_KEY]: route };
 }
 
-function pathwayUrl(route: PathwayRoute): string {
+function pathwayUrl(route: PathwayRoute, clearPeopleRoute = false): string {
   const url = new URL(window.location.href);
+  if (clearPeopleRoute) {
+    url.searchParams.delete("table");
+    url.searchParams.delete("profile");
+  }
   if (route === "home") url.searchParams.delete(PATHWAY_VIEW_PARAM);
   else url.searchParams.set(PATHWAY_VIEW_PARAM, route);
   return `${url.pathname}${url.search}${url.hash}`;
@@ -3013,7 +3081,7 @@ function applyPathwayRoute(route: PathwayRoute): void {
 
 function navigatePathway(route: PathwayRoute): void {
   if (!PATHWAY_NAV_ENABLED) return;
-  window.history.pushState(pathwayHistoryState(route), "", pathwayUrl(route));
+  window.history.pushState(pathwayHistoryState(route), "", pathwayUrl(route, true));
   applyPathwayRoute(route);
 }
 
@@ -8316,8 +8384,9 @@ for (const button of els.pathwayDestinationButtons) {
   const destination = button.dataset.pathwayDestination;
   if (destination === "human") {
     button.addEventListener("click", () => {
-      if (button.dataset.resumable === "true" && activeHumanTable) {
-        void openHumanTable(activeHumanTable.id);
+      const table = resumableHumanTable();
+      if (button.dataset.resumable === "true" && table) {
+        void openHumanTable(table.id);
         return;
       }
       if (!authenticatedUser) {

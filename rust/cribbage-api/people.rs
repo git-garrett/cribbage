@@ -250,9 +250,41 @@ struct HumanGameRecord {
     #[serde(default)]
     completed_at: Option<i64>,
     #[serde(default)]
+    pending_final_scoring: Option<HumanFinalScoringStage>,
+    #[serde(default)]
+    score_events: Vec<HumanScoreEvent>,
+    #[serde(default)]
     decision_reviews: Vec<HumanDecisionReview>,
     #[serde(default)]
     next_review_id: u32,
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+enum HumanFinalScoringStage {
+    Pone,
+    Dealer,
+    Crib,
+}
+
+#[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
+enum HumanScoreCategory {
+    Hand,
+    Crib,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct HumanScoreEvent {
+    id: String,
+    at: i64,
+    hand_number: u32,
+    player: Side,
+    dealer: Side,
+    category: HumanScoreCategory,
+    points: i32,
+    total_score: i32,
+    scores: [i32; 2],
+    cards: Vec<Card>,
+    turn_card: Card,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -764,11 +796,36 @@ fn directory_value(server: &Server, viewer: Option<&AuthUser>) -> Result<Value, 
     } else {
         Vec::new()
     };
+    let active_table = if let Some(viewer) = viewer {
+        let table_id = connection
+            .query_row(
+                "SELECT c.table_id
+                 FROM people_challenges c
+                 LEFT JOIN people_games g ON g.table_id = c.table_id
+                 WHERE c.status = 'accepted' AND c.expires_at > ?2
+                   AND (c.challenger_id = ?1 OR c.challenged_id = ?1)
+                   AND g.completed_at IS NULL
+                 ORDER BY COALESCE(g.updated_at, c.updated_at) DESC, c.created_at DESC
+                 LIMIT 1",
+                params![viewer.id, now],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| PeopleError::internal("read active player table", error))?;
+        table_id
+            .map(|table_id| {
+                table_value(server, &table_id, viewer.id).map(|response| response["table"].clone())
+            })
+            .transpose()?
+    } else {
+        None
+    };
     Ok(json!({
         "onlineCount": online_count,
         "players": players,
         "incomingChallenges": incoming,
         "outgoingChallenges": outgoing,
+        "activeTable": active_table,
     }))
 }
 
@@ -1114,6 +1171,8 @@ fn ensure_human_game(
         turn_card_revealed: false,
         created_at: unix_seconds(),
         completed_at: None,
+        pending_final_scoring: None,
+        score_events: Vec::new(),
         decision_reviews: Vec::new(),
         next_review_id: 0,
     };
@@ -1203,7 +1262,9 @@ fn table_value(server: &Server, table_id: &str, viewer_id: i64) -> Result<Value,
         .map(|stored| {
             serde_json::from_str::<HumanGameRecord>(&stored)
                 .map(|record| {
-                    if record.game.phase == Phase::GameOver {
+                    if record.game.phase == Phase::GameOver
+                        && record.pending_final_scoring.is_none()
+                    {
                         "complete"
                     } else {
                         "playing"
@@ -1351,21 +1412,61 @@ fn human_game_action(
             record.game.acknowledge_pegging_reset();
         }
         "continue-scoring" => {
-            if record.game.dealer != viewer {
+            if human_scoring_controller(&record) != Some(viewer) {
                 return Err(PeopleError::conflict(
-                    "The dealer advances the shared scoring review.",
+                    "The player whose cards are being counted advances the shared review.",
                 ));
             }
-            if record.game.phase == Phase::PeggingComplete {
-                record
-                    .game
-                    .start_scoring()
-                    .map_err(PeopleError::bad_request)?;
+            if record.pending_final_scoring.is_some() {
+                record.pending_final_scoring = None;
             } else {
-                record
-                    .game
-                    .continue_scoring()
-                    .map_err(PeopleError::bad_request)?;
+                let hand_number = record.game.hand_number;
+                let before = human_score_snapshot(&record.game);
+                let score_stage = match record.game.phase {
+                    Phase::PeggingComplete => Some((
+                        HumanScoreCategory::Hand,
+                        record.game.pone,
+                        record.game.player(record.game.pone).table.clone(),
+                        HumanFinalScoringStage::Pone,
+                    )),
+                    Phase::ScorePone => Some((
+                        HumanScoreCategory::Hand,
+                        record.game.dealer,
+                        record.game.player(record.game.dealer).table.clone(),
+                        HumanFinalScoringStage::Dealer,
+                    )),
+                    Phase::ScoreDealer => Some((
+                        HumanScoreCategory::Crib,
+                        record.game.dealer,
+                        record.game.player(record.game.dealer).crib.clone(),
+                        HumanFinalScoringStage::Crib,
+                    )),
+                    _ => None,
+                };
+                if record.game.phase == Phase::PeggingComplete {
+                    record
+                        .game
+                        .start_scoring()
+                        .map_err(PeopleError::bad_request)?;
+                } else {
+                    record
+                        .game
+                        .continue_scoring()
+                        .map_err(PeopleError::bad_request)?;
+                }
+                if let Some((category, player, cards, final_stage)) = score_stage {
+                    record_human_score_event(
+                        &mut record,
+                        hand_number,
+                        before,
+                        category,
+                        player,
+                        cards,
+                    );
+                    if record.game.phase == Phase::GameOver {
+                        record.pending_final_scoring = Some(final_stage);
+                    }
+                }
             }
             if record.game.phase == Phase::Discard {
                 record.turn_card_revealed = false;
@@ -1379,7 +1480,9 @@ fn human_game_action(
     }
 
     let now = unix_seconds();
-    let completed_at = (record.game.phase == Phase::GameOver).then_some(now);
+    let completed_at = (record.game.phase == Phase::GameOver
+        && record.pending_final_scoring.is_none())
+    .then_some(now);
     if record.completed_at.is_none() {
         record.completed_at = completed_at;
     }
@@ -1399,7 +1502,7 @@ fn human_game_action(
             "The other player moved first. Refreshing the table will show the latest play.",
         ));
     }
-    if record.game.phase == Phase::GameOver {
+    if record.game.phase == Phase::GameOver && record.pending_final_scoring.is_none() {
         record_head_to_head_game(&transaction, &row, &record, now)?;
     }
     transaction
@@ -1493,6 +1596,47 @@ fn queue_human_decision_review(
         game,
         selected_card_ids,
         completed: None,
+    });
+}
+
+fn human_score_snapshot(game: &CribbageGame) -> [i32; 2] {
+    [
+        game.player(Side::Left).score,
+        game.player(Side::Right).score,
+    ]
+}
+
+fn human_score_for_side(scores: [i32; 2], side: Side) -> i32 {
+    match side {
+        Side::Left => scores[0],
+        Side::Right => scores[1],
+    }
+}
+
+fn record_human_score_event(
+    record: &mut HumanGameRecord,
+    hand_number: u32,
+    before: [i32; 2],
+    category: HumanScoreCategory,
+    player: Side,
+    cards: Vec<Card>,
+) {
+    let scores = human_score_snapshot(&record.game);
+    let total_score = human_score_for_side(scores, player);
+    let points = total_score - human_score_for_side(before, player);
+    let event_number = record.score_events.len() + 1;
+    record.score_events.push(HumanScoreEvent {
+        id: format!("{}-score-{}", record.game_id, event_number),
+        at: unix_seconds(),
+        hand_number,
+        player,
+        dealer: record.game.dealer,
+        category,
+        points,
+        total_score,
+        scores,
+        cards,
+        turn_card: record.game.turn_card,
     });
 }
 
@@ -1654,6 +1798,13 @@ fn view_number(side: Side, viewer: Side) -> u8 {
 }
 
 fn human_public_phase(record: &HumanGameRecord, viewer: Side) -> &'static str {
+    if let Some(stage) = record.pending_final_scoring {
+        return match stage {
+            HumanFinalScoringStage::Pone => "score_pone",
+            HumanFinalScoringStage::Dealer => "score_dealer",
+            HumanFinalScoringStage::Crib => "score_crib",
+        };
+    }
     match record.game.phase {
         Phase::Discard if record.game.player(viewer).hand.len() == 4 => "ai_discarding",
         Phase::Discard => "discard",
@@ -1738,7 +1889,30 @@ fn human_nested_owned_cards_value(
 
 fn human_scoring_value(record: &HumanGameRecord, viewer: Side) -> Value {
     let game = &record.game;
-    let details = match game.phase {
+    let final_details = record.pending_final_scoring.map(|stage| match stage {
+        HumanFinalScoringStage::Pone => (
+            "pone",
+            game.pone,
+            game.player(game.pone).table.as_slice(),
+            false,
+            "View game result",
+        ),
+        HumanFinalScoringStage::Dealer => (
+            "dealer",
+            game.dealer,
+            game.player(game.dealer).table.as_slice(),
+            false,
+            "View game result",
+        ),
+        HumanFinalScoringStage::Crib => (
+            "crib",
+            game.dealer,
+            game.player(game.dealer).crib.as_slice(),
+            true,
+            "View game result",
+        ),
+    });
+    let details = final_details.or_else(|| match game.phase {
         Phase::ScorePone => Some((
             "pone",
             game.pone,
@@ -1761,7 +1935,7 @@ fn human_scoring_value(record: &HumanGameRecord, viewer: Side) -> Value {
             "Next hand",
         )),
         _ => None,
-    };
+    });
     let Some((stage, owner, cards, crib, next_label)) = details else {
         return Value::Null;
     };
@@ -1784,6 +1958,21 @@ fn human_scoring_value(record: &HumanGameRecord, viewer: Side) -> Value {
     })
 }
 
+fn human_scoring_controller(record: &HumanGameRecord) -> Option<Side> {
+    let game = &record.game;
+    if let Some(stage) = record.pending_final_scoring {
+        return Some(match stage {
+            HumanFinalScoringStage::Pone => game.pone,
+            HumanFinalScoringStage::Dealer | HumanFinalScoringStage::Crib => game.dealer,
+        });
+    }
+    match game.phase {
+        Phase::PeggingComplete | Phase::ScorePone => Some(game.pone),
+        Phase::ScoreDealer | Phase::ScoreCrib => Some(game.dealer),
+        _ => None,
+    }
+}
+
 fn human_game_message(record: &HumanGameRecord, viewer: Side) -> String {
     let game = &record.game;
     match human_public_phase(record, viewer) {
@@ -1798,7 +1987,7 @@ fn human_game_message(record: &HumanGameRecord, viewer: Side) -> String {
         "ai_discarding" => "Waiting for your opponent to discard.".to_string(),
         "pegging" if game.current_player() == viewer => "Your play.".to_string(),
         "pegging" => "Waiting for your opponent to play.".to_string(),
-        "pegging_complete" => "Pegging complete. The dealer will count the hands.".to_string(),
+        "pegging_complete" => "Pegging complete. The pone counts first.".to_string(),
         "score_pone" => format!("{} hand counted.", view_label(game.pone, viewer)),
         "score_dealer" => format!("{} hand counted.", view_label(game.dealer, viewer)),
         "score_crib" => format!("{} crib counted.", view_label(game.dealer, viewer)),
@@ -1828,7 +2017,38 @@ fn human_game_analytics(record: &HumanGameRecord, row: &TableRow, viewer: Side) 
             "ai": if viewer == Side::Left { &row.challenged_display_name } else { &row.challenger_display_name },
         },
     })];
-    if record.game.phase == Phase::GameOver {
+    events.extend(record.score_events.iter().map(|event| {
+        let crib = event.category == HumanScoreCategory::Crib;
+        let components = score_hand_components(&event.cards, event.turn_card, crib);
+        json!({
+            "id": event.id,
+            "at": timestamp(event.at),
+            "type": "score",
+            "gameId": record.game_id,
+            "handNumber": event.hand_number,
+            "player": view_key(event.player, viewer),
+            "role": if event.player == event.dealer { "dealer" } else { "pone" },
+            "category": if crib { "crib" } else { "hand" },
+            "points": event.points,
+            "reason": if crib { "Crib" } else { "Hand" },
+            "totalScore": event.total_score,
+            "scores": {
+                "human": human_score_for_side(event.scores, viewer),
+                "ai": human_score_for_side(event.scores, viewer.other()),
+            },
+            "cards": event.cards.iter().map(Card::label).collect::<Vec<_>>(),
+            "turnCard": event.turn_card.label(),
+            "scoreComponents": {
+                "total": components.total(),
+                "fifteens": components.fifteens,
+                "pairs": components.pairs,
+                "runs": components.runs,
+                "flush": components.flush,
+                "knobs": components.knobs,
+            },
+        })
+    }));
+    if record.game.phase == Phase::GameOver && record.pending_final_scoring.is_none() {
         events.extend(record.decision_reviews.iter().map(|review| {
             human_decision_review_value(record, review, viewer, timestamp(review.at))
         }));
@@ -2005,7 +2225,7 @@ fn human_game_response(
     } else {
         Vec::new()
     };
-    let result = if game.phase == Phase::GameOver {
+    let result = if game.phase == Phase::GameOver && record.pending_final_scoring.is_none() {
         let winner = if game.player(Side::Left).score >= 121 {
             Side::Left
         } else {
@@ -2114,7 +2334,7 @@ fn human_game_response(
     json!({
         "tableId": table_id,
         "revision": revision,
-        "canContinueScoring": game.dealer == viewer && matches!(game.phase, Phase::PeggingComplete | Phase::ScorePone | Phase::ScoreDealer | Phase::ScoreCrib),
+        "canContinueScoring": human_scoring_controller(record) == Some(viewer),
         "canAcknowledgePeggingReset": game.pegging_reset_pending && game.current_player() == viewer,
         "players": {
             "human": if viewer == Side::Left { row.challenger_display_name.clone() } else { row.challenged_display_name.clone() },
@@ -2717,6 +2937,212 @@ mod tests {
     }
 
     #[test]
+    fn directory_restores_the_viewers_active_human_table() {
+        let server = test_server("active-human-table");
+        let garrett = user(&server, "Garrett");
+        let kurt = user(&server, "Kurt");
+        let now = unix_seconds();
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection
+            .execute(
+                "INSERT INTO people_challenges
+                 (id, table_id, challenger_id, challenged_id, status, created_at, updated_at, expires_at)
+                 VALUES ('c', 't', ?1, ?2, 'accepted', ?3, ?3, ?4)",
+                params![garrett.id, kurt.id, now, now + TABLE_SECONDS],
+            )
+            .unwrap();
+        drop(connection);
+
+        let garrett_directory = directory_value(&server, Some(&garrett)).unwrap();
+        let kurt_directory = directory_value(&server, Some(&kurt)).unwrap();
+        assert_eq!(garrett_directory["activeTable"]["id"], "t");
+        assert_eq!(kurt_directory["activeTable"]["id"], "t");
+        assert_eq!(garrett_directory["activeTable"]["phase"], "cut_for_deal");
+        assert_eq!(kurt_directory["activeTable"]["phase"], "cut_for_deal");
+
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn each_hand_owner_advances_scoring_while_both_players_see_the_count() {
+        let server = test_server("shared-human-scoring");
+        let garrett = user(&server, "Garrett");
+        let kurt = user(&server, "Kurt");
+        let now = unix_seconds();
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection
+            .execute(
+                "INSERT INTO people_challenges
+                 (id, table_id, challenger_id, challenged_id, status, dealer_id, created_at, updated_at, expires_at)
+                 VALUES ('c', 't', ?1, ?2, 'accepted', ?1, ?3, ?3, ?4)",
+                params![garrett.id, kurt.id, now, now + TABLE_SECONDS],
+            )
+            .unwrap();
+        ensure_human_game(&connection, "t", garrett.id, garrett.id).unwrap();
+        let (mut record, _) = load_human_game(&connection, "t").unwrap();
+        record.game.phase = Phase::PeggingComplete;
+        record.turn_card_revealed = true;
+        connection
+            .execute(
+                "UPDATE people_games SET game_json = ?2 WHERE table_id = ?1",
+                params!["t", serde_json::to_string(&record).unwrap()],
+            )
+            .unwrap();
+        drop(connection);
+
+        let pone_before = human_game_status(
+            &server,
+            &request("/api/people/table/game", json!({"tableId": "t"})),
+            Some(&kurt),
+        )
+        .unwrap();
+        let dealer_before = human_game_status(
+            &server,
+            &request("/api/people/table/game", json!({"tableId": "t"})),
+            Some(&garrett),
+        )
+        .unwrap();
+        assert_eq!(pone_before["canContinueScoring"], true);
+        assert_eq!(dealer_before["canContinueScoring"], false);
+
+        human_game_action(
+            &server,
+            &request(
+                "/api/people/table/game/action",
+                json!({
+                    "tableId": "t",
+                    "action": "continue-scoring",
+                    "revision": pone_before["revision"],
+                    "payload": {},
+                }),
+            ),
+            Some(&kurt),
+        )
+        .unwrap();
+        let pone_after = human_game_status(
+            &server,
+            &request("/api/people/table/game", json!({"tableId": "t"})),
+            Some(&kurt),
+        )
+        .unwrap();
+        let dealer_after = human_game_status(
+            &server,
+            &request("/api/people/table/game", json!({"tableId": "t"})),
+            Some(&garrett),
+        )
+        .unwrap();
+        assert_eq!(pone_after["revision"], dealer_after["revision"]);
+        assert_eq!(pone_after["state"]["scoring"]["stage"], "pone");
+        assert_eq!(dealer_after["state"]["scoring"]["stage"], "pone");
+        assert_eq!(
+            pone_after["state"]["scoring"]["points"],
+            dealer_after["state"]["scoring"]["points"]
+        );
+        let pone_event = pone_after["state"]["analyticsEvents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|event| event["type"] == "score")
+            .unwrap();
+        let dealer_event = dealer_after["state"]["analyticsEvents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|event| event["type"] == "score")
+            .unwrap();
+        assert_eq!(pone_event["player"], "human");
+        assert_eq!(dealer_event["player"], "ai");
+        for key in ["category", "points", "cards", "turnCard", "scoreComponents"] {
+            assert_eq!(pone_event[key], dealer_event[key]);
+        }
+        assert_eq!(pone_after["canContinueScoring"], true);
+        assert_eq!(dealer_after["canContinueScoring"], false);
+
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn winning_human_count_stays_visible_until_its_owner_opens_the_result() {
+        let server = test_server("shared-human-final-count");
+        let garrett = user(&server, "Garrett");
+        let kurt = user(&server, "Kurt");
+        let now = unix_seconds();
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection
+            .execute(
+                "INSERT INTO people_challenges
+                 (id, table_id, challenger_id, challenged_id, status, dealer_id, created_at, updated_at, expires_at)
+                 VALUES ('c', 't', ?1, ?2, 'accepted', ?1, ?3, ?3, ?4)",
+                params![garrett.id, kurt.id, now, now + TABLE_SECONDS],
+            )
+            .unwrap();
+        ensure_human_game(&connection, "t", garrett.id, garrett.id).unwrap();
+        let (mut record, _) = load_human_game(&connection, "t").unwrap();
+        let pone = record.game.pone;
+        record.game.player_mut(pone).score = 120;
+        record.game.player_mut(pone).table = [0, 14, 28, 42]
+            .into_iter()
+            .map(|id| Card::new(id).unwrap())
+            .collect();
+        record.game.turn_card = Card::new(2).unwrap();
+        record.game.phase = Phase::PeggingComplete;
+        record.turn_card_revealed = true;
+        connection
+            .execute(
+                "UPDATE people_games SET game_json = ?2 WHERE table_id = ?1",
+                params!["t", serde_json::to_string(&record).unwrap()],
+            )
+            .unwrap();
+        drop(connection);
+
+        let counted = human_game_action(
+            &server,
+            &request(
+                "/api/people/table/game/action",
+                json!({
+                    "tableId": "t",
+                    "action": "continue-scoring",
+                    "revision": 0,
+                    "payload": {},
+                }),
+            ),
+            Some(&kurt),
+        )
+        .unwrap();
+        assert_eq!(counted["state"]["phase"], "score_pone");
+        assert_eq!(counted["state"]["result"], json!([]));
+        assert_eq!(counted["state"]["scoring"]["nextLabel"], "View game result");
+        assert_eq!(counted["canContinueScoring"], true);
+        assert_eq!(
+            table_value(&server, "t", kurt.id).unwrap()["table"]["phase"],
+            "playing"
+        );
+
+        let completed = human_game_action(
+            &server,
+            &request(
+                "/api/people/table/game/action",
+                json!({
+                    "tableId": "t",
+                    "action": "continue-scoring",
+                    "revision": counted["revision"],
+                    "payload": {},
+                }),
+            ),
+            Some(&kurt),
+        )
+        .unwrap();
+        assert_eq!(completed["state"]["phase"], "game_over");
+        assert_eq!(completed["state"]["result"], json!(["User wins."]));
+        assert_eq!(
+            table_value(&server, "t", kurt.id).unwrap()["table"]["phase"],
+            "complete"
+        );
+
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
     fn both_players_cut_and_the_lower_rank_deals() {
         let server = test_server("cut");
         let garrett = user(&server, "Garrett");
@@ -3082,7 +3508,7 @@ mod tests {
             let connection = open_game_database(&server.data_dir).unwrap();
             let (record, _) = load_human_game(&connection, "t").unwrap();
             drop(connection);
-            if record.game.phase == Phase::GameOver {
+            if record.game.phase == Phase::GameOver && record.pending_final_scoring.is_none() {
                 let connection = open_game_database(&server.data_dir).unwrap();
                 let recorded: i64 = connection
                     .query_row(
@@ -3132,38 +3558,50 @@ mod tests {
                 return;
             }
 
-            let (side, action, payload) = match record.game.phase {
-                Phase::Discard => {
-                    let side = if record.game.player(Side::Left).hand.len() == 6 {
-                        Side::Left
-                    } else {
-                        Side::Right
-                    };
-                    let ids = record.game.player(side).hand[..2]
-                        .iter()
-                        .map(|card| card.id)
-                        .collect::<Vec<_>>();
-                    (side, "discard", json!({"ids": ids}))
-                }
-                Phase::Pegging if record.game.pegging_reset_pending => (
-                    record.game.current_player(),
-                    "acknowledge-pegging-reset",
+            let (side, action, payload) = if record.pending_final_scoring.is_some() {
+                (
+                    human_scoring_controller(&record).unwrap(),
+                    "continue-scoring",
                     json!({}),
-                ),
-                Phase::Pegging => {
-                    let side = record.game.current_player();
-                    let legal = record.game.legal_cards(side);
-                    if let Some(card) = legal.first() {
-                        (side, "play", json!({"id": card.id}))
-                    } else {
-                        (side, "go", json!({}))
+                )
+            } else {
+                match record.game.phase {
+                    Phase::Discard => {
+                        let side = if record.game.player(Side::Left).hand.len() == 6 {
+                            Side::Left
+                        } else {
+                            Side::Right
+                        };
+                        let ids = record.game.player(side).hand[..2]
+                            .iter()
+                            .map(|card| card.id)
+                            .collect::<Vec<_>>();
+                        (side, "discard", json!({"ids": ids}))
                     }
+                    Phase::Pegging if record.game.pegging_reset_pending => (
+                        record.game.current_player(),
+                        "acknowledge-pegging-reset",
+                        json!({}),
+                    ),
+                    Phase::Pegging => {
+                        let side = record.game.current_player();
+                        let legal = record.game.legal_cards(side);
+                        if let Some(card) = legal.first() {
+                            (side, "play", json!({"id": card.id}))
+                        } else {
+                            (side, "go", json!({}))
+                        }
+                    }
+                    Phase::PeggingComplete
+                    | Phase::ScorePone
+                    | Phase::ScoreDealer
+                    | Phase::ScoreCrib => (
+                        human_scoring_controller(&record).unwrap(),
+                        "continue-scoring",
+                        json!({}),
+                    ),
+                    Phase::GameOver => unreachable!(),
                 }
-                Phase::PeggingComplete
-                | Phase::ScorePone
-                | Phase::ScoreDealer
-                | Phase::ScoreCrib => (record.game.dealer, "continue-scoring", json!({})),
-                Phase::GameOver => unreachable!(),
             };
             let account = if side == Side::Left { &garrett } else { &kurt };
             let view = human_game_status(

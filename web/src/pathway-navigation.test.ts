@@ -95,7 +95,7 @@ describe("local pathway navigation", () => {
 
   it("keeps pathway navigation in browser history", () => {
     expect(source).toContain('const PATHWAY_VIEW_PARAM = "pathwayView"');
-    expect(source).toContain("window.history.pushState(pathwayHistoryState(route), \"\", pathwayUrl(route))");
+    expect(source).toContain("window.history.pushState(pathwayHistoryState(route), \"\", pathwayUrl(route, true))");
     expect(source).toMatch(/window\.addEventListener\("popstate"[\s\S]*applyPathwayRoute\(pathwayRouteFromLocation\(\)\)/);
     expect(source).toMatch(/pathwayStatsReturn[\s\S]*window\.history\.back\(\)/);
     expect(source).toMatch(/function openAnalytics[\s\S]*pushState\(pathwayHistoryState\("statistics"\)/);

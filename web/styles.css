@@ -7921,6 +7921,14 @@ body[data-auth="signed-in"] .pathway-login-note {
   animation: people-challenge-pulse 1.7s ease-in-out infinite;
 }
 
+.people-presence.has-game:not(.has-challenge) .people-presence-toggle {
+  border-color: #258460;
+  background: color-mix(in srgb, var(--entry-panel) 88%, #7bd9b5);
+  box-shadow:
+    inset 0 0 0 1px rgba(37, 132, 96, 0.14),
+    0 10px 28px rgba(4, 31, 24, 0.2);
+}
+
 .people-presence-panel {
   position: absolute;
   top: calc(100% + 10px);
@@ -8060,6 +8068,12 @@ body[data-auth="signed-in"] .pathway-login-note {
 .people-list-item.is-challenge {
   border-color: #258460;
   background: color-mix(in srgb, var(--entry-panel-alt) 84%, #7bd9b5);
+}
+
+.people-list-item.is-game {
+  border-color: #258460;
+  background: color-mix(in srgb, var(--entry-panel-soft) 82%, #7bd9b5);
+  box-shadow: inset 4px 0 #258460;
 }
 
 .people-avatar {

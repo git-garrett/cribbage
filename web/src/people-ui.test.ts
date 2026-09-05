@@ -162,6 +162,19 @@ describe("human clubhouse UI", () => {
     expect(css).toContain(".people-list-item.is-looking");
   });
 
+  it("restores an active human game from the online pill and Human pathway", () => {
+    expect(html).toContain('id="people-table-section"');
+    expect(html).toContain('id="people-table-list"');
+    expect(source).toContain("activeTable: HumanTable | null");
+    expect(source).toContain("function resumableHumanTable");
+    expect(source).toContain("function humanTableResumeItem");
+    expect(source).toContain('actionLabel: "Resume"');
+    expect(source).toContain("peopleDirectory.activeTable = table.phase === \"complete\" ? null : table");
+    expect(source).toContain("pathwayUrl(route, true)");
+    expect(css).toContain(".people-list-item.is-game");
+    expect(css).toContain(".people-presence.has-game:not(.has-challenge)");
+  });
+
   it("opens a shared table, cuts for first deal, and enters the human game", () => {
     expect(html).toContain('id="human-table-page"');
     expect(html).toContain('id="human-table-cut"');
@@ -183,6 +196,11 @@ describe("human clubhouse UI", () => {
     expect(source).toMatch(/next\.phase === "ai_discarding"[\s\S]*activeHumanTable[\s\S]*scheduleHumanGamePoll\(\)/);
     expect(source).toMatch(/els\.go\.hidden = !\(activeHumanTable[\s\S]*game\.canGo/);
     expect(source).toMatch(/function shouldAutoHumanGo[\s\S]*!activeHumanTable/);
+  });
+
+  it("replaces a stale count summary when the other player advances scoring", () => {
+    expect(source).toMatch(/function applyHumanGameResponse[\s\S]*currentScoringScoreEvent\(response\.snapshot\.gameId \?\? null, response\.state\)/);
+    expect(source).toMatch(/state\.activeScoreSummary\.key !== currentScoreEvent\?\.id[\s\S]*state\.activeScoreSummary = null/);
   });
 
   it("reviews both human players with Ace and exposes player tabs after the game", () => {
