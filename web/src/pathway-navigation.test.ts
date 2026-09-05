@@ -43,6 +43,7 @@ describe("local pathway navigation", () => {
     expect(html).toContain("Play, learn, review your progress, or adjust settings.");
     expect(html).toContain("<strong>Training</strong>");
     expect(html).toContain("Whether you're a beginner or want strategies for mastering the game.");
+    expect(html).toMatch(/data-pathway-target="tutorial"[\s\S]*?<strong>Training<\/strong>[\s\S]*?<em class="pathway-coming-soon">Coming soon<\/em>/);
     expect(html).toContain('<span class="pathway-card-kicker">Track your game</span>');
     expect(html).not.toContain("pathway-pill");
     expect(html).not.toContain('<i class="active"></i>');
@@ -76,6 +77,13 @@ describe("local pathway navigation", () => {
     expect(css).toMatch(/\.pathway-brandbar\s*\{[^}]*grid-template-columns:\s*minmax\(58px, 1fr\) minmax\(0, auto\) minmax\(70px, 1fr\)[^}]*min-height:\s*68px/s);
     expect(css).toMatch(/\.pathway-logo\s*\{[^}]*grid-column:\s*2[^}]*width:\s*min\(168px, 43vw\)/s);
     expect(css).toMatch(/\.pathway-brandbar > \.people-presence\s*\{[^}]*grid-column:\s*3/s);
+  });
+
+  it("links both persistent logos to the pathway home", () => {
+    expect(html).toMatch(/<a id="pathway-logo-home" class="pathway-logo" href="\/" aria-label="Strong Cribbage home">/);
+    expect(html).toMatch(/<a id="app-brand-home" class="app-brand" href="\/" aria-label="Strong Cribbage home">/);
+    expect(source).toMatch(/pathwayLogoHome\.addEventListener\("click"[\s\S]*navigatePathway\("home"\)/s);
+    expect(source).toMatch(/appBrandHome\.addEventListener\("click"[\s\S]*leaveActivePathwayGame\("home"\)/s);
   });
 
   it("removes the redundant Home control on the app home and aligns logo left, online right", () => {

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const mainSource = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 
 describe("scoring presentation", () => {
   it("places opponent scoring at the north edge and player scoring at the south edge", () => {
@@ -33,5 +34,12 @@ describe("scoring presentation", () => {
     expect(css).toMatch(/@keyframes game-score-notification-after-lift[\s\S]*68%\s*\{[^}]*opacity:\s*1[\s\S]*100%\s*\{[^}]*opacity:\s*0/s);
     expect(css).toMatch(/@keyframes score-card-lift-cycle[\s\S]*translateY\(calc\(var\(--game-card-height\) \* -0\.2\)\)[\s\S]*translateY\(0\)/s);
     expect(css).not.toContain("score-card-wiggle");
+  });
+
+  it("offers a felt control that skips presentation directly to the current summary", () => {
+    expect(html).toMatch(/id="skip-counting"[^>]*>Skip to summary<\/button>/);
+    expect(mainSource).toMatch(/skipCounting\.addEventListener\("click"[\s\S]*clearNoticeQueue\(\)[\s\S]*ensureCurrentScoreSummary\(state\.game\)[\s\S]*maybeOpenScoreSummary\(\)/s);
+    expect(mainSource).toContain("els.skipCounting.hidden = !game.scoring || Boolean(state.activeScoreSummary)");
+    expect(css).toMatch(/\.skip-counting\s*\{[^}]*position:\s*absolute[^}]*z-index:\s*10/s);
   });
 });

@@ -499,6 +499,7 @@ const els = {
   aceTools: document.querySelector("#ace-tools") as HTMLElement,
   pathwayPage: document.querySelector("#pathway-page") as HTMLElement,
   pathwayBrandbar: document.querySelector(".pathway-brandbar") as HTMLElement,
+  pathwayLogoHome: document.querySelector("#pathway-logo-home") as HTMLAnchorElement,
   pathwayHeaderHome: document.querySelector("#pathway-header-home") as HTMLButtonElement,
   pathwayHeaderParentLabel: document.querySelector("#pathway-header-parent-label") as HTMLElement,
   pathwayViews: [...document.querySelectorAll<HTMLElement>("[data-pathway-view]")],
@@ -580,6 +581,7 @@ const els = {
   splashNameRow: document.querySelector("#splash-name-row") as HTMLElement,
   splashFirstName: document.querySelector("#splash-first-name") as HTMLInputElement,
   board: document.querySelector("#board") as HTMLElement,
+  appBrandHome: document.querySelector("#app-brand-home") as HTMLAnchorElement,
   appBack: document.querySelector("#app-back") as HTMLButtonElement,
   mobileHeaderReveal: document.querySelector("#mobile-header-reveal") as HTMLButtonElement,
   fontSizeSelect: document.querySelector("#font-size-select") as HTMLSelectElement,
@@ -700,6 +702,7 @@ const els = {
   scoreSummaryEyebrow: document.querySelector("#score-summary-eyebrow") as HTMLElement,
   scoreSummaryTitle: document.querySelector("#score-summary-title") as HTMLElement,
   scoreSummaryItems: document.querySelector("#score-summary-items") as HTMLElement,
+  skipCounting: document.querySelector("#skip-counting") as HTMLButtonElement,
   continueScoring: document.querySelector("#continue-scoring") as HTMLButtonElement,
   acknowledgePeggingReset: document.querySelector("#acknowledge-pegging-reset") as HTMLButtonElement,
   continuePegging: document.querySelector("#continue-pegging") as HTMLButtonElement,
@@ -4498,8 +4501,6 @@ async function animatePeggingPlay(
   flyingCard.style.width = `${destinationRect.width}px`;
   flyingCard.style.height = `${destinationRect.height}px`;
   layer.append(flyingCard);
-  destination.classList.add("pegging-card-arriving");
-  document.body.append(layer);
 
   const startX = source.rect.left - destinationRect.left;
   const startY = source.rect.top - destinationRect.top;
@@ -4508,6 +4509,13 @@ async function animatePeggingPlay(
   const midScaleX = 1 + ((startScaleX - 1) * 0.42);
   const midScaleY = 1 + ((startScaleY - 1) * 0.42);
   const rotation = player === "ai" ? "4deg" : "-2deg";
+
+  // Paint the flight clone at its source before it enters the document. WAAPI
+  // does not apply its first keyframe synchronously in every browser.
+  flyingCard.style.opacity = "0.92";
+  flyingCard.style.transform = `translate3d(${startX}px, ${startY}px, 0) scale(${startScaleX}, ${startScaleY}) rotate(${rotation})`;
+  destination.classList.add("pegging-card-arriving");
+  document.body.append(layer);
 
   try {
     await flyingCard.animate([
@@ -5090,6 +5098,7 @@ function renderScoreSummaryDialog(): void {
     els.scoreSummaryItems.innerHTML = "";
     return;
   }
+  els.skipCounting.hidden = true;
   els.scoreSummaryEyebrow.textContent = summary.category === "crib" ? "Crib counted" : "Hand counted";
   els.scoreSummaryTitle.textContent = summary.title;
   els.scoringPoints.textContent = `${summary.points} point${summary.points === 1 ? "" : "s"}`;
@@ -7662,6 +7671,8 @@ function render(game: GameState | null): void {
   els.go.disabled = !game.canGo;
   els.continueScoring.hidden = game.phase === "game_over";
   els.continueScoring.disabled = game.phase === "game_over" || !game.scoring;
+  els.skipCounting.hidden = !game.scoring || Boolean(state.activeScoreSummary);
+  els.skipCounting.disabled = state.pending;
   els.acknowledgePeggingReset.hidden = !game.peggingResetPending;
   els.continuePegging.hidden = game.peggingResetPending || game.phase !== "pegging_complete";
   if (state.pending) {
@@ -8007,6 +8018,18 @@ for (const button of els.pathwayBackButtons) {
     navigatePathway(destination || (view ? pathwayParentRoute(view) : null) || "home");
   });
 }
+
+els.pathwayLogoHome.addEventListener("click", (event) => {
+  if (!PATHWAY_NAV_ENABLED) return;
+  event.preventDefault();
+  navigatePathway("home");
+});
+
+els.appBrandHome.addEventListener("click", (event) => {
+  if (!PATHWAY_NAV_ENABLED) return;
+  event.preventDefault();
+  leaveActivePathwayGame("home");
+});
 
 els.appBack.addEventListener("click", () => {
   if (PATHWAY_NAV_ENABLED) {
@@ -8723,6 +8746,14 @@ els.continueScoring.addEventListener("click", async () => {
     state.pending = false;
     render(state.game);
   }
+});
+
+els.skipCounting.addEventListener("click", () => {
+  if (state.pending || !state.game?.scoring) return;
+  clearNoticeQueue();
+  ensureCurrentScoreSummary(state.game);
+  maybeOpenScoreSummary();
+  els.skipCounting.hidden = true;
 });
 
 els.continuePegging.addEventListener("click", async () => {

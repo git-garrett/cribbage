@@ -663,7 +663,17 @@ select {
 }
 
 .app-brand {
+  display: block;
   min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.app-brand:focus-visible,
+.pathway-logo:focus-visible {
+  outline: 3px solid var(--entry-focus);
+  outline-offset: 4px;
+  border-radius: 8px;
 }
 
 .app-brand-logo {
@@ -4336,8 +4346,8 @@ button.card {
   margin-top: 8px;
 }
 
-/* Extra Large uses crib-notation tokens instead of miniature playing cards:
-   one full-size rank over one full-size suit, directly on the table felt. */
+/* Extra Large uses compact, high-contrast crib-notation cards: one full-size
+   rank over one full-size suit on an opaque playing-card face. */
 body[data-font-size="x-large"] .card:not(.back) {
   display: inline-grid;
   grid-template-rows: auto auto;
@@ -4350,11 +4360,11 @@ body[data-font-size="x-large"] .card:not(.back) {
   height: auto !important;
   min-height: 1.9em !important;
   margin-left: 0;
-  padding: 0.04em 0.08em 0.1em;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  padding: 0.06em 0.12em 0.12em;
+  border: 1px solid var(--line-strong) !important;
+  border-radius: 0.22em !important;
+  background: var(--paper) !important;
+  box-shadow: var(--card-shadow) !important;
 }
 
 body[data-font-size="x-large"] .card .corner {
@@ -5365,14 +5375,19 @@ body[data-font-size="x-large"] .app[data-view="game"] .circular-track-skunk-labe
    player's name is allowed a little more horizontal room. */
 .game-notification-start {
   --notice-accent: var(--game-gold) !important;
+  width: clamp(168px, calc(var(--notice-font) * 10.5), 280px);
+  min-height: clamp(112px, calc(var(--notice-font) * 6.4), 174px);
+  aspect-ratio: auto;
+  padding-inline: clamp(20px, calc(var(--notice-font) * 1.35), 38px);
+  border-radius: 999px;
 }
 
 .game-notification-start .game-notification-points {
-  max-width: 88%;
-  overflow: hidden;
-  font-size: clamp(28px, calc(var(--notice-font) * 2.25), 42px);
+  max-width: 100%;
+  overflow: visible;
+  font-size: clamp(28px, calc(var(--notice-font) * 2.05), 42px);
   letter-spacing: -0.025em;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   white-space: nowrap;
 }
 
@@ -6170,6 +6185,16 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   margin-left: -22px;
 }
 
+@media (min-width: 960px) {
+  .app[data-view="game"] #plays .played-active.pegging-row {
+    flex-wrap: nowrap;
+  }
+
+  .app[data-view="game"] #plays .played-active.pegging-row .card + .card {
+    margin-left: calc(var(--game-card-width) * -0.68);
+  }
+}
+
 .app[data-view="game"] .played > .score-cut {
   width: var(--game-card-width);
   height: var(--game-card-height);
@@ -6604,6 +6629,34 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   backdrop-filter: blur(5px);
 }
 
+.skip-counting {
+  position: absolute;
+  top: 50%;
+  right: 18px;
+  z-index: 10;
+  width: auto;
+  min-height: 42px;
+  padding: 8px 14px;
+  border: 1px solid rgba(232, 197, 117, 0.72);
+  border-radius: 999px;
+  background: rgba(7, 31, 56, 0.9);
+  box-shadow: 0 8px 20px rgba(2, 28, 21, 0.26);
+  color: var(--game-cream);
+  font-size: max(12px, var(--control-small-font));
+  font-weight: 850;
+  transform: translateY(-50%);
+}
+
+.skip-counting:hover {
+  border-color: var(--game-gold);
+  background: var(--game-navy);
+}
+
+.skip-counting:focus-visible {
+  outline: 3px solid var(--human);
+  outline-offset: 3px;
+}
+
 .score-summary-dialog[hidden] {
   display: none;
 }
@@ -6799,6 +6852,12 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   justify-self: center;
   display: block;
   width: min(68vw, 285px);
+  color: inherit;
+  text-decoration: none;
+}
+
+.pathway-logo-picture {
+  display: block;
 }
 
 .pathway-header-home {
