@@ -5353,6 +5353,15 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(first.complete_cycles, 1);
+        session.use_dynamic_profile(first);
+        persist_session_snapshot(&data_dir, &session).unwrap();
+        let mut session = load_session_by_id(&data_dir, &session.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            session.dynamic.as_ref().unwrap().profile().complete_cycles,
+            1
+        );
 
         session.game.hand_number = 5;
         session
@@ -5370,6 +5379,23 @@ mod tests {
             .unwrap();
         assert_eq!(second.complete_cycles, 2);
         assert_eq!(second.handicap_cycles, 2);
+        session.use_dynamic_profile(second.clone());
+        persist_session_snapshot(&data_dir, &session).unwrap();
+        let resumed = load_session_by_id(&data_dir, &session.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            resumed.dynamic.as_ref().unwrap().profile().complete_cycles,
+            2
+        );
+        let resumed_handicap = resumed
+            .dynamic
+            .as_ref()
+            .unwrap()
+            .profile()
+            .handicap_per_game()
+            .unwrap();
+        assert!((resumed_handicap - second.handicap_per_game().unwrap()).abs() < 1e-12);
         assert!(sync_dynamic_player_profile(&data_dir, travis.id, &session)
             .unwrap()
             .is_none());

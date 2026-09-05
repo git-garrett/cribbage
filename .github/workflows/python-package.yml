@@ -27,6 +27,7 @@ jobs:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@stable
       - run: npm ci
+      - run: npx playwright install --with-deps chromium
       - run: pip install -e '.[dev]'
       - run: scripts/run-quiet.sh "Python lint" flake8 src tests scripts webapp.py --count --select=E9,F63,F7,F82 --show-source --statistics
       - run: scripts/run-quiet.sh "Python tests" pytest
@@ -35,3 +36,4 @@ jobs:
       - run: npm run --silent test:web
       - run: npm test --silent
       - run: npm run --silent build
+      - run: scripts/run-quiet.sh "Browser regressions" node scripts/test-browser-regressions.cjs
