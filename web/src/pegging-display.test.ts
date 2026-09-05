@@ -33,9 +33,10 @@ describe("peggingDisplaySeries", () => {
     expect(recentPeggingCards([1, 2, 3], 5)).toEqual({ hidden: [], visible: [1, 2, 3] });
   });
 
-  it("uses overlap to retain more of the current series on mobile", () => {
+  it("keeps every possible card in a desktop series and compacts mobile", () => {
     expect(peggingDisplayCardLimit(390)).toBe(7);
     expect(peggingDisplayCardLimit(640)).toBe(7);
-    expect(peggingDisplayCardLimit(641)).toBe(4);
+    expect(peggingDisplayCardLimit(641)).toBe(8);
+    expect(peggingDisplayCardLimit(1440)).toBe(8);
   });
 });

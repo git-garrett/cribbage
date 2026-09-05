@@ -15,8 +15,15 @@ export function isReviewableUserDecision(event: AnalyticsEvent): event is Review
 }
 
 export function gameAnalysisProgress(events: AnalyticsEvent[], gameId: string): GameAnalysisProgress {
+  const reviewsBothPlayers = events.some((event) =>
+    event.type === "game" && event.action === "start" && event.gameId === gameId && event.opponent === "human"
+  );
   const decisions = events
-    .filter(isReviewableUserDecision)
+    .filter((event): event is ReviewableDecision =>
+      (event.type === "discard" && (event.player === "human" || (reviewsBothPlayers && event.player === "ai"))) ||
+      (event.type === "pegging" && event.action === "play" &&
+        (event.player === "human" || (reviewsBothPlayers && event.player === "ai")))
+    )
     .filter((event) => event.gameId === gameId);
   const reviewed = decisions.filter((event) => Boolean(event.review)).length;
   return {

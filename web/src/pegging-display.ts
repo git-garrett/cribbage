@@ -15,7 +15,7 @@ export interface RecentPeggingCards<Card> {
 }
 
 export function peggingDisplayCardLimit(viewportWidth: number): number {
-  return viewportWidth <= 640 ? 7 : 4;
+  return viewportWidth <= 640 ? 7 : 8;
 }
 
 export function recentPeggingCards<Card>(cards: Card[], visibleLimit: number): RecentPeggingCards<Card> {

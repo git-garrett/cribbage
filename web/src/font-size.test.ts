@@ -14,10 +14,11 @@ describe("Extra Large accessibility typography", () => {
     expect(values.every((value) => value === 40)).toBe(true);
   });
 
-  it("renders rank-over-suit tokens at the Extra Large copy size without a card chassis", () => {
+  it("renders rank-over-suit tokens on an opaque compact card face", () => {
     expect(css).toMatch(/body\[data-font-size="x-large"\] \.card:not\(\.back\)\s*\{[^}]*display:\s*inline-grid/s);
-    expect(css).toMatch(/body\[data-font-size="x-large"\] \.card:not\(\.back\)\s*\{[^}]*border:\s*0\s*!important/s);
-    expect(css).toMatch(/body\[data-font-size="x-large"\] \.card:not\(\.back\)\s*\{[^}]*background:\s*transparent\s*!important/s);
+    expect(css).toMatch(/body\[data-font-size="x-large"\] \.card:not\(\.back\)\s*\{[^}]*border:\s*1px solid var\(--line-strong\)\s*!important/s);
+    expect(css).toMatch(/body\[data-font-size="x-large"\] \.card:not\(\.back\)\s*\{[^}]*background:\s*var\(--paper\)\s*!important/s);
+    expect(css).toMatch(/body\[data-font-size="x-large"\] \.card:not\(\.back\)\s*\{[^}]*box-shadow:\s*var\(--card-shadow\)\s*!important/s);
     expect(css).toMatch(/body\[data-font-size="x-large"\][^{]*\.card \.rank[^{]*\{[^}]*font-size:\s*var\(--app-font\)/s);
     expect(css).toMatch(/body\[data-font-size="x-large"\][^{]*\.card \.suit[^{]*\{[^}]*font-size:\s*var\(--app-font\)/s);
   });

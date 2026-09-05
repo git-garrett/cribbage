@@ -245,6 +245,9 @@ const DISMISSED_GAME_OVER_STORAGE_KEY = "strong-cribbage.dismissedGameOverId";
 const LEADERBOARD_CACHE_KEY = "strong-cribbage.leaderboard.v1";
 const PEOPLE_IDLE_MS = 15 * 60 * 1000;
 const PEOPLE_ACTIVITY_HEARTBEAT_MIN_MS = 1000;
+const PEOPLE_CHALLENGE_RETRY_MS = 1_500;
+const PEOPLE_CHALLENGE_ATTENTION_MS = 2_400;
+const HUMAN_GAME_WATCH_RETRY_MS = 1_000;
 
 function normalizeAppFontSize(value: string | null): AppFontSize {
   return value === "large" || value === "x-large" ? value : "normal";
@@ -499,6 +502,7 @@ const els = {
   aceTools: document.querySelector("#ace-tools") as HTMLElement,
   pathwayPage: document.querySelector("#pathway-page") as HTMLElement,
   pathwayBrandbar: document.querySelector(".pathway-brandbar") as HTMLElement,
+  pathwayLogoHome: document.querySelector("#pathway-logo-home") as HTMLAnchorElement,
   pathwayHeaderHome: document.querySelector("#pathway-header-home") as HTMLButtonElement,
   pathwayHeaderParentLabel: document.querySelector("#pathway-header-parent-label") as HTMLElement,
   pathwayViews: [...document.querySelectorAll<HTMLElement>("[data-pathway-view]")],
@@ -513,6 +517,8 @@ const els = {
   peoplePresenceAlert: document.querySelector("#people-presence-alert") as HTMLElement,
   peoplePresencePanel: document.querySelector("#people-presence-panel") as HTMLElement,
   peoplePresenceClose: document.querySelector("#people-presence-close") as HTMLButtonElement,
+  peopleTableSection: document.querySelector("#people-table-section") as HTMLElement,
+  peopleTableList: document.querySelector("#people-table-list") as HTMLElement,
   peopleChallengeSection: document.querySelector("#people-challenge-section") as HTMLElement,
   peopleChallengeList: document.querySelector("#people-challenge-list") as HTMLElement,
   peopleOnlineList: document.querySelector("#people-online-list") as HTMLElement,
@@ -580,6 +586,7 @@ const els = {
   splashNameRow: document.querySelector("#splash-name-row") as HTMLElement,
   splashFirstName: document.querySelector("#splash-first-name") as HTMLInputElement,
   board: document.querySelector("#board") as HTMLElement,
+  appBrandHome: document.querySelector("#app-brand-home") as HTMLAnchorElement,
   appBack: document.querySelector("#app-back") as HTMLButtonElement,
   mobileHeaderReveal: document.querySelector("#mobile-header-reveal") as HTMLButtonElement,
   fontSizeSelect: document.querySelector("#font-size-select") as HTMLSelectElement,
@@ -700,6 +707,7 @@ const els = {
   scoreSummaryEyebrow: document.querySelector("#score-summary-eyebrow") as HTMLElement,
   scoreSummaryTitle: document.querySelector("#score-summary-title") as HTMLElement,
   scoreSummaryItems: document.querySelector("#score-summary-items") as HTMLElement,
+  skipCounting: document.querySelector("#skip-counting") as HTMLButtonElement,
   continueScoring: document.querySelector("#continue-scoring") as HTMLButtonElement,
   acknowledgePeggingReset: document.querySelector("#acknowledge-pegging-reset") as HTMLButtonElement,
   continuePegging: document.querySelector("#continue-pegging") as HTMLButtonElement,
@@ -784,6 +792,10 @@ els.serverBusyRetry.addEventListener("click", () => {
 
 async function retryAfterServerBusy(retry: ServerBusyRetry): Promise<void> {
   const recovered = await reconcileRemoteGameState();
+  if (activeHumanTable) {
+    await retry();
+    return;
+  }
   if (recovered && await resumeReconciledGame(recovered)) return;
   await retry();
 }
@@ -924,6 +936,7 @@ interface PeopleDirectoryResponse {
   players: PeoplePlayer[];
   incomingChallenges: PeopleChallenge[];
   outgoingChallenges: PeopleChallenge[];
+  activeTable: HumanTable | null;
 }
 
 interface PeopleProfileResponse {
@@ -943,7 +956,7 @@ interface HumanCutCard {
 
 interface HumanTable {
   id: string;
-  phase: "waiting" | "cut_for_deal" | "deal_ready";
+  phase: "waiting" | "cut_for_deal" | "playing" | "complete";
   viewerSeat: "challenger" | "challenged";
   challenger: PeoplePlayer;
   challenged: PeoplePlayer;
@@ -954,6 +967,27 @@ interface HumanTable {
 
 interface HumanTableResponse {
   table: HumanTable;
+}
+
+interface HumanGameResponse extends ServerGameActionResponse {
+  tableId: string;
+  revision: number;
+  canContinueScoring: boolean;
+  canAcknowledgePeggingReset: boolean;
+  players: Record<PlayerKey, string>;
+  acknowledgment?: {
+    actionId: string;
+    appliedRevision: number;
+    alreadyApplied: boolean;
+  };
+  watchTimedOut?: boolean;
+}
+
+interface PendingHumanGameCommand {
+  tableId: string;
+  action: string;
+  payloadKey: string;
+  actionId: string;
 }
 
 type PendingAuthDestination =
@@ -987,13 +1021,24 @@ let peopleDirectory: PeopleDirectoryResponse = {
   players: [],
   incomingChallenges: [],
   outgoingChallenges: [],
+  activeTable: null,
 };
 let ownPeopleProfile: PeopleProfile | null = null;
 let selectedPeopleProfile: PeopleProfile | null = null;
 let pendingAvatarDataUrl: string | null = null;
 let activeHumanTable: HumanTable | null = null;
 let peoplePollTimer: number | null = null;
+let peopleChallengeWatchGeneration = 0;
+let peopleChallengeAttentionTimer: number | null = null;
 let humanTablePollTimer: number | null = null;
+let humanGameWatchGeneration = 0;
+let humanGameTableId: string | null = null;
+let humanGameRevision = -1;
+let pendingHumanGameCommand: PendingHumanGameCommand | null = null;
+let humanGameRefreshPromise: Promise<void> | null = null;
+let humanGameCanContinueScoring = false;
+let humanGameCanAcknowledgePeggingReset = false;
+let humanDecisionReviewPlayer: PlayerKey = "human";
 let peopleIdleTimer: number | null = null;
 let peopleLastActivityAt = Date.now();
 let peopleLastHeartbeatAt = 0;
@@ -1579,6 +1624,8 @@ function handicapForPlayer(
     selectedPeopleProfile,
     activeHumanTable?.challenger,
     activeHumanTable?.challenged,
+    peopleDirectory.activeTable?.challenger,
+    peopleDirectory.activeTable?.challenged,
     ...peopleDirectory.players,
     ...peopleDirectory.incomingChallenges.map((challenge) => challenge.player),
     ...peopleDirectory.outgoingChallenges.map((challenge) => challenge.player),
@@ -1700,12 +1747,13 @@ function renderPeopleAvatar(element: HTMLElement, player: Pick<PeoplePlayer, "di
 
 function peopleListItem(
   player: PeoplePlayer,
-  options: { challenge?: boolean; looking?: boolean; actionLabel?: string } = {},
+  options: { challenge?: boolean; game?: boolean; looking?: boolean; actionLabel?: string; statusText?: string } = {},
 ): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "people-list-item";
   if (options.challenge) button.classList.add("is-challenge");
+  if (options.game) button.classList.add("is-game");
   if (options.looking) button.classList.add("is-looking");
   const avatar = document.createElement("span");
   avatar.className = "people-avatar people-list-avatar";
@@ -1715,11 +1763,11 @@ function peopleListItem(
   const name = document.createElement("strong");
   setPlayerIdentity(name, player.displayName, player.dynamicHandicap ?? null);
   const status = document.createElement("small");
-  status.textContent = options.challenge
+  status.textContent = options.statusText ?? (options.challenge
     ? "Wants to play you"
     : options.looking
       ? "Looking for a game"
-      : "Online now";
+      : "Online now");
   copy.append(name, status);
   const action = document.createElement("span");
   action.className = "people-list-action";
@@ -1728,19 +1776,99 @@ function peopleListItem(
   return button;
 }
 
+function resumableHumanTable(): HumanTable | null {
+  if (activeHumanTable && activeHumanTable.phase !== "complete") return activeHumanTable;
+  if (peopleDirectory.activeTable?.phase !== "complete") return peopleDirectory.activeTable;
+  return null;
+}
+
+function humanTableOpponent(table: HumanTable): PeoplePlayer {
+  return table.viewerSeat === "challenger" ? table.challenged : table.challenger;
+}
+
+function humanTableResumeStatus(table: HumanTable): string {
+  if (table.phase === "waiting") return "Waiting for them to join";
+  if (table.phase === "cut_for_deal") return "Game ready · Cut for deal";
+  return "Game in progress";
+}
+
+function humanTableResumeItem(table: HumanTable): HTMLButtonElement {
+  return peopleListItem(humanTableOpponent(table), {
+    game: true,
+    actionLabel: "Resume",
+    statusText: humanTableResumeStatus(table),
+  });
+}
+
+function resumeHumanTable(table: HumanTable): void {
+  els.peoplePresencePanel.hidden = true;
+  els.peoplePresenceToggle.setAttribute("aria-expanded", "false");
+  void openHumanTable(table.id);
+}
+
+function challengeIds(directory: PeopleDirectoryResponse): string[] {
+  return directory.incomingChallenges.map((challenge) => challenge.id).sort();
+}
+
+function announceIncomingChallenge(challenge: PeopleChallenge): void {
+  els.peoplePresenceAlert.setAttribute(
+    "aria-label",
+    `${challenge.player.displayName} challenged you to a game`,
+  );
+  els.peoplePresence.classList.remove("challenge-arrived");
+  void els.peoplePresence.offsetWidth;
+  els.peoplePresence.classList.add("challenge-arrived");
+  if (peopleChallengeAttentionTimer !== null) window.clearTimeout(peopleChallengeAttentionTimer);
+  peopleChallengeAttentionTimer = window.setTimeout(() => {
+    els.peoplePresence.classList.remove("challenge-arrived");
+    peopleChallengeAttentionTimer = null;
+  }, PEOPLE_CHALLENGE_ATTENTION_MS);
+}
+
+function applyPeopleDirectory(directory: PeopleDirectoryResponse): void {
+  const previousIds = new Set(challengeIds(peopleDirectory));
+  const arrived = directory.incomingChallenges.find((challenge) => !previousIds.has(challenge.id));
+  peopleDirectory = directory;
+  renderPeopleDirectory();
+  if (arrived) announceIncomingChallenge(arrived);
+}
+
 function renderPeopleDirectory(): void {
   els.peoplePresence.hidden = false;
-  els.peoplePresenceLabel.textContent = `${peopleDirectory.onlineCount} online`;
+  const activeTable = resumableHumanTable();
+  els.peoplePresenceLabel.textContent = activeTable
+    ? `${peopleDirectory.onlineCount} online · Resume`
+    : `${peopleDirectory.onlineCount} online`;
   const challengeCount = peopleDirectory.incomingChallenges.length;
   els.peoplePresenceAlert.hidden = challengeCount === 0;
   els.peoplePresenceAlert.textContent = String(challengeCount);
+  if (!challengeCount) {
+    els.peoplePresenceAlert.removeAttribute("aria-label");
+    els.peoplePresence.classList.remove("challenge-arrived");
+  } else {
+    els.peoplePresenceAlert.setAttribute(
+      "aria-label",
+      `${challengeCount} pending game challenge${challengeCount === 1 ? "" : "s"}`,
+    );
+  }
   els.peoplePresence.classList.toggle("has-challenge", challengeCount > 0);
+  els.peoplePresence.classList.toggle("has-game", Boolean(activeTable));
   els.peoplePresenceToggle.setAttribute(
     "aria-label",
     challengeCount
       ? `${challengeCount} player challenge${challengeCount === 1 ? "" : "s"}; ${peopleDirectory.onlineCount} players online`
+      : activeTable
+        ? `Resume game with ${humanTableOpponent(activeTable).displayName}; ${peopleDirectory.onlineCount} players online`
       : `${peopleDirectory.onlineCount} players online`,
   );
+
+  els.peopleTableSection.hidden = !activeTable;
+  els.peopleTableList.replaceChildren();
+  if (activeTable) {
+    const row = humanTableResumeItem(activeTable);
+    row.addEventListener("click", () => resumeHumanTable(activeTable));
+    els.peopleTableList.append(row);
+  }
 
   els.peopleChallengeSection.hidden = challengeCount === 0;
   els.peopleChallengeList.replaceChildren();
@@ -1765,7 +1893,12 @@ function renderPeopleDirectory(): void {
   }
 
   els.humanDirectory.replaceChildren();
-  if (!peopleDirectory.players.length) {
+  if (activeTable) {
+    const row = humanTableResumeItem(activeTable);
+    row.addEventListener("click", () => resumeHumanTable(activeTable));
+    els.humanDirectory.append(row);
+  }
+  if (!peopleDirectory.players.length && !activeTable) {
     const empty = document.createElement("div");
     empty.className = "human-directory-empty";
     const title = document.createElement("strong");
@@ -1823,15 +1956,35 @@ function recordPeopleActivity(): void {
 async function refreshPeople(options: { heartbeat?: boolean } = {}): Promise<void> {
   try {
     if (authenticatedUser && options.heartbeat) peopleLastHeartbeatAt = Date.now();
-    peopleDirectory = authenticatedUser && options.heartbeat
+    const directory = authenticatedUser && options.heartbeat
       ? await authJson<PeopleDirectoryResponse>("/api/people/presence", {
         lookingForGame: isLookingForHumanGame(),
       })
       : await authJson<PeopleDirectoryResponse>("/api/people/online");
-    renderPeopleDirectory();
+    applyPeopleDirectory(directory);
   } catch (error) {
     console.warn("Player presence refresh failed", error);
   }
+}
+
+function startPeopleChallengeWatch(): void {
+  const generation = ++peopleChallengeWatchGeneration;
+  if (!authenticatedUser) return;
+  void (async () => {
+    while (authenticatedUser && generation === peopleChallengeWatchGeneration) {
+      try {
+        const directory = await authJson<PeopleDirectoryResponse>("/api/people/challenges/watch", {
+          knownChallengeIds: challengeIds(peopleDirectory),
+        });
+        if (!authenticatedUser || generation !== peopleChallengeWatchGeneration) return;
+        applyPeopleDirectory(directory);
+      } catch (error) {
+        if (!authenticatedUser || generation !== peopleChallengeWatchGeneration) return;
+        console.warn("Player challenge watch failed", error);
+        await waitMs(PEOPLE_CHALLENGE_RETRY_MS);
+      }
+    }
+  })();
 }
 
 function schedulePeoplePoll(): void {
@@ -1870,6 +2023,7 @@ async function initializePeople(): Promise<void> {
     peopleIdleTimer = null;
   }
   await refreshPeople({ heartbeat: Boolean(authenticatedUser) });
+  startPeopleChallengeWatch();
   schedulePeoplePoll();
 }
 
@@ -1992,7 +2146,14 @@ function humanCutElement(card: HumanCutCard, label: string): HTMLElement {
 }
 
 function renderHumanTable(table: HumanTable): void {
+  if (activeHumanTable?.id !== table.id) {
+    humanGameWatchGeneration += 1;
+    humanGameTableId = table.id;
+    humanGameRevision = -1;
+    pendingHumanGameCommand = null;
+  }
   activeHumanTable = table;
+  peopleDirectory.activeTable = table.phase === "complete" ? null : table;
   syncPathwayResumePresentation();
   els.humanTableChallenger.replaceChildren(...playerSeat(table.challenger, "Challenger"));
   els.humanTableChallenged.replaceChildren(...playerSeat(table.challenged, "Invited player"));
@@ -2010,24 +2171,160 @@ function renderHumanTable(table: HumanTable): void {
       ? "Your cut is on the table. Waiting for the other player."
       : "Both players are seated. Low card deals first.";
     els.humanTableCut.hidden = Boolean(ownCut);
-  } else {
+  } else if (table.phase === "playing") {
     els.humanTableTitle.textContent = `${table.dealerUsername || "Dealer"} deals first.`;
-    els.humanTableMessage.textContent = "Both cuts are down and the table is ready for the first deal.";
+    els.humanTableMessage.textContent = "Both cuts are down. Opening the first deal…";
+    els.humanTableCut.hidden = true;
+  } else {
+    els.humanTableTitle.textContent = "Game complete.";
+    els.humanTableMessage.textContent = "Opening the completed game…";
     els.humanTableCut.hidden = true;
   }
 }
 
+function applyHumanGameResponse(response: HumanGameResponse): GameState {
+  const sameTable = humanGameTableId === response.tableId;
+  if (sameTable && response.revision < humanGameRevision && state.game) return state.game;
+  if (!sameTable) {
+    humanGameTableId = response.tableId;
+    humanGameRevision = -1;
+    pendingHumanGameCommand = null;
+  }
+  humanGameRevision = response.revision;
+  humanGameCanContinueScoring = response.canContinueScoring;
+  humanGameCanAcknowledgePeggingReset = response.canAcknowledgePeggingReset;
+  const currentScoreEvent = currentScoringScoreEvent(response.snapshot.gameId ?? null, response.state);
+  state.scoreSummaryQueue = state.scoreSummaryQueue.filter((summary) => summary.key === currentScoreEvent?.id);
+  if (state.activeScoreSummary && state.activeScoreSummary.key !== currentScoreEvent?.id) {
+    state.activeScoreSummary = null;
+    renderScoreSummaryDialog();
+  }
+  if (activeHumanTable && response.state.phase === "game_over") {
+    activeHumanTable.phase = "complete";
+    if (peopleDirectory.activeTable?.id === activeHumanTable.id) peopleDirectory.activeTable = null;
+  }
+  applyAuthoritativeGameState(response.snapshot, response.state);
+  syncPathwayResumePresentation();
+  return response.state;
+}
+
+async function fetchHumanGame(): Promise<GameState> {
+  if (!activeHumanTable) throw new Error("That player table is no longer open.");
+  const response = await authJson<HumanGameResponse>("/api/people/table/game", {
+    tableId: activeHumanTable.id,
+  });
+  return applyHumanGameResponse(response);
+}
+
+function startHumanGameSync(): void {
+  const generation = ++humanGameWatchGeneration;
+  const tableId = activeHumanTable?.id;
+  if (!tableId || state.game?.phase === "game_over") return;
+  void (async () => {
+    while (
+      generation === humanGameWatchGeneration
+      && activeHumanTable?.id === tableId
+      && state.game?.phase !== "game_over"
+    ) {
+      if (state.pending || !els.pathwayPage.hidden || !els.authPage.hidden) {
+        await waitMs(250);
+        continue;
+      }
+      const afterRevision = humanGameRevision;
+      try {
+        const response = await authJson<HumanGameResponse>("/api/people/table/game/watch", {
+          tableId,
+          afterRevision,
+        });
+        if (generation !== humanGameWatchGeneration || activeHumanTable?.id !== tableId) return;
+        if (state.pending || !els.pathwayPage.hidden || !els.authPage.hidden) continue;
+        if (response.revision > humanGameRevision) {
+          state.selected.clear();
+          const game = applyHumanGameResponse(response);
+          render(game);
+        }
+      } catch (error) {
+        if (generation !== humanGameWatchGeneration || activeHumanTable?.id !== tableId) return;
+        els.humanTableStatus.textContent = error instanceof Error ? error.message : "The game could not be refreshed.";
+        await waitMs(HUMAN_GAME_WATCH_RETRY_MS);
+      }
+    }
+  })();
+}
+
+async function performVisibleHumanGameRefresh(): Promise<void> {
+  if (!activeHumanTable || state.game?.phase === "game_over" || state.pending) return;
+  const tableId = activeHumanTable.id;
+  humanGameWatchGeneration += 1;
+  const beforeRevision = humanGameRevision;
+  try {
+    const response = await authJson<HumanGameResponse>("/api/people/table/game", { tableId });
+    if (activeHumanTable?.id !== tableId) return;
+    const game = applyHumanGameResponse(response);
+    if (response.revision > beforeRevision) {
+      state.selected.clear();
+      render(game);
+    }
+  } catch (error) {
+    els.humanTableStatus.textContent = error instanceof Error ? error.message : "The game could not be refreshed.";
+  } finally {
+    if (activeHumanTable?.id === tableId) startHumanGameSync();
+  }
+}
+
+function refreshVisibleHumanGame(): Promise<void> {
+  if (humanGameRefreshPromise) return humanGameRefreshPromise;
+  humanGameRefreshPromise = performVisibleHumanGameRefresh().finally(() => {
+    humanGameRefreshPromise = null;
+  });
+  return humanGameRefreshPromise;
+}
+
+async function enterHumanGame(): Promise<void> {
+  if (!activeHumanTable) return;
+  const previousGameId = currentSnapshot?.gameId;
+  const game = await fetchHumanGame();
+  if (previousGameId !== currentSnapshot?.gameId) humanDecisionReviewPlayer = "human";
+  state.splashOpen = false;
+  state.hasResumableGame = false;
+  els.splashPage.hidden = true;
+  els.pathwayPage.hidden = true;
+  els.peopleProfilePage.hidden = true;
+  els.humanTablePage.hidden = true;
+  render(game);
+  if (previousGameId !== currentSnapshot?.gameId) announceGameEntry(game);
+  startHumanGameSync();
+}
+
+/*
+ * Human tables use a revision watch rather than a timer poll. The generation
+ * token is the local cancellation mechanism; late responses are also guarded
+ * by applyHumanGameResponse's monotonic revision check.
+ */
+function stopHumanGameSync(): void {
+  humanGameWatchGeneration += 1;
+}
+
+/*
+ * Table setup still has no game revision until both cuts are down, so it uses
+ * its slower table-status poll and hands off to the game watch after dealing.
+ */
 function scheduleHumanTablePoll(): void {
   if (humanTablePollTimer !== null) window.clearTimeout(humanTablePollTimer);
-  if (!activeHumanTable || els.humanTablePage.hidden || activeHumanTable.phase === "deal_ready") return;
+  if (!activeHumanTable || els.humanTablePage.hidden || activeHumanTable.phase === "playing" || activeHumanTable.phase === "complete") return;
   humanTablePollTimer = window.setTimeout(async () => {
     if (!activeHumanTable || els.humanTablePage.hidden) return;
     try {
       const response = await authJson<HumanTableResponse>("/api/people/table", { tableId: activeHumanTable.id });
       renderHumanTable(response.table);
+      if (response.table.phase === "playing" || response.table.phase === "complete") {
+        await enterHumanGame();
+        return;
+      }
       scheduleHumanTablePoll();
     } catch (error) {
       els.humanTableStatus.textContent = error instanceof Error ? error.message : "The table could not be refreshed.";
+      scheduleHumanTablePoll();
     }
   }, 1_800);
 }
@@ -2037,10 +2334,15 @@ async function openHumanTable(tableId: string, options: { push?: boolean } = {})
   renderHumanTable(response.table);
   hidePeopleProfile();
   els.humanTableStatus.textContent = "";
-  els.humanTablePage.hidden = false;
   if (options.push !== false) {
     window.history.pushState({ humanTable: tableId }, "", tableRouteUrl(tableId));
   }
+  if (response.table.phase === "playing" || response.table.phase === "complete") {
+    els.humanTablePage.hidden = true;
+    await enterHumanGame();
+    return;
+  }
+  els.humanTablePage.hidden = false;
   trackActivityPageView("people:table");
   scheduleHumanTablePoll();
   void refreshPeople({ heartbeat: true });
@@ -2052,6 +2354,13 @@ function hideHumanTable(): void {
   syncPathwayResumePresentation();
   if (humanTablePollTimer !== null) window.clearTimeout(humanTablePollTimer);
   humanTablePollTimer = null;
+  stopHumanGameSync();
+  humanGameTableId = null;
+  humanGameRevision = -1;
+  pendingHumanGameCommand = null;
+  humanGameCanContinueScoring = false;
+  humanGameCanAcknowledgePeggingReset = false;
+  humanDecisionReviewPlayer = "human";
 }
 
 async function challengePeoplePlayer(username: string): Promise<void> {
@@ -2192,10 +2501,12 @@ function recoverExpiredAuthentication(): AuthenticationRequiredError {
   authenticatedUser = null;
   ownPeopleProfile = null;
   peopleActive = false;
+  peopleChallengeWatchGeneration += 1;
   if (peopleIdleTimer !== null) window.clearTimeout(peopleIdleTimer);
   peopleIdleTimer = null;
   if (humanTablePollTimer !== null) window.clearTimeout(humanTablePollTimer);
   humanTablePollTimer = null;
+  stopHumanGameSync();
   els.authAccountRow.hidden = true;
   els.authLoginRow.hidden = false;
   resetTransientGameUi();
@@ -2615,7 +2926,7 @@ function syncPathwayResumePresentation(): void {
   }
   const resumable = new Set(resumablePathwayDestinations({
     modelGames,
-    humanGameActive: activeHumanTable !== null,
+    humanGameActive: resumableHumanTable() !== null,
   }));
   for (const button of els.pathwayDestinationButtons) {
     const destination = button.dataset.pathwayDestination as "easy" | "tough" | "master" | "dynamic" | "human";
@@ -2814,8 +3125,12 @@ function pathwayHistoryState(route: PathwayRoute): Record<string, unknown> {
   return { ...state, [PATHWAY_HISTORY_STATE_KEY]: route };
 }
 
-function pathwayUrl(route: PathwayRoute): string {
+function pathwayUrl(route: PathwayRoute, clearPeopleRoute = false): string {
   const url = new URL(window.location.href);
+  if (clearPeopleRoute) {
+    url.searchParams.delete("table");
+    url.searchParams.delete("profile");
+  }
   if (route === "home") url.searchParams.delete(PATHWAY_VIEW_PARAM);
   else url.searchParams.set(PATHWAY_VIEW_PARAM, route);
   return `${url.pathname}${url.search}${url.hash}`;
@@ -2850,7 +3165,7 @@ function applyPathwayRoute(route: PathwayRoute): void {
 
 function navigatePathway(route: PathwayRoute): void {
   if (!PATHWAY_NAV_ENABLED) return;
-  window.history.pushState(pathwayHistoryState(route), "", pathwayUrl(route));
+  window.history.pushState(pathwayHistoryState(route), "", pathwayUrl(route, true));
   applyPathwayRoute(route);
 }
 
@@ -3600,7 +3915,80 @@ interface CutForDealPreparation {
   promise: Promise<ServerCutForDealPreparationResponse>;
 }
 
+function newHumanGameActionId(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function humanGameCommand(
+  tableId: string,
+  action: string,
+  payload: Record<string, unknown>,
+): PendingHumanGameCommand {
+  const payloadKey = JSON.stringify(payload);
+  if (
+    pendingHumanGameCommand?.tableId === tableId
+    && pendingHumanGameCommand.action === action
+    && pendingHumanGameCommand.payloadKey === payloadKey
+  ) {
+    return pendingHumanGameCommand;
+  }
+  pendingHumanGameCommand = {
+    tableId,
+    action,
+    payloadKey,
+    actionId: newHumanGameActionId(),
+  };
+  return pendingHumanGameCommand;
+}
+
+async function submitHumanGameAction(
+  action: string,
+  payload: Record<string, unknown>,
+): Promise<GameState> {
+  if (!activeHumanTable) throw new Error("That player table is no longer open.");
+  const command = humanGameCommand(activeHumanTable.id, action, payload);
+  const response = await authJson<HumanGameResponse>("/api/people/table/game/action", {
+    tableId: command.tableId,
+    action,
+    actionId: command.actionId,
+    revision: humanGameRevision,
+    payload,
+  });
+  const acknowledgment = response.acknowledgment;
+  if (
+    !acknowledgment
+    || acknowledgment.actionId !== command.actionId
+    || acknowledgment.appliedRevision > response.revision
+  ) {
+    throw new Error("The player action acknowledgment was invalid.");
+  }
+  if (pendingHumanGameCommand?.actionId === command.actionId) pendingHumanGameCommand = null;
+  return applyHumanGameResponse(response);
+}
+
 async function serverGameAction(action: string, payload: Record<string, unknown> | null = null): Promise<GameState> {
+  if (activeHumanTable) {
+    if (action === "state") return fetchHumanGame();
+    const humanAction = action === "play-human"
+      ? "play"
+      : action === "go-human"
+        ? "go"
+        : action;
+    const previousPhase = state.game?.phase;
+    const game = await submitHumanGameAction(humanAction, payload ?? {});
+    if (game.phase === "game_over" && previousPhase !== "game_over" && currentSnapshot?.gameId) {
+      activityTracker.trackGameCompleted(currentSnapshot.gameId, {
+        opponent: "human",
+        humanScore: game.scores.human,
+        aiScore: game.scores.ai,
+        handNumber: game.handNumber,
+      });
+    }
+    startHumanGameSync();
+    return game;
+  }
   const requestSnapshot = currentSnapshot;
   const requestGeneration = currentSnapshotGeneration();
   const response = await serverJson<ServerGameActionResponse>("/api/game/action", {
@@ -3643,6 +4031,7 @@ function lowerLevelOpponent(opponent: string | undefined): boolean {
 }
 
 function canAskMaster(game: GameState): boolean {
+  if (activeHumanTable) return false;
   const opponent = currentSnapshot?.opponent ?? selectedMenuOpponent();
   const interactionBlocked = Boolean(
     state.dealAnimation ||
@@ -3879,6 +4268,7 @@ function storePreparedAiDiscard(game: GameState, recommendation?: AiDiscardPrepa
 }
 
 function startCutForDealPreparation(game: GameState): void {
+  if (activeHumanTable) return;
   const key = cutForDealPreparationKey(game);
   if (!key) return;
   if (state.cutForDealPreparation?.key === key) return;
@@ -3924,6 +4314,7 @@ function aiDiscardPreparationKey(game: GameState): string | null {
 }
 
 function startAiDiscardPreparation(game: GameState): void {
+  if (activeHumanTable) return;
   const key = aiDiscardPreparationKey(game);
   if (!key) return;
   if (state.aiDiscardPreparation?.key === key) return;
@@ -4498,8 +4889,6 @@ async function animatePeggingPlay(
   flyingCard.style.width = `${destinationRect.width}px`;
   flyingCard.style.height = `${destinationRect.height}px`;
   layer.append(flyingCard);
-  destination.classList.add("pegging-card-arriving");
-  document.body.append(layer);
 
   const startX = source.rect.left - destinationRect.left;
   const startY = source.rect.top - destinationRect.top;
@@ -4508,6 +4897,13 @@ async function animatePeggingPlay(
   const midScaleX = 1 + ((startScaleX - 1) * 0.42);
   const midScaleY = 1 + ((startScaleY - 1) * 0.42);
   const rotation = player === "ai" ? "4deg" : "-2deg";
+
+  // Paint the flight clone at its source before it enters the document. WAAPI
+  // does not apply its first keyframe synchronously in every browser.
+  flyingCard.style.opacity = "0.92";
+  flyingCard.style.transform = `translate3d(${startX}px, ${startY}px, 0) scale(${startScaleX}, ${startScaleY}) rotate(${rotation})`;
+  destination.classList.add("pegging-card-arriving");
+  document.body.append(layer);
 
   try {
     await flyingCard.animate([
@@ -5090,6 +5486,7 @@ function renderScoreSummaryDialog(): void {
     els.scoreSummaryItems.innerHTML = "";
     return;
   }
+  els.skipCounting.hidden = true;
   els.scoreSummaryEyebrow.textContent = summary.category === "crib" ? "Crib counted" : "Hand counted";
   els.scoreSummaryTitle.textContent = summary.title;
   els.scoringPoints.textContent = `${summary.points} point${summary.points === 1 ? "" : "s"}`;
@@ -5222,6 +5619,11 @@ function renderSingleGameReport(game: GameState, end: GameEndEvent): void {
   newGame.className = "report-new-game";
   newGame.textContent = "New game";
   newGame.addEventListener("click", () => {
+    if (activeHumanTable) {
+      hideHumanTable();
+      navigatePathway("human");
+      return;
+    }
     void startNewGameFromUi({ forceNew: true });
   });
   els.singleGameReport.append(newGame);
@@ -5262,13 +5664,38 @@ function renderGameReportInto(
 function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): HTMLElement {
   const section = document.createElement("section");
   section.className = "decision-review";
+  const start = gameStartFor(events, end.gameId);
+  const humanMatch = start?.opponent === "human";
+  const reviewPlayer = humanMatch ? humanDecisionReviewPlayer : "human";
+  const reviewName = gameReportPlayerName(start, reviewPlayer);
   const title = document.createElement("h3");
-  title.textContent = "Decision review";
+  title.textContent = humanMatch ? `${reviewName}'s errors` : "Decision review";
   section.append(title);
 
-  const mistakes = sortedDecisionMistakes(events, end.gameId);
-  const pending = pendingDecisionReviews(events, end.gameId);
-  const reviewed = reviewedUserDecisions(events, end.gameId);
+  if (humanMatch) {
+    const tabs = document.createElement("div");
+    tabs.className = "decision-review-tabs";
+    tabs.setAttribute("role", "tablist");
+    tabs.setAttribute("aria-label", "Player errors");
+    for (const player of ["human", "ai"] as const) {
+      const tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = "decision-review-tab";
+      tab.setAttribute("role", "tab");
+      tab.setAttribute("aria-selected", String(reviewPlayer === player));
+      tab.textContent = gameReportPlayerName(start, player);
+      tab.addEventListener("click", () => {
+        humanDecisionReviewPlayer = player;
+        render(state.game);
+      });
+      tabs.append(tab);
+    }
+    section.append(tabs);
+  }
+
+  const mistakes = sortedDecisionMistakes(events, end.gameId, reviewPlayer);
+  const pending = pendingDecisionReviews(events, end.gameId, reviewPlayer);
+  const reviewed = reviewedUserDecisions(events, end.gameId, reviewPlayer);
 
   if (pending.length) {
     const pendingNotice = document.createElement("div");
@@ -5276,7 +5703,7 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
     const pendingBody = document.createElement("div");
     pendingBody.className = "decision-review-pending-body";
     const pendingText = document.createElement("span");
-    pendingText.textContent = `${pending.length} ${playerDisplayName()} decision${pending.length === 1 ? "" : "s"} still need${pending.length === 1 ? "s" : ""} ${DECISION_REVIEWER_NAME} analysis.`;
+    pendingText.textContent = `${pending.length} ${reviewName} decision${pending.length === 1 ? "" : "s"} still need${pending.length === 1 ? "s" : ""} ${DECISION_REVIEWER_NAME} analysis.`;
     pendingBody.append(pendingText);
     if (state.completingReviews && state.reviewProgress) {
       const total = Math.max(1, state.reviewProgress.total);
@@ -5316,7 +5743,7 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   if (!mistakes.length) {
     const empty = document.createElement("div");
     empty.className = "decision-review-empty";
-    empty.textContent = `No ${playerDisplayName()} discards or peg plays were flagged by ${DECISION_REVIEWER_NAME} analysis.`;
+    empty.textContent = `No ${reviewName} discards or peg plays were flagged by ${DECISION_REVIEWER_NAME} analysis.`;
     section.append(empty);
     return section;
   }
@@ -5334,13 +5761,13 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
       ? `Hand ${event.handNumber} discard`
       : `Hand ${event.handNumber} peg`;
     const detail = document.createElement("span");
-    detail.textContent = decisionReviewText(event);
+    detail.textContent = decisionReviewText(event, reviewName);
     toggle.append(label, detail);
     const camera = document.createElement("button");
     camera.type = "button";
     camera.className = "decision-camera";
     camera.setAttribute("aria-label", `Show table for hand ${event.handNumber} ${event.type} error`);
-    const context = decisionContext(event, events);
+    const context = decisionContext(event, events, reviewName);
     context.hidden = true;
     toggle.addEventListener("click", () => {
       context.hidden = !context.hidden;
@@ -5357,21 +5784,29 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   return section;
 }
 
-function pendingDecisionReviews(events: AnalyticsEvent[], gameId: string): Array<DiscardEvent | PeggingEvent> {
+function pendingDecisionReviews(
+  events: AnalyticsEvent[],
+  gameId: string,
+  player: PlayerKey = "human",
+): Array<DiscardEvent | PeggingEvent> {
   return events.filter((event): event is DiscardEvent | PeggingEvent =>
     event.gameId === gameId &&
-    ((event.type === "discard" && event.player === "human") ||
-      (event.type === "pegging" && event.action === "play" && event.player === "human")) &&
+    ((event.type === "discard" && event.player === player) ||
+      (event.type === "pegging" && event.action === "play" && event.player === player)) &&
     !event.review,
   );
 }
 
-function decisionMistakes(events: AnalyticsEvent[], gameId: string): DecisionReviewEvent[] {
+function decisionMistakes(
+  events: AnalyticsEvent[],
+  gameId: string,
+  player: PlayerKey = "human",
+): DecisionReviewEvent[] {
   return events.filter((event): event is DecisionReviewEvent => {
     if (
       event.gameId !== gameId ||
-      !((event.type === "discard" && event.player === "human") ||
-        (event.type === "pegging" && event.action === "play" && event.player === "human")) ||
+      !((event.type === "discard" && event.player === player) ||
+        (event.type === "pegging" && event.action === "play" && event.player === player)) ||
       !event.review
     ) {
       return false;
@@ -5382,11 +5817,15 @@ function decisionMistakes(events: AnalyticsEvent[], gameId: string): DecisionRev
   });
 }
 
-function reviewedUserDecisions(events: AnalyticsEvent[], gameId: string): DecisionReviewEvent[] {
+function reviewedUserDecisions(
+  events: AnalyticsEvent[],
+  gameId: string,
+  player: PlayerKey = "human",
+): DecisionReviewEvent[] {
   return events.filter((event): event is DecisionReviewEvent =>
     event.gameId === gameId &&
-    ((event.type === "discard" && event.player === "human") ||
-      (event.type === "pegging" && event.action === "play" && event.player === "human")) &&
+    ((event.type === "discard" && event.player === player) ||
+      (event.type === "pegging" && event.action === "play" && event.player === player)) &&
     Boolean(event.review)
   );
 }
@@ -5399,8 +5838,12 @@ function decisionAnalysisForGame(events: AnalyticsEvent[], gameId: string): { an
   };
 }
 
-function sortedDecisionMistakes(events: AnalyticsEvent[], gameId: string): DecisionReviewEvent[] {
-  return decisionMistakes(events, gameId).sort((left, right) =>
+function sortedDecisionMistakes(
+  events: AnalyticsEvent[],
+  gameId: string,
+  player: PlayerKey = "human",
+): DecisionReviewEvent[] {
+  return decisionMistakes(events, gameId, player).sort((left, right) =>
     decisionMistakeSortValue(right) - decisionMistakeSortValue(left) ||
     left.handNumber - right.handNumber ||
     events.indexOf(left) - events.indexOf(right)
@@ -5624,22 +6067,30 @@ function finalOutScoreEvent(events: AnalyticsEvent[], end: GameEndEvent): ScoreE
     );
 }
 
-function decisionContext(event: DecisionReviewEvent, events: AnalyticsEvent[]): HTMLElement {
+function decisionContext(
+  event: DecisionReviewEvent,
+  events: AnalyticsEvent[],
+  reviewName = playerDisplayName(),
+): HTMLElement {
   const detail = document.createElement("div");
   detail.className = "decision-context";
   const rows: Array<[string, string]> = [];
+  const gameStart = gameStartFor(events, event.gameId);
+  const ownName = gameReportPlayerName(gameStart, "human");
+  const opponentName = gameReportPlayerName(gameStart, "ai");
+  const possessive = reviewName.endsWith("s") ? `${reviewName}'` : `${reviewName}'s`;
   const handStart = handStartFor(events, event.gameId, event.handNumber);
   const score = "scores" in event && event.scores
     ? event.scores
     : event.type === "pegging" && event.scoresBefore
       ? event.scoresBefore
       : handStart?.scores;
-  if (score) rows.push(["Score", `${playerDisplayName()} ${score.human}, ${playerName("ai")} ${score.ai}`]);
+  if (score) rows.push(["Score", `${ownName} ${score.human}, ${opponentName} ${score.ai}`]);
   const firstDealer = firstDealerForGame(events, event.gameId);
   if (score && firstDealer) {
     const components = event.type === "pegging" ? 2 : 0;
-    rows.push([`${playerDisplayName()} par`, parStatusText("human", score.human, firstDealer, event.handNumber, components)]);
-    rows.push([`${playerName("ai")} par`, parStatusText("ai", score.ai, firstDealer, event.handNumber, components)]);
+    rows.push([`${ownName} par`, parStatusText("human", score.human, firstDealer, event.handNumber, components)]);
+    rows.push([`${opponentName} par`, parStatusText("ai", score.ai, firstDealer, event.handNumber, components)]);
   }
   rows.push(["Hand", String(event.handNumber)]);
   if (handStart) {
@@ -5648,27 +6099,27 @@ function decisionContext(event: DecisionReviewEvent, events: AnalyticsEvent[]): 
     if (handStart.turnCard) rows.push(["Cut", event.type === "discard" ? "Not yet shown" : handStart.turnCard]);
   }
   if (event.type === "discard") {
-    rows.push(["Your hand", (event.handBeforeDiscard ?? [...event.remainingHand, ...event.cards]).join(" ")]);
-    rows.push(["You discarded", event.review.selected.join(" ")]);
-    rows.push([`${playerName("ai")} advised`, event.review.recommended.join(" ")]);
+    rows.push([`${possessive} hand`, (event.handBeforeDiscard ?? [...event.remainingHand, ...event.cards]).join(" ")]);
+    rows.push([`${reviewName} discarded`, event.review.selected.join(" ")]);
+    rows.push([`${DECISION_REVIEWER_NAME} advised`, event.review.recommended.join(" ")]);
     rows.push(["Kept", event.remainingHand.join(" ")]);
     rows.push(["Crib after discard", event.cribAfterDiscard.join(" ") || "None"]);
   } else {
     if (event.cutCard) rows.push(["Cut", event.cutCard]);
-    if (event.hand?.length) rows.push(["Your hand", event.hand.join(" ")]);
+    if (event.hand?.length) rows.push([`${possessive} hand`, event.hand.join(" ")]);
     if (event.completedPlayGroups?.length) {
       rows.push(["Prior counts", event.completedPlayGroups.map((group) => group.join(" ")).join(" / ")]);
     }
     rows.push(["Current count before play", String(event.countBefore ?? Math.max(0, event.count - cardValueFromLabel(event.card)))]);
     rows.push(["Already played", event.playedCards?.join(" ") || "None"]);
-    rows.push(["You played", event.review.selected.join(" ")]);
-    rows.push([`${playerName("ai")} advised`, event.review.recommended.join(" ")]);
+    rows.push([`${reviewName} played`, event.review.selected.join(" ")]);
+    rows.push([`${DECISION_REVIEWER_NAME} advised`, event.review.recommended.join(" ")]);
   }
-  rows.push(["Your point EV", formatEvPoints(event.review.selectedEv)]);
+  rows.push([`${possessive} point EV`, formatEvPoints(event.review.selectedEv)]);
   rows.push(["Advised point EV", formatEvPoints(event.review.recommendedEv)]);
   rows.push(["Point EV impact", formatEvPoints(-Math.max(0, event.review.delta))]);
   if (event.review.selectedWinProbability !== undefined && event.review.recommendedWinProbability !== undefined) {
-    rows.push(["Your win probability", formatWinProbability(event.review.selectedWinProbability)]);
+    rows.push([`${possessive} win probability`, formatWinProbability(event.review.selectedWinProbability)]);
     rows.push(["Advised win probability", formatWinProbability(event.review.recommendedWinProbability)]);
     rows.push(["Win probability impact", formatPercentagePointDelta(decisionErrorWinProbabilityImpact(event))]);
   }
@@ -5686,8 +6137,8 @@ function decisionContext(event: DecisionReviewEvent, events: AnalyticsEvent[]): 
 function renderDecisionSnapshot(events: AnalyticsEvent[]): void {
   const event = events.find((candidate): candidate is DecisionReviewEvent =>
     candidate.id === state.snapshotEventId &&
-    ((candidate.type === "discard" && candidate.player === "human") ||
-      (candidate.type === "pegging" && candidate.action === "play" && candidate.player === "human")) &&
+    (candidate.type === "discard" ||
+      (candidate.type === "pegging" && candidate.action === "play")) &&
     Boolean(candidate.review),
   );
   if (!event) {
@@ -5710,12 +6161,15 @@ function closeDecisionSnapshot(): void {
 
 function decisionSnapshotTable(event: DecisionReviewEvent, events: AnalyticsEvent[]): HTMLElement {
   const handStart = handStartFor(events, event.gameId, event.handNumber);
+  const gameStart = gameStartFor(events, event.gameId);
+  const actor = event.player ?? "human";
+  const actorName = gameReportPlayerName(gameStart, actor);
   const score = "scores" in event && event.scores
     ? event.scores
     : event.type === "pegging" && event.scoresBefore
       ? event.scoresBefore
       : handStart?.scores ?? { human: 0, ai: 0 };
-  const dealer = handStart?.dealer ?? (event.role === "dealer" ? "human" : "ai");
+  const dealer = handStart?.dealer ?? (event.role === "dealer" ? actor : actor === "human" ? "ai" : "human");
   const firstDealer = firstDealerForGame(events, event.gameId);
   const root = document.createElement("div");
   root.className = "snapshot-table-view";
@@ -5729,7 +6183,7 @@ function decisionSnapshotTable(event: DecisionReviewEvent, events: AnalyticsEven
   status.append(
     snapshotStatus("Dealer", playerName(dealer)),
     snapshotStatus("Count", event.type === "pegging" ? String(event.countBefore ?? 0) : "0"),
-    snapshotStatus("Turn", playerDisplayName()),
+    snapshotStatus("Turn", actorName),
   );
   table.append(status);
 
@@ -5749,7 +6203,7 @@ function decisionSnapshotTable(event: DecisionReviewEvent, events: AnalyticsEven
     );
   }
   root.append(table);
-  root.append(snapshotDecisionSummary(event));
+  root.append(snapshotDecisionSummary(event, actorName));
   return root;
 }
 
@@ -5817,15 +6271,15 @@ function snapshotStatus(label: string, value: string): HTMLElement {
   return item;
 }
 
-function snapshotDecisionSummary(event: DecisionReviewEvent): HTMLElement {
+function snapshotDecisionSummary(event: DecisionReviewEvent, actorName = playerDisplayName()): HTMLElement {
   const summary = document.createElement("div");
   summary.className = "snapshot-decision-summary";
   const yourMove = document.createElement("div");
   const advisedMove = document.createElement("div");
-  const selectedLabel = event.type === "discard" ? "You discarded" : "You played";
+  const selectedLabel = event.type === "discard" ? `${actorName} discarded` : `${actorName} played`;
   const advisedLabel = event.type === "discard"
-    ? `${playerName("ai")} advised discarding`
-    : `${playerName("ai")} advised playing`;
+    ? `${DECISION_REVIEWER_NAME} advised discarding`
+    : `${DECISION_REVIEWER_NAME} advised playing`;
   yourMove.append(labelValue(selectedLabel, event.review.selected.join(" ")));
   advisedMove.append(labelValue(advisedLabel, event.review.recommended.join(" ")));
   summary.append(yourMove, advisedMove);
@@ -5964,6 +6418,13 @@ function gameStartFor(events: AnalyticsEvent[], gameId: string): Extract<Analyti
   );
 }
 
+function gameReportPlayerName(
+  start: Extract<AnalyticsEvent, { type: "game" }> | undefined,
+  player: PlayerKey,
+): string {
+  return start?.players?.[player] ?? playerName(player, start?.opponent);
+}
+
 function firstDealerForGame(events: AnalyticsEvent[], gameId: string): "human" | "ai" | undefined {
   const firstHand = handStartFor(events, gameId, 1);
   return firstHand?.dealer;
@@ -6000,18 +6461,18 @@ function cardValueFromLabel(label: string | undefined): number {
   return Number.parseInt(rank, 10) || 0;
 }
 
-function decisionReviewText(event: DecisionReviewEvent): string {
+function decisionReviewText(event: DecisionReviewEvent, reviewName = playerDisplayName()): string {
   const review = event.review;
-  const pointEv = `your EV ${formatEvPoints(review.selectedEv)}, advised EV ${formatEvPoints(review.recommendedEv)}`;
+  const pointEv = `${reviewName} EV ${formatEvPoints(review.selectedEv)}, advised EV ${formatEvPoints(review.recommendedEv)}`;
   const delta = review.winProbabilityDelta !== undefined
     ? `; win% impact ${formatPercentagePointDelta(decisionErrorWinProbabilityImpact(event))}; ${pointEv}`
     : review.delta !== 0
       ? `; point EV impact ${formatEv(-Math.max(0, review.delta))}`
       : "";
   if (event.type === "discard") {
-    return `${playerDisplayName()} discarded ${review.selected.join(" ")}; ${DECISION_REVIEWER_NAME} advised ${review.recommended.join(" ")}${delta}.`;
+    return `${reviewName} discarded ${review.selected.join(" ")}; ${DECISION_REVIEWER_NAME} advised ${review.recommended.join(" ")}${delta}.`;
   }
-  return `${playerDisplayName()} played ${review.selected.join(" ")}; ${DECISION_REVIEWER_NAME} advised ${review.recommended.join(" ")}${delta}.`;
+  return `${reviewName} played ${review.selected.join(" ")}; ${DECISION_REVIEWER_NAME} advised ${review.recommended.join(" ")}${delta}.`;
 }
 
 function sameCards(left: string[], right: string[]): boolean {
@@ -7418,11 +7879,14 @@ function scoreLabel(category: AnalyticsScoreCategory, role: AnalyticsRole): stri
 
 function playerName(player: PlayerKey | undefined, opponent?: string): string {
   if (!player) return "-";
-  return player === "human" ? playerDisplayName() : engineName(opponent ?? currentSnapshot?.opponent ?? els.opponent.value);
+  if (player === "human") return playerDisplayName();
+  if (activeHumanTable) return gameEntryOpponentName();
+  return engineName(opponent ?? currentSnapshot?.opponent ?? els.opponent.value);
 }
 
 function engineName(engine: string | undefined): string {
   if (!engine) return "Ace";
+  if (engine === "human") return activeHumanTable ? gameEntryOpponentName() : "Human opponent";
   if (engine === PATHWAY_OPPONENTS.easy) return "Easy";
   if (engine === PATHWAY_OPPONENTS.tough) return "Tough";
   if (engine.toLowerCase().includes("grandmaster")) return "Legend";
@@ -7436,7 +7900,7 @@ function playerDisplayName(): string {
 
 function gameParticipantName(player: string | null | undefined): string {
   if (!player) return "-";
-  return player === "User" ? playerDisplayName() : engineName(currentSnapshot?.opponent ?? els.opponent.value);
+  return player === "User" ? playerDisplayName() : playerName("ai");
 }
 
 function playerPossessive(player: PlayerKey): string {
@@ -7447,10 +7911,11 @@ function playerPossessive(player: PlayerKey): string {
 function presentGameText(value: string): string {
   return value
     .replace(/\bUser\b/g, playerDisplayName())
-    .replace(/\bAI\b/g, engineName(currentSnapshot?.opponent ?? els.opponent.value));
+    .replace(/\bAI\b/g, playerName("ai"));
 }
 
 function normalizeAnalyticsEngine(engine: string | undefined): Opponent {
+  if (engine === "human") return "human";
   if (engine && SIMPLE_NETWORK_LOCAL_OPPONENTS.has(engine)) return engine as Opponent;
   return DEFAULT_OPPONENT;
 }
@@ -7652,7 +8117,7 @@ function render(game: GameState | null): void {
   els.discard.hidden = !gameActive || Boolean(state.dealAnimation) || Boolean(state.dealCutRevealStage) || waitingForDealCutOk || Boolean(state.turnCutRevealStage) || game.phase !== "discard";
   els.play.hidden = !gameActive || Boolean(state.dealAnimation) || waitingForDealCutOk || Boolean(state.turnCutRevealStage) || game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User");
   els.askMaster.hidden = !masterAdviceAvailable;
-  els.go.hidden = true;
+  els.go.hidden = !(activeHumanTable && game.phase === "pegging" && game.turn === "User" && game.canGo && !game.peggingResetPending);
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
   els.cutForDeal.textContent = turnCut?.action?.buttonLabel ?? "Cut deck";
   els.cutForDeal.disabled = !waitingForTurnCutClick;
@@ -7660,10 +8125,13 @@ function render(game: GameState | null): void {
   els.play.disabled = game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User" && selectedPlay);
   els.askMaster.disabled = !masterAdviceAvailable || state.pending;
   els.go.disabled = !game.canGo;
-  els.continueScoring.hidden = game.phase === "game_over";
-  els.continueScoring.disabled = game.phase === "game_over" || !game.scoring;
-  els.acknowledgePeggingReset.hidden = !game.peggingResetPending;
-  els.continuePegging.hidden = game.peggingResetPending || game.phase !== "pegging_complete";
+  const humanScoringWait = Boolean(activeHumanTable && !humanGameCanContinueScoring);
+  els.continueScoring.hidden = game.phase === "game_over" || humanScoringWait;
+  els.continueScoring.disabled = game.phase === "game_over" || !game.scoring || humanScoringWait;
+  els.skipCounting.hidden = !game.scoring || Boolean(state.activeScoreSummary);
+  els.skipCounting.disabled = state.pending;
+  els.acknowledgePeggingReset.hidden = !game.peggingResetPending || Boolean(activeHumanTable && !humanGameCanAcknowledgePeggingReset);
+  els.continuePegging.hidden = game.peggingResetPending || game.phase !== "pegging_complete" || humanScoringWait;
   if (state.pending) {
     els.discard.disabled = true;
     els.cutForDeal.disabled = !(waitingForDealCutOk || waitingForTurnCutClick);
@@ -7688,7 +8156,7 @@ function render(game: GameState | null): void {
 }
 
 function shouldAdvancePeggingAi(game: GameState): boolean {
-  return game.phase === "pegging" && game.turn === "AI" && !game.peggingResetPending;
+  return !activeHumanTable && game.phase === "pegging" && game.turn === "AI" && !game.peggingResetPending;
 }
 
 function shouldShowAiThinkingForPegging(game: GameState): boolean {
@@ -7696,7 +8164,7 @@ function shouldShowAiThinkingForPegging(game: GameState): boolean {
 }
 
 function shouldAutoHumanGo(game: GameState): boolean {
-  return game.phase === "pegging" && game.turn === "User" && game.canGo && !game.peggingResetPending;
+  return !activeHumanTable && game.phase === "pegging" && game.turn === "User" && game.canGo && !game.peggingResetPending;
 }
 
 async function withDelayedAiThinking<T>(game: GameState, action: () => Promise<T>): Promise<T> {
@@ -7908,6 +8376,13 @@ const storedReviewQueues = new Map<string, Promise<ReturnType<typeof gameAnalysi
 function requestNextStoredDecisionReview(gameId: string): Promise<ReturnType<typeof gameAnalysisProgress>> {
   const previous = storedReviewQueues.get(gameId) ?? Promise.resolve(gameAnalysisProgress(loadAnalytics().events, gameId));
   const request = previous.catch(() => gameAnalysisProgress(loadAnalytics().events, gameId)).then(async () => {
+    if (activeHumanTable && currentSnapshot?.gameId === gameId) {
+      const response = await authJson<HumanGameResponse>("/api/people/table/game/review", {
+        tableId: activeHumanTable.id,
+      });
+      applyHumanGameResponse(response);
+      return gameAnalysisProgress(loadAnalytics().events, gameId);
+    }
     const before = gameAnalysisProgress(loadAnalytics().events, gameId);
     if (!before.pending) return before;
     const response = await serverJson<ServerGameActionResponse>("/api/game/review", {
@@ -8008,6 +8483,18 @@ for (const button of els.pathwayBackButtons) {
   });
 }
 
+els.pathwayLogoHome.addEventListener("click", (event) => {
+  if (!PATHWAY_NAV_ENABLED) return;
+  event.preventDefault();
+  navigatePathway("home");
+});
+
+els.appBrandHome.addEventListener("click", (event) => {
+  if (!PATHWAY_NAV_ENABLED) return;
+  event.preventDefault();
+  leaveActivePathwayGame("home");
+});
+
 els.appBack.addEventListener("click", () => {
   if (PATHWAY_NAV_ENABLED) {
     leaveActivePathwayGame("play");
@@ -8028,8 +8515,9 @@ for (const button of els.pathwayDestinationButtons) {
   const destination = button.dataset.pathwayDestination;
   if (destination === "human") {
     button.addEventListener("click", () => {
-      if (button.dataset.resumable === "true" && activeHumanTable) {
-        void openHumanTable(activeHumanTable.id);
+      const table = resumableHumanTable();
+      if (button.dataset.resumable === "true" && table) {
+        void openHumanTable(table.id);
         return;
       }
       if (!authenticatedUser) {
@@ -8201,6 +8689,10 @@ els.humanTableCut.addEventListener("click", async () => {
     });
     renderHumanTable(response.table);
     els.humanTableStatus.textContent = "";
+    if (response.table.phase === "playing") {
+      await enterHumanGame();
+      return;
+    }
     scheduleHumanTablePoll();
   } catch (error) {
     els.humanTableStatus.textContent = error instanceof Error ? error.message : "The deck could not be cut.";
@@ -8576,7 +9068,7 @@ els.discard.addEventListener("click", async () => {
   if (state.pending) return;
   const selectedIds = Array.from(state.selected);
   reviewUserChoiceWithAce(state.game, "discard", selectedIds);
-  const optimisticNext = optimisticAiDiscardingState(state.game, selectedIds);
+  const optimisticNext = activeHumanTable ? null : optimisticAiDiscardingState(state.game, selectedIds);
   const epoch = interactionEpoch;
   state.pending = true;
   render(state.game);
@@ -8620,6 +9112,10 @@ els.discard.addEventListener("click", async () => {
     render(next);
     await waitForPaint();
     if (next.phase === "ai_discarding") {
+      if (activeHumanTable) {
+        startHumanGameSync();
+        return;
+      }
       handoffToBackground = true;
       state.pending = false;
       render(state.game);
@@ -8723,6 +9219,14 @@ els.continueScoring.addEventListener("click", async () => {
     state.pending = false;
     render(state.game);
   }
+});
+
+els.skipCounting.addEventListener("click", () => {
+  if (state.pending || !state.game?.scoring) return;
+  clearNoticeQueue();
+  ensureCurrentScoreSummary(state.game);
+  maybeOpenScoreSummary();
+  els.skipCounting.hidden = true;
 });
 
 els.continuePegging.addEventListener("click", async () => {
@@ -9078,12 +9582,14 @@ window.addEventListener("pageshow", (event) => {
     trackActivityPageView(currentActivitySurface(), "pageshow");
   }
   recoverInterruptedAuthentication();
+  if (event.persisted) void refreshVisibleHumanGame();
 });
 document.addEventListener("visibilitychange", () => {
   activityTracker.track("visibility", { state: document.visibilityState });
   if (document.visibilityState === "visible") {
     recordPeopleActivity();
     recoverInterruptedAuthentication();
+    void refreshVisibleHumanGame();
   }
 });
 
@@ -9183,7 +9689,7 @@ async function initializeApplication(): Promise<void> {
     await resumeAuthenticatedDestination();
   }
   if (PATHWAY_NAV_ENABLED) {
-    if (els.peopleProfilePage.hidden && els.humanTablePage.hidden && !pendingAuthDestination) {
+    if (els.peopleProfilePage.hidden && els.humanTablePage.hidden && !activeHumanTable && !pendingAuthDestination) {
       applyPathwayRoute(pathwayRouteFromLocation());
     }
     markAppReady();

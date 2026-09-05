@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Strong Cribbage</title>
     <meta name="description" content="Play one-on-one cribbage against the current Strong Cribbage server engine.">
-    <meta name="theme-color" content="#e8eee9" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#dfe9e2" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#063d30" media="(prefers-color-scheme: dark)">
     <meta property="og:title" content="Strong Cribbage">
     <meta property="og:description" content="Play one-on-one cribbage against the current Strong Cribbage server engine.">
@@ -33,7 +33,7 @@
       <button id="people-presence-toggle" class="people-presence-toggle" type="button" aria-expanded="false" aria-controls="people-presence-panel">
         <span class="people-presence-pegs" aria-hidden="true"><i></i><i></i></span>
         <span id="people-presence-label">0 online</span>
-        <span id="people-presence-alert" class="people-presence-alert" hidden>0</span>
+        <span id="people-presence-alert" class="people-presence-alert" role="alert" hidden>0</span>
       </button>
       <section id="people-presence-panel" class="people-presence-panel" aria-labelledby="people-presence-title" hidden>
         <header>
@@ -43,6 +43,10 @@
           </div>
           <button id="people-presence-close" type="button" aria-label="Close player list">×</button>
         </header>
+        <div id="people-table-section" class="people-drawer-section" hidden>
+          <h3>Your game</h3>
+          <div id="people-table-list" class="people-list"></div>
+        </div>
         <div id="people-challenge-section" class="people-drawer-section" hidden>
           <h3>Waiting for you</h3>
           <div id="people-challenge-list" class="people-list"></div>
@@ -69,10 +73,12 @@
           <button id="pathway-header-home" class="pathway-back pathway-header-home" type="button">
             <span aria-hidden="true">←</span> <span id="pathway-header-parent-label">Home</span>
           </button>
-          <picture class="pathway-logo">
-            <source media="(prefers-color-scheme: dark)" srcset="/brand/strong-cribbage-lockup-dark.svg">
-            <img src="/brand/strong-cribbage-lockup-light.svg" alt="Strong Cribbage">
-          </picture>
+          <a id="pathway-logo-home" class="pathway-logo" href="/" aria-label="Strong Cribbage home">
+            <picture class="pathway-logo-picture">
+              <source media="(prefers-color-scheme: dark)" srcset="/brand/strong-cribbage-lockup-dark.svg">
+              <img src="/brand/strong-cribbage-lockup-light.svg" alt="">
+            </picture>
+          </a>
         </header>
         <div class="pathway-rail" aria-hidden="true">
           <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
@@ -96,6 +102,7 @@
                 <span class="pathway-card-kicker">Build your game</span>
                 <strong>Training</strong>
                 <span>Whether you're a beginner or want strategies for mastering the game.</span>
+                <em class="pathway-coming-soon">Coming soon</em>
                 <b aria-hidden="true">→</b>
               </button>
               <button id="pathway-statistics" class="pathway-card" type="button">
@@ -460,10 +467,10 @@
         <button id="mobile-header-reveal" class="mobile-header-reveal" type="button" aria-label="Show navigation">
           <span aria-hidden="true"></span>
         </button>
-        <div class="app-brand">
+        <a id="app-brand-home" class="app-brand" href="/" aria-label="Strong Cribbage home">
           <img class="app-brand-logo" src="/brand/strong-cribbage-lockup-dark.svg" alt="">
           <h1 class="visually-hidden">Strong Cribbage</h1>
-        </div>
+        </a>
         <button id="app-back" class="pathway-back app-back" type="button">
           <span aria-hidden="true">←</span> Play
         </button>
@@ -578,6 +585,7 @@
           <h2 id="scoring-title">Hand score</h2>
           <div id="scoring-cards" class="cards"></div>
         </div>
+        <button id="skip-counting" class="skip-counting" type="button" hidden>Skip to summary</button>
         <div id="score-summary-dialog" class="score-summary-dialog" role="dialog" aria-modal="true" aria-labelledby="score-summary-title" hidden>
           <div class="score-summary-card">
             <span id="score-summary-eyebrow" class="score-summary-eyebrow">Hand counted</span>

@@ -15,14 +15,14 @@ describe("browser color-scheme support", () => {
   });
 
   it("defines light and dark entry materials instead of inverting arbitrary colors", () => {
-    expect(css).toMatch(/:root\s*\{[^}]*color-scheme:\s*light[^}]*--entry-canvas:\s*#e8eee9[^}]*--entry-panel:\s*#fbf8f0[^}]*--entry-accent:\s*#8f6720/s);
+    expect(css).toMatch(/:root\s*\{[^}]*color-scheme:\s*light[^}]*--entry-canvas:\s*#dfe9e2[^}]*--entry-panel:\s*#f8f1e4[^}]*--entry-accent:\s*#85580d/s);
     expect(css).toMatch(/@media \(prefers-color-scheme: dark\)\s*\{\s*:root\s*\{[^}]*color-scheme:\s*dark[^}]*--entry-canvas:\s*#042d22[^}]*--entry-panel:\s*#071f38[^}]*--entry-accent:\s*#e8c575/s);
-    expect(homepageHtml).toContain("--gold: #8f6720");
+    expect(homepageHtml).toContain("--gold: #85580d");
     expect(homepageHtml).toMatch(/@media \(prefers-color-scheme: dark\)[\s\S]*color-scheme:\s*dark/);
   });
 
   it("routes every entry lockup through picture source selection", () => {
-    for (const className of ["pathway-logo", "auth-logo", "splash-logo"]) {
+    for (const className of ["pathway-logo-picture", "auth-logo", "splash-logo"]) {
       expect(appHtml).toMatch(new RegExp(`<picture class="${className}">[\\s\\S]*?prefers-color-scheme: dark[\\s\\S]*?lockup-dark\\.svg[\\s\\S]*?lockup-light\\.svg[\\s\\S]*?<\\/picture>`));
     }
     expect(homepageHtml).toMatch(/<picture class="homepage-logo">[\s\S]*?lockup-dark\.svg[\s\S]*?lockup-light\.svg[\s\S]*?<\/picture>/);

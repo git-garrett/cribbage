@@ -53,6 +53,8 @@ describe("contextual game notifications", () => {
     expect(mainSource).toMatch(/render\(next\);\s*announceGameEntry\(next\);/s);
     expect(mainSource).toMatch(/render\(game\);\s*announceGameEntry\(game\);/s);
     expect(css).toMatch(/\.game-notification-start\s*\{[^}]*--notice-accent: var\(--game-gold\) !important/s);
+    expect(css).toMatch(/\.game-notification-start\s*\{[^}]*width:\s*clamp\(168px,[^,]+,\s*280px\)[^}]*aspect-ratio:\s*auto/s);
+    expect(css).toMatch(/\.game-notification-start \.game-notification-points\s*\{[^}]*overflow:\s*visible[^}]*text-overflow:\s*clip/s);
   });
 
   it("does not turn general game status copy into transient bubbles", () => {

@@ -11,14 +11,14 @@ const review: AnalyticsDecisionReview = {
   delta: 0,
 };
 
-function discard(id: string, gameId: string, reviewed = false): AnalyticsEvent {
+function discard(id: string, gameId: string, reviewed = false, player: "human" | "ai" = "human"): AnalyticsEvent {
   return {
     id,
     at: "2026-09-02T00:00:00Z",
     type: "discard",
     gameId,
     handNumber: 1,
-    player: "human",
+    player,
     role: "pone",
     cards: ["5C", "6D"],
     cribOwner: "ai",
@@ -58,5 +58,27 @@ describe("stored game analysis", () => {
 
     expect(helpCountForGame(events, "game-2")).toBe(1);
     expect(pendingAnalysisGameIds(events, ["game-1", "game-2"])).toEqual(["game-2"]);
+  });
+
+  it("tracks both players' reviews for a human game", () => {
+    const events = [
+      {
+        id: "human-start",
+        at: "2026-09-02T00:00:00Z",
+        type: "game",
+        action: "start",
+        gameId: "human-game",
+        opponent: "human",
+      },
+      discard("left", "human-game", true),
+      discard("right", "human-game", false, "ai"),
+    ] satisfies AnalyticsEvent[];
+
+    expect(gameAnalysisProgress(events, "human-game")).toEqual({
+      total: 2,
+      reviewed: 1,
+      pending: 1,
+      complete: false,
+    });
   });
 });

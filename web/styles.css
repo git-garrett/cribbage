@@ -1,61 +1,61 @@
 :root {
   color-scheme: light;
-  --app-bg: #edf0eb;
-  --surface: #ffffff;
-  --surface-soft: #f8faf7;
-  --surface-row: #fbfcfa;
-  --felt: #17654b;
-  --felt-dark: #0e4436;
-  --line: #d8ded9;
-  --line-strong: #b9c2bd;
-  --ink: #1b2420;
-  --muted: #5e6f67;
-  --paper: #f7f4ed;
+  --app-bg: #dfe9e2;
+  --surface: #fbf5e9;
+  --surface-soft: #f3eee2;
+  --surface-row: #fffaf0;
+  --felt: #12664a;
+  --felt-dark: #083e31;
+  --line: #c9d1c9;
+  --line-strong: #8fa69b;
+  --ink: #102c28;
+  --muted: #52685f;
+  --paper: #faf4e8;
   --card-ink: #141816;
   --card-red: #b9272d;
-  --board: #cda85f;
+  --board: #c79b47;
   --board-ink: rgba(55, 34, 13, 0.76);
   --hole: rgba(72, 42, 16, 0.55);
   --hole-start: rgba(72, 42, 16, 0.28);
-  --board-shadow: inset 0 0 0 1px rgba(80, 46, 14, 0.18);
-  --pace-label-stroke: rgba(205, 168, 95, 0.9);
-  --button-hover: #66766e;
-  --settings-shadow: 0 16px 36px rgba(20, 28, 24, 0.18);
-  --card-shadow: 0 5px 12px rgba(18, 35, 28, 0.15);
-  --cut-card-shadow: 0 4px 10px rgba(18, 35, 28, 0.18);
+  --board-shadow: inset 0 0 0 1px rgba(80, 46, 14, 0.24), 0 5px 14px rgba(69, 45, 16, 0.14);
+  --pace-label-stroke: rgba(199, 155, 71, 0.92);
+  --button-hover: #385f52;
+  --settings-shadow: 0 22px 52px rgba(7, 31, 56, 0.18), 0 5px 16px rgba(11, 91, 67, 0.1);
+  --card-shadow: 0 7px 16px rgba(7, 31, 56, 0.16), 0 2px 4px rgba(7, 31, 56, 0.08);
+  --cut-card-shadow: 0 6px 14px rgba(7, 31, 56, 0.2), 0 2px 4px rgba(7, 31, 56, 0.08);
   --actions-bg: rgba(20, 87, 61, 0.96);
   --human: #1d7fd1;
   --ai: #c43d36;
   --comparison-good: #12813c;
   --comparison-bad: #b42318;
   --comparison-warn: #a66f00;
-  --entry-canvas: #e8eee9;
-  --entry-canvas-glow: rgba(24, 123, 91, 0.2);
-  --entry-grid: rgba(7, 31, 56, 0.055);
-  --entry-panel: #fbf8f0;
-  --entry-panel-soft: #fffefa;
-  --entry-panel-alt: #edf6f1;
-  --entry-panel-highlight: rgba(232, 197, 117, 0.2);
-  --entry-heading: #071f38;
-  --entry-ink: #14231e;
-  --entry-muted: #5e6f67;
-  --entry-accent: #8f6720;
-  --entry-accent-bright: #e8c575;
-  --entry-border: #d8d0bd;
-  --entry-border-strong: #99afa5;
-  --entry-field: #fffefb;
-  --entry-link: #0a654b;
+  --entry-canvas: #dfe9e2;
+  --entry-canvas-glow: rgba(11, 91, 67, 0.26);
+  --entry-grid: rgba(7, 31, 56, 0.066);
+  --entry-panel: #f8f1e4;
+  --entry-panel-soft: #fffaf0;
+  --entry-panel-alt: #e5f0e9;
+  --entry-panel-highlight: rgba(199, 155, 71, 0.2);
+  --entry-heading: #061f36;
+  --entry-ink: #122d28;
+  --entry-muted: #52685f;
+  --entry-accent: #85580d;
+  --entry-accent-bright: #d7ac54;
+  --entry-border: #d0bd93;
+  --entry-border-strong: #86a296;
+  --entry-field: #fffdf7;
+  --entry-link: #075f48;
   --entry-featured: #071f38;
   --entry-featured-border: #123854;
   --entry-featured-muted: #cfe8de;
-  --entry-status: #f3eddf;
+  --entry-status: #eee3cc;
   --entry-danger: #7c2824;
   --entry-danger-border: #a83a35;
   --entry-focus: #1d7fd1;
   --entry-focus-ring: rgba(29, 127, 209, 0.2);
-  --entry-page-shadow: 0 24px 70px rgba(20, 35, 30, 0.16);
-  --entry-card-shadow: 0 7px 20px rgba(20, 35, 30, 0.06);
-  --entry-card-shadow-raised: 0 12px 26px rgba(20, 35, 30, 0.12);
+  --entry-page-shadow: 0 30px 76px rgba(7, 31, 56, 0.17), 0 8px 22px rgba(11, 91, 67, 0.1);
+  --entry-card-shadow: 0 8px 20px rgba(7, 31, 56, 0.08), 0 2px 5px rgba(11, 91, 67, 0.05);
+  --entry-card-shadow-raised: 0 16px 34px rgba(7, 31, 56, 0.16), 0 4px 10px rgba(11, 91, 67, 0.08);
   --app-font: 16px;
   --heading-font: 22px;
   --subheading-font: 15px;
@@ -663,7 +663,17 @@ select {
 }
 
 .app-brand {
+  display: block;
   min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.app-brand:focus-visible,
+.pathway-logo:focus-visible {
+  outline: 3px solid var(--entry-focus);
+  outline-offset: 4px;
+  border-radius: 8px;
 }
 
 .app-brand-logo {
@@ -1848,6 +1858,40 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
 .decision-review h3 {
   margin: 4px 0 0;
   font-size: var(--body-font);
+}
+
+.decision-review-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.decision-review-tab {
+  min-width: 0;
+  min-height: 44px;
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: var(--menu-font);
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+
+.decision-review-tab[aria-selected="true"] {
+  border-color: var(--game-gold, #e8c575);
+  background: var(--game-green, #0b5b43);
+  color: var(--game-cream, #fbf8f0);
+}
+
+.decision-review-tab:focus-visible {
+  outline: 3px solid #8bcbff;
+  outline-offset: 2px;
 }
 
 .decision-ev-summary {
@@ -4336,8 +4380,8 @@ button.card {
   margin-top: 8px;
 }
 
-/* Extra Large uses crib-notation tokens instead of miniature playing cards:
-   one full-size rank over one full-size suit, directly on the table felt. */
+/* Extra Large uses compact, high-contrast crib-notation cards: one full-size
+   rank over one full-size suit on an opaque playing-card face. */
 body[data-font-size="x-large"] .card:not(.back) {
   display: inline-grid;
   grid-template-rows: auto auto;
@@ -4350,11 +4394,11 @@ body[data-font-size="x-large"] .card:not(.back) {
   height: auto !important;
   min-height: 1.9em !important;
   margin-left: 0;
-  padding: 0.04em 0.08em 0.1em;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  padding: 0.06em 0.12em 0.12em;
+  border: 1px solid var(--line-strong) !important;
+  border-radius: 0.22em !important;
+  background: var(--paper) !important;
+  box-shadow: var(--card-shadow) !important;
 }
 
 body[data-font-size="x-large"] .card .corner {
@@ -5365,14 +5409,19 @@ body[data-font-size="x-large"] .app[data-view="game"] .circular-track-skunk-labe
    player's name is allowed a little more horizontal room. */
 .game-notification-start {
   --notice-accent: var(--game-gold) !important;
+  width: clamp(168px, calc(var(--notice-font) * 10.5), 280px);
+  min-height: clamp(112px, calc(var(--notice-font) * 6.4), 174px);
+  aspect-ratio: auto;
+  padding-inline: clamp(20px, calc(var(--notice-font) * 1.35), 38px);
+  border-radius: 999px;
 }
 
 .game-notification-start .game-notification-points {
-  max-width: 88%;
-  overflow: hidden;
-  font-size: clamp(28px, calc(var(--notice-font) * 2.25), 42px);
+  max-width: 100%;
+  overflow: visible;
+  font-size: clamp(28px, calc(var(--notice-font) * 2.05), 42px);
   letter-spacing: -0.025em;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   white-space: nowrap;
 }
 
@@ -6170,6 +6219,16 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   margin-left: -22px;
 }
 
+@media (min-width: 960px) {
+  .app[data-view="game"] #plays .played-active.pegging-row {
+    flex-wrap: nowrap;
+  }
+
+  .app[data-view="game"] #plays .played-active.pegging-row .card + .card {
+    margin-left: calc(var(--game-card-width) * -0.68);
+  }
+}
+
 .app[data-view="game"] .played > .score-cut {
   width: var(--game-card-width);
   height: var(--game-card-height);
@@ -6604,6 +6663,34 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   backdrop-filter: blur(5px);
 }
 
+.skip-counting {
+  position: absolute;
+  top: 50%;
+  right: 18px;
+  z-index: 10;
+  width: auto;
+  min-height: 42px;
+  padding: 8px 14px;
+  border: 1px solid rgba(232, 197, 117, 0.72);
+  border-radius: 999px;
+  background: rgba(7, 31, 56, 0.9);
+  box-shadow: 0 8px 20px rgba(2, 28, 21, 0.26);
+  color: var(--game-cream);
+  font-size: max(12px, var(--control-small-font));
+  font-weight: 850;
+  transform: translateY(-50%);
+}
+
+.skip-counting:hover {
+  border-color: var(--game-gold);
+  background: var(--game-navy);
+}
+
+.skip-counting:focus-visible {
+  outline: 3px solid var(--human);
+  outline-offset: 3px;
+}
+
 .score-summary-dialog[hidden] {
   display: none;
 }
@@ -6799,6 +6886,12 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   justify-self: center;
   display: block;
   width: min(68vw, 285px);
+  color: inherit;
+  text-decoration: none;
+}
+
+.pathway-logo-picture {
+  display: block;
 }
 
 .pathway-header-home {
@@ -7828,6 +7921,14 @@ body[data-auth="signed-in"] .pathway-login-note {
   animation: people-challenge-pulse 1.7s ease-in-out infinite;
 }
 
+.people-presence.has-game:not(.has-challenge) .people-presence-toggle {
+  border-color: #258460;
+  background: color-mix(in srgb, var(--entry-panel) 88%, #7bd9b5);
+  box-shadow:
+    inset 0 0 0 1px rgba(37, 132, 96, 0.14),
+    0 10px 28px rgba(4, 31, 24, 0.2);
+}
+
 .people-presence-panel {
   position: absolute;
   top: calc(100% + 10px);
@@ -7967,6 +8068,12 @@ body[data-auth="signed-in"] .pathway-login-note {
 .people-list-item.is-challenge {
   border-color: #258460;
   background: color-mix(in srgb, var(--entry-panel-alt) 84%, #7bd9b5);
+}
+
+.people-list-item.is-game {
+  border-color: #258460;
+  background: color-mix(in srgb, var(--entry-panel-soft) 82%, #7bd9b5);
+  box-shadow: inset 4px 0 #258460;
 }
 
 .people-avatar {
@@ -8789,6 +8896,45 @@ body[data-font-size="x-large"] .pathway-choice {
         0 0 0 9px rgba(232, 197, 117, 0),
         0 13px 34px rgba(4, 31, 24, 0.34);
     }
+  }
+
+  @keyframes people-challenge-arrived {
+    0%, 100% {
+      transform: scale(1) rotate(0deg);
+    }
+    28% {
+      transform: scale(1.1) rotate(-2deg);
+    }
+    52% {
+      transform: scale(1.06) rotate(2deg);
+    }
+    74% {
+      transform: scale(1.09) rotate(-1deg);
+    }
+  }
+
+  @keyframes people-challenge-badge-arrived {
+    0% {
+      transform: scale(0.45);
+      opacity: 0;
+    }
+    48% {
+      transform: scale(1.35);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  .people-presence.has-challenge.challenge-arrived .people-presence-toggle {
+    animation:
+      people-challenge-arrived 760ms cubic-bezier(0.2, 0.9, 0.25, 1),
+      people-challenge-pulse 1.7s 760ms ease-in-out infinite;
+  }
+
+  .people-presence.challenge-arrived .people-presence-alert {
+    animation: people-challenge-badge-arrived 620ms cubic-bezier(0.2, 0.9, 0.25, 1);
   }
 }
 
@@ -10496,5 +10642,196 @@ body[data-font-size="x-large"] .pathway-choice {
 @media (prefers-reduced-motion: reduce) and (max-width: 640px) {
   body.mobile-game-header-active .app[data-view="game"] > .topbar {
     transition: none;
+  }
+}
+
+/* Light mode is a daylight card room: mineral-green canvas, warm paper,
+   brass edges, and enough layered depth to preserve the dark theme's
+   clubhouse hierarchy without imitating its low-light palette. */
+@media (prefers-color-scheme: light) {
+  body {
+    background:
+      radial-gradient(circle at 9% -8%, rgba(11, 91, 67, 0.2), transparent 30rem),
+      radial-gradient(circle at 92% 108%, rgba(199, 155, 71, 0.16), transparent 28rem),
+      linear-gradient(rgba(7, 31, 56, 0.026) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(7, 31, 56, 0.026) 1px, transparent 1px),
+      var(--app-bg);
+    background-attachment: fixed;
+    background-size: auto, auto, 34px 34px, 34px 34px, auto;
+  }
+
+  .auth-page,
+  .splash-page,
+  .pathway-page {
+    background:
+      radial-gradient(circle at 12% 7%, rgba(11, 91, 67, 0.25), transparent 32rem),
+      radial-gradient(circle at 90% 92%, rgba(199, 155, 71, 0.14), transparent 26rem),
+      linear-gradient(var(--entry-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--entry-grid) 1px, transparent 1px),
+      var(--entry-canvas);
+    background-size: auto, auto, 42px 42px, 42px 42px, auto;
+  }
+
+  .auth-shell,
+  .splash-shell {
+    position: relative;
+    overflow: hidden;
+    border-color: color-mix(in srgb, var(--entry-accent) 58%, var(--entry-border));
+    background:
+      radial-gradient(circle at 100% 0, rgba(215, 172, 84, 0.2), transparent 17rem),
+      linear-gradient(145deg, rgba(255, 255, 255, 0.72), transparent 46%),
+      var(--entry-panel);
+    box-shadow:
+      inset 0 1px rgba(255, 255, 255, 0.94),
+      inset 0 -4px rgba(11, 91, 67, 0.045),
+      var(--entry-page-shadow);
+    isolation: isolate;
+  }
+
+  .auth-shell::after,
+  .splash-shell::after {
+    position: absolute;
+    inset: 7px;
+    z-index: -1;
+    border: 1px solid rgba(255, 255, 255, 0.56);
+    border-radius: 18px;
+    content: "";
+    pointer-events: none;
+  }
+
+  .auth-form input,
+  .splash-name-row input,
+  .settings-panel input,
+  .settings-panel select {
+    box-shadow:
+      inset 0 1px 2px rgba(7, 31, 56, 0.06),
+      0 1px rgba(255, 255, 255, 0.84);
+  }
+
+  .auth-primary,
+  .splash-new-game {
+    background: linear-gradient(180deg, #147456, #07513f);
+    box-shadow:
+      inset 0 1px rgba(255, 255, 255, 0.18),
+      0 8px 18px rgba(7, 81, 63, 0.2);
+  }
+
+  .pathway-stage {
+    position: relative;
+    overflow: hidden;
+    border-color: color-mix(in srgb, var(--entry-accent) 72%, var(--entry-border));
+    background:
+      radial-gradient(circle at 100% 0, rgba(215, 172, 84, 0.23), transparent 25rem),
+      linear-gradient(145deg, rgba(255, 255, 255, 0.66), transparent 42%),
+      var(--entry-panel);
+    box-shadow:
+      inset 0 1px rgba(255, 255, 255, 0.9),
+      var(--entry-page-shadow);
+    isolation: isolate;
+  }
+
+  .pathway-stage::before {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 0;
+    height: 48%;
+    border-top: 1px solid rgba(232, 197, 117, 0.7);
+    background:
+      radial-gradient(circle at 50% 0, rgba(37, 132, 96, 0.88), transparent 30rem),
+      linear-gradient(rgba(232, 197, 117, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(232, 197, 117, 0.03) 1px, transparent 1px),
+      #0b5b43;
+    background-size: auto, 32px 32px, 32px 32px, auto;
+    box-shadow:
+      inset 0 10px 30px rgba(3, 42, 32, 0.22),
+      inset 0 1px rgba(255, 255, 255, 0.08);
+    content: "";
+    pointer-events: none;
+  }
+
+  .pathway-view {
+    position: relative;
+    z-index: 1;
+  }
+
+  .pathway-card:not(.pathway-card-featured),
+  .pathway-choice:not(.pathway-choice-human):not(.pathway-choice-dynamic) {
+    background:
+      linear-gradient(145deg, rgba(255, 255, 255, 0.72), transparent 58%),
+      var(--entry-panel-soft);
+    box-shadow:
+      0 -3px 0 color-mix(in srgb, var(--entry-accent) 52%, transparent),
+      0 18px 34px rgba(3, 42, 32, 0.2),
+      0 4px 10px rgba(7, 31, 56, 0.1);
+  }
+
+  .pathway-choice-dynamic {
+    background:
+      radial-gradient(circle at 100% 0, rgba(11, 91, 67, 0.12), transparent 12rem),
+      var(--entry-panel-alt);
+    box-shadow:
+      0 -3px 0 color-mix(in srgb, var(--entry-link) 38%, transparent),
+      0 18px 34px rgba(3, 42, 32, 0.2),
+      0 4px 10px rgba(7, 31, 56, 0.1);
+  }
+
+  .pathway-card-featured,
+  .pathway-choice-featured,
+  .pathway-choice-human {
+    box-shadow:
+      0 -3px 0 rgba(232, 197, 117, 0.82),
+      0 20px 38px rgba(3, 25, 19, 0.28);
+  }
+
+  .gameplay-settings-sheet {
+    border-color: color-mix(in srgb, var(--entry-accent) 58%, var(--entry-border));
+    background:
+      linear-gradient(145deg, rgba(255, 255, 255, 0.7), transparent 48%),
+      var(--entry-panel-soft);
+    box-shadow:
+      0 -3px 0 color-mix(in srgb, var(--entry-accent) 48%, transparent),
+      0 20px 40px rgba(3, 42, 32, 0.23),
+      0 5px 12px rgba(7, 31, 56, 0.1);
+  }
+
+  :is(
+    .analytics-page,
+    .game-log-page,
+    .leaderboard-page,
+    .model-info-page,
+    .decision-review-page
+  ) {
+    border-color: color-mix(in srgb, var(--entry-accent) 46%, var(--entry-border));
+    background:
+      radial-gradient(circle at 100% 0, rgba(215, 172, 84, 0.14), transparent 24rem),
+      linear-gradient(145deg, rgba(255, 255, 255, 0.58), transparent 38%),
+      var(--entry-panel);
+    box-shadow: var(--entry-page-shadow);
+  }
+
+  .settings-panel,
+  .game-over-alert-box,
+  .snapshot-header,
+  .snapshot-decision-summary {
+    border-color: color-mix(in srgb, var(--entry-accent) 38%, var(--line));
+    background:
+      linear-gradient(145deg, rgba(255, 255, 255, 0.7), transparent 48%),
+      var(--surface);
+  }
+
+  .analytics-total,
+  .analytics-row,
+  .game-log-item,
+  .model-info-content,
+  .model-info-item {
+    box-shadow: 0 3px 10px rgba(7, 31, 56, 0.055);
+  }
+}
+
+@media (prefers-color-scheme: light) and (max-width: 849px) {
+  .pathway-stage::before {
+    height: 63%;
   }
 }
