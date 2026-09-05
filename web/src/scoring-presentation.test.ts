@@ -42,4 +42,9 @@ describe("scoring presentation", () => {
     expect(mainSource).toContain("els.skipCounting.hidden = !game.scoring || Boolean(state.activeScoreSummary)");
     expect(css).toMatch(/\.skip-counting\s*\{[^}]*position:\s*absolute[^}]*z-index:\s*10/s);
   });
+
+  it("keeps the mobile skip control clear of each scoring rack", () => {
+    expect(css).toMatch(/@media \(max-width: 640px\)[\s\S]*\.scoring-review\[data-owner="ai"\]\s*~\s*\.skip-counting\s*\{[^}]*top:\s*72%[^}]*bottom:\s*auto/s);
+    expect(css).toMatch(/@media \(max-width: 640px\)[\s\S]*\.scoring-review\[data-owner="human"\]\s*~\s*\.skip-counting\s*\{[^}]*top:\s*auto[^}]*bottom:\s*72%/s);
+  });
 });

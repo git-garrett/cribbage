@@ -51,6 +51,7 @@ static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 struct Session {
     id: String,
     tag: Option<String>,
+    owner_user_id: Option<i64>,
     model: ModelId,
     seed: u32,
     game: CribbageGame,
@@ -201,6 +202,8 @@ struct PersistedSession {
     version: u8,
     id: String,
     tag: Option<String>,
+    #[serde(default)]
+    owner_user_id: Option<i64>,
     model: String,
     seed: u32,
     game: CribbageGame,
@@ -317,6 +320,14 @@ fn main() {
     });
     auth::initialize(&data_dir)
         .unwrap_or_else(|error| panic!("could not initialize authentication storage: {}", error));
+    let migrated_legacy_sessions = migrate_legacy_session_owners(&data_dir)
+        .unwrap_or_else(|error| panic!("could not migrate legacy game ownership: {}", error));
+    if migrated_legacy_sessions > 0 {
+        eprintln!(
+            "Mapped {} legacy game session(s) to authenticated accounts.",
+            migrated_legacy_sessions
+        );
+    }
     activity::initialize(&data_dir)
         .unwrap_or_else(|error| panic!("could not initialize activity storage: {}", error));
     feedback::initialize(&data_dir)
@@ -655,6 +666,7 @@ fn game_action(
                 None
             };
             let mut session = new_session(model, tag);
+            session.owner_user_id = authenticated_user.map(|user| user.id);
             if let Some(profile) = inherited_dynamic_profile {
                 session.use_dynamic_profile(profile);
             }
@@ -817,7 +829,6 @@ fn review_game(
     let result = (|| -> Result<String, String> {
         let game_id =
             json_string(body, "gameId").ok_or_else(|| "Missing completed game id.".to_string())?;
-        let requested_tag = json_string(body, "tag").filter(|value| !value.trim().is_empty());
         let pending = {
             let mut app = server
                 .state
@@ -830,12 +841,12 @@ fn review_game(
             }
             let session = app
                 .sessions
-                .get(&game_id)
+                .get_mut(&game_id)
                 .ok_or_else(|| "The saved game is not available for analysis.".to_string())?;
-            if requested_tag
-                .as_deref()
-                .is_some_and(|tag| session.tag.as_deref() != Some(tag))
-            {
+            let authenticated_owner = session
+                .owner_user_id
+                .is_some_and(|owner_id| authenticated_user.is_some_and(|user| user.id == owner_id));
+            if !authenticated_owner {
                 return Err("The saved game belongs to another player.".to_string());
             }
             session
@@ -922,6 +933,7 @@ fn new_session_from_seed(model: ModelId, tag: Option<String>, seed: u32, counter
     Session {
         id: format!("rust-{:x}-{:x}", unix_millis(), counter),
         tag,
+        owner_user_id: None,
         model,
         seed,
         game,
@@ -1030,6 +1042,7 @@ fn persisted_session(session: &Session) -> PersistedSession {
         version: 1,
         id: session.id.clone(),
         tag: session.tag.clone(),
+        owner_user_id: session.owner_user_id,
         model: session.model.as_str().to_string(),
         seed: session.seed,
         game: session.game.clone(),
@@ -1061,6 +1074,7 @@ fn restore_persisted_session(stored: PersistedSession) -> Result<Session, String
     let mut session = Session {
         id: stored.id,
         tag: stored.tag,
+        owner_user_id: stored.owner_user_id,
         model,
         seed: stored.seed,
         game: stored.game,
@@ -1087,6 +1101,52 @@ fn restore_persisted_session(stored: PersistedSession) -> Result<Session, String
         dynamic.normalize_profile_version(session.seed);
     }
     Ok(session)
+}
+
+fn migrate_legacy_session_owners(data_dir: &Path) -> Result<usize, String> {
+    let connection = open_game_database(data_dir)?;
+    let session_jsons = {
+        let mut statement = connection
+            .prepare("SELECT session_json FROM cribbage_game_sessions")
+            .map_err(|error| format!("prepare legacy session migration: {error}"))?;
+        let sessions = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| format!("query legacy session migration: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("read legacy session migration: {error}"))?;
+        sessions
+    };
+    let mut migrations = Vec::new();
+    for session_json in session_jsons {
+        let stored = serde_json::from_str::<PersistedSession>(&session_json)
+            .map_err(|error| format!("parse legacy game session: {error}"))?;
+        let Some(tag) = stored.tag.as_deref().filter(|tag| !tag.trim().is_empty()) else {
+            continue;
+        };
+        if stored.owner_user_id.is_some() {
+            continue;
+        }
+        let (matches, user_id): (i64, Option<i64>) = connection
+            .query_row(
+                "SELECT COUNT(*), MIN(id) FROM auth_users
+                 WHERE lower(trim(display_name)) = lower(trim(?1))",
+                params![tag],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|error| format!("find legacy game owner: {error}"))?;
+        let Some(user_id) = (matches == 1).then_some(user_id).flatten() else {
+            continue;
+        };
+        let mut session = restore_persisted_session(stored)?;
+        session.owner_user_id = Some(user_id);
+        session.updated_at = isoish_now();
+        migrations.push(session);
+    }
+    drop(connection);
+    for session in &migrations {
+        persist_session_snapshot(data_dir, session)?;
+    }
+    Ok(migrations.len())
 }
 
 fn session_status(session: &Session) -> &'static str {
@@ -4298,6 +4358,169 @@ mod tests {
             &server,
             &json!({"action": "new", "payload": {"opponent": DYNAMIC}}).to_string(),
         ));
+    }
+
+    #[test]
+    fn migrates_only_uniquely_mapped_legacy_game_sessions() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-legacy-owner-migration-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        auth::initialize(&data_dir).unwrap();
+        let connection = open_game_database(&data_dir).unwrap();
+        let user = connection
+            .query_row(
+                "SELECT id, username, display_name, email, password_hash
+                 FROM auth_users WHERE username = 'Travis'",
+                [],
+                auth::user_from_row,
+            )
+            .unwrap();
+        drop(connection);
+
+        let mut mapped = new_session_from_seed(
+            ModelId::Schell13,
+            Some(user.display_name.clone()),
+            0x1234_5678,
+            1,
+        );
+        mapped.game.phase = Phase::GameOver;
+        let mapped_id = mapped.id.clone();
+        persist_session_snapshot(&data_dir, &mapped).unwrap();
+        let mut unmapped = new_session_from_seed(
+            ModelId::Schell13,
+            Some("Unmapped local name".to_string()),
+            0x1234_5678,
+            2,
+        );
+        unmapped.game.phase = Phase::GameOver;
+        let unmapped_id = unmapped.id.clone();
+        persist_session_snapshot(&data_dir, &unmapped).unwrap();
+
+        assert_eq!(migrate_legacy_session_owners(&data_dir).unwrap(), 1);
+        assert_eq!(
+            load_session_by_id(&data_dir, &mapped_id)
+                .unwrap()
+                .unwrap()
+                .owner_user_id,
+            Some(user.id)
+        );
+        assert_eq!(
+            load_session_by_id(&data_dir, &unmapped_id)
+                .unwrap()
+                .unwrap()
+                .owner_user_id,
+            None
+        );
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn authenticated_player_can_review_an_owned_game() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-owned-review-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let mut session = new_session_from_seed(
+            ModelId::Schell13,
+            Some("Current Player".to_string()),
+            0x1234_5678,
+            1,
+        );
+        session.owner_user_id = Some(1);
+        session.game.phase = Phase::GameOver;
+        let game_id = session.id.clone();
+        let mut app = AppState::default();
+        app.sessions.insert(game_id.clone(), session);
+        let server = Server {
+            state: Mutex::new(app),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+        let user = auth::test_user(1, "Current Player", "current@example.test");
+
+        let response = review_game(
+            &server,
+            &json!({"gameId": game_id, "tag": user.display_name}).to_string(),
+            Some(&user),
+        );
+
+        assert_eq!(response.status, 200);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn unmapped_legacy_game_cannot_be_reviewed_without_an_owner() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-unmapped-review-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let mut session = new_session_from_seed(
+            ModelId::Schell13,
+            Some("Unmapped local name".to_string()),
+            0x1234_5678,
+            1,
+        );
+        session.game.phase = Phase::GameOver;
+        let game_id = session.id.clone();
+        let mut app = AppState::default();
+        app.sessions.insert(game_id.clone(), session);
+        let server = Server {
+            state: Mutex::new(app),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+
+        let response = review_game(
+            &server,
+            &json!({"gameId": game_id, "tag": "Unmapped local name"}).to_string(),
+            None,
+        );
+
+        assert_eq!(response.status, 400);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn authenticated_player_cannot_review_another_players_game() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-review-owner-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let mut session = new_session_from_seed(
+            ModelId::Schell13,
+            Some("Other Player".to_string()),
+            0x1234_5678,
+            1,
+        );
+        session.owner_user_id = Some(2);
+        session.game.phase = Phase::GameOver;
+        let game_id = session.id.clone();
+        let mut app = AppState::default();
+        app.sessions.insert(game_id.clone(), session);
+        let server = Server {
+            state: Mutex::new(app),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+        let user = auth::test_user(1, "Current Player", "current@example.test");
+
+        let response = review_game(
+            &server,
+            &json!({"gameId": game_id, "tag": "Other Player"}).to_string(),
+            Some(&user),
+        );
+
+        assert_eq!(response.status, 400);
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[test]

@@ -10657,6 +10657,16 @@ body[data-font-size="x-large"] .pathway-choice {
     min-height: 18px;
     padding: 2px 7px;
   }
+
+  .app[data-view="game"] .scoring-review[data-owner="ai"] ~ .skip-counting {
+    top: 72%;
+    bottom: auto;
+  }
+
+  .app[data-view="game"] .scoring-review[data-owner="human"] ~ .skip-counting {
+    top: auto;
+    bottom: 72%;
+  }
 }
 
 .ace-tools,
