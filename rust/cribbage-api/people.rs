@@ -25,11 +25,13 @@ use super::{auth::AuthUser, open_game_database, Request, Response, Server};
 
 const ONLINE_SECONDS: i64 = 15 * 60;
 const CHALLENGE_SECONDS: i64 = 10 * 60;
-const TABLE_SECONDS: i64 = 12 * 60 * 60;
+const TABLE_IDLE_SECONDS: i64 = 30 * 24 * 60 * 60;
 const MAX_AVATAR_BYTES: usize = 420_000;
 const CHALLENGE_WATCH_SECONDS: u64 = 20;
+const HUMAN_GAME_WATCH_SECONDS: u64 = 20;
 
 static CHALLENGE_SIGNAL: OnceLock<(Mutex<()>, Condvar)> = OnceLock::new();
+static HUMAN_GAME_SIGNAL: OnceLock<(Mutex<()>, Condvar)> = OnceLock::new();
 
 fn challenge_signal() -> &'static (Mutex<()>, Condvar) {
     CHALLENGE_SIGNAL.get_or_init(|| (Mutex::new(()), Condvar::new()))
@@ -37,6 +39,16 @@ fn challenge_signal() -> &'static (Mutex<()>, Condvar) {
 
 fn notify_challenge_watchers() {
     let (lock, signal) = challenge_signal();
+    let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    signal.notify_all();
+}
+
+fn human_game_signal() -> &'static (Mutex<()>, Condvar) {
+    HUMAN_GAME_SIGNAL.get_or_init(|| (Mutex::new(()), Condvar::new()))
+}
+
+fn notify_human_game_watchers() {
+    let (lock, signal) = human_game_signal();
     let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     signal.notify_all();
 }
@@ -237,7 +249,16 @@ struct HumanGameActionSelection {
     action: String,
     revision: i64,
     #[serde(default)]
+    action_id: String,
+    #[serde(default)]
     payload: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HumanGameWatchSelection {
+    table_id: String,
+    after_revision: i64,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -363,6 +384,16 @@ pub fn initialize(data_dir: &std::path::Path) -> Result<(), String> {
              );
              CREATE INDEX IF NOT EXISTS people_games_active
                ON people_games(completed_at, updated_at DESC);
+             CREATE TABLE IF NOT EXISTS people_game_actions (
+               table_id TEXT NOT NULL REFERENCES people_games(table_id) ON DELETE CASCADE,
+               actor_id INTEGER NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+               action_id TEXT NOT NULL,
+               action TEXT NOT NULL,
+               payload_json TEXT NOT NULL,
+               result_revision INTEGER NOT NULL,
+               created_at INTEGER NOT NULL,
+               PRIMARY KEY(table_id, actor_id, action_id)
+             );
              CREATE TABLE IF NOT EXISTS people_head_to_head_games (
                game_id TEXT PRIMARY KEY,
                first_player_id INTEGER NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
@@ -395,6 +426,7 @@ pub fn handle(server: &Server, request: &Request, user: Option<&AuthUser>) -> Op
         ("POST", "/api/people/table") => table_status(server, request, user),
         ("POST", "/api/people/table/cut") => cut_for_deal(server, request, user),
         ("POST", "/api/people/table/game") => human_game_status(server, request, user),
+        ("POST", "/api/people/table/game/watch") => watch_human_game(server, request, user),
         ("POST", "/api/people/table/game/action") => human_game_action(server, request, user),
         ("POST", "/api/people/table/game/review") => human_game_review(server, request, user),
         _ => return None,
@@ -960,7 +992,7 @@ fn create_challenge(
                     "UPDATE people_challenges
                      SET status = 'accepted', updated_at = ?2, expires_at = ?3
                      WHERE id = ?1 AND status = 'pending'",
-                    params![existing.0, now, now + TABLE_SECONDS],
+                    params![existing.0, now, now + TABLE_IDLE_SECONDS],
                 )
                 .map_err(|error| PeopleError::internal("join crossed challenge", error))?;
             "accepted"
@@ -1027,7 +1059,7 @@ fn accept_challenge(
             "UPDATE people_challenges
              SET status = 'accepted', updated_at = ?3, expires_at = ?4
              WHERE id = ?1 AND challenged_id = ?2 AND status = 'pending' AND expires_at > ?3",
-            params![input.challenge_id, user.id, now, now + TABLE_SECONDS],
+            params![input.challenge_id, user.id, now, now + TABLE_IDLE_SECONDS],
         )
         .map_err(|error| PeopleError::internal("accept player challenge", error))?;
     if updated == 0 {
@@ -1056,6 +1088,25 @@ fn table_status(
     table_value(server, &input.table_id, user.id)
 }
 
+fn renew_human_table(connection: &rusqlite::Connection, table_id: &str) -> Result<(), PeopleError> {
+    let now = unix_seconds();
+    connection
+        .execute(
+            "UPDATE people_challenges
+             SET expires_at = ?2
+             WHERE table_id = ?1 AND status = 'accepted'
+               AND expires_at > ?3 AND expires_at < ?4",
+            params![
+                table_id,
+                now + TABLE_IDLE_SECONDS,
+                now,
+                now + TABLE_IDLE_SECONDS / 2,
+            ],
+        )
+        .map_err(|error| PeopleError::internal("renew player table", error))?;
+    Ok(())
+}
+
 fn cut_for_deal(
     server: &Server,
     request: &Request,
@@ -1068,6 +1119,7 @@ fn cut_for_deal(
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| PeopleError::internal("begin deal cut", error))?;
+    renew_human_table(&transaction, &input.table_id)?;
     let row = table_row(&transaction, &input.table_id)?;
     if user.id != row.challenger_id && user.id != row.challenged_id {
         return Err(PeopleError::not_found("That player table was not found."));
@@ -1244,6 +1296,7 @@ fn table_row(connection: &rusqlite::Connection, table_id: &str) -> Result<TableR
 fn table_value(server: &Server, table_id: &str, viewer_id: i64) -> Result<Value, PeopleError> {
     let connection = open_game_database(&server.data_dir)
         .map_err(|error| PeopleError::internal("open table database", error))?;
+    renew_human_table(&connection, table_id)?;
     let row = table_row(&connection, table_id)?;
     if viewer_id != row.challenger_id && viewer_id != row.challenged_id {
         return Err(PeopleError::not_found("That player table was not found."));
@@ -1315,22 +1368,66 @@ fn human_game_status(
 ) -> Result<Value, PeopleError> {
     let user = user.ok_or_else(PeopleError::unauthorized)?;
     let input: TableSelection = parse(request, "Choose a player table.")?;
+    human_game_value(server, &input.table_id, user.id, true)
+}
+
+fn human_game_value(
+    server: &Server,
+    table_id: &str,
+    viewer_id: i64,
+    renew_table: bool,
+) -> Result<Value, PeopleError> {
     let connection = open_game_database(&server.data_dir)
         .map_err(|error| PeopleError::internal("open player game database", error))?;
-    let row = table_row(&connection, &input.table_id)?;
-    let viewer = table_viewer_side(&row, user.id)?;
+    if renew_table {
+        renew_human_table(&connection, table_id)?;
+    }
+    let row = table_row(&connection, table_id)?;
+    let viewer = table_viewer_side(&row, viewer_id)?;
     let dealer_id = row
         .dealer_id
         .ok_or_else(|| PeopleError::conflict("Both players must cut before the game can begin."))?;
-    ensure_human_game(&connection, &input.table_id, dealer_id, row.challenger_id)?;
-    let (record, revision) = load_human_game(&connection, &input.table_id)?;
+    ensure_human_game(&connection, table_id, dealer_id, row.challenger_id)?;
+    let (record, revision) = load_human_game(&connection, table_id)?;
     Ok(human_game_response(
-        &input.table_id,
-        &row,
-        &record,
-        revision,
-        viewer,
+        table_id, &row, &record, revision, viewer,
     ))
+}
+
+fn watch_human_game(
+    server: &Server,
+    request: &Request,
+    user: Option<&AuthUser>,
+) -> Result<Value, PeopleError> {
+    let user = user.ok_or_else(PeopleError::unauthorized)?;
+    let input: HumanGameWatchSelection = parse(request, "Choose a player game to watch.")?;
+    if input.after_revision < -1 {
+        return Err(PeopleError::bad_request("The watched revision is invalid."));
+    }
+    let deadline = Instant::now() + Duration::from_secs(HUMAN_GAME_WATCH_SECONDS);
+    let (lock, signal) = human_game_signal();
+    loop {
+        let guard = lock
+            .lock()
+            .map_err(|error| PeopleError::internal("watch player game signal", error))?;
+        let mut response = human_game_value(server, &input.table_id, user.id, false)?;
+        let revision = response["revision"].as_i64().unwrap_or(-1);
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if revision > input.after_revision || remaining.is_zero() {
+            response["watchTimedOut"] = Value::Bool(remaining.is_zero());
+            drop(guard);
+            return Ok(response);
+        }
+        let (guard, wait) = signal
+            .wait_timeout(guard, remaining)
+            .map_err(|error| PeopleError::internal("wait for player game update", error))?;
+        drop(guard);
+        if wait.timed_out() {
+            let mut response = human_game_value(server, &input.table_id, user.id, false)?;
+            response["watchTimedOut"] = Value::Bool(true);
+            return Ok(response);
+        }
+    }
 }
 
 fn human_game_action(
@@ -1345,9 +1442,54 @@ fn human_game_action(
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| PeopleError::internal("begin player game action", error))?;
+    renew_human_table(&transaction, &input.table_id)?;
     let row = table_row(&transaction, &input.table_id)?;
     let viewer = table_viewer_side(&row, user.id)?;
     let (mut record, revision) = load_human_game(&transaction, &input.table_id)?;
+    let action_id = input.action_id.trim();
+    if action_id.len() > 120 {
+        return Err(PeopleError::bad_request(
+            "The player action id is too long.",
+        ));
+    }
+    let action_id = (!action_id.is_empty()).then(|| action_id.to_string());
+    let payload_json = serde_json::to_string(&input.payload)
+        .map_err(|error| PeopleError::internal("serialize player action", error))?;
+    if let Some(action_id) = action_id.as_deref() {
+        if let Some((saved_action, saved_payload, applied_revision)) = transaction
+            .query_row(
+                "SELECT action, payload_json, result_revision
+                 FROM people_game_actions
+                 WHERE table_id = ?1 AND actor_id = ?2 AND action_id = ?3",
+                params![input.table_id, user.id, action_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| PeopleError::internal("find acknowledged player action", error))?
+        {
+            if saved_action != input.action || saved_payload != payload_json {
+                return Err(PeopleError::conflict(
+                    "That player action id was already used for another move.",
+                ));
+            }
+            let response = acknowledge_human_game_action(
+                human_game_response(&input.table_id, &row, &record, revision, viewer),
+                action_id,
+                applied_revision,
+                true,
+            );
+            transaction.commit().map_err(|error| {
+                PeopleError::internal("finish acknowledged player action", error)
+            })?;
+            return Ok(response);
+        }
+    }
     // Both players can choose their private discards from the same revision.
     // The choices touch disjoint hands, so merge the second valid discard into
     // the latest authoritative game instead of forcing a needless refresh.
@@ -1502,19 +1644,36 @@ fn human_game_action(
             "The other player moved first. Refreshing the table will show the latest play.",
         ));
     }
+    if let Some(action_id) = action_id.as_deref() {
+        transaction
+            .execute(
+                "INSERT INTO people_game_actions
+                 (table_id, actor_id, action_id, action, payload_json, result_revision, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    input.table_id,
+                    user.id,
+                    action_id,
+                    input.action,
+                    payload_json,
+                    revision + 1,
+                    now,
+                ],
+            )
+            .map_err(|error| PeopleError::internal("acknowledge player action", error))?;
+    }
     if record.game.phase == Phase::GameOver && record.pending_final_scoring.is_none() {
         record_head_to_head_game(&transaction, &row, &record, now)?;
     }
     transaction
         .commit()
         .map_err(|error| PeopleError::internal("commit player game action", error))?;
-    Ok(human_game_response(
-        &input.table_id,
-        &row,
-        &record,
-        revision + 1,
-        viewer,
-    ))
+    notify_human_game_watchers();
+    let response = human_game_response(&input.table_id, &row, &record, revision + 1, viewer);
+    Ok(match action_id.as_deref() {
+        Some(action_id) => acknowledge_human_game_action(response, action_id, revision + 1, false),
+        None => response,
+    })
 }
 
 fn human_game_review(
@@ -2198,6 +2357,20 @@ fn human_card_labels(ids: &[u8]) -> Vec<String> {
         .filter_map(|id| Card::new(*id).ok())
         .map(|card| card.label())
         .collect()
+}
+
+fn acknowledge_human_game_action(
+    mut response: Value,
+    action_id: &str,
+    applied_revision: i64,
+    already_applied: bool,
+) -> Value {
+    response["acknowledgment"] = json!({
+        "actionId": action_id,
+        "appliedRevision": applied_revision,
+        "alreadyApplied": already_applied,
+    });
+    response
 }
 
 fn human_game_response(
@@ -2948,7 +3121,7 @@ mod tests {
                 "INSERT INTO people_challenges
                  (id, table_id, challenger_id, challenged_id, status, created_at, updated_at, expires_at)
                  VALUES ('c', 't', ?1, ?2, 'accepted', ?3, ?3, ?4)",
-                params![garrett.id, kurt.id, now, now + TABLE_SECONDS],
+                params![garrett.id, kurt.id, now, now + TABLE_IDLE_SECONDS],
             )
             .unwrap();
         drop(connection);
@@ -2964,6 +3137,38 @@ mod tests {
     }
 
     #[test]
+    fn opening_an_active_table_renews_its_idle_expiration() {
+        let server = test_server("renew-active-human-table");
+        let garrett = user(&server, "Garrett");
+        let kurt = user(&server, "Kurt");
+        let now = unix_seconds();
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection
+            .execute(
+                "INSERT INTO people_challenges
+                 (id, table_id, challenger_id, challenged_id, status, created_at, updated_at, expires_at)
+                 VALUES ('c', 't', ?1, ?2, 'accepted', ?3, ?3, ?4)",
+                params![garrett.id, kurt.id, now, now + 60],
+            )
+            .unwrap();
+        drop(connection);
+
+        table_value(&server, "t", garrett.id).unwrap();
+
+        let connection = open_game_database(&server.data_dir).unwrap();
+        let expires_at: i64 = connection
+            .query_row(
+                "SELECT expires_at FROM people_challenges WHERE table_id = 't'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(expires_at >= now + TABLE_IDLE_SECONDS - 1);
+        drop(connection);
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
     fn each_hand_owner_advances_scoring_while_both_players_see_the_count() {
         let server = test_server("shared-human-scoring");
         let garrett = user(&server, "Garrett");
@@ -2975,7 +3180,7 @@ mod tests {
                 "INSERT INTO people_challenges
                  (id, table_id, challenger_id, challenged_id, status, dealer_id, created_at, updated_at, expires_at)
                  VALUES ('c', 't', ?1, ?2, 'accepted', ?1, ?3, ?3, ?4)",
-                params![garrett.id, kurt.id, now, now + TABLE_SECONDS],
+                params![garrett.id, kurt.id, now, now + TABLE_IDLE_SECONDS],
             )
             .unwrap();
         ensure_human_game(&connection, "t", garrett.id, garrett.id).unwrap();
@@ -3062,6 +3267,97 @@ mod tests {
     }
 
     #[test]
+    fn human_actions_are_acknowledged_once_and_watched_by_revision() {
+        let server = test_server("acknowledged-human-action");
+        let garrett = user(&server, "Garrett");
+        let kurt = user(&server, "Kurt");
+        let now = unix_seconds();
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection
+            .execute(
+                "INSERT INTO people_challenges
+                 (id, table_id, challenger_id, challenged_id, status, dealer_id, created_at, updated_at, expires_at)
+                 VALUES ('c', 't', ?1, ?2, 'accepted', ?1, ?3, ?3, ?4)",
+                params![garrett.id, kurt.id, now, now + TABLE_IDLE_SECONDS],
+            )
+            .unwrap();
+        ensure_human_game(&connection, "t", garrett.id, garrett.id).unwrap();
+        let (mut record, _) = load_human_game(&connection, "t").unwrap();
+        record.game.phase = Phase::PeggingComplete;
+        record.turn_card_revealed = true;
+        connection
+            .execute(
+                "UPDATE people_games SET game_json = ?2 WHERE table_id = ?1",
+                params!["t", serde_json::to_string(&record).unwrap()],
+            )
+            .unwrap();
+        drop(connection);
+
+        let first_request = request(
+            "/api/people/table/game/action",
+            json!({
+                "tableId": "t",
+                "action": "continue-scoring",
+                "actionId": "count-pone",
+                "revision": 0,
+                "payload": {},
+            }),
+        );
+        let first = human_game_action(&server, &first_request, Some(&kurt)).unwrap();
+        assert_eq!(first["revision"], 1);
+        assert_eq!(first["acknowledgment"]["actionId"], "count-pone");
+        assert_eq!(first["acknowledgment"]["appliedRevision"], 1);
+        assert_eq!(first["acknowledgment"]["alreadyApplied"], false);
+
+        let replayed = human_game_action(&server, &first_request, Some(&kurt)).unwrap();
+        assert_eq!(replayed["revision"], 1);
+        assert_eq!(replayed["state"]["phase"], "score_pone");
+        assert_eq!(replayed["acknowledgment"]["appliedRevision"], 1);
+        assert_eq!(replayed["acknowledgment"]["alreadyApplied"], true);
+
+        let reused = human_game_action(
+            &server,
+            &request(
+                "/api/people/table/game/action",
+                json!({
+                    "tableId": "t",
+                    "action": "continue-scoring",
+                    "actionId": "count-pone",
+                    "revision": 1,
+                    "payload": {"different": true},
+                }),
+            ),
+            Some(&kurt),
+        )
+        .unwrap_err();
+        assert_eq!(reused.status, 409);
+
+        let watched = watch_human_game(
+            &server,
+            &request(
+                "/api/people/table/game/watch",
+                json!({"tableId": "t", "afterRevision": 0}),
+            ),
+            Some(&garrett),
+        )
+        .unwrap();
+        assert_eq!(watched["revision"], 1);
+        assert_eq!(watched["watchTimedOut"], false);
+
+        let connection = open_game_database(&server.data_dir).unwrap();
+        let action_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM people_game_actions WHERE table_id = 't'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(action_count, 1);
+        drop(connection);
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
     fn winning_human_count_stays_visible_until_its_owner_opens_the_result() {
         let server = test_server("shared-human-final-count");
         let garrett = user(&server, "Garrett");
@@ -3073,7 +3369,7 @@ mod tests {
                 "INSERT INTO people_challenges
                  (id, table_id, challenger_id, challenged_id, status, dealer_id, created_at, updated_at, expires_at)
                  VALUES ('c', 't', ?1, ?2, 'accepted', ?1, ?3, ?3, ?4)",
-                params![garrett.id, kurt.id, now, now + TABLE_SECONDS],
+                params![garrett.id, kurt.id, now, now + TABLE_IDLE_SECONDS],
             )
             .unwrap();
         ensure_human_game(&connection, "t", garrett.id, garrett.id).unwrap();

@@ -189,13 +189,28 @@ describe("human clubhouse UI", () => {
     expect(source).toMatch(/response\.table\.phase === "playing"[\s\S]*await enterHumanGame\(\)/);
   });
 
-  it("polls a human opponent instead of asking the AI engine to move", () => {
-    expect(source).toContain("function scheduleHumanGamePoll");
+  it("watches a human opponent instead of asking the AI engine to move", () => {
+    expect(source).toContain("function startHumanGameSync");
+    expect(source).toContain('"/api/people/table/game/watch"');
     expect(source).toMatch(/function shouldAdvancePeggingAi[\s\S]*!activeHumanTable/);
     expect(source).toMatch(/const optimisticNext = activeHumanTable \? null/);
-    expect(source).toMatch(/next\.phase === "ai_discarding"[\s\S]*activeHumanTable[\s\S]*scheduleHumanGamePoll\(\)/);
+    expect(source).toMatch(/next\.phase === "ai_discarding"[\s\S]*activeHumanTable[\s\S]*startHumanGameSync\(\)/);
     expect(source).toMatch(/els\.go\.hidden = !\(activeHumanTable[\s\S]*game\.canGo/);
     expect(source).toMatch(/function shouldAutoHumanGo[\s\S]*!activeHumanTable/);
+  });
+
+  it("applies human game state monotonically and acknowledges retried actions", () => {
+    expect(source).toMatch(/sameTable && response\.revision < humanGameRevision/);
+    expect(source).toContain("function humanGameCommand");
+    expect(source).toContain("actionId: command.actionId");
+    expect(source).toMatch(/!acknowledgment[\s\S]*acknowledgment\.actionId !== command\.actionId/);
+    expect(source).toContain("pendingHumanGameCommand?.actionId === command.actionId");
+  });
+
+  it("refreshes the authoritative human game after returning to the page", () => {
+    expect(source).toContain("function refreshVisibleHumanGame");
+    expect(source).toMatch(/window\.addEventListener\("pageshow"[\s\S]*event\.persisted[\s\S]*refreshVisibleHumanGame/);
+    expect(source).toMatch(/document\.addEventListener\("visibilitychange"[\s\S]*document\.visibilityState === "visible"[\s\S]*refreshVisibleHumanGame/);
   });
 
   it("replaces a stale count summary when the other player advances scoring", () => {

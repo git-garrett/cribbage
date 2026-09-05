@@ -247,6 +247,7 @@ const PEOPLE_IDLE_MS = 15 * 60 * 1000;
 const PEOPLE_ACTIVITY_HEARTBEAT_MIN_MS = 1000;
 const PEOPLE_CHALLENGE_RETRY_MS = 1_500;
 const PEOPLE_CHALLENGE_ATTENTION_MS = 2_400;
+const HUMAN_GAME_WATCH_RETRY_MS = 1_000;
 
 function normalizeAppFontSize(value: string | null): AppFontSize {
   return value === "large" || value === "x-large" ? value : "normal";
@@ -791,6 +792,10 @@ els.serverBusyRetry.addEventListener("click", () => {
 
 async function retryAfterServerBusy(retry: ServerBusyRetry): Promise<void> {
   const recovered = await reconcileRemoteGameState();
+  if (activeHumanTable) {
+    await retry();
+    return;
+  }
   if (recovered && await resumeReconciledGame(recovered)) return;
   await retry();
 }
@@ -970,6 +975,19 @@ interface HumanGameResponse extends ServerGameActionResponse {
   canContinueScoring: boolean;
   canAcknowledgePeggingReset: boolean;
   players: Record<PlayerKey, string>;
+  acknowledgment?: {
+    actionId: string;
+    appliedRevision: number;
+    alreadyApplied: boolean;
+  };
+  watchTimedOut?: boolean;
+}
+
+interface PendingHumanGameCommand {
+  tableId: string;
+  action: string;
+  payloadKey: string;
+  actionId: string;
 }
 
 type PendingAuthDestination =
@@ -1013,8 +1031,11 @@ let peoplePollTimer: number | null = null;
 let peopleChallengeWatchGeneration = 0;
 let peopleChallengeAttentionTimer: number | null = null;
 let humanTablePollTimer: number | null = null;
-let humanGamePollTimer: number | null = null;
+let humanGameWatchGeneration = 0;
+let humanGameTableId: string | null = null;
 let humanGameRevision = -1;
+let pendingHumanGameCommand: PendingHumanGameCommand | null = null;
+let humanGameRefreshPromise: Promise<void> | null = null;
 let humanGameCanContinueScoring = false;
 let humanGameCanAcknowledgePeggingReset = false;
 let humanDecisionReviewPlayer: PlayerKey = "human";
@@ -2125,6 +2146,12 @@ function humanCutElement(card: HumanCutCard, label: string): HTMLElement {
 }
 
 function renderHumanTable(table: HumanTable): void {
+  if (activeHumanTable?.id !== table.id) {
+    humanGameWatchGeneration += 1;
+    humanGameTableId = table.id;
+    humanGameRevision = -1;
+    pendingHumanGameCommand = null;
+  }
   activeHumanTable = table;
   peopleDirectory.activeTable = table.phase === "complete" ? null : table;
   syncPathwayResumePresentation();
@@ -2156,6 +2183,13 @@ function renderHumanTable(table: HumanTable): void {
 }
 
 function applyHumanGameResponse(response: HumanGameResponse): GameState {
+  const sameTable = humanGameTableId === response.tableId;
+  if (sameTable && response.revision < humanGameRevision && state.game) return state.game;
+  if (!sameTable) {
+    humanGameTableId = response.tableId;
+    humanGameRevision = -1;
+    pendingHumanGameCommand = null;
+  }
   humanGameRevision = response.revision;
   humanGameCanContinueScoring = response.canContinueScoring;
   humanGameCanAcknowledgePeggingReset = response.canAcknowledgePeggingReset;
@@ -2182,32 +2216,68 @@ async function fetchHumanGame(): Promise<GameState> {
   return applyHumanGameResponse(response);
 }
 
-function scheduleHumanGamePoll(): void {
-  if (humanGamePollTimer !== null) window.clearTimeout(humanGamePollTimer);
-  if (!activeHumanTable || state.game?.phase === "game_over") return;
-  humanGamePollTimer = window.setTimeout(async () => {
-    if (!activeHumanTable) return;
-    const tableId = activeHumanTable.id;
-    if (state.pending || !els.pathwayPage.hidden || !els.authPage.hidden) {
-      scheduleHumanGamePoll();
-      return;
-    }
-    try {
-      const response = await authJson<HumanGameResponse>("/api/people/table/game", {
-        tableId,
-      });
-      if (activeHumanTable?.id !== tableId) return;
-      if (response.revision !== humanGameRevision) {
-        state.selected.clear();
-        const game = applyHumanGameResponse(response);
-        render(game);
+function startHumanGameSync(): void {
+  const generation = ++humanGameWatchGeneration;
+  const tableId = activeHumanTable?.id;
+  if (!tableId || state.game?.phase === "game_over") return;
+  void (async () => {
+    while (
+      generation === humanGameWatchGeneration
+      && activeHumanTable?.id === tableId
+      && state.game?.phase !== "game_over"
+    ) {
+      if (state.pending || !els.pathwayPage.hidden || !els.authPage.hidden) {
+        await waitMs(250);
+        continue;
       }
-    } catch (error) {
-      els.humanTableStatus.textContent = error instanceof Error ? error.message : "The game could not be refreshed.";
-    } finally {
-      scheduleHumanGamePoll();
+      const afterRevision = humanGameRevision;
+      try {
+        const response = await authJson<HumanGameResponse>("/api/people/table/game/watch", {
+          tableId,
+          afterRevision,
+        });
+        if (generation !== humanGameWatchGeneration || activeHumanTable?.id !== tableId) return;
+        if (state.pending || !els.pathwayPage.hidden || !els.authPage.hidden) continue;
+        if (response.revision > humanGameRevision) {
+          state.selected.clear();
+          const game = applyHumanGameResponse(response);
+          render(game);
+        }
+      } catch (error) {
+        if (generation !== humanGameWatchGeneration || activeHumanTable?.id !== tableId) return;
+        els.humanTableStatus.textContent = error instanceof Error ? error.message : "The game could not be refreshed.";
+        await waitMs(HUMAN_GAME_WATCH_RETRY_MS);
+      }
     }
-  }, 900);
+  })();
+}
+
+async function performVisibleHumanGameRefresh(): Promise<void> {
+  if (!activeHumanTable || state.game?.phase === "game_over" || state.pending) return;
+  const tableId = activeHumanTable.id;
+  humanGameWatchGeneration += 1;
+  const beforeRevision = humanGameRevision;
+  try {
+    const response = await authJson<HumanGameResponse>("/api/people/table/game", { tableId });
+    if (activeHumanTable?.id !== tableId) return;
+    const game = applyHumanGameResponse(response);
+    if (response.revision > beforeRevision) {
+      state.selected.clear();
+      render(game);
+    }
+  } catch (error) {
+    els.humanTableStatus.textContent = error instanceof Error ? error.message : "The game could not be refreshed.";
+  } finally {
+    if (activeHumanTable?.id === tableId) startHumanGameSync();
+  }
+}
+
+function refreshVisibleHumanGame(): Promise<void> {
+  if (humanGameRefreshPromise) return humanGameRefreshPromise;
+  humanGameRefreshPromise = performVisibleHumanGameRefresh().finally(() => {
+    humanGameRefreshPromise = null;
+  });
+  return humanGameRefreshPromise;
 }
 
 async function enterHumanGame(): Promise<void> {
@@ -2223,9 +2293,22 @@ async function enterHumanGame(): Promise<void> {
   els.humanTablePage.hidden = true;
   render(game);
   if (previousGameId !== currentSnapshot?.gameId) announceGameEntry(game);
-  scheduleHumanGamePoll();
+  startHumanGameSync();
 }
 
+/*
+ * Human tables use a revision watch rather than a timer poll. The generation
+ * token is the local cancellation mechanism; late responses are also guarded
+ * by applyHumanGameResponse's monotonic revision check.
+ */
+function stopHumanGameSync(): void {
+  humanGameWatchGeneration += 1;
+}
+
+/*
+ * Table setup still has no game revision until both cuts are down, so it uses
+ * its slower table-status poll and hands off to the game watch after dealing.
+ */
 function scheduleHumanTablePoll(): void {
   if (humanTablePollTimer !== null) window.clearTimeout(humanTablePollTimer);
   if (!activeHumanTable || els.humanTablePage.hidden || activeHumanTable.phase === "playing" || activeHumanTable.phase === "complete") return;
@@ -2270,9 +2353,10 @@ function hideHumanTable(): void {
   syncPathwayResumePresentation();
   if (humanTablePollTimer !== null) window.clearTimeout(humanTablePollTimer);
   humanTablePollTimer = null;
-  if (humanGamePollTimer !== null) window.clearTimeout(humanGamePollTimer);
-  humanGamePollTimer = null;
+  stopHumanGameSync();
+  humanGameTableId = null;
   humanGameRevision = -1;
+  pendingHumanGameCommand = null;
   humanGameCanContinueScoring = false;
   humanGameCanAcknowledgePeggingReset = false;
   humanDecisionReviewPlayer = "human";
@@ -2421,8 +2505,7 @@ function recoverExpiredAuthentication(): AuthenticationRequiredError {
   peopleIdleTimer = null;
   if (humanTablePollTimer !== null) window.clearTimeout(humanTablePollTimer);
   humanTablePollTimer = null;
-  if (humanGamePollTimer !== null) window.clearTimeout(humanGamePollTimer);
-  humanGamePollTimer = null;
+  stopHumanGameSync();
   els.authAccountRow.hidden = true;
   els.authLoginRow.hidden = false;
   resetTransientGameUi();
@@ -3831,6 +3914,59 @@ interface CutForDealPreparation {
   promise: Promise<ServerCutForDealPreparationResponse>;
 }
 
+function newHumanGameActionId(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function humanGameCommand(
+  tableId: string,
+  action: string,
+  payload: Record<string, unknown>,
+): PendingHumanGameCommand {
+  const payloadKey = JSON.stringify(payload);
+  if (
+    pendingHumanGameCommand?.tableId === tableId
+    && pendingHumanGameCommand.action === action
+    && pendingHumanGameCommand.payloadKey === payloadKey
+  ) {
+    return pendingHumanGameCommand;
+  }
+  pendingHumanGameCommand = {
+    tableId,
+    action,
+    payloadKey,
+    actionId: newHumanGameActionId(),
+  };
+  return pendingHumanGameCommand;
+}
+
+async function submitHumanGameAction(
+  action: string,
+  payload: Record<string, unknown>,
+): Promise<GameState> {
+  if (!activeHumanTable) throw new Error("That player table is no longer open.");
+  const command = humanGameCommand(activeHumanTable.id, action, payload);
+  const response = await authJson<HumanGameResponse>("/api/people/table/game/action", {
+    tableId: command.tableId,
+    action,
+    actionId: command.actionId,
+    revision: humanGameRevision,
+    payload,
+  });
+  const acknowledgment = response.acknowledgment;
+  if (
+    !acknowledgment
+    || acknowledgment.actionId !== command.actionId
+    || acknowledgment.appliedRevision > response.revision
+  ) {
+    throw new Error("The player action acknowledgment was invalid.");
+  }
+  if (pendingHumanGameCommand?.actionId === command.actionId) pendingHumanGameCommand = null;
+  return applyHumanGameResponse(response);
+}
+
 async function serverGameAction(action: string, payload: Record<string, unknown> | null = null): Promise<GameState> {
   if (activeHumanTable) {
     if (action === "state") return fetchHumanGame();
@@ -3839,23 +3975,17 @@ async function serverGameAction(action: string, payload: Record<string, unknown>
       : action === "go-human"
         ? "go"
         : action;
-    const response = await authJson<HumanGameResponse>("/api/people/table/game/action", {
-      tableId: activeHumanTable.id,
-      action: humanAction,
-      revision: humanGameRevision,
-      payload: payload ?? {},
-    });
     const previousPhase = state.game?.phase;
-    const game = applyHumanGameResponse(response);
-    if (game.phase === "game_over" && previousPhase !== "game_over" && response.snapshot.gameId) {
-      activityTracker.trackGameCompleted(response.snapshot.gameId, {
+    const game = await submitHumanGameAction(humanAction, payload ?? {});
+    if (game.phase === "game_over" && previousPhase !== "game_over" && currentSnapshot?.gameId) {
+      activityTracker.trackGameCompleted(currentSnapshot.gameId, {
         opponent: "human",
         humanScore: game.scores.human,
         aiScore: game.scores.ai,
         handNumber: game.handNumber,
       });
     }
-    scheduleHumanGamePoll();
+    startHumanGameSync();
     return game;
   }
   const requestSnapshot = currentSnapshot;
@@ -8982,7 +9112,7 @@ els.discard.addEventListener("click", async () => {
     await waitForPaint();
     if (next.phase === "ai_discarding") {
       if (activeHumanTable) {
-        scheduleHumanGamePoll();
+        startHumanGameSync();
         return;
       }
       handoffToBackground = true;
@@ -9451,12 +9581,14 @@ window.addEventListener("pageshow", (event) => {
     trackActivityPageView(currentActivitySurface(), "pageshow");
   }
   recoverInterruptedAuthentication();
+  if (event.persisted) void refreshVisibleHumanGame();
 });
 document.addEventListener("visibilitychange", () => {
   activityTracker.track("visibility", { state: document.visibilityState });
   if (document.visibilityState === "visible") {
     recordPeopleActivity();
     recoverInterruptedAuthentication();
+    void refreshVisibleHumanGame();
   }
 });
 
