@@ -38,8 +38,12 @@ sudo systemctl enable --now caddy
 
 Do not build the browser client on a 1 GB Nanode. Build the Vite client on a
 laptop, workstation, or CI runner, then upload the generated artifact. The
-small native Rust API is compiled on the Nanode from the package's locked
-source tree to produce the correct Linux binary.
+native Rust API is compiled on the Nanode from the package's locked source tree
+to produce the correct Linux x86-64 binary; a macOS arm64 build from the
+development machine cannot run there. The helper reuses a server-side Cargo
+target cache and copies only the finished binary into the immutable release.
+It also carries the active release's hashed browser assets forward before
+overlaying the new browser bundle.
 
 The easiest path is the deploy helper:
 
@@ -47,7 +51,7 @@ The easiest path is the deploy helper:
 scripts/deploy-nanode.sh deploy
 ```
 
-By default it targets `root@172.239.170.10` using `../../keys/strongcribbage_admin_ed25519`, builds locally, uploads the artifact, installs the systemd unit, writes the Caddy routes for the game at `cribbage.strongcribbage.com` and the public landing page at `strongcribbage.com`, restarts services, and checks health.
+By default it targets `root@172.239.170.10` using `../../keys/strongcribbage_admin_ed25519`, runs QA and the browser build locally, uploads the artifact, builds the Linux API in an isolated release directory, atomically switches the active-release symlink, and checks health.
 
 The helper accepts deployments only from a clean local `master` that exactly
 matches `origin/master`. It runs the Python, TypeScript, and Rust checks and
@@ -83,9 +87,10 @@ scp cribbage-server-16.0.0.tgz YOUR_USER@your-domain.example.com:/tmp/
 ## 5. Deploy the App
 
 ```bash
-sudo mkdir -p /opt/cribbage /var/lib/cribbage
-sudo chown -R "$USER":"$USER" /opt/cribbage /var/lib/cribbage
-tar -xzf /tmp/cribbage-server-16.0.0.tgz -C /opt/cribbage
+release_commit=REPLACE_WITH_GIT_COMMIT
+sudo mkdir -p "/opt/cribbage/releases/$release_commit" /var/lib/cribbage
+sudo tar -xzf /tmp/cribbage-server-16.0.0.tgz -C "/opt/cribbage/releases/$release_commit"
+sudo ln -s "/opt/cribbage/releases/$release_commit" /opt/cribbage/current
 ```
 
 No `npm ci` or Node runtime is required on the Nanode. The deploy helper runs
@@ -102,18 +107,20 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/cribbage
+WorkingDirectory=/opt/cribbage/current
 Environment=HOST=127.0.0.1
 Environment=PORT=8787
-Environment=CRIBBAGE_MODEL_ROOT=/opt/cribbage
+Environment=CRIBBAGE_MODEL_ROOT=/opt/cribbage/current
 Environment=CRIBBAGE_DATA_DIR=/var/lib/cribbage
 Environment=CRIBBAGE_REQUIRE_AUTH=true
+Environment=CRIBBAGE_ENGAGEMENT_ADMIN_USER_IDS=1,53
 Environment=CRIBBAGE_PUBLIC_ORIGIN=https://cribbage.strongcribbage.com
 Environment=CRIBBAGE_MAIL_FROM=hello@strongcribbage.com
 Environment="CRIBBAGE_MAIL_FROM_NAME=Strong Cribbage"
 Environment=CRIBBAGE_MAIL_REPLY_TO=founder@evenvision.com
+Environment=CRIBBAGE_EMAIL_DELIVERY_PAUSED=true
 EnvironmentFile=-/etc/cribbage/cribbage.env
-ExecStart=/opt/cribbage/rust/target/release/cribbage-api
+ExecStart=/opt/cribbage/current/rust/target/release/cribbage-api
 Restart=always
 RestartSec=3
 User=cribbage
@@ -183,9 +190,12 @@ cribbage.strongcribbage.com {
 	encode zstd gzip
 	@api path /api/* /health
 	handle @api {
-		reverse_proxy 127.0.0.1:8787
+		reverse_proxy 127.0.0.1:8787 {
+			lb_try_duration 5s
+			lb_try_interval 100ms
+		}
 	}
-	root * /opt/cribbage/dist
+	root * /opt/cribbage/current/dist
 	@assets path /assets/*
 	handle @assets {
 		file_server
@@ -199,7 +209,7 @@ cribbage.strongcribbage.com {
 
 strongcribbage.com {
 	encode zstd gzip
-	root * /opt/cribbage/dist
+	root * /opt/cribbage/current/dist
 	try_files {path} /coming-soon.html
 	file_server
 }
@@ -215,9 +225,9 @@ curl https://cribbage.strongcribbage.com/health
 
 Caddy serves the browser client and routes `/api/*` and `/health` to the Rust
 API only on `cribbage.strongcribbage.com`. HTML is never cached, and missing
-hashed assets return 404 instead of falling through to `index.html`. Deploys
-retain earlier hashed assets so a client with older HTML can finish loading.
-The apex domain serves the public landing page in `dist/coming-soon.html`.
+hashed assets return 404 instead of falling through to `index.html`. Versioned
+releases preserve complete earlier bundles for rollback. The apex domain serves
+the public landing page in `dist/coming-soon.html`.
 
 ## 8. Operating Notes
 
@@ -234,27 +244,12 @@ Use the helper:
 scripts/deploy-nanode.sh deploy
 ```
 
-Manual equivalent on the build machine:
-
-```bash
-cd /path/to/cribbage
-git switch master
-git pull --ff-only origin master
-npm ci
-npm run qa:predeploy
-scp cribbage-server-16.0.0.tgz YOUR_USER@your-domain.example.com:/tmp/
-```
-
-On the Nanode:
-
-```bash
-sudo systemctl stop cribbage
-sudo rm -rf /opt/cribbage/dist /opt/cribbage/server-dist /opt/cribbage/package.json /opt/cribbage/rust
-tar -xzf /tmp/cribbage-server-16.0.0.tgz -C /opt/cribbage
-cd /opt/cribbage/rust && cargo build --locked --release --manifest-path cribbage-api/Cargo.toml
-sudo systemctl start cribbage
-curl http://127.0.0.1:8787/health
-```
+This helper is the canonical update path; do not reproduce its cutover with a
+manual extract-and-restart sequence. It carries retained assets forward, reuses
+the native Cargo cache, validates Caddy before cutover, retries requests during the
+brief API restart, verifies both local and public commit identity, and rolls
+back the symlink and service configuration if verification fails. It does not
+run overlapping API processes because active game sessions are held in memory.
 
 ## 10. Pulling Production Data Down
 

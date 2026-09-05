@@ -158,6 +158,127 @@ async function testPeopleInteractions(browser, baseUrl) {
   return { cachedOpenMilliseconds, farRightProfileTap: true, farRightResumeTap: true };
 }
 
+function engagementFixture(filters = {}) {
+  const breakdown = [{ label: "QA signal", events: 3, sessions: 2, visitors: 2 }];
+  const daily = [
+    { period: "2026-08-06", activeVisitors: 17, sessions: 17, events: 17, gameStarts: 0, gameCompletions: 0, gameForfeits: 0, bounces: 0, errorEvents: 0, frictionEvents: 0, abandonmentCandidates: 0 },
+    { period: "2026-09-03", activeVisitors: 1, sessions: 1, events: 4, gameStarts: 1, gameCompletions: 0, gameForfeits: 0, bounces: 0, errorEvents: 0, frictionEvents: 0, abandonmentCandidates: 0 },
+    { period: "2026-09-04", activeVisitors: 2, sessions: 2, events: 8, gameStarts: 1, gameCompletions: 1, gameForfeits: 0, bounces: 1, errorEvents: 1, frictionEvents: 1, abandonmentCandidates: 0 },
+    { period: "2026-09-05", activeVisitors: 2, sessions: 3, events: 12, gameStarts: 2, gameCompletions: 1, gameForfeits: 0, bounces: 0, errorEvents: 0, frictionEvents: 1, abandonmentCandidates: 1 },
+  ];
+  return {
+    range: {
+      days: filters.days ?? 30,
+      label: `Last ${filters.days ?? 30} days`,
+      from: "2026-09-03T10:00:00Z",
+      to: "2026-09-05T12:00:00Z",
+      environment: filters.environment ?? "all",
+      audience: filters.audience ?? "all",
+    },
+    totals: {
+      activeVisitors: 2, registeredUsers: 2, anonymousSessions: 0, signedInSessions: 3,
+      sessions: 3, returningUsers: 1, events: 24, pageViews: 8, interactions: 6,
+      activeNow: 1, activeLast24Hours: 2, gameStarts: 4, observedGames: 4,
+      gameResumes: 1, gameCompletions: 2, gameForfeits: 0, gameAbandons: 1,
+      completionPercent: 50, bounceSessions: 1, bouncePercent: 33.3,
+      errorEvents: 1, errorSessions: 1, frictionEvents: 2, frictionSessions: 1,
+      averageExitSeconds: 180,
+    },
+    comparison: { activeVisitors: 100, sessions: 50, gameStarts: 33.3, completionPercent: 5, bouncePercent: -2, errorSessions: 0 },
+    definitions: { activeVisitors: "Distinct visitors.", completionPercent: "Completed distinct games divided by observed distinct games." },
+    funnel: [
+      { label: "Sessions started", sessions: 3, conversionPercent: 100, dropOff: null, denominator: "sessions" },
+      { label: "Reached home", sessions: 3, conversionPercent: 100, dropOff: 0, denominator: "sessions" },
+      { label: "Reached Play Now", sessions: 2, conversionPercent: 66.7, dropOff: 1, denominator: "sessions" },
+      { label: "Started a game", sessions: 2, conversionPercent: 66.7, dropOff: 0, denominator: "sessions" },
+      { label: "Completed a game", sessions: 1, conversionPercent: 33.3, dropOff: 1, denominator: "sessions" },
+    ],
+    pathways: breakdown,
+    opponents: [{ label: "Dynamic", events: 4, sessions: 3, visitors: 2 }],
+    devices: breakdown,
+    clients: breakdown,
+    environments: breakdown,
+    locations: breakdown,
+    surfaces: breakdown,
+    eventTypes: breakdown,
+    states: [{ label: "Visibility · Hidden", events: 2, sessions: 1, visitors: 1 }],
+    interactions: breakdown,
+    errors: [{ label: "Client · QA error", events: 1, sessions: 1, visitors: 1 }],
+    users: [{
+      username: "Garrett", displayName: "Garrett", lastActive: "2026-09-05T12:00:00Z",
+      activeDays: 3, sessions: 3, events: 20, pageViews: 7, gameStarts: 4,
+      observedGames: 4, gameCompletions: 2, errors: 1, frictionEvents: 2,
+      primaryClient: "Desktop · Chromium",
+    }],
+    recentActivity: [{ at: "2026-09-05T12:00:00Z", person: "Garrett", username: "Garrett", event: "game_complete", detail: "Dynamic", environment: "prod", client: "Desktop · Chromium" }],
+    daily,
+    hourly: daily.map((point, index) => ({ ...point, period: `2026-09-05T${String(10 + index).padStart(2, "0")}` })),
+    csv: "date,events\n2026-09-05,12\n",
+  };
+}
+
+async function testEngagementDashboard(browser, baseUrl) {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1050 } });
+  await installStaticBuild(page);
+  const user = { username: "Garrett", displayName: "Garrett", email: "garrett@example.test", engagementAdmin: true };
+  const profile = { ...user, avatarDataUrl: null, online: true, lookingForGame: false, isSelf: true, textSize: "normal" };
+  const engagementRequests = [];
+  await page.route("**/api/**", async (route) => {
+    const apiPath = new URL(route.request().url()).pathname;
+    if (apiPath === "/api/auth/session") return route.fulfill({ json: { authenticated: true, user } });
+    if (apiPath === "/api/people/me") return route.fulfill({ json: { profile } });
+    if (apiPath === "/api/people/presence" || apiPath === "/api/people/online") {
+      return route.fulfill({ json: { players: [], incomingChallenges: [], outgoingChallenges: [], onlineCount: 1 } });
+    }
+    if (apiPath === "/api/people/challenges/watch") return route.abort();
+    if (apiPath === "/api/admin/engagement") {
+      const filters = route.request().postDataJSON();
+      engagementRequests.push(filters);
+      return route.fulfill({ json: engagementFixture(filters) });
+    }
+    if (apiPath === "/api/activity") return route.fulfill({ json: { ok: true } });
+    return route.fulfill({ status: 404, json: { error: `Unhandled QA route: ${apiPath}` } });
+  });
+
+  await page.goto(`${baseUrl}/?engagement=1`, { waitUntil: "domcontentloaded" });
+  await page.locator('#engagement-content:not([hidden])').waitFor();
+  const activityChart = page.locator("#engagement-activity-chart");
+  await activityChart.locator("svg path.engagement-chart-line").first().waitFor();
+  const chartPointTitles = await activityChart.locator("circle title").allTextContents();
+  if (!chartPointTitles.some((title) => title.includes("Visitors: 17 · Aug 6"))) {
+    throw new Error("Engagement chart omitted the oldest partial reporting bucket.");
+  }
+  const legend = activityChart.locator(".engagement-chart-legend button").first();
+  const pressedBefore = await legend.getAttribute("aria-pressed");
+  await legend.click();
+  const pressedAfter = await legend.getAttribute("aria-pressed");
+  if (pressedBefore === pressedAfter) throw new Error("Engagement chart legend did not toggle its line.");
+
+  const overviewTab = page.locator('[data-engagement-tab="overview"]');
+  await overviewTab.focus();
+  await overviewTab.press("ArrowRight");
+  if (await page.locator('[data-engagement-tab="people"]').getAttribute("aria-selected") !== "true") {
+    throw new Error("Engagement keyboard tab navigation did not select People.");
+  }
+  if (!await page.locator("#engagement-users").getByText("Garrett", { exact: true }).first().isVisible()) {
+    throw new Error("Engagement account activity did not render.");
+  }
+
+  await page.locator('[data-engagement-tab="experience"]').click();
+  await page.locator("#engagement-experience-chart svg").waitFor({ state: "visible" });
+  await page.locator('[data-engagement-tab="data"]').click();
+  await page.locator("#engagement-states").getByText("Visibility · Hidden", { exact: true }).waitFor();
+  await page.getByText("What the current data cannot answer", { exact: true }).waitFor();
+
+  await page.locator("#engagement-environment").selectOption("prod");
+  await page.waitForFunction(() => document.querySelector("#engagement-summary")?.textContent?.includes("prod"));
+  if (!engagementRequests.some((request) => request.environment === "prod")) {
+    throw new Error("Engagement environment filter did not reach the reporting API.");
+  }
+  await page.close();
+  return { lineChart: true, oldestPartialBucket: true, legendToggle: true, keyboardTabs: true, people: true, experience: true, states: true, serverFilter: true };
+}
+
 async function main() {
   if (!fs.existsSync(path.join(root, "index.html"))) {
     throw new Error("Missing dist/index.html; run npm run build first.");
@@ -215,7 +336,8 @@ async function main() {
     }
     await page.close();
     const people = await testPeopleInteractions(browser, baseUrl);
-    console.log(JSON.stringify({ authenticationRecovery: state, people }));
+    const engagement = await testEngagementDashboard(browser, baseUrl);
+    console.log(JSON.stringify({ authenticationRecovery: state, people, engagement }));
   } finally {
     await browser.close();
   }
