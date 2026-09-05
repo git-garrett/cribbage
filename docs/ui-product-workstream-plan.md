@@ -194,7 +194,7 @@ Every PR must:
 
 ### Verification evidence
 
-- `npm test --silent`: 276 Rust tests across 18 targets passed.
+- `npm test --silent`: 279 Rust tests across 18 targets passed.
 - `npm run test:web`, `npm run typecheck`, and `npm run build`: passed.
 - The live API returns `401` for an unauthenticated engagement request.
 - The committed Chromium regression covers dashboard keyboard tabs, line-chart
