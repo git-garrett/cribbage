@@ -35,6 +35,7 @@ import {
   dynamicCardCopy,
   dynamicHandicapPointsCopy,
   dynamicProvisionalHandicapCopy,
+  freshestDynamicCalibration,
   isDynamicCalibrating,
   playerHandicapCopy,
   type DynamicCalibration,
@@ -244,7 +245,8 @@ const ERROR_NOTICES_ENABLED_STORAGE_KEY = "strong-cribbage.errorNoticesEnabled.v
 const DISMISSED_GAME_OVER_STORAGE_KEY = "strong-cribbage.dismissedGameOverId";
 const LEADERBOARD_CACHE_KEY = "strong-cribbage.leaderboard.v1";
 const PEOPLE_IDLE_MS = 15 * 60 * 1000;
-const PEOPLE_ACTIVITY_HEARTBEAT_MIN_MS = 1000;
+const PEOPLE_POLL_MS = 60_000;
+const PEOPLE_ACTIVITY_HEARTBEAT_MIN_MS = PEOPLE_POLL_MS;
 const PEOPLE_CHALLENGE_RETRY_MS = 1_500;
 const PEOPLE_CHALLENGE_ATTENTION_MS = 2_400;
 const HUMAN_GAME_WATCH_RETRY_MS = 1_000;
@@ -1028,6 +1030,9 @@ let selectedPeopleProfile: PeopleProfile | null = null;
 let pendingAvatarDataUrl: string | null = null;
 let activeHumanTable: HumanTable | null = null;
 let peoplePollTimer: number | null = null;
+let peopleDirectoryInteractionActive = false;
+let peopleDirectoryInteractionReleaseTimer: number | null = null;
+let pendingPeopleDirectory: PeopleDirectoryResponse | null = null;
 let peopleChallengeWatchGeneration = 0;
 let peopleChallengeAttentionTimer: number | null = null;
 let humanTablePollTimer: number | null = null;
@@ -1605,7 +1610,7 @@ function peopleInitials(player: Pick<PeoplePlayer, "displayName" | "username">):
   return `${words[0][0] || ""}${words.length > 1 ? words.at(-1)?.[0] || "" : words[0][1] || ""}`.toUpperCase();
 }
 
-const HANDICAP_EXPLANATION = "Estimated total percentage points of game win probability this player loses per game relative to Ace-level choices.";
+const HANDICAP_EXPLANATION = "Handicap measures win probability of cribbage decisions.";
 const HANDICAP_TOOLTIP_ID = "player-handicap-tooltip";
 let handicapTooltipOwner: HTMLElement | null = null;
 
@@ -1645,15 +1650,23 @@ function handicapForPlayer(
   return null;
 }
 
-function playerHandicapMarker(handicap: DynamicHandicapSummary | null | undefined): HTMLElement | null {
+function playerHandicapMarker(
+  handicap: DynamicHandicapSummary | null | undefined,
+  options: { interactive?: boolean } = {},
+): HTMLElement | null {
   const copy = playerHandicapCopy(handicap);
   if (!copy) return null;
   const marker = document.createElement("span");
   marker.className = "player-handicap";
   marker.textContent = copy;
-  marker.tabIndex = 0;
-  marker.setAttribute("aria-describedby", HANDICAP_TOOLTIP_ID);
-  marker.setAttribute("aria-label", `${copy.slice(1, -1)} handicap. ${HANDICAP_EXPLANATION}`);
+  if (options.interactive !== false) {
+    marker.tabIndex = 0;
+    marker.setAttribute("aria-describedby", HANDICAP_TOOLTIP_ID);
+    marker.setAttribute("aria-label", `${copy.slice(1, -1)} handicap. ${HANDICAP_EXPLANATION}`);
+  } else {
+    marker.classList.add("is-static");
+    marker.setAttribute("aria-hidden", "true");
+  }
   return marker;
 }
 
@@ -1693,6 +1706,10 @@ function showHandicapTooltip(marker: HTMLElement): void {
 
 function hideHandicapTooltip(marker: HTMLElement): void {
   if (handicapTooltipOwner !== marker) return;
+  dismissHandicapTooltip();
+}
+
+function dismissHandicapTooltip(): void {
   const tooltip = document.querySelector(`#${HANDICAP_TOOLTIP_ID}`) as HTMLElement | null;
   if (tooltip) tooltip.hidden = true;
   handicapTooltipOwner = null;
@@ -1700,7 +1717,7 @@ function hideHandicapTooltip(marker: HTMLElement): void {
 
 function handicapMarkerFromEvent(event: Event): HTMLElement | null {
   return event.target instanceof Element
-    ? event.target.closest<HTMLElement>(".player-handicap")
+    ? event.target.closest<HTMLElement>(".player-handicap:not(.is-static)")
     : null;
 }
 
@@ -1730,11 +1747,12 @@ function setPlayerIdentity(
   element: HTMLElement,
   displayName: string,
   handicap: DynamicHandicapSummary | null = handicapForPlayer(displayName),
+  options: { interactive?: boolean } = {},
 ): void {
   const name = document.createElement("span");
   name.className = "player-identity-name";
   name.textContent = displayName;
-  const marker = playerHandicapMarker(handicap);
+  const marker = playerHandicapMarker(handicap, options);
   element.replaceChildren(name, ...(marker ? [marker] : []));
 }
 
@@ -1761,7 +1779,7 @@ function peopleListItem(
   const copy = document.createElement("span");
   copy.className = "people-list-copy";
   const name = document.createElement("strong");
-  setPlayerIdentity(name, player.displayName, player.dynamicHandicap ?? null);
+  setPlayerIdentity(name, player.displayName, player.dynamicHandicap ?? null, { interactive: false });
   const status = document.createElement("small");
   status.textContent = options.statusText ?? (options.challenge
     ? "Wants to play you"
@@ -1801,6 +1819,7 @@ function humanTableResumeItem(table: HumanTable): HTMLButtonElement {
 }
 
 function resumeHumanTable(table: HumanTable): void {
+  dismissHandicapTooltip();
   els.peoplePresencePanel.hidden = true;
   els.peoplePresenceToggle.setAttribute("aria-expanded", "false");
   void openHumanTable(table.id);
@@ -1825,7 +1844,33 @@ function announceIncomingChallenge(challenge: PeopleChallenge): void {
   }, PEOPLE_CHALLENGE_ATTENTION_MS);
 }
 
+function beginPeopleDirectoryInteraction(): void {
+  if (peopleDirectoryInteractionReleaseTimer !== null) {
+    window.clearTimeout(peopleDirectoryInteractionReleaseTimer);
+    peopleDirectoryInteractionReleaseTimer = null;
+  }
+  peopleDirectoryInteractionActive = true;
+}
+
+function finishPeopleDirectoryInteraction(): void {
+  if (!peopleDirectoryInteractionActive) return;
+  if (peopleDirectoryInteractionReleaseTimer !== null) {
+    window.clearTimeout(peopleDirectoryInteractionReleaseTimer);
+  }
+  peopleDirectoryInteractionReleaseTimer = window.setTimeout(() => {
+    peopleDirectoryInteractionReleaseTimer = null;
+    peopleDirectoryInteractionActive = false;
+    const directory = pendingPeopleDirectory;
+    pendingPeopleDirectory = null;
+    if (directory) applyPeopleDirectory(directory);
+  }, 0);
+}
+
 function applyPeopleDirectory(directory: PeopleDirectoryResponse): void {
+  if (peopleDirectoryInteractionActive) {
+    pendingPeopleDirectory = directory;
+    return;
+  }
   const previousIds = new Set(challengeIds(peopleDirectory));
   const arrived = directory.incomingChallenges.find((challenge) => !previousIds.has(challenge.id));
   peopleDirectory = directory;
@@ -1834,6 +1879,7 @@ function applyPeopleDirectory(directory: PeopleDirectoryResponse): void {
 }
 
 function renderPeopleDirectory(): void {
+  dismissHandicapTooltip();
   els.peoplePresence.hidden = false;
   const activeTable = resumableHumanTable();
   els.peoplePresenceLabel.textContent = activeTable
@@ -1938,7 +1984,7 @@ function schedulePeopleIdleTimeout(): void {
   }, remaining);
 }
 
-function recordPeopleActivity(): void {
+function recordPeopleActivity(): boolean {
   const now = Date.now();
   const reactivating = !peopleActive || now - peopleLastActivityAt >= PEOPLE_IDLE_MS;
   peopleLastActivityAt = now;
@@ -1948,9 +1994,10 @@ function recordPeopleActivity(): void {
     !authenticatedUser ||
     document.visibilityState !== "visible" ||
     (!reactivating && now - peopleLastHeartbeatAt < PEOPLE_ACTIVITY_HEARTBEAT_MIN_MS)
-  ) return;
+  ) return false;
   peopleLastHeartbeatAt = now;
   void refreshPeople({ heartbeat: true });
+  return true;
 }
 
 async function refreshPeople(options: { heartbeat?: boolean } = {}): Promise<void> {
@@ -1990,9 +2037,11 @@ function startPeopleChallengeWatch(): void {
 function schedulePeoplePoll(): void {
   if (peoplePollTimer !== null) window.clearTimeout(peoplePollTimer);
   peoplePollTimer = window.setTimeout(async () => {
-    await refreshPeople();
+    if (document.visibilityState === "visible") {
+      await refreshPeople({ heartbeat: Boolean(authenticatedUser && peopleActive) });
+    }
     schedulePeoplePoll();
-  }, 15_000);
+  }, PEOPLE_POLL_MS);
 }
 
 async function initializePeople(): Promise<void> {
@@ -2100,6 +2149,7 @@ function renderPeopleHeadToHead(profile: PeopleProfile): void {
 }
 
 async function openPeopleProfile(username: string, options: { push?: boolean } = {}): Promise<void> {
+  dismissHandicapTooltip();
   els.peoplePresencePanel.hidden = true;
   els.peoplePresenceToggle.setAttribute("aria-expanded", "false");
   els.peopleProfileStatus.textContent = "";
@@ -8390,6 +8440,7 @@ function requestNextStoredDecisionReview(gameId: string): Promise<ReturnType<typ
       tag: currentSessionTag() || null,
     });
     syncAnalytics(response.state.analyticsEvents);
+    mergeReviewedDynamicCalibration(gameId, response.state.dynamicCalibration);
     return gameAnalysisProgress(loadAnalytics().events, gameId);
   });
   storedReviewQueues.set(gameId, request);
@@ -8397,6 +8448,28 @@ function requestNextStoredDecisionReview(gameId: string): Promise<ReturnType<typ
     if (storedReviewQueues.get(gameId) === request) storedReviewQueues.delete(gameId);
   }).catch(() => undefined);
   return request;
+}
+
+function mergeReviewedDynamicCalibration(
+  gameId: string,
+  reviewed: DynamicCalibration | null | undefined,
+): void {
+  if (!state.game || currentSnapshot?.gameId !== gameId) return;
+  const current = state.game.dynamicCalibration;
+  const freshest = freshestDynamicCalibration(current, reviewed);
+  if (!freshest || freshest === current) return;
+  state.game = { ...state.game, dynamicCalibration: freshest };
+  if (ownPeopleProfile) {
+    const profileCalibration = freshestDynamicCalibration(
+      ownPeopleProfile.dynamicCalibration,
+      freshest,
+    );
+    if (profileCalibration !== ownPeopleProfile.dynamicCalibration) {
+      ownPeopleProfile = { ...ownPeopleProfile, dynamicCalibration: profileCalibration ?? undefined };
+    }
+  }
+  saveGame();
+  syncPathwayResumePresentation();
 }
 
 function storeLiveDecisionReview(gameId: string): void {
@@ -8564,11 +8637,16 @@ els.peoplePresenceToggle.addEventListener("click", () => {
   els.peoplePresenceToggle.setAttribute("aria-expanded", String(open));
   if (open) {
     showMobileGameplayHeader(false);
+    renderPeopleDirectory();
     void refreshPeople({ heartbeat: Boolean(authenticatedUser) });
   } else {
     scheduleMobileGameplayHeaderHide(700);
   }
 });
+
+els.peoplePresencePanel.addEventListener("pointerdown", beginPeopleDirectoryInteraction);
+document.addEventListener("pointerup", finishPeopleDirectoryInteraction, { capture: true });
+document.addEventListener("pointercancel", finishPeopleDirectoryInteraction, { capture: true });
 
 els.peoplePresenceClose.addEventListener("click", () => {
   els.peoplePresencePanel.hidden = true;
@@ -9587,7 +9665,10 @@ window.addEventListener("pageshow", (event) => {
 document.addEventListener("visibilitychange", () => {
   activityTracker.track("visibility", { state: document.visibilityState });
   if (document.visibilityState === "visible") {
-    recordPeopleActivity();
+    if (!recordPeopleActivity()) {
+      if (authenticatedUser) peopleLastHeartbeatAt = Date.now();
+      void refreshPeople({ heartbeat: Boolean(authenticatedUser) });
+    }
     recoverInterruptedAuthentication();
     void refreshVisibleHumanGame();
   }

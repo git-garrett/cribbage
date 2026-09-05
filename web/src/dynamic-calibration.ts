@@ -27,6 +27,15 @@ export function dynamicCardCopy(
   return DYNAMIC_CALIBRATED_COPY;
 }
 
+export function freshestDynamicCalibration(
+  current: DynamicCalibration | null | undefined,
+  candidate: DynamicCalibration | null | undefined,
+): DynamicCalibration | null | undefined {
+  if (!candidate) return current;
+  if (!current || candidate.completeCycles > current.completeCycles) return candidate;
+  return current;
+}
+
 export function dynamicProvisionalHandicapCopy(
   calibration: DynamicCalibration | null | undefined,
 ): string | null {
