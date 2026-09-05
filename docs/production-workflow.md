@@ -25,12 +25,34 @@ git worktree add -b work/SHORT-DESCRIPTION /private/tmp/cribbage-SHORT-DESCRIPTI
 
 1. Verify the change in proportion to its risk and commit it on the work branch.
    Follow `docs/compact-output.md` for the canonical commands and output rules.
-2. Push the branch and open a pull request targeting `master`.
+2. Push the branch and open a pull request targeting `master` from the CLI:
+
+   ```bash
+   git push -u origin "$(git branch --show-current)"
+   scripts/github-release-pr.sh create "Concise release title" /tmp/pr-body.md
+   ```
+
+   The helper uses the existing `github.com` HTTPS credential through
+   `git credential fill` and the GitHub API. It does not require `gh`, a browser,
+   or a ChatGPT/Codex GitHub connector. Never print the credential or paste it
+   into a command response.
 3. Run the repository code-review workflow against `master`, resolve every
-   blocking finding, and wait for required GitHub checks.
-4. Merge the reviewed pull request. The GitHub `master` ruleset requires this
-   PR path and a passing Quality check; direct pushes are reserved for
-   repository recovery.
+   blocking finding, then wait for the required GitHub check:
+
+   ```bash
+   scripts/github-release-pr.sh wait
+   ```
+
+4. Merge the reviewed pull request from the CLI. The helper refuses to merge
+   unless the exact PR head has a successful `test` check:
+
+   ```bash
+   scripts/github-release-pr.sh merge
+   ```
+
+   The GitHub `master` ruleset requires this PR path and a passing Quality
+   check; direct pushes are reserved for repository recovery. Do not substitute
+   browser automation or connector setup for this credential-backed CLI path.
 5. Synchronize a clean local `master` with `origin/master`.
 
 ## Deploy
@@ -41,6 +63,13 @@ Deploy only from that synchronized `master` checkout:
 scripts/deploy-nanode.sh check
 scripts/deploy-nanode.sh deploy
 ```
+
+If another production deployment is running, stop after preparing the reviewed
+feature branch. Do not merge its PR until the active deployment has completed;
+then refresh `origin/master`, update the feature branch if needed, rerun review
+and Quality, merge, synchronize the dedicated clean `master` worktree, and run
+the deployment commands above. Never use the dirty shared `server` checkout for
+production.
 
 The deploy command resolves local credentials relative to the repository's main
 checkout, even when run from a linked worktree. It then enforces the branch,
