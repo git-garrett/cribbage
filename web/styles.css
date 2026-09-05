@@ -8655,6 +8655,10 @@ body[data-auth="signed-out"] .bug-report-dock {
   display: none;
 }
 
+body:has(.app[data-view="game"]) .bug-report-dock {
+  display: none;
+}
+
 .feedback-trigger {
   appearance: none;
   min-height: 42px;

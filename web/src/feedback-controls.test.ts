@@ -12,6 +12,7 @@ describe("player feedback controls", () => {
     expect(html).toMatch(/id="bug-report-help"[^>]*role="tooltip"[^>]*>[^<]*anything looks wrong/i);
     expect(css).toMatch(/\.bug-report-dock\s*\{[^}]*position:\s*fixed[^}]*bottom:\s*max\([^}]*z-index:\s*5200/s);
     expect(css).toMatch(/\.bug-report-dock:is\(:hover, :focus-within\) \.feedback-tooltip/);
+    expect(css).toMatch(/body:has\(\.app\[data-view="game"\]\) \.bug-report-dock\s*\{[^}]*display:\s*none/s);
   });
 
   it("collects a concise bug description and optional screenshot in a modal", () => {
