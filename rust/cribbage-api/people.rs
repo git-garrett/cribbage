@@ -843,9 +843,12 @@ fn create_challenge(
     let user = user.ok_or_else(PeopleError::unauthorized)?;
     let input: ChallengeCreate = parse(request, "Choose an online player.")?;
     let now = unix_seconds();
-    let connection = open_game_database(&server.data_dir)
+    let mut connection = open_game_database(&server.data_dir)
         .map_err(|error| PeopleError::internal("open challenge database", error))?;
-    let target = connection
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| PeopleError::internal("start challenge transaction", error))?;
+    let target = transaction
         .query_row(
             "SELECT u.id, u.username, u.display_name, p.avatar_data_url,
                     COALESCE(pr.last_seen_at, 0)
@@ -873,33 +876,60 @@ fn create_challenge(
     if target.4 < now - ONLINE_SECONDS {
         return Err(PeopleError::conflict("That player is no longer online."));
     }
-    if let Some(existing) = connection
+    if let Some(existing) = transaction
         .query_row(
-            "SELECT id, table_id FROM people_challenges
-             WHERE challenger_id = ?1 AND challenged_id = ?2
+            "SELECT id, table_id, challenger_id FROM people_challenges
+             WHERE ((challenger_id = ?1 AND challenged_id = ?2)
+                 OR (challenger_id = ?2 AND challenged_id = ?1))
                AND status = 'pending' AND expires_at > ?3
-             ORDER BY created_at DESC LIMIT 1",
+             ORDER BY created_at ASC, id ASC LIMIT 1",
             params![user.id, target.0, now],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
         )
         .optional()
         .map_err(|error| PeopleError::internal("find active challenge", error))?
     {
-        return Ok(json!({
+        let status = if existing.2 == user.id {
+            "pending"
+        } else {
+            transaction
+                .execute(
+                    "UPDATE people_challenges
+                     SET status = 'accepted', updated_at = ?2, expires_at = ?3
+                     WHERE id = ?1 AND status = 'pending'",
+                    params![existing.0, now, now + TABLE_SECONDS],
+                )
+                .map_err(|error| PeopleError::internal("join crossed challenge", error))?;
+            "accepted"
+        };
+        let response = json!({
             "challenge": challenge_value(
                 &existing.0,
                 &existing.1,
-                "pending",
+                status,
                 &target.1,
                 &target.2,
                 target.3,
-                dynamic_handicap_for_user(&connection, target.0)?,
+                dynamic_handicap_for_user(&transaction, target.0)?,
             ),
-        }));
+        });
+        transaction
+            .commit()
+            .map_err(|error| PeopleError::internal("commit active challenge", error))?;
+        if status == "accepted" {
+            notify_challenge_watchers();
+        }
+        return Ok(response);
     }
     let id = random_id("challenge");
     let table_id = random_id("table");
-    connection
+    transaction
         .execute(
             "INSERT INTO people_challenges
              (id, table_id, challenger_id, challenged_id, status, created_at, updated_at, expires_at)
@@ -907,8 +937,7 @@ fn create_challenge(
             params![id, table_id, user.id, target.0, now, now + CHALLENGE_SECONDS],
         )
         .map_err(|error| PeopleError::internal("create player challenge", error))?;
-    notify_challenge_watchers();
-    Ok(json!({
+    let response = json!({
         "challenge": challenge_value(
             &id,
             &table_id,
@@ -916,9 +945,14 @@ fn create_challenge(
             &target.1,
             &target.2,
             target.3,
-            dynamic_handicap_for_user(&connection, target.0)?,
+            dynamic_handicap_for_user(&transaction, target.0)?,
         ),
-    }))
+    });
+    transaction
+        .commit()
+        .map_err(|error| PeopleError::internal("commit player challenge", error))?;
+    notify_challenge_watchers();
+    Ok(response)
 }
 
 fn accept_challenge(
@@ -2261,7 +2295,7 @@ fn unix_seconds() -> i64 {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Barrier, Mutex};
 
     fn test_server(name: &str) -> Server {
         let data_dir = std::env::temp_dir().join(format!(
@@ -2557,6 +2591,129 @@ mod tests {
             from_challenger["table"]["id"]
         );
         std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn crossed_challenge_joins_and_accepts_the_first_table() {
+        let server = test_server("crossed-challenge");
+        let garrett = user(&server, "Garrett");
+        let kurt = user(&server, "Kurt");
+        for player in [&garrett, &kurt] {
+            heartbeat(
+                &server,
+                &request("/api/people/presence", json!({"lookingForGame": true})),
+                Some(player),
+            )
+            .unwrap();
+        }
+
+        let first = create_challenge(
+            &server,
+            &request("/api/people/challenge", json!({"username": "Kurt"})),
+            Some(&garrett),
+        )
+        .unwrap();
+        let crossed = create_challenge(
+            &server,
+            &request("/api/people/challenge", json!({"username": "Garrett"})),
+            Some(&kurt),
+        )
+        .unwrap();
+
+        assert_eq!(crossed["challenge"]["id"], first["challenge"]["id"]);
+        assert_eq!(
+            crossed["challenge"]["tableId"],
+            first["challenge"]["tableId"]
+        );
+        assert_eq!(crossed["challenge"]["status"], "accepted");
+        let table_id = first["challenge"]["tableId"].as_str().unwrap();
+        let from_garrett = table_value(&server, table_id, garrett.id).unwrap();
+        let from_kurt = table_value(&server, table_id, kurt.id).unwrap();
+        assert_eq!(from_garrett["table"]["phase"], "cut_for_deal");
+        assert_eq!(from_kurt["table"]["id"], from_garrett["table"]["id"]);
+
+        let connection = open_game_database(&server.data_dir).unwrap();
+        let pair_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM people_challenges
+                 WHERE (challenger_id = ?1 AND challenged_id = ?2)
+                    OR (challenger_id = ?2 AND challenged_id = ?1)",
+                params![garrett.id, kurt.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(pair_count, 1);
+        drop(connection);
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn simultaneous_crossed_challenges_create_one_table() {
+        let server = Arc::new(test_server("simultaneous-crossed-challenge"));
+        let garrett = user(&server, "Garrett");
+        let kurt = user(&server, "Kurt");
+        for player in [&garrett, &kurt] {
+            heartbeat(
+                &server,
+                &request("/api/people/presence", json!({"lookingForGame": true})),
+                Some(player),
+            )
+            .unwrap();
+        }
+
+        let barrier = Arc::new(Barrier::new(3));
+        let first_server = Arc::clone(&server);
+        let first_barrier = Arc::clone(&barrier);
+        let first_player = garrett.clone();
+        let first = std::thread::spawn(move || {
+            first_barrier.wait();
+            create_challenge(
+                &first_server,
+                &request("/api/people/challenge", json!({"username": "Kurt"})),
+                Some(&first_player),
+            )
+            .unwrap()
+        });
+        let second_server = Arc::clone(&server);
+        let second_barrier = Arc::clone(&barrier);
+        let second_player = kurt.clone();
+        let second = std::thread::spawn(move || {
+            second_barrier.wait();
+            create_challenge(
+                &second_server,
+                &request("/api/people/challenge", json!({"username": "Garrett"})),
+                Some(&second_player),
+            )
+            .unwrap()
+        });
+        barrier.wait();
+        let first = first.join().unwrap();
+        let second = second.join().unwrap();
+
+        assert_eq!(first["challenge"]["id"], second["challenge"]["id"]);
+        assert_eq!(
+            first["challenge"]["tableId"],
+            second["challenge"]["tableId"]
+        );
+        assert!(
+            first["challenge"]["status"] == "accepted"
+                || second["challenge"]["status"] == "accepted"
+        );
+        let connection = open_game_database(&server.data_dir).unwrap();
+        let saved: (i64, String) = connection
+            .query_row(
+                "SELECT COUNT(*), MIN(status) FROM people_challenges
+                 WHERE (challenger_id = ?1 AND challenged_id = ?2)
+                    OR (challenger_id = ?2 AND challenged_id = ?1)",
+                params![garrett.id, kurt.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(saved, (1, "accepted".to_string()));
+        drop(connection);
+        let data_dir = server.data_dir.clone();
+        drop(server);
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[test]
