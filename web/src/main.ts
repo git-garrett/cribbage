@@ -1054,6 +1054,7 @@ let peopleDirectoryInteractionActive = false;
 let peopleDirectoryInteractionReleaseTimer: number | null = null;
 let pendingPeopleDirectory: PeopleDirectoryResponse | null = null;
 let peopleChallengeWatchGeneration = 0;
+let peopleChallengeWatchAbortController: AbortController | null = null;
 let peopleChallengeAttentionTimer: number | null = null;
 let humanTablePollTimer: number | null = null;
 let humanGameWatchGeneration = 0;
@@ -1597,8 +1598,15 @@ async function serverGetJson<T>(path: string): Promise<T> {
   }
 }
 
-async function authJson<T>(path: string, body?: Record<string, unknown>): Promise<T> {
+async function authJson<T>(
+  path: string,
+  body?: Record<string, unknown>,
+  options: { signal?: AbortSignal } = {},
+): Promise<T> {
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  options.signal?.addEventListener("abort", abort, { once: true });
+  if (options.signal?.aborted) controller.abort();
   const timeout = window.setTimeout(() => controller.abort(), 30_000);
   try {
     const response = await fetch(`${REMOTE_AI_BASE}${path}`, {
@@ -1622,6 +1630,7 @@ async function authJson<T>(path: string, body?: Record<string, unknown>): Promis
     if (error instanceof Error && error.name !== "AbortError") throw error;
     throw new Error("Account service is temporarily unavailable.");
   } finally {
+    options.signal?.removeEventListener("abort", abort);
     window.clearTimeout(timeout);
   }
 }
@@ -2150,15 +2159,27 @@ async function refreshPeople(options: { heartbeat?: boolean } = {}): Promise<voi
   }
 }
 
+function stopPeopleChallengeWatch(): void {
+  peopleChallengeWatchGeneration += 1;
+  peopleChallengeWatchAbortController?.abort();
+  peopleChallengeWatchAbortController = null;
+}
+
 function startPeopleChallengeWatch(): void {
   const generation = ++peopleChallengeWatchGeneration;
-  if (!authenticatedUser) return;
-  void (async () => {
-    while (authenticatedUser && generation === peopleChallengeWatchGeneration) {
+  if (!authenticatedUser || document.visibilityState !== "visible") return;
+  const controller = new AbortController();
+  peopleChallengeWatchAbortController = controller;
+  void ((async () => {
+    while (
+      authenticatedUser
+      && document.visibilityState === "visible"
+      && generation === peopleChallengeWatchGeneration
+    ) {
       try {
         const directory = await authJson<PeopleDirectoryResponse>("/api/people/challenges/watch", {
           knownChallengeIds: challengeIds(peopleDirectory),
-        });
+        }, { signal: controller.signal });
         if (!authenticatedUser || generation !== peopleChallengeWatchGeneration) return;
         applyPeopleDirectory(directory);
       } catch (error) {
@@ -2167,7 +2188,11 @@ function startPeopleChallengeWatch(): void {
         await waitMs(PEOPLE_CHALLENGE_RETRY_MS);
       }
     }
-  })();
+  })().finally(() => {
+    if (peopleChallengeWatchAbortController === controller) {
+      peopleChallengeWatchAbortController = null;
+    }
+  }));
 }
 
 function schedulePeoplePoll(): void {
@@ -2687,7 +2712,7 @@ function recoverExpiredAuthentication(): AuthenticationRequiredError {
   authenticatedUser = null;
   ownPeopleProfile = null;
   peopleActive = false;
-  peopleChallengeWatchGeneration += 1;
+  stopPeopleChallengeWatch();
   if (peopleIdleTimer !== null) window.clearTimeout(peopleIdleTimer);
   peopleIdleTimer = null;
   if (humanTablePollTimer !== null) window.clearTimeout(humanTablePollTimer);
@@ -9891,7 +9916,12 @@ window.addEventListener("pageshow", (event) => {
 });
 document.addEventListener("visibilitychange", () => {
   activityTracker.track("visibility", { state: document.visibilityState });
+  if (document.visibilityState === "hidden") {
+    stopPeopleChallengeWatch();
+    return;
+  }
   if (document.visibilityState === "visible") {
+    startPeopleChallengeWatch();
     if (!recordPeopleActivity()) {
       if (authenticatedUser) peopleLastHeartbeatAt = Date.now();
       void refreshPeople({ heartbeat: Boolean(authenticatedUser) });

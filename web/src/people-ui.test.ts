@@ -214,6 +214,13 @@ describe("human clubhouse UI", () => {
     expect(source).toMatch(/visibilitychange[\s\S]*document\.visibilityState === "visible"[\s\S]*refreshPeople\(\{ heartbeat: Boolean\(authenticatedUser\) \}\)/);
   });
 
+  it("pauses the challenge watcher while hidden and resumes it before refreshing presence", () => {
+    expect(source).toContain("function stopPeopleChallengeWatch");
+    expect(source).toMatch(/visibilitychange[\s\S]*document\.visibilityState === "hidden"[\s\S]*stopPeopleChallengeWatch\(\)/);
+    expect(source).toMatch(/document\.visibilityState === "visible"[\s\S]*startPeopleChallengeWatch\(\)[\s\S]*refreshPeople/);
+    expect(source).toMatch(/authJson<PeopleDirectoryResponse>\([\s\S]*people\/challenges\/watch[\s\S]*signal: controller\.signal/);
+  });
+
   it("shows the cached human directory before its shared presence heartbeat refreshes it", () => {
     const pathwayView = source.match(/function showPathwayView\(view: PathwayView\): void \{([\s\S]*?)\n\}/)?.[1] ?? "";
     expect(pathwayView).toContain('if (view === "human") renderPeopleDirectory()');
