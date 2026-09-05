@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 const fs = require("node:fs");
-const http = require("node:http");
 const path = require("node:path");
 const { chromium } = require("@playwright/test");
 
@@ -15,18 +14,20 @@ const contentTypes = {
   ".webmanifest": "application/manifest+json",
 };
 
-function serveBuild(request, response) {
-  const pathname = decodeURIComponent(new URL(request.url, "http://127.0.0.1").pathname);
-  const requested = pathname === "/" ? "index.html" : pathname.slice(1);
-  let target = path.resolve(root, requested);
-  if (!target.startsWith(`${root}${path.sep}`) || !fs.existsSync(target) || fs.statSync(target).isDirectory()) {
-    target = path.join(root, "index.html");
-  }
-  response.writeHead(200, {
-    "content-type": contentTypes[path.extname(target)] || "application/octet-stream",
-    "cache-control": "no-store",
+async function installStaticBuild(page) {
+  await page.route("https://strong-cribbage.test/**", async (route) => {
+    const pathname = decodeURIComponent(new URL(route.request().url()).pathname);
+    const requested = pathname === "/" ? "index.html" : pathname.slice(1);
+    let target = path.resolve(root, requested);
+    if (!target.startsWith(`${root}${path.sep}`) || !fs.existsSync(target) || fs.statSync(target).isDirectory()) {
+      target = path.join(root, "index.html");
+    }
+    await route.fulfill({
+      path: target,
+      contentType: contentTypes[path.extname(target)] || "application/octet-stream",
+      headers: { "cache-control": "no-store" },
+    });
   });
-  fs.createReadStream(target).pipe(response);
 }
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -112,6 +113,7 @@ async function installPeopleFixture(page) {
 
 async function readyPeoplePage(browser, baseUrl) {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await installStaticBuild(page);
   await installPeopleFixture(page);
   await page.goto(`${baseUrl}/?pathwayView=home`, { waitUntil: "domcontentloaded" });
   await page.locator('body[data-ready="true"][data-auth="signed-in"]').waitFor();
@@ -160,13 +162,11 @@ async function main() {
   if (!fs.existsSync(path.join(root, "index.html"))) {
     throw new Error("Missing dist/index.html; run npm run build first.");
   }
-  const server = http.createServer(serveBuild);
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
   const browser = await chromium.launch({ headless: true });
   try {
-    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const baseUrl = "https://strong-cribbage.test";
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await installStaticBuild(page);
     const user = { username: "qa-player", displayName: "QA Player", email: "qa@example.test" };
     await page.route("**/api/**", async (route) => {
       const apiPath = new URL(route.request().url()).pathname;
@@ -218,7 +218,6 @@ async function main() {
     console.log(JSON.stringify({ authenticationRecovery: state, people }));
   } finally {
     await browser.close();
-    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 }
 
