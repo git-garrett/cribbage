@@ -131,6 +131,7 @@ Environment=PORT=${REMOTE_PORT_APP}
 Environment=CRIBBAGE_MODEL_ROOT=${REMOTE_APP_DIR}
 Environment=CRIBBAGE_DATA_DIR=${REMOTE_DATA_DIR}
 Environment=CRIBBAGE_REQUIRE_AUTH=true
+Environment=CRIBBAGE_ENGAGEMENT_ADMIN_USER_IDS=1,53
 Environment=CRIBBAGE_PUBLIC_ORIGIN=https://${GAME_DOMAIN}
 Environment=CRIBBAGE_MAIL_FROM=hello@strongcribbage.com
 Environment="CRIBBAGE_MAIL_FROM_NAME=Strong Cribbage"

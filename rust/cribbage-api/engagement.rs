@@ -480,21 +480,25 @@ fn load_events(
         .map_err(|error| format!("query engagement events: {error}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("read engagement events: {error}"))?;
-    let session_users = rows
-        .iter()
-        .filter_map(|event| {
-            event
-                .user_id
-                .map(|user_id| (event.session_id.clone(), user_id))
-        })
-        .collect::<HashMap<_, _>>();
+    let mut session_users: HashMap<String, HashSet<i64>> = HashMap::new();
+    for event in &rows {
+        if let Some(user_id) = event.user_id {
+            session_users
+                .entry(event.session_id.clone())
+                .or_default()
+                .insert(user_id);
+        }
+    }
     for event in &mut rows {
-        event.visitor_id = session_users
-            .get(&event.session_id)
-            .copied()
-            .or(event.user_id)
-            .map(|id| format!("user:{id}"))
-            .unwrap_or_else(|| format!("anonymous:{}", event.session_id));
+        event.visitor_id = match event.user_id {
+            Some(user_id) => format!("user:{user_id}"),
+            None => match session_users.get(&event.session_id) {
+                Some(user_ids) if user_ids.len() == 1 => {
+                    format!("user:{}", user_ids.iter().next().unwrap())
+                }
+                _ => format!("anonymous:{}", event.session_id),
+            },
+        };
     }
     Ok(rows)
 }
@@ -1221,6 +1225,45 @@ mod tests {
         let response = handle(&server, &request(30), Some(&owner)).unwrap();
         let value: Value = serde_json::from_str(&response.body).unwrap();
         assert_eq!(value["totals"]["activeVisitors"], 1);
+        assert_eq!(value["totals"]["sessions"], 1);
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn a_shared_tab_preserves_each_authenticated_visitor() {
+        let server = test_server("shared-tab-visitors");
+        add_event(
+            &server,
+            "1",
+            None,
+            "shared-tab",
+            "session_start",
+            None,
+            json!({}),
+        );
+        add_event(
+            &server,
+            "2",
+            Some(1),
+            "shared-tab",
+            "login",
+            None,
+            json!({"method":"password"}),
+        );
+        add_event(
+            &server,
+            "3",
+            Some(2),
+            "shared-tab",
+            "login",
+            None,
+            json!({"method":"password"}),
+        );
+        let owner = auth::test_user(1, "Garrett", "owner@example.test");
+        let response = handle(&server, &request(30), Some(&owner)).unwrap();
+        let value: Value = serde_json::from_str(&response.body).unwrap();
+        assert_eq!(value["totals"]["activeVisitors"], 3);
+        assert_eq!(value["totals"]["registeredUsers"], 2);
         assert_eq!(value["totals"]["sessions"], 1);
         std::fs::remove_dir_all(server.data_dir).unwrap();
     }

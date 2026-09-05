@@ -64,13 +64,15 @@ retained in page paths.
 `POST /api/admin/engagement` accepts `days` as `1`, `7`, `30`, `90`, or `0`
 for all available history, plus `environment` (`all`, `prod`, `ios`, `lan`, or
 `local`) and `audience` (`all`, `registered`, or `anonymous`) filters. The
-server resolves the usernames in `CRIBBAGE_ENGAGEMENT_ADMINS` into immutable
-account-role rows once when the role schema is first initialized; the default
-bootstrap names are `Garrett` and `Test`. Later profile-name edits neither grant
-nor revoke access. Adding another administrator requires an explicit role-row
-change rather than adopting a configured display name. Hiding the client link is
-only a convenience—the API independently returns `403` to every other signed-in
-account.
+server resolves the immutable account IDs in
+`CRIBBAGE_ENGAGEMENT_ADMIN_USER_IDS` into account-role rows once when the role
+schema is first initialized. The production service config designates account
+IDs `1` (Garrett) and `53` (Test); a fresh local database defaults to its seeded
+owner account ID `1`. Initialization fails rather than partially completing if
+any configured account does not exist. Later profile-name edits neither grant
+nor revoke access. Adding another administrator requires an explicit stable-ID
+configuration and role migration. Hiding the client link is only a convenience—the
+API independently returns `403` to every other signed-in account.
 
 The report defines its metrics in the response and UI. Active visitors combine
 distinct authenticated accounts with anonymous tab sessions. Returning users
@@ -88,7 +90,9 @@ account-level engagement, recent activity, screen and pathway use, interaction
 hot spots, sanitized error groups, event inventory, and client, platform,
 version, screen, pixel-ratio, touch, timezone, language, visibility, orientation,
 authentication, and recorded game-phase breakdowns. Anonymous activity from a
-tab that later signs in is reconciled to the signed-in account for visitor totals.
+tab that later uses exactly one signed-in account is reconciled to that account
+for visitor totals. If multiple accounts share a tab, each account remains a
+distinct visitor and unattributable anonymous activity remains separate.
 
 ## Known measurement gaps
 

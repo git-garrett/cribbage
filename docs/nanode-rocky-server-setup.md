@@ -108,6 +108,7 @@ Environment=PORT=8787
 Environment=CRIBBAGE_MODEL_ROOT=/opt/cribbage
 Environment=CRIBBAGE_DATA_DIR=/var/lib/cribbage
 Environment=CRIBBAGE_REQUIRE_AUTH=true
+Environment=CRIBBAGE_ENGAGEMENT_ADMIN_USER_IDS=1,53
 Environment=CRIBBAGE_PUBLIC_ORIGIN=https://cribbage.strongcribbage.com
 Environment=CRIBBAGE_MAIL_FROM=hello@strongcribbage.com
 Environment="CRIBBAGE_MAIL_FROM_NAME=Strong Cribbage"

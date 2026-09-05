@@ -164,11 +164,16 @@ pub fn initialize(data_dir: &std::path::Path) -> Result<(), String> {
                 .map_err(|error| format!("seed account for {}: {}", username, error))?;
         }
     }
-    bootstrap_engagement_admins(&connection)?;
+    let engagement_admin_ids =
+        env::var("CRIBBAGE_ENGAGEMENT_ADMIN_USER_IDS").unwrap_or_else(|_| "1".to_string());
+    bootstrap_engagement_admins(&connection, &engagement_admin_ids)?;
     Ok(())
 }
 
-fn bootstrap_engagement_admins(connection: &rusqlite::Connection) -> Result<(), String> {
+fn bootstrap_engagement_admins(
+    connection: &rusqlite::Connection,
+    configured_ids: &str,
+) -> Result<(), String> {
     let already_bootstrapped: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM auth_role_bootstrap WHERE role = 'engagement_admin')",
@@ -179,22 +184,42 @@ fn bootstrap_engagement_admins(connection: &rusqlite::Connection) -> Result<(), 
     if already_bootstrapped {
         return Ok(());
     }
-    let configured =
-        env::var("CRIBBAGE_ENGAGEMENT_ADMINS").unwrap_or_else(|_| "Garrett,Test".to_string());
-    let now = unix_seconds();
-    for username in configured
+    let user_ids = configured_ids
         .split(',')
         .map(str::trim)
-        .filter(|name| !name.is_empty())
-    {
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            value
+                .parse::<i64>()
+                .ok()
+                .filter(|id| *id > 0)
+                .ok_or_else(|| format!("invalid engagement admin user ID: {value}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if user_ids.is_empty() {
+        return Err("at least one engagement admin user ID must be configured".to_string());
+    }
+    for user_id in &user_ids {
+        let exists: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM auth_users WHERE id = ?1)",
+                [user_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("read engagement admin account {user_id}: {error}"))?;
+        if !exists {
+            return Err(format!("engagement admin account {user_id} does not exist"));
+        }
+    }
+    let now = unix_seconds();
+    for user_id in user_ids {
         connection
             .execute(
                 "INSERT OR IGNORE INTO auth_roles (user_id, role, created_at)
-                 SELECT id, 'engagement_admin', ?2 FROM auth_users
-                 WHERE username = ?1 COLLATE NOCASE",
-                params![username, now],
+                 VALUES (?1, 'engagement_admin', ?2)",
+                params![user_id, now],
             )
-            .map_err(|error| format!("bootstrap engagement admin {username}: {error}"))?;
+            .map_err(|error| format!("bootstrap engagement admin {user_id}: {error}"))?;
     }
     connection
         .execute(
@@ -1248,6 +1273,49 @@ mod tests {
             .unwrap();
         assert!(is_engagement_admin(&server.data_dir, &garrett));
         assert!(!is_engagement_admin(&server.data_dir, &kurt));
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn engagement_admin_bootstrap_requires_and_assigns_every_stable_id() {
+        let server = test_server("engagement-role-provisioning");
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection
+            .execute(
+                "INSERT INTO auth_users
+                 (username, display_name, email, normalized_email, created_at, updated_at)
+                 VALUES ('Test', 'Test', 'test@example.test', 'test@example.test', 1, 1)",
+                [],
+            )
+            .unwrap();
+        let test_user_id = connection.last_insert_rowid();
+        connection.execute("DELETE FROM auth_roles", []).unwrap();
+        connection
+            .execute("DELETE FROM auth_role_bootstrap", [])
+            .unwrap();
+
+        let missing_id = test_user_id + 1000;
+        assert!(bootstrap_engagement_admins(
+            &connection,
+            &format!("1,{test_user_id},{missing_id}")
+        )
+        .is_err());
+        let marker_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM auth_role_bootstrap", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(marker_count, 0);
+
+        bootstrap_engagement_admins(&connection, &format!("1,{test_user_id}")).unwrap();
+        let role_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM auth_roles WHERE role = 'engagement_admin'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(role_count, 2);
         std::fs::remove_dir_all(server.data_dir).unwrap();
     }
 
