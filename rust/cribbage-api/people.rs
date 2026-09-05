@@ -1447,48 +1447,51 @@ fn human_game_action(
     let viewer = table_viewer_side(&row, user.id)?;
     let (mut record, revision) = load_human_game(&transaction, &input.table_id)?;
     let action_id = input.action_id.trim();
+    if action_id.is_empty() {
+        return Err(PeopleError::bad_request(
+            "The player action id is required.",
+        ));
+    }
     if action_id.len() > 120 {
         return Err(PeopleError::bad_request(
             "The player action id is too long.",
         ));
     }
-    let action_id = (!action_id.is_empty()).then(|| action_id.to_string());
+    let action_id = action_id.to_string();
     let payload_json = serde_json::to_string(&input.payload)
         .map_err(|error| PeopleError::internal("serialize player action", error))?;
-    if let Some(action_id) = action_id.as_deref() {
-        if let Some((saved_action, saved_payload, applied_revision)) = transaction
-            .query_row(
-                "SELECT action, payload_json, result_revision
-                 FROM people_game_actions
-                 WHERE table_id = ?1 AND actor_id = ?2 AND action_id = ?3",
-                params![input.table_id, user.id, action_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(|error| PeopleError::internal("find acknowledged player action", error))?
-        {
-            if saved_action != input.action || saved_payload != payload_json {
-                return Err(PeopleError::conflict(
-                    "That player action id was already used for another move.",
-                ));
-            }
-            let response = acknowledge_human_game_action(
-                human_game_response(&input.table_id, &row, &record, revision, viewer),
-                action_id,
-                applied_revision,
-                true,
-            );
-            transaction.commit().map_err(|error| {
-                PeopleError::internal("finish acknowledged player action", error)
-            })?;
-            return Ok(response);
+    if let Some((saved_action, saved_payload, applied_revision)) = transaction
+        .query_row(
+            "SELECT action, payload_json, result_revision
+             FROM people_game_actions
+             WHERE table_id = ?1 AND actor_id = ?2 AND action_id = ?3",
+            params![input.table_id, user.id, action_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| PeopleError::internal("find acknowledged player action", error))?
+    {
+        if saved_action != input.action || saved_payload != payload_json {
+            return Err(PeopleError::conflict(
+                "That player action id was already used for another move.",
+            ));
         }
+        let response = acknowledge_human_game_action(
+            human_game_response(&input.table_id, &row, &record, revision, viewer),
+            &action_id,
+            applied_revision,
+            true,
+        );
+        transaction
+            .commit()
+            .map_err(|error| PeopleError::internal("finish acknowledged player action", error))?;
+        return Ok(response);
     }
     // Both players can choose their private discards from the same revision.
     // The choices touch disjoint hands, so merge the second valid discard into
@@ -1644,24 +1647,22 @@ fn human_game_action(
             "The other player moved first. Refreshing the table will show the latest play.",
         ));
     }
-    if let Some(action_id) = action_id.as_deref() {
-        transaction
-            .execute(
-                "INSERT INTO people_game_actions
-                 (table_id, actor_id, action_id, action, payload_json, result_revision, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    input.table_id,
-                    user.id,
-                    action_id,
-                    input.action,
-                    payload_json,
-                    revision + 1,
-                    now,
-                ],
-            )
-            .map_err(|error| PeopleError::internal("acknowledge player action", error))?;
-    }
+    transaction
+        .execute(
+            "INSERT INTO people_game_actions
+             (table_id, actor_id, action_id, action, payload_json, result_revision, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                input.table_id,
+                user.id,
+                action_id,
+                input.action,
+                payload_json,
+                revision + 1,
+                now,
+            ],
+        )
+        .map_err(|error| PeopleError::internal("acknowledge player action", error))?;
     if record.game.phase == Phase::GameOver && record.pending_final_scoring.is_none() {
         record_head_to_head_game(&transaction, &row, &record, now)?;
     }
@@ -1670,10 +1671,12 @@ fn human_game_action(
         .map_err(|error| PeopleError::internal("commit player game action", error))?;
     notify_human_game_watchers();
     let response = human_game_response(&input.table_id, &row, &record, revision + 1, viewer);
-    Ok(match action_id.as_deref() {
-        Some(action_id) => acknowledge_human_game_action(response, action_id, revision + 1, false),
-        None => response,
-    })
+    Ok(acknowledge_human_game_action(
+        response,
+        &action_id,
+        revision + 1,
+        false,
+    ))
 }
 
 fn human_game_review(
@@ -1709,6 +1712,8 @@ fn human_game_review(
     let row = table_row(&transaction, &input.table_id)?;
     let viewer = table_viewer_side(&row, user.id)?;
     let (mut record, revision) = load_human_game(&transaction, &input.table_id)?;
+    let mut response_revision = revision;
+    let mut review_saved = false;
     if let (Some(pending), Some(completed)) = (pending, completed) {
         if let Some(saved) = record
             .decision_reviews
@@ -1718,22 +1723,34 @@ fn human_game_review(
             saved.completed = Some(completed);
             let game_json = serde_json::to_string(&record)
                 .map_err(|error| PeopleError::internal("serialize player review", error))?;
-            transaction
+            let updated = transaction
                 .execute(
-                    "UPDATE people_games SET game_json = ?2, updated_at = ?3 WHERE table_id = ?1",
-                    params![input.table_id, game_json, unix_seconds()],
+                    "UPDATE people_games
+                     SET game_json = ?2, revision = revision + 1, updated_at = ?3
+                     WHERE table_id = ?1 AND revision = ?4",
+                    params![input.table_id, game_json, unix_seconds(), revision],
                 )
                 .map_err(|error| PeopleError::internal("save player decision review", error))?;
+            if updated != 1 {
+                return Err(PeopleError::conflict(
+                    "The player game changed while Ace was reviewing it.",
+                ));
+            }
+            response_revision += 1;
+            review_saved = true;
         }
     }
     transaction
         .commit()
         .map_err(|error| PeopleError::internal("commit player decision review", error))?;
+    if review_saved {
+        notify_human_game_watchers();
+    }
     Ok(human_game_response(
         &input.table_id,
         &row,
         &record,
-        revision,
+        response_revision,
         viewer,
     ))
 }
@@ -3217,6 +3234,7 @@ mod tests {
                 json!({
                     "tableId": "t",
                     "action": "continue-scoring",
+                    "actionId": "shared-score-pone",
                     "revision": pone_before["revision"],
                     "payload": {},
                 }),
@@ -3303,6 +3321,22 @@ mod tests {
                 "payload": {},
             }),
         );
+        let missing_action_id = human_game_action(
+            &server,
+            &request(
+                "/api/people/table/game/action",
+                json!({
+                    "tableId": "t",
+                    "action": "continue-scoring",
+                    "revision": 0,
+                    "payload": {},
+                }),
+            ),
+            Some(&kurt),
+        )
+        .unwrap_err();
+        assert_eq!(missing_action_id.status, 400);
+
         let first = human_game_action(&server, &first_request, Some(&kurt)).unwrap();
         assert_eq!(first["revision"], 1);
         assert_eq!(first["acknowledgment"]["actionId"], "count-pone");
@@ -3398,6 +3432,7 @@ mod tests {
                 json!({
                     "tableId": "t",
                     "action": "continue-scoring",
+                    "actionId": "winning-score",
                     "revision": 0,
                     "payload": {},
                 }),
@@ -3421,6 +3456,7 @@ mod tests {
                 json!({
                     "tableId": "t",
                     "action": "continue-scoring",
+                    "actionId": "view-winning-result",
                     "revision": counted["revision"],
                     "payload": {},
                 }),
@@ -3562,6 +3598,7 @@ mod tests {
                 json!({
                     "tableId": "t",
                     "action": "discard",
+                    "actionId": "garrett-discard",
                     "revision": initial["revision"],
                     "payload": {"ids": ids},
                 }),
@@ -3628,6 +3665,7 @@ mod tests {
                 json!({
                     "tableId": "t",
                     "action": "discard",
+                    "actionId": "kurt-discard",
                     "revision": simultaneous_opponent["revision"],
                     "payload": {"ids": opponent_ids},
                 }),
@@ -3663,6 +3701,7 @@ mod tests {
                 json!({
                     "tableId": "t",
                     "action": "play",
+                    "actionId": "first-peg-play",
                     "revision": acting_view["revision"],
                     "payload": {"id": card_id},
                 }),
@@ -3691,6 +3730,7 @@ mod tests {
                 json!({
                     "tableId": "t",
                     "action": "play",
+                    "actionId": "stale-peg-play",
                     "revision": acting_view["revision"],
                     "payload": {"id": card_id},
                 }),
@@ -3737,13 +3777,14 @@ mod tests {
             .take(2)
             .map(|card| card["id"].as_u64().unwrap())
             .collect::<Vec<_>>();
-        human_game_action(
+        let acted = human_game_action(
             &server,
             &request(
                 "/api/people/table/game/action",
                 json!({
                     "tableId": "t",
                     "action": "discard",
+                    "actionId": "reviewed-discard",
                     "revision": initial["revision"],
                     "payload": {"ids": ids},
                 }),
@@ -3759,12 +3800,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
+            reviewed["revision"].as_i64().unwrap(),
+            acted["revision"].as_i64().unwrap() + 1
+        );
+        assert_eq!(
             reviewed["state"]["analyticsEvents"]
                 .as_array()
                 .unwrap()
                 .len(),
             1
         );
+        let opponent_view = human_game_status(
+            &server,
+            &request("/api/people/table/game", json!({"tableId": "t"})),
+            Some(&kurt),
+        )
+        .unwrap();
+        assert_eq!(opponent_view["revision"], reviewed["revision"]);
         let connection = open_game_database(&server.data_dir).unwrap();
         let (saved, _) = load_human_game(&connection, "t").unwrap();
         let evaluation = saved.decision_reviews[0].completed.as_ref().unwrap();
@@ -3800,7 +3852,7 @@ mod tests {
             .unwrap();
         }
 
-        for _ in 0..2_000 {
+        for step in 0..2_000 {
             let connection = open_game_database(&server.data_dir).unwrap();
             let (record, _) = load_human_game(&connection, "t").unwrap();
             drop(connection);
@@ -3913,6 +3965,7 @@ mod tests {
                     json!({
                         "tableId": "t",
                         "action": action,
+                        "actionId": format!("smoke-{step}"),
                         "revision": view["revision"],
                         "payload": payload,
                     }),

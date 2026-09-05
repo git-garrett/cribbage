@@ -187,6 +187,7 @@ describe("human clubhouse UI", () => {
     expect(source).toContain("Low card deals first.");
     expect(source).toContain("async function enterHumanGame");
     expect(source).toMatch(/response\.table\.phase === "playing"[\s\S]*await enterHumanGame\(\)/);
+    expect(source).toMatch(/function scheduleHumanTablePoll[\s\S]*catch \(error\)[\s\S]*scheduleHumanTablePoll\(\)/);
   });
 
   it("watches a human opponent instead of asking the AI engine to move", () => {

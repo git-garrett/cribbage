@@ -2324,6 +2324,7 @@ function scheduleHumanTablePoll(): void {
       scheduleHumanTablePoll();
     } catch (error) {
       els.humanTableStatus.textContent = error instanceof Error ? error.message : "The table could not be refreshed.";
+      scheduleHumanTablePoll();
     }
   }, 1_800);
 }
