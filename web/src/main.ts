@@ -318,6 +318,7 @@ const state: {
   hintsEnabled: boolean;
   errorNoticesEnabled: boolean;
   analyticsOpen: boolean;
+  engagementOpen: boolean;
   analyticsMode: "my" | "full";
   statsView: StatsView;
   gameLogView: GameLogView;
@@ -383,6 +384,7 @@ const state: {
   hintsEnabled: safeLocalStorageGet(HINTS_ENABLED_STORAGE_KEY) !== "0",
   errorNoticesEnabled: safeLocalStorageGet(ERROR_NOTICES_ENABLED_STORAGE_KEY) !== "0",
   analyticsOpen: false,
+  engagementOpen: false,
   analyticsMode: "my",
   statsView: "stats",
   gameLogView: "games",
@@ -486,6 +488,7 @@ function resetTransientGameUi(): void {
   els.masterSessionDialog.hidden = true;
   closeDecisionSnapshot();
   state.analyticsOpen = false;
+  state.engagementOpen = false;
   state.leaderboardOpen = false;
   state.modelInfoOpen = false;
   state.decisionReviewOpen = false;
@@ -516,6 +519,7 @@ const els = {
   pathwayDestinationButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-destination]")],
   dynamicCardCopy: document.querySelector("#dynamic-card-copy") as HTMLElement,
   pathwayStatistics: document.querySelector("#pathway-statistics") as HTMLButtonElement,
+  engagementPathwayOpen: document.querySelector("#engagement-pathway-open") as HTMLButtonElement,
   bugReportOpen: document.querySelector("#bug-report-open") as HTMLButtonElement,
   bugReportDialog: document.querySelector("#bug-report-dialog") as HTMLDialogElement,
   bugReportForm: document.querySelector("#bug-report-form") as HTMLFormElement,
@@ -620,11 +624,26 @@ const els = {
   menuToggle: document.createElement("button"),
   settingsPanel: document.querySelector("#settings-panel") as HTMLElement,
   adminMenu: document.querySelector("#admin-menu") as HTMLElement,
+  engagementMenuOpen: document.querySelector("#engagement-menu-open") as HTMLButtonElement,
   parGuidesToggle: document.querySelector("#par-guides-toggle") as HTMLInputElement,
   appVersion: document.querySelector("#app-version") as HTMLElement,
   currentModel: document.querySelector("#current-model") as HTMLElement,
   myStatsOpen: document.querySelector("#my-stats-open") as HTMLButtonElement,
   analyticsOpen: document.querySelector("#analytics-open") as HTMLButtonElement,
+  engagementPage: document.querySelector("#engagement-page") as HTMLElement,
+  engagementClose: document.querySelector("#engagement-close") as HTMLButtonElement,
+  engagementRange: document.querySelector("#engagement-range") as HTMLSelectElement,
+  engagementExport: document.querySelector("#engagement-export") as HTMLButtonElement,
+  engagementSummary: document.querySelector("#engagement-summary") as HTMLElement,
+  engagementStatus: document.querySelector("#engagement-status") as HTMLElement,
+  engagementContent: document.querySelector("#engagement-content") as HTMLElement,
+  engagementOverview: document.querySelector("#engagement-overview") as HTMLElement,
+  engagementDefinitions: document.querySelector("#engagement-definitions") as HTMLElement,
+  engagementFunnel: document.querySelector("#engagement-funnel") as HTMLElement,
+  engagementPathways: document.querySelector("#engagement-pathways") as HTMLElement,
+  engagementOpponents: document.querySelector("#engagement-opponents") as HTMLElement,
+  engagementDevices: document.querySelector("#engagement-devices") as HTMLElement,
+  engagementDaily: document.querySelector("#engagement-daily") as HTMLElement,
   exportGameLog: document.querySelector("#export-game-log") as HTMLButtonElement,
   troubleGame: document.querySelector("#trouble-game") as HTMLButtonElement,
   analyticsClose: document.querySelector("#analytics-close") as HTMLButtonElement,
@@ -912,7 +931,41 @@ interface AuthUser {
   username: string;
   displayName: string;
   email: string;
+  engagementAdmin?: boolean;
 }
+
+interface EngagementBreakdown {
+  label: string;
+  events: number;
+  sessions: number;
+  visitors: number;
+}
+
+interface EngagementReport {
+  range: { days: number; label: string; from: string | null; to: string };
+  totals: {
+    activeVisitors: number;
+    registeredUsers: number;
+    anonymousSessions: number;
+    sessions: number;
+    returningUsers: number;
+    events: number;
+    gameStarts: number;
+    gameCompletions: number;
+    gameForfeits: number;
+    gameAbandons: number;
+    completionPercent: number;
+  };
+  definitions: Record<string, string>;
+  funnel: Array<{ label: string; sessions: number; conversionPercent: number; denominator: string }>;
+  pathways: EngagementBreakdown[];
+  opponents: EngagementBreakdown[];
+  devices: EngagementBreakdown[];
+  daily: Array<{ date: string; activeVisitors: number; sessions: number; gameStarts: number; gameCompletions: number }>;
+  csv: string;
+}
+
+let engagementReport: EngagementReport | null = null;
 
 interface PeopleProfile {
   username: string;
@@ -1275,6 +1328,7 @@ function activityErrorSummary(error: unknown): string {
 }
 
 function currentActivitySurface(): string {
+  if (!els.engagementPage.hidden) return "admin:engagement";
   if (!els.authPage.hidden) {
     if (!els.authPasswordForm.hidden) return URL_PARAMS.has("invite") ? "auth:invite" : "auth:reset";
     if (!els.authOtpForm.hidden) return "auth:otp";
@@ -1370,8 +1424,10 @@ function applySimpleNetworkMode(): void {
 }
 
 function applyAdminVisibility(): void {
-  const showAdmin = window.location.hash === ADMIN_HASH;
+  const showAdmin = Boolean(authenticatedUser?.engagementAdmin) || window.location.hash === ADMIN_HASH;
   els.adminMenu.hidden = !showAdmin;
+  els.engagementPathwayOpen.hidden = !authenticatedUser?.engagementAdmin;
+  els.engagementMenuOpen.hidden = !authenticatedUser?.engagementAdmin;
   if (!showAdmin) els.adminMenu.removeAttribute("open");
 }
 
@@ -2656,6 +2712,9 @@ function currentAuthenticationRequest(): {
 function recoverExpiredAuthentication(): AuthenticationRequiredError {
   const request = currentAuthenticationRequest();
   authenticatedUser = null;
+  state.engagementOpen = false;
+  els.engagementPage.hidden = true;
+  applyAdminVisibility();
   ownPeopleProfile = null;
   peopleActive = false;
   peopleChallengeWatchGeneration += 1;
@@ -2851,6 +2910,7 @@ function finishAuthentication(user: AuthUser): void {
   els.authAccountRow.hidden = false;
   els.authLoginRow.hidden = true;
   els.authAccountProfile.textContent = user.displayName;
+  applyAdminVisibility();
   const cleanUrl = new URL(window.location.href);
   cleanUrl.searchParams.delete("reset");
   cleanUrl.searchParams.delete("invite");
@@ -2877,6 +2937,7 @@ async function initializeAuthentication(): Promise<boolean> {
       return true;
     }
     authenticatedUser = null;
+    applyAdminVisibility();
     document.body.dataset.auth = "guest";
     els.authPage.hidden = true;
     els.authAccountRow.hidden = true;
@@ -3056,6 +3117,8 @@ function markAppReady(): void {
 
 function showPathwayView(view: PathwayView): void {
   if (!PATHWAY_NAV_ENABLED) return;
+  state.engagementOpen = false;
+  els.engagementPage.hidden = true;
   if (els.pathwayPage.hidden && isActiveGame(state.game)) suspendActiveGameForPathway();
   els.pathwayPage.hidden = false;
   els.pathwayPage.dataset.view = view;
@@ -8114,8 +8177,10 @@ function playAreaTitle(game: GameState): string {
 }
 
 function renderUtilityPages(): void {
-  els.app.dataset.view = state.analyticsOpen
-    ? "analytics"
+  els.app.dataset.view = state.engagementOpen
+    ? "engagement"
+    : state.analyticsOpen
+      ? "analytics"
     : state.leaderboardOpen
       ? "leaderboard"
       : state.modelInfoOpen
@@ -8125,6 +8190,7 @@ function renderUtilityPages(): void {
           : "game";
   syncMobileGameplayHeaderPlacement();
   els.analyticsPage.hidden = !state.analyticsOpen;
+  els.engagementPage.hidden = !state.engagementOpen;
   els.leaderboardPage.hidden = !state.leaderboardOpen;
   els.modelInfoPage.hidden = !state.modelInfoOpen;
   els.decisionReviewPage.hidden = !state.decisionReviewOpen;
@@ -8132,7 +8198,7 @@ function renderUtilityPages(): void {
   if (state.leaderboardOpen) renderLeaderboard();
   if (state.modelInfoOpen) renderModelInfoPage();
   if (state.decisionReviewOpen) renderDecisionReviewPage();
-  if (state.analyticsOpen || state.leaderboardOpen || state.modelInfoOpen || state.decisionReviewOpen) {
+  if (state.engagementOpen || state.analyticsOpen || state.leaderboardOpen || state.modelInfoOpen || state.decisionReviewOpen) {
     trackActivityPageView(currentActivitySurface());
   }
 }
@@ -8992,6 +9058,163 @@ document.addEventListener("keydown", (event) => {
   if (parent) navigatePathway(parent);
 });
 
+function engagementMetric(label: string, value: string, note: string): HTMLElement {
+  const card = document.createElement("article");
+  card.className = "engagement-metric";
+  const heading = document.createElement("span");
+  heading.textContent = label;
+  const strong = document.createElement("strong");
+  strong.textContent = value;
+  const detail = document.createElement("small");
+  detail.textContent = note;
+  card.append(heading, strong, detail);
+  return card;
+}
+
+function engagementTable(
+  container: HTMLElement,
+  headings: string[],
+  rows: Array<Array<string | number>>,
+  emptyMessage: string,
+): void {
+  container.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.className = "engagement-empty";
+    empty.textContent = emptyMessage;
+    container.append(empty);
+    return;
+  }
+  const table = document.createElement("table");
+  const head = document.createElement("thead");
+  const headingRow = document.createElement("tr");
+  for (const heading of headings) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = heading;
+    headingRow.append(cell);
+  }
+  head.append(headingRow);
+  const body = document.createElement("tbody");
+  for (const values of rows) {
+    const row = document.createElement("tr");
+    values.forEach((value, index) => {
+      const cell = document.createElement(index === 0 ? "th" : "td");
+      if (index === 0) (cell as HTMLTableCellElement).scope = "row";
+      cell.textContent = String(value);
+      row.append(cell);
+    });
+    body.append(row);
+  }
+  table.append(head, body);
+  container.append(table);
+}
+
+function renderEngagementReport(report: EngagementReport): void {
+  const totals = report.totals;
+  els.engagementSummary.textContent = `${report.range.label} · through ${shortDate(report.range.to)}`;
+  els.engagementOverview.replaceChildren(
+    engagementMetric("Active visitors", String(totals.activeVisitors), "Distinct signed-in accounts plus anonymous tab sessions."),
+    engagementMetric("Registered users", String(totals.registeredUsers), "Signed-in accounts active during this window."),
+    engagementMetric("Sessions", String(totals.sessions), "Distinct browser-tab sessions with at least one event."),
+    engagementMetric("Returning users", String(totals.returningUsers), "Signed-in accounts active on at least two UTC dates."),
+    engagementMetric("Game starts", String(totals.gameStarts), "All game_start events in this window."),
+    engagementMetric("Completions", String(totals.gameCompletions), `${totals.completionPercent}% of starts in this window.`),
+    engagementMetric("Abandons", String(totals.gameAbandons), "Unresolved page-exit abandonment candidates."),
+    engagementMetric("Forfeits", String(totals.gameForfeits), "Explicit game forfeits in this window."),
+  );
+  els.engagementDefinitions.replaceChildren(...Object.entries(report.definitions).map(([key, definition]) => {
+    const item = document.createElement("p");
+    const term = document.createElement("strong");
+    term.textContent = key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase());
+    item.append(term, document.createTextNode(` — ${definition}`));
+    return item;
+  }));
+  els.engagementFunnel.replaceChildren(...report.funnel.map((step) => {
+    const item = document.createElement("article");
+    const copy = document.createElement("div");
+    const label = document.createElement("strong");
+    label.textContent = step.label;
+    const detail = document.createElement("span");
+    detail.textContent = `${step.sessions} sessions · ${step.conversionPercent}%`;
+    copy.append(label, detail);
+    const bar = document.createElement("i");
+    bar.style.setProperty("--engagement-width", `${Math.min(100, step.conversionPercent)}%`);
+    item.append(copy, bar);
+    return item;
+  }));
+  const breakdownRows = (rows: EngagementBreakdown[]) => rows.map((row) => [row.label, row.events, row.sessions, row.visitors]);
+  engagementTable(els.engagementPathways, ["Pathway", "Views", "Sessions", "Visitors"], breakdownRows(report.pathways), "No pathway views in this window.");
+  engagementTable(els.engagementOpponents, ["Opponent/model", "Starts", "Sessions", "Visitors"], breakdownRows(report.opponents), "No games started in this window.");
+  engagementTable(els.engagementDevices, ["Device · browser · viewport", "Events", "Sessions", "Visitors"], breakdownRows(report.devices), "No client activity in this window.");
+  engagementTable(
+    els.engagementDaily,
+    ["UTC date", "Visitors", "Sessions", "Starts", "Completions"],
+    report.daily.map((row) => [row.date, row.activeVisitors, row.sessions, row.gameStarts, row.gameCompletions]),
+    "No daily activity in this window.",
+  );
+  els.engagementContent.hidden = false;
+  els.engagementExport.disabled = report.daily.length === 0;
+}
+
+async function loadEngagementReport(): Promise<void> {
+  els.engagementStatus.textContent = "Loading engagement data…";
+  els.engagementContent.hidden = true;
+  els.engagementExport.disabled = true;
+  try {
+    const days = Number(els.engagementRange.value);
+    engagementReport = await authJson<EngagementReport>("/api/admin/engagement", { days });
+    renderEngagementReport(engagementReport);
+    els.engagementStatus.textContent = engagementReport.totals.events
+      ? ""
+      : "No activity was recorded in this window.";
+  } catch (error) {
+    engagementReport = null;
+    els.engagementSummary.textContent = "Engagement report unavailable";
+    els.engagementStatus.textContent = error instanceof Error ? error.message : "The report could not be loaded.";
+  }
+}
+
+function openEngagementReport(): void {
+  if (!authenticatedUser?.engagementAdmin) return;
+  closeDecisionSnapshot();
+  state.engagementOpen = true;
+  state.analyticsOpen = false;
+  state.leaderboardOpen = false;
+  state.modelInfoOpen = false;
+  state.decisionReviewOpen = false;
+  els.pathwayPage.hidden = true;
+  els.settingsPanel.hidden = true;
+  render(state.game);
+  void loadEngagementReport();
+}
+
+function closeEngagementReport(): void {
+  state.engagementOpen = false;
+  const url = new URL(window.location.href);
+  url.searchParams.delete("engagement");
+  window.history.replaceState(pathwayHistoryState("home"), "", `${url.pathname}${url.search}${url.hash}`);
+  showPathwayView("home");
+  render(state.game);
+}
+
+els.engagementPathwayOpen.addEventListener("click", openEngagementReport);
+els.engagementMenuOpen.addEventListener("click", openEngagementReport);
+els.engagementClose.addEventListener("click", closeEngagementReport);
+els.engagementRange.addEventListener("change", () => void loadEngagementReport());
+els.engagementExport.addEventListener("click", () => {
+  if (!engagementReport?.csv) return;
+  const blob = new Blob([engagementReport.csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `strong-cribbage-engagement-${engagementReport.range.days || "all"}-days.csv`;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+});
+
 function openAnalytics(mode: "my" | "full"): void {
   if (mode === "my" && PATHWAY_NAV_ENABLED && pathwayRouteFromLocation() !== "statistics") {
     window.history.pushState(pathwayHistoryState("statistics"), "", pathwayUrl("statistics"));
@@ -9003,6 +9226,7 @@ function openAnalytics(mode: "my" | "full"): void {
   state.statsView = "stats";
   if (mode !== "my") state.myStatsOpponent = "master";
   state.analyticsOpen = true;
+  state.engagementOpen = false;
   state.leaderboardOpen = false;
   state.modelInfoOpen = false;
   state.decisionReviewOpen = false;
@@ -9075,6 +9299,7 @@ els.gameLogOpen.addEventListener("click", openStatsGameLog);
 els.leaderboardOpen.addEventListener("click", () => {
   closeDecisionSnapshot();
   state.leaderboardOpen = true;
+  state.engagementOpen = false;
   state.analyticsOpen = false;
   state.modelInfoOpen = false;
   state.decisionReviewOpen = false;
@@ -9093,6 +9318,7 @@ els.modelInfoOpen.addEventListener("click", () => {
   closeDecisionSnapshot();
   state.selectedModelInfo = normalizeAnalyticsEngine(els.opponent.value);
   state.modelInfoOpen = true;
+  state.engagementOpen = false;
   state.analyticsOpen = false;
   state.leaderboardOpen = false;
   state.decisionReviewOpen = false;
@@ -9962,6 +10188,11 @@ async function initializeApplication(): Promise<void> {
     return;
   }
   await initializePeople();
+  if (URL_PARAMS.get("engagement") === "1" && authenticatedUser?.engagementAdmin) {
+    openEngagementReport();
+    markAppReady();
+    return;
+  }
   await syncPeopleRouteFromLocation();
   if (authenticatedUser && pendingAuthDestination) {
     await resumeAuthenticatedDestination();

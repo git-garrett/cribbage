@@ -35,6 +35,7 @@ use serde_json::{json, Value};
 mod activity;
 mod auth;
 mod email;
+mod engagement;
 mod feedback;
 mod people;
 
@@ -393,6 +394,9 @@ fn handle_connection(mut stream: TcpStream, server: &Server) -> Result<(), Strin
         );
     }
     if let Some(response) = activity::handle(server, &request, authenticated_user.as_ref()) {
+        return write_response(&mut stream, response);
+    }
+    if let Some(response) = engagement::handle(server, &request, authenticated_user.as_ref()) {
         return write_response(&mut stream, response);
     }
     if let Some(response) = feedback::handle(server, &request, authenticated_user.as_ref()) {

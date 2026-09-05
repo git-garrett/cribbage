@@ -11212,3 +11212,261 @@ body[data-font-size="x-large"] .pathway-choice {
     height: 63%;
   }
 }
+
+.app[data-view="engagement"] > .topbar,
+.app[data-view="engagement"] > .scoreboard,
+.app[data-view="engagement"] > .table {
+  display: none;
+}
+
+body:has(.app[data-view="engagement"]) .bug-report-dock {
+  display: none;
+}
+
+.engagement-page {
+  min-height: 100vh;
+  padding: clamp(1rem, 3vw, 2.5rem);
+  color: var(--text);
+  background:
+    radial-gradient(circle at 90% 0, color-mix(in srgb, var(--accent) 18%, transparent), transparent 32rem),
+    var(--background);
+}
+
+.engagement-page[hidden] {
+  display: none;
+}
+
+.engagement-shell {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+}
+
+.engagement-header,
+.engagement-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.engagement-header {
+  margin-bottom: 1.25rem;
+}
+
+.engagement-header .people-page-back {
+  position: static;
+  padding: 0.65rem 0.9rem;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.engagement-header h1 {
+  margin: 0.2rem 0;
+  font-size: clamp(2rem, 5vw, 4rem);
+}
+
+.engagement-header p,
+.engagement-grid section > p,
+.engagement-content > section > p {
+  color: var(--muted);
+}
+
+.engagement-toolbar {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--surface);
+}
+
+.engagement-toolbar label {
+  font-weight: 800;
+}
+
+.engagement-toolbar select,
+.engagement-toolbar button {
+  min-height: 2.75rem;
+}
+
+.engagement-toolbar button {
+  margin-left: auto;
+}
+
+.engagement-content {
+  display: grid;
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+
+.engagement-content > section,
+.engagement-grid > section {
+  padding: clamp(1rem, 2vw, 1.5rem);
+  border: 1px solid var(--line);
+  border-radius: 1.15rem;
+  background: var(--surface);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.12);
+}
+
+.engagement-content h2 {
+  margin: 0 0 0.35rem;
+}
+
+.engagement-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.engagement-metric {
+  display: grid;
+  gap: 0.25rem;
+  padding: 1rem;
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--surface) 78%, var(--accent) 22%);
+}
+
+.engagement-metric span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.engagement-metric strong {
+  font-size: clamp(1.7rem, 4vw, 2.6rem);
+}
+
+.engagement-metric small,
+.engagement-definitions {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.engagement-definitions {
+  margin-top: 1rem;
+  font-size: 0.88rem;
+}
+
+.engagement-definitions p {
+  margin: 0.35rem 0;
+}
+
+.engagement-funnel {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.engagement-funnel article {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.35fr) 1fr;
+  align-items: center;
+  gap: 1rem;
+}
+
+.engagement-funnel article div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.engagement-funnel article span {
+  color: var(--muted);
+}
+
+.engagement-funnel i {
+  display: block;
+  height: 0.7rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 65%, transparent);
+}
+
+.engagement-funnel i::after {
+  display: block;
+  width: var(--engagement-width);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  content: "";
+}
+
+.engagement-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+}
+
+.engagement-table {
+  max-height: 26rem;
+  overflow: auto;
+}
+
+.engagement-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.engagement-table th,
+.engagement-table td {
+  padding: 0.65rem 0.55rem;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.engagement-table th:first-child,
+.engagement-table td:first-child {
+  text-align: left;
+}
+
+.engagement-table thead th {
+  position: sticky;
+  top: 0;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.engagement-empty {
+  margin: 1rem 0 0;
+  padding: 1rem;
+  color: var(--muted);
+  border: 1px dashed var(--line);
+  border-radius: 0.8rem;
+}
+
+.pathway-card-admin {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
+}
+
+@media (max-width: 850px) {
+  .engagement-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .engagement-funnel article {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+}
+
+@media (max-width: 560px) {
+  .engagement-header {
+    align-items: flex-start;
+    flex-direction: column-reverse;
+  }
+
+  .engagement-toolbar button {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .engagement-metrics,
+  .engagement-grid {
+    grid-template-columns: 1fr;
+  }
+}

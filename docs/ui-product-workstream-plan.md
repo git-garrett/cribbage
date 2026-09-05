@@ -171,17 +171,17 @@ Every PR must:
 
 ### Scope
 
-- [ ] Inventory the activity events already collected and document their
+- [x] Inventory the activity events already collected and document their
   field meanings and retention limitations.
-- [ ] Add server-enforced authorization for the owner and designated test user;
+- [x] Add server-enforced authorization for the owner and designated test user;
   do not rely on hiding a client link.
-- [ ] Add an admin-only pathway/menu link and reporting page.
-- [ ] Report active users, sessions, return usage, pathway progression, game
+- [x] Add an admin-only pathway/menu link and reporting page.
+- [x] Report active users, sessions, return usage, pathway progression, game
   starts/completions/abandons, opponent/model selection, device/viewport, and
   engagement funnels supported by the existing event data.
-- [ ] Add date filters, clear empty states, and CSV export where the underlying
+- [x] Add date filters, clear empty states, and CSV export where the underlying
   data supports it.
-- [ ] Avoid collecting new personal or sensitive fields unless separately
+- [x] Avoid collecting new personal or sensitive fields unless separately
   approved.
 
 ### Acceptance checks
@@ -189,6 +189,15 @@ Every PR must:
 - Unauthorized users receive no admin data even when calling the API directly.
 - Owner and test user see the same reproducible totals for a seeded fixture.
 - Every displayed metric identifies its denominator and time window.
+
+### Verification evidence
+
+- `npm test --silent`: 271 Rust tests across 18 targets passed.
+- `npm run test:web`, `npm run typecheck`, and `npm run build`: passed.
+- The live API returns `401` for an unauthenticated engagement request.
+- Chromium visual checks passed at 1440×1050 and 390×844.
+- The shared LAN runtime serves the current branch at
+  `http://192.168.88.17:8765/?engagement=1`.
 
 ## PR 5 — Standalone leaderboard and ranking views
 
@@ -229,5 +238,5 @@ production release; leave PR open and never merge to `master`.
 - [x] PR 1 complete and deployed to production.
 - [x] PR 2 available on the local runtime for review.
 - [ ] PR 3 available on the local runtime for review.
-- [ ] PR 4 available on the local runtime for review.
+- [x] PR 4 available on the local runtime for review.
 - [ ] PR 5 available on the local runtime for review.

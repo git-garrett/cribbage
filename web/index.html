@@ -136,6 +136,12 @@
                 <span>Adjust the game for your screen and space.</span>
                 <b aria-hidden="true">→</b>
               </button>
+              <button id="engagement-pathway-open" class="pathway-card pathway-card-admin" type="button" hidden>
+                <span class="pathway-card-kicker">Private administration</span>
+                <strong>Engagement</strong>
+                <span>Review usage, progression, games, and client context.</span>
+                <b aria-hidden="true">→</b>
+              </button>
             </nav>
           </section>
 
@@ -582,6 +588,7 @@
           <button id="export-game-log" type="button">Export games</button>
           <details id="admin-menu" class="admin-menu" hidden>
             <summary>Administrator</summary>
+            <button id="engagement-menu-open" type="button">Engagement report</button>
             <button id="analytics-open" type="button">Full analytics</button>
             <label class="toggle-row">
               <span>Par guides</span>
@@ -692,6 +699,65 @@
           </div>
         </div>
         <div id="single-game-report" class="single-game-report" hidden></div>
+      </section>
+
+      <section id="engagement-page" class="engagement-page" aria-labelledby="engagement-title" hidden>
+        <div class="engagement-shell">
+          <header class="engagement-header">
+            <div>
+              <p class="pathway-eyebrow">Private administration</p>
+              <h1 id="engagement-title">Engagement</h1>
+              <p id="engagement-summary">Loading activity…</p>
+            </div>
+            <button id="engagement-close" class="people-page-back" type="button"><span aria-hidden="true">←</span> Home</button>
+          </header>
+          <div class="engagement-toolbar">
+            <label for="engagement-range">Reporting window</label>
+            <select id="engagement-range">
+              <option value="1">Today</option>
+              <option value="7">Last 7 days</option>
+              <option value="30" selected>Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="0">All time</option>
+            </select>
+            <button id="engagement-export" type="button" disabled>Export daily CSV</button>
+          </div>
+          <p id="engagement-status" class="people-form-status" role="status" aria-live="polite"></p>
+          <div id="engagement-content" class="engagement-content" hidden>
+            <section aria-labelledby="engagement-overview-title">
+              <h2 id="engagement-overview-title">Overview</h2>
+              <div id="engagement-overview" class="engagement-metrics"></div>
+              <div id="engagement-definitions" class="engagement-definitions"></div>
+            </section>
+            <section aria-labelledby="engagement-funnel-title">
+              <h2 id="engagement-funnel-title">Path to a completed game</h2>
+              <p>Each step counts distinct sessions; conversion uses sessions that recorded a session start in this window.</p>
+              <div id="engagement-funnel" class="engagement-funnel"></div>
+            </section>
+            <div class="engagement-grid">
+              <section aria-labelledby="engagement-pathways-title">
+                <h2 id="engagement-pathways-title">Pathway progression</h2>
+                <p>Page views by pathway, with distinct sessions and visitors.</p>
+                <div id="engagement-pathways" class="engagement-table"></div>
+              </section>
+              <section aria-labelledby="engagement-opponents-title">
+                <h2 id="engagement-opponents-title">Opponent selection</h2>
+                <p>Game starts by selected opponent/model.</p>
+                <div id="engagement-opponents" class="engagement-table"></div>
+              </section>
+              <section aria-labelledby="engagement-devices-title">
+                <h2 id="engagement-devices-title">Device and viewport</h2>
+                <p>Events grouped by device, browser, and viewport size.</p>
+                <div id="engagement-devices" class="engagement-table"></div>
+              </section>
+              <section aria-labelledby="engagement-daily-title">
+                <h2 id="engagement-daily-title">Daily activity</h2>
+                <p>Distinct visitors and sessions, plus game starts and completions.</p>
+                <div id="engagement-daily" class="engagement-table"></div>
+              </section>
+            </div>
+          </div>
+        </div>
       </section>
 
       <div id="thinking-overlay" class="thinking-overlay" role="status" aria-live="polite" hidden>

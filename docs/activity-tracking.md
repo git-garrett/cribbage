@@ -9,6 +9,22 @@ with `auth_users.id` by the server session cookie. Anonymous traffic is associat
 only with a random ID kept in the browser tab's `sessionStorage`; there is no
 persistent anonymous identifier.
 
+## Stored fields and retention limits
+
+Each row stores the event and tab-session IDs, optional account ID, environment,
+application version, event name, client occurrence time, server receipt time,
+sanitized page, optional game ID, normalized client/device dimensions, and a
+small JSON metadata object. The reporting interface exposes aggregates only; it
+does not return account IDs, session IDs, game IDs, email addresses, or raw
+metadata.
+
+There is currently no automatic retention or deletion schedule. “All time”
+therefore means all rows still present in the server database, not necessarily
+the lifetime of the product. Anonymous tab IDs disappear from the browser when
+the tab session ends, but their collected event rows remain until an explicit
+retention policy removes them. Client occurrence times are not trusted for
+reporting windows; reports use the server receipt time.
+
 ## Environments and clients
 
 `environment` is one of:
@@ -41,6 +57,23 @@ UI events contain stable element IDs or generic component classes. They never
 contain form values, page text, email addresses, invite/reset tokens, arbitrary URL
 query parameters, or raw card selections. Only the `pathwayView` query parameter is
 retained in page paths.
+
+## Private engagement report
+
+`POST /api/admin/engagement` accepts `days` as `1`, `7`, `30`, `90`, or `0`
+for all available history. The server authorizes only usernames listed in
+`CRIBBAGE_ENGAGEMENT_ADMINS`; the default designated accounts are `Garrett` and
+`Test`. Hiding the client link is only a convenience—the API independently
+returns `403` to every other signed-in account.
+
+The report defines its metrics in the response and UI. Active visitors combine
+distinct authenticated accounts with anonymous tab sessions. Returning users
+are authenticated accounts seen on two or more UTC dates in the window.
+Completion rate divides completion events by start events in the same window.
+An abandonment is a game's latest abandonment candidate with no later resume,
+completion, or forfeit event in the selected window. Funnel conversion uses
+sessions with a recorded `session_start` as its denominator. Daily aggregates
+are available as a CSV download.
 
 ## Interim queries
 

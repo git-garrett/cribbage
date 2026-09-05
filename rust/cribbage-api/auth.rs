@@ -186,6 +186,16 @@ pub fn auth_required() -> bool {
         .unwrap_or(false)
 }
 
+pub fn is_engagement_admin(user: &AuthUser) -> bool {
+    let configured =
+        env::var("CRIBBAGE_ENGAGEMENT_ADMINS").unwrap_or_else(|_| "Garrett,Test".to_string());
+    configured
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .any(|name| name.eq_ignore_ascii_case(&user.username))
+}
+
 pub fn protects(path: &str) -> bool {
     path.starts_with("/api/")
 }
@@ -1049,10 +1059,22 @@ fn user_json(user: &AuthUser) -> String {
         "user": {
             "username": user.username,
             "displayName": user.display_name,
-            "email": user.email
+            "email": user.email,
+            "engagementAdmin": is_engagement_admin(user)
         }
     })
     .to_string()
+}
+
+#[cfg(test)]
+pub fn test_auth_user(id: i64, username: &str) -> AuthUser {
+    AuthUser {
+        id,
+        username: username.to_string(),
+        display_name: username.to_string(),
+        email: format!("{}@example.com", username.to_ascii_lowercase()),
+        password_hash: None,
+    }
 }
 
 fn generic_email_response(message: &str) -> Response {
