@@ -73,7 +73,20 @@ production.
 
 The deploy command resolves local credentials relative to the repository's main
 checkout, even when run from a linked worktree. It then enforces the branch,
-clean-tree, and remote-synchronization checks, runs the Python/TypeScript/Rust
-test and build suite, compiles the exact Git commit into the server binary, and
-accepts production health only when both the host-local and public APIs report
-that commit.
+clean-tree, and remote-synchronization checks and runs the complete local QA and
+browser build. Because the development machine is macOS arm64 and production is
+Linux x86-64, the locked Rust source is compiled natively on the server in an
+isolated staging workspace while the existing release keeps serving. A shared
+Cargo target cache speeds later builds, but only the finished API binary is
+copied into each immutable, versioned release. Previously deployed hashed
+browser assets are carried into the candidate before the new bundle is overlaid
+so in-flight and recently opened clients keep working across the cutover.
+
+After validating the candidate Caddy configuration, deployment atomically moves
+the `/opt/cribbage/current` symlink, reloads Caddy, and restarts the API. Caddy
+retries upstream connection attempts for five seconds to bridge the short API
+restart. Failed local health, public health, or cache-contract checks restore
+the prior symlink and service configuration automatically. This is a
+near-zero-interruption cutover; a dual-process blue/green deployment is avoided
+because active game sessions also live in process memory and overlapping API
+instances could briefly diverge.

@@ -10,6 +10,9 @@ REMOTE_USER="${REMOTE_USER:-root}"
 REMOTE_PORT="${REMOTE_PORT:-22}"
 SSH_KEY="${SSH_KEY:-${REPOSITORY_ROOT}/../../keys/strongcribbage_admin_ed25519}"
 REMOTE_APP_DIR="${REMOTE_APP_DIR:-/opt/cribbage}"
+REMOTE_RELEASES_DIR="${REMOTE_RELEASES_DIR:-${REMOTE_APP_DIR}/releases}"
+REMOTE_CURRENT_LINK="${REMOTE_CURRENT_LINK:-${REMOTE_APP_DIR}/current}"
+REMOTE_BUILD_DIR="${REMOTE_BUILD_DIR:-${REMOTE_APP_DIR}/build}"
 REMOTE_DATA_DIR="${REMOTE_DATA_DIR:-/var/lib/cribbage}"
 REMOTE_PORT_APP="${REMOTE_PORT_APP:-8787}"
 REMOTE_BIND_HOST="${REMOTE_BIND_HOST:-127.0.0.1}"
@@ -90,7 +93,42 @@ check_archive_identity() {
     || fail_checkout "archive version ${archive_version:-unknown} does not match ${VERSION}."
 }
 
+rollback_release() {
+  local backup_dir="$1"
+  local replacement_link="${REMOTE_APP_DIR}/.current-rollback-${GIT_COMMIT}"
+
+  echo "Rolling back to the previous production release..." >&2
+  remote_exec "test -f '${backup_dir}/ready'" || {
+    echo "Rollback was not attempted because no completed cutover backup was found." >&2
+    return 1
+  }
+  remote_exec "set -e
+    if [ -f '${backup_dir}/had-current-link' ]; then
+      read -r previous_release < '${backup_dir}/current-target'
+      rm -f '${replacement_link}'
+      ln -s \"\$previous_release\" '${replacement_link}'
+      mv -Tf '${replacement_link}' '${REMOTE_CURRENT_LINK}'
+    else
+      rm -f '${REMOTE_CURRENT_LINK}'
+    fi
+    if [ -f '${backup_dir}/cribbage.service' ]; then
+      cp -a '${backup_dir}/cribbage.service' /etc/systemd/system/cribbage.service
+    else
+      rm -f /etc/systemd/system/cribbage.service
+    fi
+    if [ -f '${backup_dir}/Caddyfile' ]; then
+      cp -a '${backup_dir}/Caddyfile' /etc/caddy/Caddyfile
+    else
+      rm -f /etc/caddy/Caddyfile
+    fi
+    systemctl daemon-reload
+    systemctl restart cribbage
+    systemctl reload caddy"
+}
+
 deploy() {
+  local remote_archive release_dir incoming_dir unit_candidate caddy_candidate
+  local backup_dir replacement_link
   [[ $# -eq 0 ]] || { echo "deploy does not accept options." >&2; usage; exit 2; }
   check_production_checkout
   [[ -r "$SSH_KEY" ]] || {
@@ -102,33 +140,55 @@ deploy() {
   check_production_checkout
   check_archive_identity
 
+  remote_archive="/tmp/$(basename "$ARCHIVE")"
+  release_dir="${REMOTE_RELEASES_DIR}/${GIT_COMMIT}"
+  incoming_dir="${REMOTE_RELEASES_DIR}/.incoming-${GIT_COMMIT}"
+  unit_candidate="/tmp/cribbage.service.${GIT_COMMIT}"
+  caddy_candidate="/tmp/Caddyfile.${GIT_COMMIT}"
+  backup_dir="/tmp/cribbage-deploy-backup-${GIT_COMMIT}"
+  replacement_link="${REMOTE_APP_DIR}/.current-${GIT_COMMIT}"
+
   echo "Uploading $ARCHIVE to $REMOTE..."
-  "${SCP_BASE[@]}" "$ARCHIVE" "$REMOTE:/tmp/$(basename "$ARCHIVE")"
+  "${SCP_BASE[@]}" "$ARCHIVE" "$REMOTE:$remote_archive"
 
-  echo "Installing app files on $REMOTE..."
+  echo "Building an isolated Linux release on $REMOTE..."
   remote_exec "id cribbage >/dev/null 2>&1 || useradd --system --home-dir '$REMOTE_DATA_DIR' --shell /usr/sbin/nologin cribbage && \
-    mkdir -p '$REMOTE_APP_DIR' '$REMOTE_DATA_DIR' /etc/cribbage && \
+    install -d -m 755 '$REMOTE_APP_DIR' '$REMOTE_RELEASES_DIR' '$REMOTE_BUILD_DIR' && \
+    install -d -m 750 -o cribbage -g cribbage '$REMOTE_DATA_DIR' && \
+    mkdir -p /etc/cribbage && \
     chmod 700 /etc/cribbage && \
-    rm -rf '$REMOTE_APP_DIR/server-dist' '$REMOTE_APP_DIR/package.json' '$REMOTE_APP_DIR/docs' '$REMOTE_APP_DIR/rust' && \
-    tar -xzf '/tmp/$(basename "$ARCHIVE")' -C '$REMOTE_APP_DIR' && \
-    cd '$REMOTE_APP_DIR/rust' && CRIBBAGE_BUILD_GIT_COMMIT='$GIT_COMMIT' cargo build --locked --release --manifest-path cribbage-api/Cargo.toml && \
-    chown -R root:root '$REMOTE_APP_DIR' && \
-    chown -R cribbage:cribbage '$REMOTE_DATA_DIR' && \
-    chmod 755 '$REMOTE_APP_DIR' && \
-    chmod 750 '$REMOTE_DATA_DIR'"
+    if [ ! -d '$release_dir' ]; then \
+      rm -rf '$incoming_dir' && \
+      mkdir -p '$incoming_dir' && \
+      mkdir -p '$incoming_dir/dist/assets' && \
+      if [ -d '$REMOTE_CURRENT_LINK/dist/assets' ]; then \
+        cp -a '$REMOTE_CURRENT_LINK/dist/assets/.' '$incoming_dir/dist/assets/'; \
+      elif [ -d '$REMOTE_APP_DIR/dist/assets' ]; then \
+        cp -a '$REMOTE_APP_DIR/dist/assets/.' '$incoming_dir/dist/assets/'; \
+      fi && \
+      tar -xzf '$remote_archive' -C '$incoming_dir' && \
+      cd '$incoming_dir/rust' && \
+      CRIBBAGE_BUILD_GIT_COMMIT='$GIT_COMMIT' CARGO_TARGET_DIR='$REMOTE_BUILD_DIR/target' cargo build --locked --release --manifest-path cribbage-api/Cargo.toml && \
+      install -d -m 755 '$incoming_dir/rust/target/release' && \
+      install -m 755 '$REMOTE_BUILD_DIR/target/release/cribbage-api' '$incoming_dir/rust/target/release/cribbage-api' && \
+      chown -R root:root '$incoming_dir' && \
+      chmod 755 '$incoming_dir' && \
+      mv '$incoming_dir' '$release_dir'; \
+    fi && \
+    test -x '$release_dir/rust/target/release/cribbage-api'"
 
-  echo "Writing systemd unit..."
-  "${SSH_BASE[@]}" "$REMOTE" "cat > /etc/systemd/system/cribbage.service" <<SERVICE
+  echo "Preparing systemd and Caddy configuration..."
+  "${SSH_BASE[@]}" "$REMOTE" "cat > '$unit_candidate'" <<SERVICE
 [Unit]
 Description=Cribbage Rust API and static client
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=${REMOTE_APP_DIR}
+WorkingDirectory=${REMOTE_CURRENT_LINK}
 Environment=HOST=${REMOTE_BIND_HOST}
 Environment=PORT=${REMOTE_PORT_APP}
-Environment=CRIBBAGE_MODEL_ROOT=${REMOTE_APP_DIR}
+Environment=CRIBBAGE_MODEL_ROOT=${REMOTE_CURRENT_LINK}
 Environment=CRIBBAGE_DATA_DIR=${REMOTE_DATA_DIR}
 Environment=CRIBBAGE_REQUIRE_AUTH=true
 Environment=CRIBBAGE_ENGAGEMENT_ADMIN_USER_IDS=1,53
@@ -138,7 +198,7 @@ Environment="CRIBBAGE_MAIL_FROM_NAME=Strong Cribbage"
 Environment=CRIBBAGE_MAIL_REPLY_TO=founder@evenvision.com
 Environment=CRIBBAGE_EMAIL_DELIVERY_PAUSED=true
 EnvironmentFile=-/etc/cribbage/cribbage.env
-ExecStart=${REMOTE_APP_DIR}/rust/target/release/cribbage-api
+ExecStart=${REMOTE_CURRENT_LINK}/rust/target/release/cribbage-api
 Restart=always
 RestartSec=3
 User=cribbage
@@ -171,15 +231,17 @@ SystemCallArchitectures=native
 WantedBy=multi-user.target
 SERVICE
 
-  echo "Writing Caddy reverse proxy..."
-  "${SSH_BASE[@]}" "$REMOTE" "cat > /etc/caddy/Caddyfile" <<CADDY
+  "${SSH_BASE[@]}" "$REMOTE" "cat > '$caddy_candidate'" <<CADDY
 ${GAME_DOMAIN} {
 	encode zstd gzip
 	@api path /api/* /health
 	handle @api {
-		reverse_proxy ${REMOTE_BIND_HOST}:${REMOTE_PORT_APP}
+		reverse_proxy ${REMOTE_BIND_HOST}:${REMOTE_PORT_APP} {
+			lb_try_duration 5s
+			lb_try_interval 100ms
+		}
 	}
-	root * ${REMOTE_APP_DIR}/dist
+	root * ${REMOTE_CURRENT_LINK}/dist
 	@assets path /assets/*
 	handle @assets {
 		file_server
@@ -193,22 +255,55 @@ ${GAME_DOMAIN} {
 
 ${MARKETING_DOMAIN} {
 	encode zstd gzip
-	root * ${REMOTE_APP_DIR}/dist
+	root * ${REMOTE_CURRENT_LINK}/dist
 	try_files {path} /coming-soon.html
 	file_server
 }
 CADDY
 
-  echo "Starting services..."
-  remote_exec "systemctl daemon-reload && \
-    systemctl enable --now cribbage && \
-    systemctl restart cribbage && \
-    caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null && \
-    systemctl enable --now caddy && \
-    systemctl reload caddy"
+  remote_exec "caddy fmt --overwrite '$caddy_candidate' >/dev/null && \
+    caddy validate --adapter caddyfile --config '$caddy_candidate' >/dev/null"
 
-  health "$GIT_COMMIT"
-  (cd "$ROOT_DIR" && node scripts/check-client-cache-contract.cjs "https://${GAME_DOMAIN}")
+  echo "Atomically activating release $GIT_COMMIT..."
+  if ! remote_exec "set -e
+    rm -rf '$backup_dir'
+    mkdir -p '$backup_dir'
+    if [ -L '$REMOTE_CURRENT_LINK' ]; then
+      readlink '$REMOTE_CURRENT_LINK' > '${backup_dir}/current-target'
+      touch '${backup_dir}/had-current-link'
+    fi
+    if [ -f /etc/systemd/system/cribbage.service ]; then
+      cp -a /etc/systemd/system/cribbage.service '${backup_dir}/cribbage.service'
+    fi
+    if [ -f /etc/caddy/Caddyfile ]; then
+      cp -a /etc/caddy/Caddyfile '${backup_dir}/Caddyfile'
+    fi
+    touch '${backup_dir}/ready'
+    rm -f '$replacement_link'
+    ln -s '$release_dir' '$replacement_link'
+    mv -Tf '$replacement_link' '$REMOTE_CURRENT_LINK'
+    install -m 644 '$unit_candidate' /etc/systemd/system/cribbage.service
+    install -m 644 '$caddy_candidate' /etc/caddy/Caddyfile
+    systemctl daemon-reload
+    systemctl enable cribbage >/dev/null
+    systemctl enable --now caddy >/dev/null
+    systemctl reload caddy
+    systemctl restart cribbage"; then
+    rollback_release "$backup_dir"
+    return 1
+  fi
+
+  if ! health "$GIT_COMMIT"; then
+    rollback_release "$backup_dir"
+    return 1
+  fi
+  if ! (cd "$ROOT_DIR" && node scripts/check-client-cache-contract.cjs "https://${GAME_DOMAIN}"); then
+    rollback_release "$backup_dir"
+    return 1
+  fi
+
+  remote_exec "rm -f '$remote_archive' '$unit_candidate' '$caddy_candidate' && rm -rf '$backup_dir'"
+  echo "Active release: $release_dir"
 }
 
 pull() {
