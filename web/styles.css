@@ -1860,6 +1860,40 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   font-size: var(--body-font);
 }
 
+.decision-review-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.decision-review-tab {
+  min-width: 0;
+  min-height: 44px;
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: var(--menu-font);
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+
+.decision-review-tab[aria-selected="true"] {
+  border-color: var(--game-gold, #e8c575);
+  background: var(--game-green, #0b5b43);
+  color: var(--game-cream, #fbf8f0);
+}
+
+.decision-review-tab:focus-visible {
+  outline: 3px solid #8bcbff;
+  outline-offset: 2px;
+}
+
 .decision-ev-summary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -8848,6 +8882,45 @@ body[data-font-size="x-large"] .pathway-choice {
         0 0 0 9px rgba(232, 197, 117, 0),
         0 13px 34px rgba(4, 31, 24, 0.34);
     }
+  }
+
+  @keyframes people-challenge-arrived {
+    0%, 100% {
+      transform: scale(1) rotate(0deg);
+    }
+    28% {
+      transform: scale(1.1) rotate(-2deg);
+    }
+    52% {
+      transform: scale(1.06) rotate(2deg);
+    }
+    74% {
+      transform: scale(1.09) rotate(-1deg);
+    }
+  }
+
+  @keyframes people-challenge-badge-arrived {
+    0% {
+      transform: scale(0.45);
+      opacity: 0;
+    }
+    48% {
+      transform: scale(1.35);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  .people-presence.has-challenge.challenge-arrived .people-presence-toggle {
+    animation:
+      people-challenge-arrived 760ms cubic-bezier(0.2, 0.9, 0.25, 1),
+      people-challenge-pulse 1.7s 760ms ease-in-out infinite;
+  }
+
+  .people-presence.challenge-arrived .people-presence-alert {
+    animation: people-challenge-badge-arrived 620ms cubic-bezier(0.2, 0.9, 0.25, 1);
   }
 }
 

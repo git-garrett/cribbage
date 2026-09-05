@@ -106,12 +106,23 @@ describe("human clubhouse UI", () => {
 
   it("provides a global online-player control with incoming challenges first", () => {
     expect(html).toContain('id="people-presence"');
+    expect(html).toMatch(/id="people-presence-alert"[^>]*role="alert"/);
     expect(html).toContain('id="people-challenge-section"');
     expect(html).toContain('id="people-online-list"');
     expect(source).toMatch(/incomingChallenges[\s\S]*peopleChallengeList[\s\S]*peopleOnlineList/);
     expect(source).toContain("peopleDirectory.onlineCount");
     expect(css).toContain(".people-presence.has-challenge .people-presence-toggle");
     expect(css).toContain("@keyframes people-challenge-pulse");
+  });
+
+  it("wakes the online pill immediately and animates each new human challenge", () => {
+    expect(source).toContain('"/api/people/challenges/watch"');
+    expect(source).toContain("function startPeopleChallengeWatch");
+    expect(source).toContain("function announceIncomingChallenge");
+    expect(source).toContain('classList.add("challenge-arrived")');
+    expect(source).toContain("challenged you to a game");
+    expect(css).toContain("@keyframes people-challenge-arrived");
+    expect(css).toContain("@keyframes people-challenge-badge-arrived");
   });
 
   it("uses real activity instead of background polling for 15-minute presence", () => {
@@ -151,14 +162,37 @@ describe("human clubhouse UI", () => {
     expect(css).toContain(".people-list-item.is-looking");
   });
 
-  it("opens a shared waiting table and cuts for first deal", () => {
+  it("opens a shared table, cuts for first deal, and enters the human game", () => {
     expect(html).toContain('id="human-table-page"');
     expect(html).toContain('id="human-table-cut"');
     expect(source).toContain('"/api/people/challenge"');
     expect(source).toContain('"/api/people/challenge/accept"');
     expect(source).toContain('"/api/people/table/cut"');
+    expect(source).toContain('"/api/people/table/game"');
+    expect(source).toContain('"/api/people/table/game/action"');
     expect(source).toContain('kind: "table"');
     expect(source).toContain("Low card deals first.");
+    expect(source).toContain("async function enterHumanGame");
+    expect(source).toMatch(/response\.table\.phase === "playing"[\s\S]*await enterHumanGame\(\)/);
+  });
+
+  it("polls a human opponent instead of asking the AI engine to move", () => {
+    expect(source).toContain("function scheduleHumanGamePoll");
+    expect(source).toMatch(/function shouldAdvancePeggingAi[\s\S]*!activeHumanTable/);
+    expect(source).toMatch(/const optimisticNext = activeHumanTable \? null/);
+    expect(source).toMatch(/next\.phase === "ai_discarding"[\s\S]*activeHumanTable[\s\S]*scheduleHumanGamePoll\(\)/);
+    expect(source).toMatch(/els\.go\.hidden = !\(activeHumanTable[\s\S]*game\.canGo/);
+    expect(source).toMatch(/function shouldAutoHumanGo[\s\S]*!activeHumanTable/);
+  });
+
+  it("reviews both human players with Ace and exposes player tabs after the game", () => {
+    expect(source).toContain('"/api/people/table/game/review"');
+    expect(source).toContain('tabs.setAttribute("aria-label", "Player errors")');
+    expect(source).toContain('className = "decision-review-tab"');
+    expect(source).toMatch(/sortedDecisionMistakes\(events, end\.gameId, reviewPlayer\)/);
+    expect(source).toMatch(/humanTablePage\.hidden && !activeHumanTable && !pendingAuthDestination/);
+    expect(css).toContain(".decision-review-tabs");
+    expect(css).toContain('.decision-review-tab[aria-selected="true"]');
   });
 
   it("keeps motion optional and layouts responsive", () => {

@@ -4,6 +4,7 @@
  */
 export type PlayerKey = "human" | "ai";
 export type Opponent =
+  | "human"
   | "dynamic"
   | "myrmidon-5"
   | "schell_table-peg_table-9.1"
@@ -84,6 +85,7 @@ export type AnalyticsEvent =
       action: "start" | "end";
       gameId: string;
       opponent: StoredOpponent;
+      players?: Record<PlayerKey, string>;
       winner?: PlayerKey;
       loser?: PlayerKey;
       result?: AnalyticsGameResult;

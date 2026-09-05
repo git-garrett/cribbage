@@ -1,14 +1,24 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{Condvar, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine as _;
-use cribbage_shadow_engine::dynamic::{
-    MIN_COMPLETE_CYCLES, MIN_COMPLETE_GAMES_FOR_PERSONAL_LENGTH, UNIVERSAL_CYCLES_PER_GAME,
+use cribbage_shadow_engine::cards::{score_hand_components, Card, RANKS, SUIT_NAMES};
+use cribbage_shadow_engine::decision::{
+    review_discard_for_side_with_recommendation, review_peg_for_side_with_recommendation,
+    DecisionReview as EngineDecisionReview,
 };
+use cribbage_shadow_engine::dynamic::{
+    DYNAMIC_EVALUATOR_VERSION, MIN_COMPLETE_CYCLES, MIN_COMPLETE_GAMES_FOR_PERSONAL_LENGTH,
+    UNIVERSAL_CYCLES_PER_GAME,
+};
+use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
+use cribbage_shadow_engine::model_id::ModelId;
 use rand_core::{OsRng, RngCore};
-use rusqlite::{params, OptionalExtension};
-use serde::Deserialize;
+use rusqlite::{params, OptionalExtension, TransactionBehavior};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{auth::AuthUser, open_game_database, Request, Response, Server};
@@ -17,6 +27,19 @@ const ONLINE_SECONDS: i64 = 15 * 60;
 const CHALLENGE_SECONDS: i64 = 10 * 60;
 const TABLE_SECONDS: i64 = 12 * 60 * 60;
 const MAX_AVATAR_BYTES: usize = 420_000;
+const CHALLENGE_WATCH_SECONDS: u64 = 20;
+
+static CHALLENGE_SIGNAL: OnceLock<(Mutex<()>, Condvar)> = OnceLock::new();
+
+fn challenge_signal() -> &'static (Mutex<()>, Condvar) {
+    CHALLENGE_SIGNAL.get_or_init(|| (Mutex::new(()), Condvar::new()))
+}
+
+fn notify_challenge_watchers() {
+    let (lock, signal) = challenge_signal();
+    let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    signal.notify_all();
+}
 
 fn dynamic_handicap_value(evaluator_version: &str, profile: &Value) -> Option<Value> {
     let mut cycles = profile["handicap_cycles"].as_u64().unwrap_or_default();
@@ -196,8 +219,68 @@ struct ChallengeSelection {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ChallengeWatchSelection {
+    #[serde(default)]
+    known_challenge_ids: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct TableSelection {
     table_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HumanGameActionSelection {
+    table_id: String,
+    action: String,
+    revision: i64,
+    #[serde(default)]
+    payload: Value,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct HumanGameRecord {
+    version: u8,
+    game_id: String,
+    game: CribbageGame,
+    turn_card_revealed: bool,
+    created_at: i64,
+    #[serde(default)]
+    completed_at: Option<i64>,
+    #[serde(default)]
+    decision_reviews: Vec<HumanDecisionReview>,
+    #[serde(default)]
+    next_review_id: u32,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+enum HumanReviewKind {
+    Discard,
+    Peg,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct HumanDecisionReview {
+    id: String,
+    at: i64,
+    kind: HumanReviewKind,
+    player: Side,
+    game: CribbageGame,
+    selected_card_ids: Vec<u8>,
+    completed: Option<HumanCompletedDecisionReview>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct HumanCompletedDecisionReview {
+    evaluator_model: String,
+    selected_card_ids: Vec<u8>,
+    recommended_card_ids: Vec<u8>,
+    selected_ev: f64,
+    recommended_ev: f64,
+    selected_win_probability: Option<f64>,
+    recommended_win_probability: Option<f64>,
 }
 
 pub fn initialize(data_dir: &std::path::Path) -> Result<(), String> {
@@ -237,6 +320,17 @@ pub fn initialize(data_dir: &std::path::Path) -> Result<(), String> {
                ON people_challenges(challenged_id, status, created_at DESC);
              CREATE INDEX IF NOT EXISTS people_challenges_outgoing
                ON people_challenges(challenger_id, status, created_at DESC);
+             CREATE TABLE IF NOT EXISTS people_games (
+               table_id TEXT PRIMARY KEY REFERENCES people_challenges(table_id) ON DELETE CASCADE,
+               game_id TEXT NOT NULL UNIQUE,
+               game_json TEXT NOT NULL,
+               revision INTEGER NOT NULL DEFAULT 0,
+               created_at INTEGER NOT NULL,
+               updated_at INTEGER NOT NULL,
+               completed_at INTEGER
+             );
+             CREATE INDEX IF NOT EXISTS people_games_active
+               ON people_games(completed_at, updated_at DESC);
              CREATE TABLE IF NOT EXISTS people_head_to_head_games (
                game_id TEXT PRIMARY KEY,
                first_player_id INTEGER NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
@@ -263,10 +357,14 @@ pub fn handle(server: &Server, request: &Request, user: Option<&AuthUser>) -> Op
         ("POST", "/api/people/profile") => public_profile(server, request, user),
         ("GET", "/api/people/online") => online_people(server, user),
         ("POST", "/api/people/presence") => heartbeat(server, request, user),
+        ("POST", "/api/people/challenges/watch") => watch_challenges(server, request, user),
         ("POST", "/api/people/challenge") => create_challenge(server, request, user),
         ("POST", "/api/people/challenge/accept") => accept_challenge(server, request, user),
         ("POST", "/api/people/table") => table_status(server, request, user),
         ("POST", "/api/people/table/cut") => cut_for_deal(server, request, user),
+        ("POST", "/api/people/table/game") => human_game_status(server, request, user),
+        ("POST", "/api/people/table/game/action") => human_game_action(server, request, user),
+        ("POST", "/api/people/table/game/review") => human_game_review(server, request, user),
         _ => return None,
     };
     Some(match result {
@@ -539,6 +637,63 @@ fn online_people(server: &Server, user: Option<&AuthUser>) -> Result<Value, Peop
     directory_value(server, user)
 }
 
+fn watch_challenges(
+    server: &Server,
+    request: &Request,
+    user: Option<&AuthUser>,
+) -> Result<Value, PeopleError> {
+    let user = user.ok_or_else(PeopleError::unauthorized)?;
+    let mut input: ChallengeWatchSelection = parse(request, "Challenge watch is incomplete.")?;
+    if input.known_challenge_ids.len() > 100 {
+        return Err(PeopleError::bad_request(
+            "Too many challenge ids were supplied.",
+        ));
+    }
+    input.known_challenge_ids.sort();
+    input.known_challenge_ids.dedup();
+    let deadline = Instant::now() + Duration::from_secs(CHALLENGE_WATCH_SECONDS);
+    let (lock, signal) = challenge_signal();
+
+    loop {
+        // Hold the signal mutex while checking SQLite so an invitation cannot
+        // be committed and signaled in the gap before this request waits.
+        let guard = lock
+            .lock()
+            .map_err(|error| PeopleError::internal("watch challenge signal", error))?;
+        let current = incoming_challenge_ids(server, user.id)?;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if current != input.known_challenge_ids || remaining.is_zero() {
+            drop(guard);
+            return directory_value(server, Some(user));
+        }
+        let (guard, wait) = signal
+            .wait_timeout(guard, remaining)
+            .map_err(|error| PeopleError::internal("wait for player challenge", error))?;
+        drop(guard);
+        if wait.timed_out() {
+            return directory_value(server, Some(user));
+        }
+    }
+}
+
+fn incoming_challenge_ids(server: &Server, user_id: i64) -> Result<Vec<String>, PeopleError> {
+    let connection = open_game_database(&server.data_dir)
+        .map_err(|error| PeopleError::internal("open challenge watch database", error))?;
+    let mut statement = connection
+        .prepare(
+            "SELECT id FROM people_challenges
+             WHERE challenged_id = ?1 AND status = 'pending' AND expires_at > ?2
+             ORDER BY id",
+        )
+        .map_err(|error| PeopleError::internal("prepare challenge watch", error))?;
+    let ids = statement
+        .query_map(params![user_id, unix_seconds()], |row| row.get(0))
+        .map_err(|error| PeopleError::internal("read challenge watch", error))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| PeopleError::internal("collect challenge watch", error))?;
+    Ok(ids)
+}
+
 fn directory_value(server: &Server, viewer: Option<&AuthUser>) -> Result<Value, PeopleError> {
     let connection = open_game_database(&server.data_dir)
         .map_err(|error| PeopleError::internal("open people directory", error))?;
@@ -752,6 +907,7 @@ fn create_challenge(
             params![id, table_id, user.id, target.0, now, now + CHALLENGE_SECONDS],
         )
         .map_err(|error| PeopleError::internal("create player challenge", error))?;
+    notify_challenge_watchers();
     Ok(json!({
         "challenge": challenge_value(
             &id,
@@ -788,6 +944,7 @@ fn accept_challenge(
             "That challenge is no longer available.",
         ));
     }
+    notify_challenge_watchers();
     let table_id: String = connection
         .query_row(
             "SELECT table_id FROM people_challenges WHERE id = ?1",
@@ -818,7 +975,7 @@ fn cut_for_deal(
     let mut connection = open_game_database(&server.data_dir)
         .map_err(|error| PeopleError::internal("open table database", error))?;
     let transaction = connection
-        .transaction()
+        .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| PeopleError::internal("begin deal cut", error))?;
     let row = table_row(&transaction, &input.table_id)?;
     if user.id != row.challenger_id && user.id != row.challenged_id {
@@ -876,10 +1033,67 @@ fn cut_for_deal(
                 .map_err(|error| PeopleError::internal("choose first dealer", error))?;
         }
     }
+    let dealer_id = transaction
+        .query_row(
+            "SELECT dealer_id FROM people_challenges WHERE table_id = ?1",
+            [&input.table_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .map_err(|error| PeopleError::internal("read first dealer", error))?;
+    if let Some(dealer_id) = dealer_id {
+        ensure_human_game(&transaction, &input.table_id, dealer_id, row.challenger_id)?;
+    }
     transaction
         .commit()
         .map_err(|error| PeopleError::internal("commit deal cut", error))?;
     table_value(server, &input.table_id, user.id)
+}
+
+fn ensure_human_game(
+    connection: &rusqlite::Connection,
+    table_id: &str,
+    dealer_id: i64,
+    challenger_id: i64,
+) -> Result<(), PeopleError> {
+    let exists = connection
+        .query_row(
+            "SELECT 1 FROM people_games WHERE table_id = ?1",
+            [table_id],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|error| PeopleError::internal("find player game", error))?
+        .is_some();
+    if exists {
+        return Ok(());
+    }
+    let seed = OsRng.next_u32();
+    let first_deal = if dealer_id == challenger_id {
+        Side::Left
+    } else {
+        Side::Right
+    };
+    let record = HumanGameRecord {
+        version: 1,
+        game_id: random_id("human-game"),
+        game: CribbageGame::new_with_seed(seed, first_deal),
+        turn_card_revealed: false,
+        created_at: unix_seconds(),
+        completed_at: None,
+        decision_reviews: Vec::new(),
+        next_review_id: 0,
+    };
+    let game_json = serde_json::to_string(&record)
+        .map_err(|error| PeopleError::internal("serialize player game", error))?;
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO people_games
+             (table_id, game_id, game_json, revision, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 0, ?4, ?4)",
+            params![table_id, record.game_id, game_json, record.created_at],
+        )
+        .map_err(|error| PeopleError::internal("create player game", error))?;
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -941,10 +1155,35 @@ fn table_value(server: &Server, table_id: &str, viewer_id: i64) -> Result<Value,
     if viewer_id != row.challenger_id && viewer_id != row.challenged_id {
         return Err(PeopleError::not_found("That player table was not found."));
     }
+    if let Some(dealer_id) = row.dealer_id {
+        ensure_human_game(&connection, table_id, dealer_id, row.challenger_id)?;
+    }
+    let game_phase = connection
+        .query_row(
+            "SELECT game_json FROM people_games WHERE table_id = ?1",
+            [table_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| PeopleError::internal("read player game phase", error))?
+        .map(|stored| {
+            serde_json::from_str::<HumanGameRecord>(&stored)
+                .map(|record| {
+                    if record.game.phase == Phase::GameOver {
+                        "complete"
+                    } else {
+                        "playing"
+                    }
+                })
+                .map_err(|error| PeopleError::internal("parse player game phase", error))
+        })
+        .transpose()?;
     let phase = if row.status == "pending" {
         "waiting"
+    } else if let Some(game_phase) = game_phase {
+        game_phase
     } else if row.dealer_id.is_some() {
-        "deal_ready"
+        "playing"
     } else {
         "cut_for_deal"
     };
@@ -972,6 +1211,884 @@ fn table_value(server: &Server, table_id: &str, viewer_id: i64) -> Result<Value,
             }),
         }
     }))
+}
+
+fn human_game_status(
+    server: &Server,
+    request: &Request,
+    user: Option<&AuthUser>,
+) -> Result<Value, PeopleError> {
+    let user = user.ok_or_else(PeopleError::unauthorized)?;
+    let input: TableSelection = parse(request, "Choose a player table.")?;
+    let connection = open_game_database(&server.data_dir)
+        .map_err(|error| PeopleError::internal("open player game database", error))?;
+    let row = table_row(&connection, &input.table_id)?;
+    let viewer = table_viewer_side(&row, user.id)?;
+    let dealer_id = row
+        .dealer_id
+        .ok_or_else(|| PeopleError::conflict("Both players must cut before the game can begin."))?;
+    ensure_human_game(&connection, &input.table_id, dealer_id, row.challenger_id)?;
+    let (record, revision) = load_human_game(&connection, &input.table_id)?;
+    Ok(human_game_response(
+        &input.table_id,
+        &row,
+        &record,
+        revision,
+        viewer,
+    ))
+}
+
+fn human_game_action(
+    server: &Server,
+    request: &Request,
+    user: Option<&AuthUser>,
+) -> Result<Value, PeopleError> {
+    let user = user.ok_or_else(PeopleError::unauthorized)?;
+    let input: HumanGameActionSelection = parse(request, "Choose a player game action.")?;
+    let mut connection = open_game_database(&server.data_dir)
+        .map_err(|error| PeopleError::internal("open player game database", error))?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| PeopleError::internal("begin player game action", error))?;
+    let row = table_row(&transaction, &input.table_id)?;
+    let viewer = table_viewer_side(&row, user.id)?;
+    let (mut record, revision) = load_human_game(&transaction, &input.table_id)?;
+    // Both players can choose their private discards from the same revision.
+    // The choices touch disjoint hands, so merge the second valid discard into
+    // the latest authoritative game instead of forcing a needless refresh.
+    if revision != input.revision && input.action != "discard" {
+        return Err(PeopleError::conflict(
+            "The other player moved first. Refreshing the table will show the latest play.",
+        ));
+    }
+
+    match input.action.as_str() {
+        "discard" => {
+            if record.game.phase != Phase::Discard || record.game.player(viewer).hand.len() != 6 {
+                return Err(PeopleError::conflict("Your discard is already down."));
+            }
+            let ids = human_action_card_ids(&input.payload, 2)?;
+            let review_game = record.game.clone();
+            record
+                .game
+                .discard(viewer, [ids[0], ids[1]])
+                .map_err(PeopleError::bad_request)?;
+            queue_human_decision_review(
+                &mut record,
+                HumanReviewKind::Discard,
+                viewer,
+                review_game,
+                ids,
+            );
+            if record.game.phase == Phase::Pegging || record.game.phase == Phase::GameOver {
+                record.turn_card_revealed = true;
+            }
+        }
+        "play" => {
+            let id = input.payload["id"]
+                .as_u64()
+                .and_then(|value| u8::try_from(value).ok())
+                .ok_or_else(|| PeopleError::bad_request("Choose a card to play."))?;
+            let review_game = record.game.clone();
+            record
+                .game
+                .play_card(viewer, id)
+                .map_err(PeopleError::bad_request)?;
+            queue_human_decision_review(
+                &mut record,
+                HumanReviewKind::Peg,
+                viewer,
+                review_game,
+                vec![id],
+            );
+        }
+        "go" => {
+            record
+                .game
+                .say_go(viewer)
+                .map_err(PeopleError::bad_request)?;
+        }
+        "acknowledge-pegging-reset" => {
+            if record.game.pegging_reset_pending && record.game.current_player() != viewer {
+                return Err(PeopleError::conflict(
+                    "The other player is clearing the count.",
+                ));
+            }
+            record.game.acknowledge_pegging_reset();
+        }
+        "continue-scoring" => {
+            if record.game.dealer != viewer {
+                return Err(PeopleError::conflict(
+                    "The dealer advances the shared scoring review.",
+                ));
+            }
+            if record.game.phase == Phase::PeggingComplete {
+                record
+                    .game
+                    .start_scoring()
+                    .map_err(PeopleError::bad_request)?;
+            } else {
+                record
+                    .game
+                    .continue_scoring()
+                    .map_err(PeopleError::bad_request)?;
+            }
+            if record.game.phase == Phase::Discard {
+                record.turn_card_revealed = false;
+            }
+        }
+        _ => {
+            return Err(PeopleError::bad_request(
+                "That player game action is not available.",
+            ))
+        }
+    }
+
+    let now = unix_seconds();
+    let completed_at = (record.game.phase == Phase::GameOver).then_some(now);
+    if record.completed_at.is_none() {
+        record.completed_at = completed_at;
+    }
+    let game_json = serde_json::to_string(&record)
+        .map_err(|error| PeopleError::internal("serialize player game", error))?;
+    let updated = transaction
+        .execute(
+            "UPDATE people_games
+             SET game_json = ?2, revision = revision + 1, updated_at = ?3,
+                 completed_at = COALESCE(completed_at, ?4)
+             WHERE table_id = ?1 AND revision = ?5",
+            params![input.table_id, game_json, now, completed_at, revision],
+        )
+        .map_err(|error| PeopleError::internal("save player game", error))?;
+    if updated != 1 {
+        return Err(PeopleError::conflict(
+            "The other player moved first. Refreshing the table will show the latest play.",
+        ));
+    }
+    if record.game.phase == Phase::GameOver {
+        record_head_to_head_game(&transaction, &row, &record, now)?;
+    }
+    transaction
+        .commit()
+        .map_err(|error| PeopleError::internal("commit player game action", error))?;
+    Ok(human_game_response(
+        &input.table_id,
+        &row,
+        &record,
+        revision + 1,
+        viewer,
+    ))
+}
+
+fn human_game_review(
+    server: &Server,
+    request: &Request,
+    user: Option<&AuthUser>,
+) -> Result<Value, PeopleError> {
+    let user = user.ok_or_else(PeopleError::unauthorized)?;
+    let input: TableSelection = parse(request, "Choose a player table.")?;
+    let pending = {
+        let connection = open_game_database(&server.data_dir)
+            .map_err(|error| PeopleError::internal("open player review database", error))?;
+        let row = table_row(&connection, &input.table_id)?;
+        table_viewer_side(&row, user.id)?;
+        let (record, _) = load_human_game(&connection, &input.table_id)?;
+        record
+            .decision_reviews
+            .iter()
+            .find(|review| review.completed.is_none())
+            .cloned()
+    };
+
+    let completed = pending
+        .as_ref()
+        .map(|review| evaluate_human_decision_review(review, &server.model_root))
+        .transpose()?;
+
+    let mut connection = open_game_database(&server.data_dir)
+        .map_err(|error| PeopleError::internal("open player review database", error))?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| PeopleError::internal("begin player decision review", error))?;
+    let row = table_row(&transaction, &input.table_id)?;
+    let viewer = table_viewer_side(&row, user.id)?;
+    let (mut record, revision) = load_human_game(&transaction, &input.table_id)?;
+    if let (Some(pending), Some(completed)) = (pending, completed) {
+        if let Some(saved) = record
+            .decision_reviews
+            .iter_mut()
+            .find(|review| review.id == pending.id && review.completed.is_none())
+        {
+            saved.completed = Some(completed);
+            let game_json = serde_json::to_string(&record)
+                .map_err(|error| PeopleError::internal("serialize player review", error))?;
+            transaction
+                .execute(
+                    "UPDATE people_games SET game_json = ?2, updated_at = ?3 WHERE table_id = ?1",
+                    params![input.table_id, game_json, unix_seconds()],
+                )
+                .map_err(|error| PeopleError::internal("save player decision review", error))?;
+        }
+    }
+    transaction
+        .commit()
+        .map_err(|error| PeopleError::internal("commit player decision review", error))?;
+    Ok(human_game_response(
+        &input.table_id,
+        &row,
+        &record,
+        revision,
+        viewer,
+    ))
+}
+
+fn queue_human_decision_review(
+    record: &mut HumanGameRecord,
+    kind: HumanReviewKind,
+    player: Side,
+    game: CribbageGame,
+    selected_card_ids: Vec<u8>,
+) {
+    let id = format!("{}-review-{}", record.game_id, record.next_review_id);
+    record.next_review_id += 1;
+    record.decision_reviews.push(HumanDecisionReview {
+        id,
+        at: unix_seconds(),
+        kind,
+        player,
+        game,
+        selected_card_ids,
+        completed: None,
+    });
+}
+
+fn evaluate_human_decision_review(
+    pending: &HumanDecisionReview,
+    model_root: &str,
+) -> Result<HumanCompletedDecisionReview, PeopleError> {
+    let review = match pending.kind {
+        HumanReviewKind::Discard => {
+            if pending.selected_card_ids.len() != 2 {
+                return Err(PeopleError::bad_request(
+                    "The saved discard review is malformed.",
+                ));
+            }
+            review_discard_for_side_with_recommendation(
+                &pending.game,
+                pending.player,
+                ModelId::Schell13,
+                [pending.selected_card_ids[0], pending.selected_card_ids[1]],
+                None,
+                model_root,
+            )
+        }
+        HumanReviewKind::Peg => {
+            let selected = pending.selected_card_ids.first().copied().ok_or_else(|| {
+                PeopleError::bad_request("The saved pegging review is malformed.")
+            })?;
+            review_peg_for_side_with_recommendation(
+                &pending.game,
+                pending.player,
+                ModelId::Schell13,
+                selected,
+                None,
+                model_root,
+            )
+        }
+    }
+    .map_err(|error| PeopleError::internal("evaluate player decision", error))?;
+    Ok(human_completed_review(review))
+}
+
+fn human_completed_review(review: EngineDecisionReview) -> HumanCompletedDecisionReview {
+    HumanCompletedDecisionReview {
+        evaluator_model: DYNAMIC_EVALUATOR_VERSION.to_string(),
+        selected_card_ids: review.selected.card_ids,
+        recommended_card_ids: review.recommended.card_ids,
+        selected_ev: review.selected.ev.unwrap_or(0.0),
+        recommended_ev: review.recommended.ev.unwrap_or(0.0),
+        selected_win_probability: review.selected.win_probability,
+        recommended_win_probability: review.recommended.win_probability,
+    }
+}
+
+fn table_viewer_side(row: &TableRow, viewer_id: i64) -> Result<Side, PeopleError> {
+    if viewer_id == row.challenger_id {
+        Ok(Side::Left)
+    } else if viewer_id == row.challenged_id {
+        Ok(Side::Right)
+    } else {
+        Err(PeopleError::not_found("That player table was not found."))
+    }
+}
+
+fn load_human_game(
+    connection: &rusqlite::Connection,
+    table_id: &str,
+) -> Result<(HumanGameRecord, i64), PeopleError> {
+    let (stored, revision) = connection
+        .query_row(
+            "SELECT game_json, revision FROM people_games WHERE table_id = ?1",
+            [table_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()
+        .map_err(|error| PeopleError::internal("read player game", error))?
+        .ok_or_else(|| PeopleError::conflict("The player game has not started yet."))?;
+    let record = serde_json::from_str::<HumanGameRecord>(&stored)
+        .map_err(|error| PeopleError::internal("parse player game", error))?;
+    if record.version != 1 {
+        return Err(PeopleError::conflict(
+            "This player game was saved by an unsupported version.",
+        ));
+    }
+    Ok((record, revision))
+}
+
+fn human_action_card_ids(payload: &Value, expected: usize) -> Result<Vec<u8>, PeopleError> {
+    let ids = payload["ids"]
+        .as_array()
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_u64().and_then(|id| u8::try_from(id).ok()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if ids.len() != expected {
+        return Err(PeopleError::bad_request(format!(
+            "Choose exactly {expected} cards."
+        )));
+    }
+    Ok(ids)
+}
+
+fn record_head_to_head_game(
+    connection: &rusqlite::Connection,
+    row: &TableRow,
+    record: &HumanGameRecord,
+    completed_at: i64,
+) -> Result<(), PeopleError> {
+    let left_score = record.game.player(Side::Left).score;
+    let right_score = record.game.player(Side::Right).score;
+    let winner_id = if left_score >= 121 {
+        row.challenger_id
+    } else {
+        row.challenged_id
+    };
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO people_head_to_head_games
+             (game_id, first_player_id, second_player_id, winner_id, first_score, second_score, completed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                record.game_id,
+                row.challenger_id,
+                row.challenged_id,
+                winner_id,
+                left_score,
+                right_score,
+                completed_at,
+            ],
+        )
+        .map_err(|error| PeopleError::internal("record player game result", error))?;
+    Ok(())
+}
+
+fn view_key(side: Side, viewer: Side) -> &'static str {
+    if side == viewer {
+        "human"
+    } else {
+        "ai"
+    }
+}
+
+fn view_label(side: Side, viewer: Side) -> &'static str {
+    if side == viewer {
+        "User"
+    } else {
+        "AI"
+    }
+}
+
+fn view_number(side: Side, viewer: Side) -> u8 {
+    if side == viewer {
+        0
+    } else {
+        1
+    }
+}
+
+fn human_public_phase(record: &HumanGameRecord, viewer: Side) -> &'static str {
+    match record.game.phase {
+        Phase::Discard if record.game.player(viewer).hand.len() == 4 => "ai_discarding",
+        Phase::Discard => "discard",
+        Phase::Pegging => "pegging",
+        Phase::PeggingComplete => "pegging_complete",
+        Phase::ScorePone => "score_pone",
+        Phase::ScoreDealer => "score_dealer",
+        Phase::ScoreCrib => "score_crib",
+        Phase::GameOver => "game_over",
+    }
+}
+
+fn human_card_value(card: Card, owner: Option<&str>) -> Value {
+    let symbol = match card.suit {
+        0 => "♦",
+        1 => "♣",
+        2 => "♥",
+        _ => "♠",
+    };
+    let mut value = json!({
+        "index": card.id,
+        "id": card.id,
+        "rank": RANKS[card.rank as usize],
+        "suit": SUIT_NAMES[card.suit as usize],
+        "symbol": symbol,
+        "value": card.value,
+        "label": card.label(),
+    });
+    if let Some(owner) = owner {
+        value["owner"] = Value::String(owner.to_string());
+    }
+    value
+}
+
+fn human_cards_value(cards: &[Card], owner: Option<&str>) -> Value {
+    Value::Array(
+        cards
+            .iter()
+            .copied()
+            .map(|card| human_card_value(card, owner))
+            .collect(),
+    )
+}
+
+fn human_owned_cards_value(cards: &[Card], owners: &[Side], viewer: Side) -> Value {
+    Value::Array(
+        cards
+            .iter()
+            .enumerate()
+            .map(|(index, card)| {
+                human_card_value(
+                    *card,
+                    owners
+                        .get(index)
+                        .copied()
+                        .map(|side| view_key(side, viewer)),
+                )
+            })
+            .collect(),
+    )
+}
+
+fn human_nested_owned_cards_value(
+    groups: &[Vec<Card>],
+    owner_groups: &[Vec<Side>],
+    viewer: Side,
+) -> Value {
+    Value::Array(
+        groups
+            .iter()
+            .enumerate()
+            .map(|(index, cards)| {
+                human_owned_cards_value(
+                    cards,
+                    owner_groups.get(index).map(Vec::as_slice).unwrap_or(&[]),
+                    viewer,
+                )
+            })
+            .collect(),
+    )
+}
+
+fn human_scoring_value(record: &HumanGameRecord, viewer: Side) -> Value {
+    let game = &record.game;
+    let details = match game.phase {
+        Phase::ScorePone => Some((
+            "pone",
+            game.pone,
+            game.player(game.pone).table.as_slice(),
+            false,
+            "Show dealer hand",
+        )),
+        Phase::ScoreDealer => Some((
+            "dealer",
+            game.dealer,
+            game.player(game.dealer).table.as_slice(),
+            false,
+            "Show crib",
+        )),
+        Phase::ScoreCrib => Some((
+            "crib",
+            game.dealer,
+            game.player(game.dealer).crib.as_slice(),
+            true,
+            "Next hand",
+        )),
+        _ => None,
+    };
+    let Some((stage, owner, cards, crib, next_label)) = details else {
+        return Value::Null;
+    };
+    let components = score_hand_components(cards, game.turn_card, crib);
+    json!({
+        "stage": stage,
+        "title": format!("{} {}", view_label(owner, viewer), if crib { "crib" } else { "hand" }),
+        "owner": view_label(owner, viewer),
+        "cards": human_cards_value(cards, Some(view_key(owner, viewer))),
+        "points": components.total(),
+        "components": {
+            "total": components.total(),
+            "fifteens": components.fifteens,
+            "pairs": components.pairs,
+            "runs": components.runs,
+            "flush": components.flush,
+            "knobs": components.knobs,
+        },
+        "nextLabel": next_label,
+    })
+}
+
+fn human_game_message(record: &HumanGameRecord, viewer: Side) -> String {
+    let game = &record.game;
+    match human_public_phase(record, viewer) {
+        "discard" => format!(
+            "Select two cards to discard to {} crib.",
+            if game.dealer == viewer {
+                "your"
+            } else {
+                "your opponent's"
+            }
+        ),
+        "ai_discarding" => "Waiting for your opponent to discard.".to_string(),
+        "pegging" if game.current_player() == viewer => "Your play.".to_string(),
+        "pegging" => "Waiting for your opponent to play.".to_string(),
+        "pegging_complete" => "Pegging complete. The dealer will count the hands.".to_string(),
+        "score_pone" => format!("{} hand counted.", view_label(game.pone, viewer)),
+        "score_dealer" => format!("{} hand counted.", view_label(game.dealer, viewer)),
+        "score_crib" => format!("{} crib counted.", view_label(game.dealer, viewer)),
+        "game_over" => "Game over.".to_string(),
+        _ => String::new(),
+    }
+}
+
+fn human_game_analytics(record: &HumanGameRecord, row: &TableRow, viewer: Side) -> Value {
+    let timestamp = |seconds: i64| {
+        super::iso8601_from_unix_millis(
+            u64::try_from(seconds)
+                .unwrap_or_default()
+                .saturating_mul(1_000),
+        )
+    };
+    let created_at = timestamp(record.created_at);
+    let mut events = vec![json!({
+        "id": format!("{}-start", record.game_id),
+        "at": created_at,
+        "type": "game",
+        "action": "start",
+        "gameId": record.game_id,
+        "opponent": "human",
+        "players": {
+            "human": if viewer == Side::Left { &row.challenger_display_name } else { &row.challenged_display_name },
+            "ai": if viewer == Side::Left { &row.challenged_display_name } else { &row.challenger_display_name },
+        },
+    })];
+    if record.game.phase == Phase::GameOver {
+        events.extend(record.decision_reviews.iter().map(|review| {
+            human_decision_review_value(record, review, viewer, timestamp(review.at))
+        }));
+        let winner = if record.game.player(Side::Left).score >= 121 {
+            Side::Left
+        } else {
+            Side::Right
+        };
+        let loser = winner.other();
+        let loser_score = record.game.player(loser).score;
+        let result = if loser_score <= 60 {
+            "double-skunk"
+        } else if loser_score <= 90 {
+            "skunk"
+        } else {
+            "regular"
+        };
+        events.push(json!({
+            "id": format!("{}-end", record.game_id),
+            "at": timestamp(record.completed_at.unwrap_or(record.created_at)),
+            "type": "game",
+            "action": "end",
+            "gameId": record.game_id,
+            "opponent": "human",
+            "players": {
+                "human": if viewer == Side::Left { &row.challenger_display_name } else { &row.challenged_display_name },
+                "ai": if viewer == Side::Left { &row.challenged_display_name } else { &row.challenger_display_name },
+            },
+            "winner": view_key(winner, viewer),
+            "loser": view_key(loser, viewer),
+            "result": result,
+            "finalScores": {
+                "human": record.game.player(viewer).score,
+                "ai": record.game.player(viewer.other()).score,
+            },
+        }));
+    }
+    Value::Array(events)
+}
+
+fn human_decision_review_value(
+    record: &HumanGameRecord,
+    saved: &HumanDecisionReview,
+    viewer: Side,
+    at: String,
+) -> Value {
+    let game = &saved.game;
+    let player = view_key(saved.player, viewer);
+    let selected = human_card_labels(&saved.selected_card_ids);
+    let role = if game.dealer == saved.player {
+        "dealer"
+    } else {
+        "pone"
+    };
+    let mut event = match saved.kind {
+        HumanReviewKind::Discard => {
+            let remaining = game
+                .player(saved.player)
+                .hand
+                .iter()
+                .filter(|card| !saved.selected_card_ids.contains(&card.id))
+                .map(Card::label)
+                .collect::<Vec<_>>();
+            json!({
+                "id": saved.id,
+                "at": at,
+                "type": "discard",
+                "gameId": record.game_id,
+                "handNumber": game.hand_number,
+                "player": player,
+                "role": role,
+                "cards": selected,
+                "cribOwner": view_key(game.dealer, viewer),
+                "cribAfterDiscard": selected,
+                "remainingHand": remaining,
+                "handBeforeDiscard": game.player(saved.player).hand.iter().map(Card::label).collect::<Vec<_>>(),
+                "scores": {
+                    "human": game.player(viewer).score,
+                    "ai": game.player(viewer.other()).score,
+                },
+                "dealer": view_key(game.dealer, viewer),
+                "model": DYNAMIC_EVALUATOR_VERSION,
+            })
+        }
+        HumanReviewKind::Peg => {
+            let selected_card = saved
+                .selected_card_ids
+                .first()
+                .and_then(|id| Card::new(*id).ok());
+            json!({
+                "id": saved.id,
+                "at": at,
+                "type": "pegging",
+                "action": "play",
+                "gameId": record.game_id,
+                "handNumber": game.hand_number,
+                "player": player,
+                "role": role,
+                "card": selected.first().cloned().unwrap_or_else(|| "card".to_string()),
+                "hand": game.player(saved.player).hand.iter().map(Card::label).collect::<Vec<_>>(),
+                "playedCards": game.plays.iter().map(Card::label).collect::<Vec<_>>(),
+                "completedPlayGroups": game.completed_plays.iter().map(|cards| cards.iter().map(Card::label).collect::<Vec<_>>()).collect::<Vec<_>>(),
+                "cutCard": game.turn_card.label(),
+                "countBefore": game.count,
+                "scoresBefore": {
+                    "human": game.player(viewer).score,
+                    "ai": game.player(viewer.other()).score,
+                },
+                "count": game.count.saturating_add(selected_card.map(|card| card.value).unwrap_or_default()),
+                "scores": {
+                    "human": game.player(viewer).score,
+                    "ai": game.player(viewer.other()).score,
+                },
+                "message": format!("{} played {}", player, selected.first().cloned().unwrap_or_else(|| "a card".to_string())),
+                "model": DYNAMIC_EVALUATOR_VERSION,
+            })
+        }
+    };
+    if let Some(completed) = &saved.completed {
+        event["review"] = human_completed_review_value(completed);
+    }
+    event
+}
+
+fn human_completed_review_value(review: &HumanCompletedDecisionReview) -> Value {
+    let mut value = json!({
+        "model": review.evaluator_model,
+        "selected": human_card_labels(&review.selected_card_ids),
+        "recommended": human_card_labels(&review.recommended_card_ids),
+        "selectedEv": review.selected_ev,
+        "recommendedEv": review.recommended_ev,
+        "delta": review.recommended_ev - review.selected_ev,
+    });
+    if let (Some(selected), Some(recommended)) = (
+        review.selected_win_probability,
+        review.recommended_win_probability,
+    ) {
+        value["selectedWinProbability"] = Value::from(selected);
+        value["recommendedWinProbability"] = Value::from(recommended);
+        value["winProbabilityDelta"] = Value::from(recommended - selected);
+    }
+    value
+}
+
+fn human_card_labels(ids: &[u8]) -> Vec<String> {
+    ids.iter()
+        .filter_map(|id| Card::new(*id).ok())
+        .map(|card| card.label())
+        .collect()
+}
+
+fn human_game_response(
+    table_id: &str,
+    row: &TableRow,
+    record: &HumanGameRecord,
+    revision: i64,
+    viewer: Side,
+) -> Value {
+    let game = &record.game;
+    let opponent = viewer.other();
+    let phase = human_public_phase(record, viewer);
+    let scoring = human_scoring_value(record, viewer);
+    let analytics = human_game_analytics(record, row, viewer);
+    let turn_card = if record.turn_card_revealed {
+        human_card_value(game.turn_card, None)
+    } else {
+        Value::Null
+    };
+    let legal = if phase == "pegging" && game.current_player() == viewer {
+        game.legal_cards(viewer)
+            .iter()
+            .map(|card| Value::from(card.id))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let result = if game.phase == Phase::GameOver {
+        let winner = if game.player(Side::Left).score >= 121 {
+            Side::Left
+        } else {
+            Side::Right
+        };
+        vec![Value::String(format!(
+            "{} wins.",
+            view_label(winner, viewer)
+        ))]
+    } else {
+        Vec::new()
+    };
+    let state = json!({
+        "phase": phase,
+        "message": human_game_message(record, viewer),
+        "log": [],
+        "result": result,
+        "handNumber": game.hand_number,
+        "scores": {
+            "human": game.player(viewer).score,
+            "ai": game.player(opponent).score,
+        },
+        "pegPositions": {
+            "human": [game.player(viewer).score, game.player(viewer).score],
+            "ai": [game.player(opponent).score, game.player(opponent).score],
+        },
+        "dealer": view_label(game.dealer, viewer),
+        "firstDealer": view_label(game.first_deal, viewer),
+        "cribOwner": view_label(game.dealer, viewer),
+        "turn": if phase == "pegging" { Value::String(view_label(game.current_player(), viewer).to_string()) } else { Value::Null },
+        "count": game.count,
+        "turnCard": turn_card,
+        "turnCardRevealed": record.turn_card_revealed,
+        "plays": human_owned_cards_value(&game.plays, &game.play_owners, viewer),
+        "completedPlays": human_nested_owned_cards_value(&game.completed_plays, &game.completed_play_owners, viewer),
+        "peggingResetPending": game.pegging_reset_pending,
+        "humanHand": human_cards_value(&game.player(viewer).hand, Some("human")),
+        "aiHandCount": game.player(opponent).hand.len(),
+        "humanTable": human_cards_value(&game.player(viewer).table, Some("human")),
+        "aiTable": human_cards_value(&game.player(opponent).table, Some("ai")),
+        "legalCardIds": legal,
+        "aiLegalCardIds": [],
+        "canGo": phase == "pegging" && game.current_player() == viewer && game.legal_cards(viewer).is_empty(),
+        "scoring": scoring,
+        "cutForDeal": Value::Null,
+        "dynamicCalibration": Value::Null,
+        "analyticsEvents": analytics,
+    });
+
+    let scoring_review = if scoring.is_null() {
+        Value::Null
+    } else {
+        json!({
+            "stage": scoring["stage"],
+            "title": scoring["title"],
+            "owner": scoring["owner"],
+            "rawCards": scoring["cards"].as_array().unwrap_or(&Vec::new()).iter().map(|card| card["id"].clone()).collect::<Vec<_>>(),
+            "points": scoring["points"],
+            "components": scoring["components"],
+            "nextLabel": scoring["nextLabel"],
+        })
+    };
+    let mapped_side = |side: Side| Value::String(view_key(side, viewer).to_string());
+    let snapshot = json!({
+        "version": 1,
+        "gameId": record.game_id,
+        "analyticsCounter": revision,
+        "analyticsEvents": state["analyticsEvents"],
+        "opponent": "human",
+        "deal": view_number(game.deal, viewer),
+        "firstDeal": view_number(game.first_deal, viewer),
+        "handNumber": game.hand_number,
+        "human": {
+            "hand": game.player(viewer).hand.iter().map(|card| card.id).collect::<Vec<_>>(),
+            "table": game.player(viewer).table.iter().map(|card| card.id).collect::<Vec<_>>(),
+            "crib": [],
+            "score": game.player(viewer).score,
+        },
+        "ai": {
+            "hand": [],
+            "table": game.player(opponent).table.iter().map(|card| card.id).collect::<Vec<_>>(),
+            "crib": [],
+            "score": game.player(opponent).score,
+        },
+        "turnCard": if record.turn_card_revealed { Value::from(game.turn_card.id) } else { Value::Null },
+        "turnCardRevealed": record.turn_card_revealed,
+        "crib": [],
+        "plays": game.plays.iter().map(|card| card.id).collect::<Vec<_>>(),
+        "playOwners": game.play_owners.iter().map(|side| view_key(*side, viewer)).collect::<Vec<_>>(),
+        "completedPlays": game.completed_plays.iter().map(|cards| cards.iter().map(|card| card.id).collect::<Vec<_>>()).collect::<Vec<_>>(),
+        "completedPlayOwners": game.completed_play_owners.iter().map(|owners| owners.iter().map(|side| view_key(*side, viewer)).collect::<Vec<_>>()).collect::<Vec<_>>(),
+        "peggingResetPending": game.pegging_reset_pending,
+        "count": game.count,
+        "turn": view_number(game.current_player(), viewer),
+        "goPlayer": game.go_player.map(&mapped_side).unwrap_or(Value::Null),
+        "lastPlayer": game.last_player.map(&mapped_side).unwrap_or(Value::Null),
+        "scoringReview": scoring_review,
+        "phase": phase,
+        "message": state["message"],
+        "log": [],
+        "result": state["result"],
+        "pegPositions": state["pegPositions"],
+        "pendingDiscardReviews": [],
+        "pendingPeggingReviews": [],
+    });
+    json!({
+        "tableId": table_id,
+        "revision": revision,
+        "canContinueScoring": game.dealer == viewer && matches!(game.phase, Phase::PeggingComplete | Phase::ScorePone | Phase::ScoreDealer | Phase::ScoreCrib),
+        "canAcknowledgePeggingReset": game.pegging_reset_pending && game.current_player() == viewer,
+        "players": {
+            "human": if viewer == Side::Left { row.challenger_display_name.clone() } else { row.challenged_display_name.clone() },
+            "ai": if viewer == Side::Left { row.challenged_display_name.clone() } else { row.challenger_display_name.clone() },
+        },
+        "state": state,
+        "snapshot": snapshot,
+    })
 }
 
 fn player_value(
@@ -1402,6 +2519,16 @@ mod tests {
         .unwrap();
         let challenge_id = challenge["challenge"]["id"].as_str().unwrap();
         let table_id = challenge["challenge"]["tableId"].as_str().unwrap();
+        let watched = watch_challenges(
+            &server,
+            &request(
+                "/api/people/challenges/watch",
+                json!({"knownChallengeIds": []}),
+            ),
+            Some(&kurt),
+        )
+        .unwrap();
+        assert_eq!(watched["incomingChallenges"][0]["id"], challenge_id);
         let accepted = accept_challenge(
             &server,
             &request(
@@ -1412,6 +2539,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(accepted["tableId"], table_id);
+        let cleared = watch_challenges(
+            &server,
+            &request(
+                "/api/people/challenges/watch",
+                json!({"knownChallengeIds": [challenge_id]}),
+            ),
+            Some(&kurt),
+        )
+        .unwrap();
+        assert!(cleared["incomingChallenges"].as_array().unwrap().is_empty());
         let from_challenger = table_value(&server, table_id, garrett.id).unwrap();
         let from_challenged = table_value(&server, table_id, kurt.id).unwrap();
         assert_eq!(from_challenger["table"]["phase"], "cut_for_deal");
@@ -1451,8 +2588,448 @@ mod tests {
             Some(&kurt),
         )
         .unwrap();
-        assert_eq!(second["table"]["phase"], "deal_ready");
+        assert_eq!(second["table"]["phase"], "playing");
         assert!(second["table"]["dealerUsername"].is_string());
+
+        let challenger_game = human_game_status(
+            &server,
+            &request("/api/people/table/game", json!({"tableId": "t"})),
+            Some(&garrett),
+        )
+        .unwrap();
+        let challenged_game = human_game_status(
+            &server,
+            &request("/api/people/table/game", json!({"tableId": "t"})),
+            Some(&kurt),
+        )
+        .unwrap();
+        assert_eq!(challenger_game["state"]["phase"], "discard");
+        assert_eq!(challenged_game["state"]["phase"], "discard");
+        assert_eq!(
+            challenger_game["state"]["humanHand"]
+                .as_array()
+                .unwrap()
+                .len(),
+            6
+        );
+        assert_eq!(
+            challenged_game["state"]["humanHand"]
+                .as_array()
+                .unwrap()
+                .len(),
+            6
+        );
+        assert_eq!(challenger_game["state"]["aiHandCount"], 6);
+        assert_eq!(challenged_game["state"]["aiHandCount"], 6);
+        assert_ne!(
+            challenger_game["state"]["humanHand"],
+            challenged_game["state"]["humanHand"]
+        );
         std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn human_table_actions_wait_for_the_other_player_without_exposing_their_hand() {
+        let server = test_server("human-actions");
+        let garrett = user(&server, "Garrett");
+        let kurt = user(&server, "Kurt");
+        let now = unix_seconds();
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection
+            .execute(
+                "INSERT INTO people_challenges
+                 (id, table_id, challenger_id, challenged_id, status, created_at, updated_at, expires_at)
+                 VALUES ('c', 't', ?1, ?2, 'accepted', ?3, ?3, ?4)",
+                params![garrett.id, kurt.id, now, now + CHALLENGE_SECONDS],
+            )
+            .unwrap();
+        drop(connection);
+        cut_for_deal(
+            &server,
+            &request("/api/people/table/cut", json!({"tableId": "t"})),
+            Some(&garrett),
+        )
+        .unwrap();
+        cut_for_deal(
+            &server,
+            &request("/api/people/table/cut", json!({"tableId": "t"})),
+            Some(&kurt),
+        )
+        .unwrap();
+
+        let initial = human_game_status(
+            &server,
+            &request("/api/people/table/game", json!({"tableId": "t"})),
+            Some(&garrett),
+        )
+        .unwrap();
+        let simultaneous_opponent = human_game_status(
+            &server,
+            &request("/api/people/table/game", json!({"tableId": "t"})),
+            Some(&kurt),
+        )
+        .unwrap();
+        let ids = initial["state"]["humanHand"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .take(2)
+            .map(|card| card["id"].as_u64().unwrap())
+            .collect::<Vec<_>>();
+        let after_discard = human_game_action(
+            &server,
+            &request(
+                "/api/people/table/game/action",
+                json!({
+                    "tableId": "t",
+                    "action": "discard",
+                    "revision": initial["revision"],
+                    "payload": {"ids": ids},
+                }),
+            ),
+            Some(&garrett),
+        )
+        .unwrap();
+        assert_eq!(after_discard["state"]["phase"], "ai_discarding");
+        assert_eq!(
+            after_discard["state"]["humanHand"]
+                .as_array()
+                .unwrap()
+                .len(),
+            4
+        );
+        assert_eq!(
+            after_discard["state"]["analyticsEvents"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        let connection = open_game_database(&server.data_dir).unwrap();
+        let (saved_after_discard, _) = load_human_game(&connection, "t").unwrap();
+        assert_eq!(saved_after_discard.decision_reviews.len(), 1);
+        assert_eq!(saved_after_discard.decision_reviews[0].player, Side::Left);
+        assert_eq!(
+            saved_after_discard.decision_reviews[0].kind,
+            HumanReviewKind::Discard
+        );
+        drop(connection);
+
+        let opponent_view = human_game_status(
+            &server,
+            &request("/api/people/table/game", json!({"tableId": "t"})),
+            Some(&kurt),
+        )
+        .unwrap();
+        assert_eq!(opponent_view["state"]["phase"], "discard");
+        assert_eq!(
+            opponent_view["state"]["humanHand"]
+                .as_array()
+                .unwrap()
+                .len(),
+            6
+        );
+        assert_eq!(opponent_view["state"]["aiHandCount"], 4);
+        assert!(opponent_view["snapshot"]["ai"]["hand"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+
+        let opponent_ids = simultaneous_opponent["state"]["humanHand"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .take(2)
+            .map(|card| card["id"].as_u64().unwrap())
+            .collect::<Vec<_>>();
+        let pegging = human_game_action(
+            &server,
+            &request(
+                "/api/people/table/game/action",
+                json!({
+                    "tableId": "t",
+                    "action": "discard",
+                    "revision": simultaneous_opponent["revision"],
+                    "payload": {"ids": opponent_ids},
+                }),
+            ),
+            Some(&kurt),
+        )
+        .unwrap();
+        assert_eq!(pegging["state"]["phase"], "pegging");
+        assert_eq!(pegging["state"]["turnCardRevealed"], true);
+        assert!(pegging["state"]["turnCard"].is_object());
+        let connection = open_game_database(&server.data_dir).unwrap();
+        let (saved_after_discards, _) = load_human_game(&connection, "t").unwrap();
+        assert_eq!(saved_after_discards.decision_reviews.len(), 2);
+        assert_eq!(saved_after_discards.decision_reviews[1].player, Side::Right);
+        drop(connection);
+
+        let garrett_pegging = human_game_status(
+            &server,
+            &request("/api/people/table/game", json!({"tableId": "t"})),
+            Some(&garrett),
+        )
+        .unwrap();
+        let (actor, acting_view) = if garrett_pegging["state"]["turn"] == "User" {
+            (&garrett, garrett_pegging)
+        } else {
+            (&kurt, pegging)
+        };
+        let card_id = acting_view["state"]["legalCardIds"][0].as_u64().unwrap();
+        let played = human_game_action(
+            &server,
+            &request(
+                "/api/people/table/game/action",
+                json!({
+                    "tableId": "t",
+                    "action": "play",
+                    "revision": acting_view["revision"],
+                    "payload": {"id": card_id},
+                }),
+            ),
+            Some(actor),
+        )
+        .unwrap();
+        assert_eq!(played["state"]["plays"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            played["revision"],
+            acting_view["revision"].as_i64().unwrap() + 1
+        );
+        let connection = open_game_database(&server.data_dir).unwrap();
+        let (saved_after_play, _) = load_human_game(&connection, "t").unwrap();
+        assert_eq!(saved_after_play.decision_reviews.len(), 3);
+        assert_eq!(
+            saved_after_play.decision_reviews[2].kind,
+            HumanReviewKind::Peg
+        );
+        drop(connection);
+
+        let stale = human_game_action(
+            &server,
+            &request(
+                "/api/people/table/game/action",
+                json!({
+                    "tableId": "t",
+                    "action": "play",
+                    "revision": acting_view["revision"],
+                    "payload": {"id": card_id},
+                }),
+            ),
+            Some(actor),
+        )
+        .unwrap_err();
+        assert_eq!(stale.status, 409);
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn human_table_review_persists_ace_evaluation_without_revealing_it_live() {
+        let mut server = test_server("human-review");
+        server.model_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .to_string_lossy()
+            .into_owned();
+        let garrett = user(&server, "Garrett");
+        let kurt = user(&server, "Kurt");
+        let now = unix_seconds();
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection
+            .execute(
+                "INSERT INTO people_challenges
+                 (id, table_id, challenger_id, challenged_id, status, dealer_id, created_at, updated_at, expires_at)
+                 VALUES ('c', 't', ?1, ?2, 'accepted', ?1, ?3, ?3, ?4)",
+                params![garrett.id, kurt.id, now, now + CHALLENGE_SECONDS],
+            )
+            .unwrap();
+        ensure_human_game(&connection, "t", garrett.id, garrett.id).unwrap();
+        drop(connection);
+
+        let initial = human_game_status(
+            &server,
+            &request("/api/people/table/game", json!({"tableId": "t"})),
+            Some(&garrett),
+        )
+        .unwrap();
+        let ids = initial["state"]["humanHand"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .take(2)
+            .map(|card| card["id"].as_u64().unwrap())
+            .collect::<Vec<_>>();
+        human_game_action(
+            &server,
+            &request(
+                "/api/people/table/game/action",
+                json!({
+                    "tableId": "t",
+                    "action": "discard",
+                    "revision": initial["revision"],
+                    "payload": {"ids": ids},
+                }),
+            ),
+            Some(&garrett),
+        )
+        .unwrap();
+
+        let reviewed = human_game_review(
+            &server,
+            &request("/api/people/table/game/review", json!({"tableId": "t"})),
+            Some(&garrett),
+        )
+        .unwrap();
+        assert_eq!(
+            reviewed["state"]["analyticsEvents"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        let connection = open_game_database(&server.data_dir).unwrap();
+        let (saved, _) = load_human_game(&connection, "t").unwrap();
+        let evaluation = saved.decision_reviews[0].completed.as_ref().unwrap();
+        assert_eq!(evaluation.evaluator_model, DYNAMIC_EVALUATOR_VERSION);
+        assert_eq!(evaluation.selected_card_ids.len(), 2);
+        assert_eq!(evaluation.recommended_card_ids.len(), 2);
+        drop(connection);
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn human_table_can_play_through_to_a_recorded_winner() {
+        let server = test_server("human-full-game");
+        let garrett = user(&server, "Garrett");
+        let kurt = user(&server, "Kurt");
+        let now = unix_seconds();
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection
+            .execute(
+                "INSERT INTO people_challenges
+                 (id, table_id, challenger_id, challenged_id, status, created_at, updated_at, expires_at)
+                 VALUES ('c', 't', ?1, ?2, 'accepted', ?3, ?3, ?4)",
+                params![garrett.id, kurt.id, now, now + CHALLENGE_SECONDS],
+            )
+            .unwrap();
+        drop(connection);
+        for account in [&garrett, &kurt] {
+            cut_for_deal(
+                &server,
+                &request("/api/people/table/cut", json!({"tableId": "t"})),
+                Some(account),
+            )
+            .unwrap();
+        }
+
+        for _ in 0..2_000 {
+            let connection = open_game_database(&server.data_dir).unwrap();
+            let (record, _) = load_human_game(&connection, "t").unwrap();
+            drop(connection);
+            if record.game.phase == Phase::GameOver {
+                let connection = open_game_database(&server.data_dir).unwrap();
+                let recorded: i64 = connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM people_head_to_head_games WHERE game_id = ?1",
+                        [record.game_id.as_str()],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(recorded, 1);
+                assert_eq!(
+                    table_value(&server, "t", garrett.id).unwrap()["table"]["phase"],
+                    "complete"
+                );
+                let row = table_row(&connection, "t").unwrap();
+                let mut reviewed = record.clone();
+                for side in [Side::Left, Side::Right] {
+                    let saved = reviewed
+                        .decision_reviews
+                        .iter_mut()
+                        .find(|review| review.player == side)
+                        .unwrap();
+                    saved.completed = Some(HumanCompletedDecisionReview {
+                        evaluator_model: DYNAMIC_EVALUATOR_VERSION.to_string(),
+                        selected_card_ids: saved.selected_card_ids.clone(),
+                        recommended_card_ids: saved.selected_card_ids.clone(),
+                        selected_ev: 1.0,
+                        recommended_ev: 1.0,
+                        selected_win_probability: Some(0.5),
+                        recommended_win_probability: Some(0.5),
+                    });
+                }
+                for viewer in [Side::Left, Side::Right] {
+                    let analytics = human_game_analytics(&reviewed, &row, viewer);
+                    let reviewed_players = analytics
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|event| event["review"].is_object())
+                        .map(|event| event["player"].as_str().unwrap())
+                        .collect::<std::collections::HashSet<_>>();
+                    assert_eq!(
+                        reviewed_players,
+                        std::collections::HashSet::from(["human", "ai"])
+                    );
+                }
+                std::fs::remove_dir_all(server.data_dir).unwrap();
+                return;
+            }
+
+            let (side, action, payload) = match record.game.phase {
+                Phase::Discard => {
+                    let side = if record.game.player(Side::Left).hand.len() == 6 {
+                        Side::Left
+                    } else {
+                        Side::Right
+                    };
+                    let ids = record.game.player(side).hand[..2]
+                        .iter()
+                        .map(|card| card.id)
+                        .collect::<Vec<_>>();
+                    (side, "discard", json!({"ids": ids}))
+                }
+                Phase::Pegging if record.game.pegging_reset_pending => (
+                    record.game.current_player(),
+                    "acknowledge-pegging-reset",
+                    json!({}),
+                ),
+                Phase::Pegging => {
+                    let side = record.game.current_player();
+                    let legal = record.game.legal_cards(side);
+                    if let Some(card) = legal.first() {
+                        (side, "play", json!({"id": card.id}))
+                    } else {
+                        (side, "go", json!({}))
+                    }
+                }
+                Phase::PeggingComplete
+                | Phase::ScorePone
+                | Phase::ScoreDealer
+                | Phase::ScoreCrib => (record.game.dealer, "continue-scoring", json!({})),
+                Phase::GameOver => unreachable!(),
+            };
+            let account = if side == Side::Left { &garrett } else { &kurt };
+            let view = human_game_status(
+                &server,
+                &request("/api/people/table/game", json!({"tableId": "t"})),
+                Some(account),
+            )
+            .unwrap();
+            human_game_action(
+                &server,
+                &request(
+                    "/api/people/table/game/action",
+                    json!({
+                        "tableId": "t",
+                        "action": action,
+                        "revision": view["revision"],
+                        "payload": payload,
+                    }),
+                ),
+                Some(account),
+            )
+            .unwrap();
+        }
+        panic!("human game smoke test exceeded its action guard");
     }
 }
