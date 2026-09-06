@@ -51,16 +51,17 @@ describe("rankLeaderboardWins", () => {
 
 describe("rankLeaderboardMetricPlayers", () => {
   const players = [
-    { player: "Zulu", games: 4, wins: 2, losses: 2, skunks: 1, skunked: 0, leaderboardPoints: 3, pointDifferential: 8, avgMargin: 2 },
-    { player: "Alpha", games: 4, wins: 3, losses: 1, skunks: 0, skunked: 0, leaderboardPoints: 3, pointDifferential: 8, avgMargin: 2 },
-    { player: "Bravo", games: 2, wins: 2, losses: 0, skunks: 0, skunked: 0, leaderboardPoints: 2, pointDifferential: 4, avgMargin: 2 },
+    { player: "Zulu", games: 4, wins: 2, losses: 2, skunks: 1, skunked: 0, leaderboardPoints: 3, cribbagePointsScored: 438, cribbagePointsAgainst: 430, pointDifferential: 8, avgMargin: 2 },
+    { player: "Alpha", games: 4, wins: 3, losses: 1, skunks: 0, skunked: 0, leaderboardPoints: 3, cribbagePointsScored: 451, cribbagePointsAgainst: 443, pointDifferential: 8, avgMargin: 2 },
+    { player: "Bravo", games: 2, wins: 2, losses: 0, skunks: 0, skunked: 0, leaderboardPoints: 2, cribbagePointsScored: 238, cribbagePointsAgainst: 234, pointDifferential: 4, avgMargin: 2 },
   ];
 
   it("calculates every persisted-game metric", () => {
     expect(leaderboardMetricValue(players[0], "pointsPerGame")).toBe(0.6);
     expect(leaderboardMetricValue(players[0], "winPercentage")).toBe(0.5);
-    expect(leaderboardMetricValue(players[0], "pointDifferential")).toBe(8);
-    expect(leaderboardMetricValue(players[0], "totalPoints")).toBe(3);
+    expect(leaderboardMetricValue(players[0], "pointDifferential"))
+      .toBe(players[0].cribbagePointsScored - players[0].cribbagePointsAgainst);
+    expect(leaderboardMetricValue(players[0], "totalPoints")).toBe(438);
     expect(leaderboardMetricValue(players[0], "totalWins")).toBe(2);
   });
 

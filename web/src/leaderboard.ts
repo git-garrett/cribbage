@@ -13,6 +13,8 @@ export interface RankedLeaderboardPlayer {
   skunked: number;
   avgMargin?: number;
   leaderboardPoints?: number;
+  cribbagePointsScored?: number;
+  cribbagePointsAgainst?: number;
   pointDifferential?: number;
 }
 
@@ -46,7 +48,7 @@ export function leaderboardMetricValue(player: RankedLeaderboardPlayer, metric: 
   if (metric === "pointsPerGame") return leaderboardScore(player);
   if (metric === "winPercentage") return player.wins / Math.max(1, player.games ?? player.wins + player.losses);
   if (metric === "pointDifferential") return player.pointDifferential ?? (player.avgMargin ?? 0) * (player.games ?? 0);
-  if (metric === "totalPoints") return player.leaderboardPoints ?? player.wins + player.skunks;
+  if (metric === "totalPoints") return player.cribbagePointsScored ?? 0;
   return player.wins;
 }
 

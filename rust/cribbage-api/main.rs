@@ -3745,6 +3745,8 @@ struct PlayerTotals {
     skunks: i32,
     skunked: i32,
     points: i32,
+    cribbage_points_scored: i32,
+    cribbage_points_against: i32,
     margin_total: i32,
     scoring_games: i32,
     human_scoring: ScoringTotals,
@@ -3780,6 +3782,8 @@ fn add_upload_to_player_totals(total: &mut PlayerTotals, upload: &UploadedGame) 
     }
     total.errors += upload.errors;
     let won = upload.winner.as_deref() == Some("human");
+    total.cribbage_points_scored += upload.human_score;
+    total.cribbage_points_against += upload.ai_score;
     total.margin_total += upload.human_score - upload.ai_score;
     if won {
         total.wins += 1;
@@ -4045,7 +4049,7 @@ where
             let (player, total) = row.borrow();
             let games = total.games.max(1) as f64;
             format!(
-                "{{\"player\":\"{}\",\"games\":{},\"wins\":{},\"losses\":{},\"skunks\":{},\"skunked\":{},\"leaderboardPoints\":{},\"leaderboardScore\":{:.6},\"leaderboardPointsPerGame\":{:.6},\"winRate\":{:.3},\"avgMargin\":{:.3},\"pointDifferential\":{},\"scoringGames\":{},\"analyzedGames\":{},\"errors\":{},\"humanScoring\":{},\"aiScoring\":{}}}",
+                "{{\"player\":\"{}\",\"games\":{},\"wins\":{},\"losses\":{},\"skunks\":{},\"skunked\":{},\"leaderboardPoints\":{},\"leaderboardScore\":{:.6},\"leaderboardPointsPerGame\":{:.6},\"winRate\":{:.3},\"avgMargin\":{:.3},\"cribbagePointsScored\":{},\"cribbagePointsAgainst\":{},\"pointDifferential\":{},\"scoringGames\":{},\"analyzedGames\":{},\"errors\":{},\"humanScoring\":{},\"aiScoring\":{}}}",
                 json_escape(player),
                 total.games,
                 total.wins,
@@ -4057,7 +4061,9 @@ where
                 leaderboard_score(total),
                 total.wins as f64 / games,
                 total.margin_total as f64 / games,
-                total.margin_total,
+                total.cribbage_points_scored,
+                total.cribbage_points_against,
+                total.cribbage_points_scored - total.cribbage_points_against,
                 total.scoring_games,
                 total.analyzed_games,
                 total.errors,
@@ -4808,11 +4814,46 @@ mod tests {
             errors: 0,
         };
         let uploads = HashMap::from([
-            ("today".to_string(), game("today", "Daily", "schell_table-peg_table-13.215", "2026-09-05T11:00:00Z")),
-            ("week".to_string(), game("week", "Weekly", "schell_table-peg_table-13.215", "2026-09-01T12:00:00Z")),
-            ("month".to_string(), game("month", "Monthly", "schell_table-peg_table-13.215", "2026-08-20T12:00:00Z")),
-            ("old".to_string(), game("old", "All Time", "schell_table-peg_table-13.215", "2026-07-01T12:00:00Z")),
-            ("easy".to_string(), game("easy", "Not Ace", "myrmidon-5", "2026-09-05T11:00:00Z")),
+            (
+                "today".to_string(),
+                game(
+                    "today",
+                    "Daily",
+                    "schell_table-peg_table-13.215",
+                    "2026-09-05T11:00:00Z",
+                ),
+            ),
+            (
+                "week".to_string(),
+                game(
+                    "week",
+                    "Weekly",
+                    "schell_table-peg_table-13.215",
+                    "2026-09-01T12:00:00Z",
+                ),
+            ),
+            (
+                "month".to_string(),
+                game(
+                    "month",
+                    "Monthly",
+                    "schell_table-peg_table-13.215",
+                    "2026-08-20T12:00:00Z",
+                ),
+            ),
+            (
+                "old".to_string(),
+                game(
+                    "old",
+                    "All Time",
+                    "schell_table-peg_table-13.215",
+                    "2026-07-01T12:00:00Z",
+                ),
+            ),
+            (
+                "easy".to_string(),
+                game("easy", "Not Ace", "myrmidon-5", "2026-09-05T11:00:00Z"),
+            ),
         ]);
         let as_of = parse_utc_timestamp_millis("2026-09-05T12:00:00Z").unwrap();
         let summary = serde_json::from_str::<Value>(&leaderboard_summary_json_with_handicaps_at(
@@ -4833,8 +4874,52 @@ mod tests {
         assert_eq!(names("daily"), vec!["Daily"]);
         assert_eq!(names("weekly"), vec!["Daily", "Weekly"]);
         assert_eq!(names("monthly"), vec!["Daily", "Monthly", "Weekly"]);
-        assert_eq!(names("allTime"), vec!["All Time", "Daily", "Monthly", "Weekly"]);
+        assert_eq!(
+            names("allTime"),
+            vec!["All Time", "Daily", "Monthly", "Weekly"]
+        );
         assert_eq!(summary["generatedAt"], "2026-09-05T12:00:00.000Z");
+    }
+
+    #[test]
+    fn leaderboard_cribbage_points_and_differential_sum_every_selected_game() {
+        let game = |game_id: &str, human_score: i32, ai_score: i32| UploadedGame {
+            game_id: game_id.to_string(),
+            player: "Garrett".to_string(),
+            winner: Some(
+                if human_score > ai_score {
+                    "human"
+                } else {
+                    "ai"
+                }
+                .to_string(),
+            ),
+            result: "regular".to_string(),
+            human_score,
+            ai_score,
+            model: "schell_table-peg_table-13.215".to_string(),
+            ended_at: "2026-09-05T11:00:00Z".to_string(),
+            human_scoring: ScoringTotals::default(),
+            ai_scoring: ScoringTotals::default(),
+            analyzed: false,
+            errors: 0,
+        };
+        let uploads = HashMap::from([
+            ("win".to_string(), game("win", 121, 110)),
+            ("loss".to_string(), game("loss", 100, 121)),
+        ]);
+        let as_of = parse_utc_timestamp_millis("2026-09-05T12:00:00Z").unwrap();
+        let summary = serde_json::from_str::<Value>(&leaderboard_summary_json_with_handicaps_at(
+            &uploads,
+            &HashMap::new(),
+            as_of,
+        ))
+        .unwrap();
+        let player = &summary["playerStatsByWindow"]["allTime"][0];
+
+        assert_eq!(player["cribbagePointsScored"], 221);
+        assert_eq!(player["cribbagePointsAgainst"], 231);
+        assert_eq!(player["pointDifferential"], -10);
     }
 
     #[test]

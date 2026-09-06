@@ -150,6 +150,8 @@ interface LeaderboardPlayer {
   skunks: number;
   skunked: number;
   leaderboardPoints?: number;
+  cribbagePointsScored?: number;
+  cribbagePointsAgainst?: number;
   leaderboardScore?: number;
   leaderboardPointsPerGame?: number;
   pointDifferential?: number;
@@ -7366,7 +7368,7 @@ const LEADERBOARD_METRIC_LABELS: Record<LeaderboardMetric, string> = {
   pointsPerGame: "Points per game",
   winPercentage: "Win percentage",
   pointDifferential: "Point differential",
-  totalPoints: "Total points",
+  totalPoints: "Points scored",
   totalWins: "Total wins",
 };
 

@@ -215,7 +215,7 @@ production release; leave PR open and never merge to `master`.
   - Points per game: `(wins + skunks) / (wins + skunks + losses + skunked)`
   - Win percentage
   - Point differential
-  - Total points
+  - Points scored (total cribbage points scored)
   - Total wins
 - [x] Add Daily, Weekly, Monthly, and All Time subtabs for every metric other
   than Handicap; Handicap is a current-value metric with no time-window tabs.
@@ -233,9 +233,10 @@ production release; leave PR open and never merge to `master`.
   win percentage, average margin, and player name. Handicap sorts by absolute
   current handicap ascending, then calibrated cycles descending and player
   name.
-- Points per game uses `(wins + skunks) / (wins + skunks + losses + skunked)`;
-  total points uses `wins + skunks`; point differential is the total score
-  margin across games in the selected window.
+- Points per game uses `(wins + skunks) / (wins + skunks + losses + skunked)`.
+  Points scored is the sum of the player's cribbage scores. Point differential
+  is the sum of the player's cribbage scores minus the sum of the opponents'
+  cribbage scores across every game in the selected window.
 
 ### Acceptance checks
 
