@@ -681,7 +681,6 @@ const els = {
   engagementDaily: document.querySelector("#engagement-daily") as HTMLElement,
   exportGameLog: document.querySelector("#export-game-log") as HTMLButtonElement,
   troubleGame: document.querySelector("#trouble-game") as HTMLButtonElement,
-  analyticsClose: document.querySelector("#analytics-close") as HTMLButtonElement,
   analyticsPage: document.querySelector("#analytics-page") as HTMLElement,
   analyticsTitle: document.querySelector("#analytics-title") as HTMLElement,
   analyticsSummary: document.querySelector("#analytics-summary") as HTMLElement,
@@ -1888,7 +1887,7 @@ function peopleInitials(player: Pick<PeoplePlayer, "displayName" | "username">):
   return `${words[0][0] || ""}${words.length > 1 ? words.at(-1)?.[0] || "" : words[0][1] || ""}`.toUpperCase();
 }
 
-const HANDICAP_EXPLANATION = "Handicap measures win probability of cribbage decisions.";
+const HANDICAP_EXPLANATION = "Handicap is a skill-only (no chance or cards component) measure of cribbage skill.";
 const HANDICAP_TOOLTIP_ID = "player-handicap-tooltip";
 let handicapTooltipOwner: HTMLElement | null = null;
 
@@ -3496,6 +3495,13 @@ function pathwayParentRoute(route: PathwayRoute): PathwayRoute | null {
   return "home";
 }
 
+function currentAppBackRoute(): PathwayRoute {
+  const route = pathwayRouteFromLocation();
+  if (state.analyticsOpen && route === "statistics") return pathwayParentRoute(route) ?? "home";
+  if (state.leaderboardOpen && route === "leaderboard") return pathwayParentRoute(route) ?? "home";
+  return "play";
+}
+
 function pathwayRouteLabel(route: PathwayRoute): string {
   if (route === "play") return "Play";
   if (route === "settings") return "Settings";
@@ -3571,7 +3577,6 @@ function applyPathwayNavigation(): void {
   if (!PATHWAY_NAV_ENABLED) return;
   const route = pathwayRouteFromLocation();
   window.history.replaceState(pathwayHistoryState(route), "", pathwayUrl(route));
-  applyPathwayRoute(route);
 }
 
 function buildBoard(): void {
@@ -8343,7 +8348,7 @@ function renderUtilityPages(): void {
   els.leaderboardPage.hidden = !state.leaderboardOpen;
   els.modelInfoPage.hidden = !state.modelInfoOpen;
   els.decisionReviewPage.hidden = !state.decisionReviewOpen;
-  els.appBackLabel.textContent = state.leaderboardOpen ? "Home" : "Play";
+  els.appBackLabel.textContent = pathwayRouteLabel(currentAppBackRoute());
   if (state.analyticsOpen) renderAnalytics();
   if (state.leaderboardOpen) renderLeaderboard();
   if (state.modelInfoOpen) renderModelInfoPage();
@@ -8982,12 +8987,10 @@ els.appBrandHome.addEventListener("click", (event) => {
 });
 
 els.appBack.addEventListener("click", () => {
-  if (state.leaderboardOpen && pathwayRouteFromLocation() === "leaderboard") {
-    window.history.back();
-    return;
-  }
   if (PATHWAY_NAV_ENABLED) {
-    leaveActivePathwayGame("play");
+    const parent = currentAppBackRoute();
+    if (parent === "play") leaveActivePathwayGame(parent);
+    else navigatePathway(parent);
     return;
   }
   state.splashOpen = true;
@@ -9701,19 +9704,6 @@ for (const button of els.gameLogViewTabButtons) {
 
 els.gameLogAnalyzeAll.addEventListener("click", () => {
   void analyzeAllLoggedGames();
-});
-
-els.analyticsClose.addEventListener("click", () => {
-  if (pathwayStatsReturn && pathwayRouteFromLocation() === "statistics") {
-    window.history.back();
-    return;
-  }
-  state.analyticsOpen = false;
-  render(state.game);
-  if (pathwayStatsReturn) {
-    pathwayStatsReturn = false;
-    showPathwayView("home");
-  }
 });
 
 function openStatsGameLog(): void {

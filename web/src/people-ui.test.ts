@@ -87,7 +87,8 @@ describe("human clubhouse UI", () => {
     expect(source).toContain("function setPlayerIdentity");
     expect(source).toContain('marker.className = "player-handicap"');
     expect(source).toContain("HANDICAP_EXPLANATION");
-    expect(source).toContain('const HANDICAP_EXPLANATION = "Handicap measures win probability of cribbage decisions."');
+    expect(source).toContain('const HANDICAP_EXPLANATION = "Handicap is a skill-only (no chance or cards component) measure of cribbage skill."');
+    expect(source).not.toContain('HANDICAP_EXPLANATION = "Handicap is a skill-only (no chance or cards component) measure of cribbage skill. Learn More"');
     expect(source).toContain("playerHandicaps");
     expect(source).toContain('document.addEventListener("mouseover"');
     expect(source).toContain('document.addEventListener("focusin"');

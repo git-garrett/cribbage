@@ -13,7 +13,7 @@ describe("standalone leaderboard pathway", () => {
     expect(html).not.toContain('data-stats-view="leaderboard"');
     expect(html).not.toContain('id="stats-leaderboard"');
     expect(html).not.toContain('id="leaderboard-close"');
-    expect(source).toMatch(/state\.leaderboardOpen[\s\S]*pathwayRouteFromLocation\(\) === "leaderboard"[\s\S]*window\.history\.back\(\)/);
+    expect(source).toMatch(/state\.leaderboardOpen[\s\S]*route === "leaderboard"[\s\S]*pathwayParentRoute\(route\)/);
   });
 
   it("defaults to current Handicap without time-window controls", () => {
@@ -29,6 +29,7 @@ describe("standalone leaderboard pathway", () => {
     for (const metric of ["handicap", "pointsPerGame", "winPercentage", "pointDifferential", "totalPoints", "totalWins"]) {
       expect(html).toContain(`data-leaderboard-metric="${metric}"`);
     }
+    expect(html).toContain('data-leaderboard-metric="totalPoints" aria-selected="false">Points scored</button>');
     for (const window of ["daily", "weekly", "monthly", "allTime"]) {
       expect(html).toContain(`data-leaderboard-window="${window}"`);
     }

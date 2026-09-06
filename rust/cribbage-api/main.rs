@@ -3854,6 +3854,9 @@ fn leaderboard_summary_json_with_handicaps_at(
         HashMap::new();
     let mut best_wins = Vec::new();
     for upload in uploads.values() {
+        if !is_completed_leaderboard_game(upload) {
+            continue;
+        }
         add_upload_to_player_totals(totals.entry(upload.player.clone()).or_default(), upload);
         add_upload_to_player_totals(
             totals_by_opponent
@@ -3966,7 +3969,10 @@ fn leaderboard_summary_json_with_handicaps_at(
     format!(
         "{{\"generatedAt\":\"{}\",\"source\":\"rust-api-tsv\",\"model\":\"historical\",\"games\":{},\"playerStats\":[{}],\"playerStatsByOpponent\":{{{}}},\"playerStatsByWindow\":{{{}}},\"playerHandicaps\":{{{}}},\"bestWinRate\":[{}],\"winRate14_3\":[{}],\"bestWins\":[{}],\"mostSkunks\":[{}]}}",
         iso8601_from_unix_millis(as_of_millis),
-        uploads.len(),
+        uploads
+            .values()
+            .filter(|upload| is_completed_leaderboard_game(upload))
+            .count(),
         player_stats,
         player_stats_by_opponent,
         player_stats_by_window,
@@ -3986,6 +3992,9 @@ fn leaderboard_window_player_json(
     let cutoff = duration_millis.map(|duration| as_of_millis.saturating_sub(duration));
     let mut totals: HashMap<String, PlayerTotals> = HashMap::new();
     for upload in uploads.values() {
+        if !is_completed_leaderboard_game(upload) {
+            continue;
+        }
         if stats_opponent_family(&upload.model) != "master" {
             continue;
         }
@@ -4002,6 +4011,10 @@ fn leaderboard_window_player_json(
     let mut rows = totals.into_iter().collect::<Vec<_>>();
     rows.sort_by(compare_leaderboard_players);
     leaderboard_player_json(&rows)
+}
+
+fn is_completed_leaderboard_game(upload: &UploadedGame) -> bool {
+    upload.human_score != 0 || upload.ai_score != 0
 }
 
 fn leaderboard_weighted_results(total: &PlayerTotals) -> i64 {
@@ -4920,6 +4933,61 @@ mod tests {
         assert_eq!(player["cribbagePointsScored"], 221);
         assert_eq!(player["cribbagePointsAgainst"], 231);
         assert_eq!(player["pointDifferential"], -10);
+    }
+
+    #[test]
+    fn leaderboard_excludes_scoreless_test_uploads_from_every_board() {
+        let game = |game_id: &str,
+                    player: &str,
+                    winner: &str,
+                    result: &str,
+                    human_score: i32,
+                    ai_score: i32| UploadedGame {
+            game_id: game_id.to_string(),
+            player: player.to_string(),
+            winner: Some(winner.to_string()),
+            result: result.to_string(),
+            human_score,
+            ai_score,
+            model: "schell_table-peg_table-13.215".to_string(),
+            ended_at: "2026-09-05T11:00:00Z".to_string(),
+            human_scoring: ScoringTotals::default(),
+            ai_scoring: ScoringTotals::default(),
+            analyzed: false,
+            errors: 0,
+        };
+        let uploads = HashMap::from([
+            (
+                "real".to_string(),
+                game("real", "Garrett", "human", "regular", 121, 110),
+            ),
+            (
+                "test-skunk".to_string(),
+                game("test-skunk", "Test", "human", "skunk", 0, 0),
+            ),
+            (
+                "test-garrett".to_string(),
+                game("test-garrett", "Garrett", "ai", "regular", 0, 0),
+            ),
+        ]);
+        let as_of = parse_utc_timestamp_millis("2026-09-05T12:00:00Z").unwrap();
+        let summary = serde_json::from_str::<Value>(&leaderboard_summary_json_with_handicaps_at(
+            &uploads,
+            &HashMap::new(),
+            as_of,
+        ))
+        .unwrap();
+
+        assert_eq!(summary["games"], 1);
+        assert_eq!(summary["playerStats"].as_array().unwrap().len(), 1);
+        assert_eq!(summary["playerStats"][0]["player"], "Garrett");
+        assert_eq!(summary["playerStats"][0]["games"], 1);
+        assert!(summary["playerStatsByWindow"]["allTime"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|player| player["player"] != "Test"));
+        assert!(summary["mostSkunks"].as_array().unwrap().is_empty());
     }
 
     #[test]

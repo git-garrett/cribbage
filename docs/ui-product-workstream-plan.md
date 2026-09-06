@@ -247,10 +247,17 @@ production release; leave PR open and never merge to `master`.
   windowed metric is selected, Monthly is the default timeframe.
 - Metric and time-window combinations produce deterministic seeded results and
   preserve keyboard-accessible tab semantics.
+- Direct refreshes restore the Leaderboard route after initialization, and
+  every pathway Back control resolves its declared parent rather than the
+  previously visited sibling.
+- Statistics uses the shared parent-aware Back control without a redundant
+  Done button.
+- Scoreless `0–0` QA uploads are excluded from every leaderboard aggregate;
+  legitimate completed games, including double skunks, remain eligible.
 
 ### Verification evidence
 
-- `npm test`: 284 Rust tests across 18 targets passed.
+- `npm test`: 286 Rust tests across 18 targets passed.
 - `npm run test:web`, `npm run typecheck`, and `npm run build`: passed.
 - Chromium interaction and visual QA passed at 1440×1050 and 390×844 in light
   and dark mode using fixed signed-in leaderboard fixtures. The pass covered

@@ -69,7 +69,7 @@ describe("local pathway navigation", () => {
     expect(source).toContain('const PATHWAY_NAV_ENABLED = SIMPLE_NETWORK_MODE');
     expect(source).toMatch(/pathwayStatistics\.addEventListener\("click"[\s\S]*navigatePathway\("statistics"\)/);
     expect(source).toMatch(/route === "statistics"[\s\S]*openAnalytics\("my"\)/);
-    expect(source).toMatch(/analyticsClose\.addEventListener\("click"[\s\S]*showPathwayView\("home"\)/);
+    expect(html).not.toContain('id="analytics-close"');
   });
 
   it("shares the parent link, centered logo, and online-pill header arrangement away from home", () => {
@@ -97,7 +97,7 @@ describe("local pathway navigation", () => {
     expect(source).toContain('const PATHWAY_VIEW_PARAM = "pathwayView"');
     expect(source).toContain("window.history.pushState(pathwayHistoryState(route), \"\", pathwayUrl(route, true))");
     expect(source).toMatch(/window\.addEventListener\("popstate"[\s\S]*applyPathwayRoute\(pathwayRouteFromLocation\(\)\)/);
-    expect(source).toMatch(/pathwayStatsReturn[\s\S]*window\.history\.back\(\)/);
+    expect(source).toMatch(/function currentAppBackRoute[\s\S]*route === "statistics"[\s\S]*route === "leaderboard"/);
     expect(source).toMatch(/function openAnalytics[\s\S]*pushState\(pathwayHistoryState\("statistics"\)/);
   });
 
@@ -179,7 +179,7 @@ describe("local pathway navigation", () => {
     expect(html).toContain('id="master-session-dialog"');
     expect(html).toContain('id="master-session-save"');
     expect(html).toContain('id="master-session-forfeit"');
-    expect(source).toMatch(/appBack\.addEventListener\("click"[\s\S]*leaveActivePathwayGame\("play"\)/);
+    expect(source).toMatch(/appBack\.addEventListener\("click"[\s\S]*parent === "play"[\s\S]*leaveActivePathwayGame\(parent\)/);
     expect(source).toMatch(/function leaveActivePathwayGame[\s\S]*isAceOpponent\(currentSnapshot\.opponent\)[\s\S]*masterSessionDialog\.hidden = false/);
     expect(source).not.toMatch(/function launchPathwayOpponent[\s\S]*findRemoteActiveGameSession\(DEFAULT_OPPONENT\)[\s\S]*function dismissMasterSessionDialog/);
     expect(source).toMatch(/function suspendActiveGameForPathway[\s\S]*state\.pending = false[\s\S]*resetTransientGameUi\(\)/);
@@ -221,6 +221,7 @@ describe("local pathway navigation", () => {
     expect(html).toMatch(/id="app-back"[\s\S]*?←<\/span> <span id="app-back-label">Play<\/span>/);
     expect(source).toMatch(/function pathwayParentRoute[\s\S]*route === "human"[\s\S]*return "play"[\s\S]*route === "gameplay"[\s\S]*return "settings"/);
     expect(source).toMatch(/pathwayHeaderHome\.addEventListener[\s\S]*pathwayParentRoute/);
+    expect(source).toMatch(/appBack\.addEventListener[\s\S]*currentAppBackRoute\(\)[\s\S]*navigatePathway\(parent\)/);
   });
 
   it("uses a restrained staggered deal with an explicit reduced-motion fallback", () => {
