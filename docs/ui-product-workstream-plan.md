@@ -10,14 +10,10 @@ set narrow enough to test, preview, and release independently.
 
 - The protected default branch is `master`. Do not merge any PR in this
   workstream into `master` without a new, explicit instruction.
-- Production releases use the `server` line and
-  `scripts/deploy-nanode.sh deploy`.
-- PR 1 is authorized for a production deployment and may be merged into
-  `server` after its checks pass. It must not be merged into `master`.
-- PRs 2–4 stop after a local-runtime deployment and user review. Do not merge
-  or deploy them to production at that gate.
-- PR 5 also stops at local review because no production deployment was
-  specified.
+- Production releases use `master` and `scripts/deploy-nanode.sh deploy`.
+- PRs 1–4 are complete and deployed to production.
+- PR 5 is authorized for merge to `master` and production deployment after its
+  checks and required review pass.
 - Work on only one PR at a time. Do not begin the next review PR until the
   current PR reaches its stated gate.
 - Preserve unrelated workspace changes, including `capacitor.config.ts` and
@@ -39,8 +35,7 @@ Every PR must:
 
 - **Branch:** `feat/gameplay-ui-polish`
 - **Target:** `server`
-- **Release gate:** Deploy to production after checks pass; never merge to
-`master`.
+- **Release status:** Deployed to production in PR #6.
 
 ### Scope
 
@@ -93,7 +88,7 @@ Every PR must:
 
 - **Branch:** `feat/feedback-requests`
 - **Target:** `server`
-- **Release gate:** Local runtime only; leave PR open for review.
+- **Release status:** Deployed to production in PR #7.
 
 ### Scope
 
@@ -137,22 +132,22 @@ Every PR must:
 
 ## PR 3 — Presence responsiveness and Dynamic calibration reliability
 
-- **Branch:** create from the accepted `server` baseline after PR 2 review
+- **Branch:** implemented in PR #9, with follow-up presence polish in PR #12
 - **Target:** `server`
-- **Release gate:** Local runtime only; leave PR open for review.
+- **Release status:** Deployed to production in PRs #9 and #12.
 
 ### Scope
 
-- [ ] Build a deterministic timing regression for the slow Online pill before
+- [x] Build a deterministic timing regression for the slow Online pill before
   changing the implementation.
-- [ ] Add a low-overhead 60-second presence heartbeat that refreshes login and
+- [x] Add a low-overhead 60-second presence heartbeat that refreshes login and
   inactivity state, with immediate cached rendering when the pill opens.
-- [ ] Avoid polling when the document is hidden and refresh promptly when it
+- [x] Avoid polling when the document is hidden and refresh promptly when it
   becomes visible again.
-- [ ] Build persistence and multi-cycle regressions for provisional Dynamic
+- [x] Build persistence and multi-cycle regressions for provisional Dynamic
   handicap before changing calibration code.
-- [ ] Persist provisional calibration progress across leaving/resuming a game.
-- [ ] Confirm every eligible unassisted completed cycle continues updating the
+- [x] Persist provisional calibration progress across leaving/resuming a game.
+- [x] Confirm every eligible unassisted completed cycle continues updating the
   provisional handicap until calibration completes.
 
 ### Acceptance checks
@@ -167,9 +162,7 @@ Every PR must:
 
 - **Branch:** `feat/private-engagement-admin`
 - **Target:** `master`
-- **Release gate:** Prepare and review the PR, but do not merge or deploy until
-  the separately running production deployment is complete and the owner gives
-  an explicit go-ahead.
+- **Release status:** Deployed to production in PR #13.
 
 ### Scope
 
@@ -206,42 +199,77 @@ Every PR must:
 
 ## PR 5 — Standalone leaderboard and ranking views
 
-- **Branch:** create from the accepted `server` baseline after PR 4 review
-- **Target:** `server`
-- **Release gate:** Local runtime only unless a later instruction authorizes a
-production release; leave PR open and never merge to `master`.
+- **Branch:** `work/standalone-leaderboard`
+- **Target:** `master`
+- **Release status:** Complete and deployed to production.
 
 ### Scope
 
-- [ ] Move Leaderboard out of My Stats into its own Choose Your Path homepage
+- [x] Move Leaderboard out of My Stats into its own Choose Your Path homepage
   card.
-- [ ] Remove the Done button and use pathway-aware back navigation.
-- [ ] Make Handicap the default board.
-- [ ] Add metric tabs for:
+- [x] Remove the Done button and use pathway-aware back navigation.
+- [x] Make current Handicap the default board.
+- [x] Add metric tabs for:
   - Handicap
   - Points per game: `(wins + skunks) / (wins + skunks + losses + skunked)`
   - Win percentage
   - Point differential
-  - Total points
+  - Points scored (total cribbage points scored)
   - Total wins
-- [ ] Add Daily, Weekly, Monthly, and All Time subtabs for every metric.
-- [ ] Extend the API aggregation only where current leaderboard records cannot
+- [x] Add Daily, Weekly, Monthly, and All Time subtabs for every metric other
+  than Handicap, defaulting those metrics to Monthly; Handicap is a
+  current-value metric with no time-window tabs.
+- [x] Extend the API aggregation only where current leaderboard records cannot
   calculate a metric/window accurately.
-- [ ] Define stable ordering and tie-breakers for every board.
+- [x] Define stable ordering and tie-breakers for every board.
+
+### Ranking definitions
+
+- Daily, Weekly, and Monthly are trailing 24-hour, 7-day, and 30-day windows
+  ending at the response's fixed `generatedAt` time. All Time includes every
+  persisted Ace game. Invalid or future timestamps are excluded from timed
+  windows.
+- Result boards sort by the selected metric descending, then games played,
+  win percentage, average margin, and player name. Handicap sorts by absolute
+  current handicap ascending, then calibrated cycles descending and player
+  name.
+- Points per game uses `(wins + skunks) / (wins + skunks + losses + skunked)`.
+  Points scored is the sum of the player's cribbage scores. Point differential
+  is the sum of the player's cribbage scores minus the sum of the opponents'
+  cribbage scores across every game in the selected window.
 
 ### Acceptance checks
 
 - The homepage card opens Leaderboard directly and My Stats no longer owns the
   entry point.
-- Handicap / All Time is selected by default.
+- Current Handicap is selected by default, with no time-window tabs. When a
+  windowed metric is selected, Monthly is the default timeframe.
 - Metric and time-window combinations produce deterministic seeded results and
   preserve keyboard-accessible tab semantics.
+- Direct refreshes restore the Leaderboard route after initialization, and
+  every pathway Back control resolves its declared parent rather than the
+  previously visited sibling.
+- Statistics uses the shared parent-aware Back control without a redundant
+  Done button.
+- Scoreless `0–0` QA uploads are excluded from every leaderboard aggregate;
+  legitimate completed games, including double skunks, remain eligible.
+
+### Verification evidence
+
+- `npm test`: 290 Rust tests across 18 targets passed.
+- `npm run test:web`, `npm run typecheck`, and `npm run build`: passed.
+- Chromium interaction and visual QA passed at 1440×1050 and 390×844 in light
+  and dark mode using fixed signed-in leaderboard fixtures. The pass covered
+  the home card, default Handicap board, hidden Handicap windows, every metric
+  and time-window control, arrow-key tab navigation, phone scrolling, and the
+  pathway-aware return to Home.
+- The shared local runtime serves this branch at `http://127.0.0.1:8765/`.
 
 ## Progress log
 
 - [x] Workstream captured in this plan.
 - [x] PR 1 complete and deployed to production.
-- [x] PR 2 available on the local runtime for review.
-- [ ] PR 3 available on the local runtime for review.
-- [x] PR 4 available on the local runtime for review.
-- [ ] PR 5 available on the local runtime for review.
+- [x] PR 2 complete and deployed to production.
+- [x] PR 3 complete and deployed to production.
+- [x] PR 4 complete and deployed to production.
+- [x] PR 5 complete and deployed to production.

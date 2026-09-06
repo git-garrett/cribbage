@@ -3745,6 +3745,8 @@ struct PlayerTotals {
     skunks: i32,
     skunked: i32,
     points: i32,
+    cribbage_points_scored: i32,
+    cribbage_points_against: i32,
     margin_total: i32,
     scoring_games: i32,
     human_scoring: ScoringTotals,
@@ -3780,6 +3782,8 @@ fn add_upload_to_player_totals(total: &mut PlayerTotals, upload: &UploadedGame) 
     }
     total.errors += upload.errors;
     let won = upload.winner.as_deref() == Some("human");
+    total.cribbage_points_scored += upload.human_score;
+    total.cribbage_points_against += upload.ai_score;
     total.margin_total += upload.human_score - upload.ai_score;
     if won {
         total.wins += 1;
@@ -3837,11 +3841,22 @@ fn leaderboard_summary_json_with_handicaps(
     uploads: &HashMap<String, UploadedGame>,
     handicaps: &HashMap<String, Value>,
 ) -> String {
+    leaderboard_summary_json_with_handicaps_at(uploads, handicaps, unix_millis() as u64)
+}
+
+fn leaderboard_summary_json_with_handicaps_at(
+    uploads: &HashMap<String, UploadedGame>,
+    handicaps: &HashMap<String, Value>,
+    as_of_millis: u64,
+) -> String {
     let mut totals: HashMap<String, PlayerTotals> = HashMap::new();
     let mut totals_by_opponent: HashMap<&'static str, HashMap<String, PlayerTotals>> =
         HashMap::new();
     let mut best_wins = Vec::new();
     for upload in uploads.values() {
+        if !is_completed_leaderboard_game(upload) {
+            continue;
+        }
         add_upload_to_player_totals(totals.entry(upload.player.clone()).or_default(), upload);
         add_upload_to_player_totals(
             totals_by_opponent
@@ -3929,18 +3944,77 @@ fn leaderboard_summary_json_with_handicaps(
         })
         .collect::<Vec<_>>()
         .join(",");
+    let player_stats_by_window = [
+        (
+            "daily",
+            leaderboard_window_player_json(uploads, as_of_millis, Some(24 * 60 * 60 * 1_000)),
+        ),
+        (
+            "weekly",
+            leaderboard_window_player_json(uploads, as_of_millis, Some(7 * 24 * 60 * 60 * 1_000)),
+        ),
+        (
+            "monthly",
+            leaderboard_window_player_json(uploads, as_of_millis, Some(30 * 24 * 60 * 60 * 1_000)),
+        ),
+        (
+            "allTime",
+            leaderboard_window_player_json(uploads, as_of_millis, None),
+        ),
+    ]
+    .into_iter()
+    .map(|(window, rows)| format!("\"{window}\":[{rows}]"))
+    .collect::<Vec<_>>()
+    .join(",");
     format!(
-        "{{\"generatedAt\":\"{}\",\"source\":\"rust-api-tsv\",\"model\":\"historical\",\"games\":{},\"playerStats\":[{}],\"playerStatsByOpponent\":{{{}}},\"playerHandicaps\":{{{}}},\"bestWinRate\":[{}],\"winRate14_3\":[{}],\"bestWins\":[{}],\"mostSkunks\":[{}]}}",
-        isoish_now(),
-        uploads.len(),
+        "{{\"generatedAt\":\"{}\",\"source\":\"rust-api-tsv\",\"model\":\"historical\",\"games\":{},\"playerStats\":[{}],\"playerStatsByOpponent\":{{{}}},\"playerStatsByWindow\":{{{}}},\"playerHandicaps\":{{{}}},\"bestWinRate\":[{}],\"winRate14_3\":[{}],\"bestWins\":[{}],\"mostSkunks\":[{}]}}",
+        iso8601_from_unix_millis(as_of_millis),
+        uploads
+            .values()
+            .filter(|upload| is_completed_leaderboard_game(upload))
+            .count(),
         player_stats,
         player_stats_by_opponent,
+        player_stats_by_window,
         handicap_json,
         player_stats,
         player_stats,
         best_wins_json,
         most_skunks,
     )
+}
+
+fn leaderboard_window_player_json(
+    uploads: &HashMap<String, UploadedGame>,
+    as_of_millis: u64,
+    duration_millis: Option<u64>,
+) -> String {
+    let cutoff = duration_millis.map(|duration| as_of_millis.saturating_sub(duration));
+    let mut totals: HashMap<String, PlayerTotals> = HashMap::new();
+    for upload in uploads.values() {
+        if !is_completed_leaderboard_game(upload) {
+            continue;
+        }
+        if stats_opponent_family(&upload.model) != "master" {
+            continue;
+        }
+        if let Some(cutoff) = cutoff {
+            let Some(ended_at) = parse_utc_timestamp_millis(&upload.ended_at) else {
+                continue;
+            };
+            if ended_at < cutoff || ended_at > as_of_millis {
+                continue;
+            }
+        }
+        add_upload_to_player_totals(totals.entry(upload.player.clone()).or_default(), upload);
+    }
+    let mut rows = totals.into_iter().collect::<Vec<_>>();
+    rows.sort_by(compare_leaderboard_players);
+    leaderboard_player_json(&rows)
+}
+
+fn is_completed_leaderboard_game(upload: &UploadedGame) -> bool {
+    upload.human_score != 0 || upload.ai_score != 0
 }
 
 fn leaderboard_weighted_results(total: &PlayerTotals) -> i64 {
@@ -3988,7 +4062,7 @@ where
             let (player, total) = row.borrow();
             let games = total.games.max(1) as f64;
             format!(
-                "{{\"player\":\"{}\",\"games\":{},\"wins\":{},\"losses\":{},\"skunks\":{},\"skunked\":{},\"leaderboardPoints\":{},\"leaderboardScore\":{:.6},\"leaderboardPointsPerGame\":{:.6},\"winRate\":{:.3},\"avgMargin\":{:.3},\"scoringGames\":{},\"analyzedGames\":{},\"errors\":{},\"humanScoring\":{},\"aiScoring\":{}}}",
+                "{{\"player\":\"{}\",\"games\":{},\"wins\":{},\"losses\":{},\"skunks\":{},\"skunked\":{},\"leaderboardPoints\":{},\"leaderboardScore\":{:.6},\"leaderboardPointsPerGame\":{:.6},\"winRate\":{:.3},\"avgMargin\":{:.3},\"cribbagePointsScored\":{},\"cribbagePointsAgainst\":{},\"pointDifferential\":{},\"scoringGames\":{},\"analyzedGames\":{},\"errors\":{},\"humanScoring\":{},\"aiScoring\":{}}}",
                 json_escape(player),
                 total.games,
                 total.wins,
@@ -4000,6 +4074,9 @@ where
                 leaderboard_score(total),
                 total.wins as f64 / games,
                 total.margin_total as f64 / games,
+                total.cribbage_points_scored,
+                total.cribbage_points_against,
+                total.cribbage_points_scored - total.cribbage_points_against,
                 total.scoring_games,
                 total.analyzed_games,
                 total.errors,
@@ -4731,6 +4808,186 @@ mod tests {
         assert_eq!(summary["playerStatsByOpponent"]["easy"][0]["wins"], 1);
         assert_eq!(summary["playerStatsByOpponent"]["easy"][0]["skunks"], 1);
         assert_eq!(summary["playerHandicaps"]["Garrett"]["wpPerGame"], -0.125);
+    }
+
+    #[test]
+    fn leaderboard_time_windows_use_a_fixed_as_of_and_only_include_ace_games() {
+        let game = |game_id: &str, player: &str, model: &str, ended_at: &str| UploadedGame {
+            game_id: game_id.to_string(),
+            player: player.to_string(),
+            winner: Some("human".to_string()),
+            result: "regular".to_string(),
+            human_score: 121,
+            ai_score: 110,
+            model: model.to_string(),
+            ended_at: ended_at.to_string(),
+            human_scoring: ScoringTotals::default(),
+            ai_scoring: ScoringTotals::default(),
+            analyzed: false,
+            errors: 0,
+        };
+        let uploads = HashMap::from([
+            (
+                "today".to_string(),
+                game(
+                    "today",
+                    "Daily",
+                    "schell_table-peg_table-13.215",
+                    "2026-09-05T11:00:00Z",
+                ),
+            ),
+            (
+                "week".to_string(),
+                game(
+                    "week",
+                    "Weekly",
+                    "schell_table-peg_table-13.215",
+                    "2026-09-01T12:00:00Z",
+                ),
+            ),
+            (
+                "month".to_string(),
+                game(
+                    "month",
+                    "Monthly",
+                    "schell_table-peg_table-13.215",
+                    "2026-08-20T12:00:00Z",
+                ),
+            ),
+            (
+                "old".to_string(),
+                game(
+                    "old",
+                    "All Time",
+                    "schell_table-peg_table-13.215",
+                    "2026-07-01T12:00:00Z",
+                ),
+            ),
+            (
+                "easy".to_string(),
+                game("easy", "Not Ace", "myrmidon-5", "2026-09-05T11:00:00Z"),
+            ),
+        ]);
+        let as_of = parse_utc_timestamp_millis("2026-09-05T12:00:00Z").unwrap();
+        let summary = serde_json::from_str::<Value>(&leaderboard_summary_json_with_handicaps_at(
+            &uploads,
+            &HashMap::new(),
+            as_of,
+        ))
+        .unwrap();
+
+        let names = |window: &str| {
+            summary["playerStatsByWindow"][window]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|row| row["player"].as_str().unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names("daily"), vec!["Daily"]);
+        assert_eq!(names("weekly"), vec!["Daily", "Weekly"]);
+        assert_eq!(names("monthly"), vec!["Daily", "Monthly", "Weekly"]);
+        assert_eq!(
+            names("allTime"),
+            vec!["All Time", "Daily", "Monthly", "Weekly"]
+        );
+        assert_eq!(summary["generatedAt"], "2026-09-05T12:00:00.000Z");
+    }
+
+    #[test]
+    fn leaderboard_cribbage_points_and_differential_sum_every_selected_game() {
+        let game = |game_id: &str, human_score: i32, ai_score: i32| UploadedGame {
+            game_id: game_id.to_string(),
+            player: "Garrett".to_string(),
+            winner: Some(
+                if human_score > ai_score {
+                    "human"
+                } else {
+                    "ai"
+                }
+                .to_string(),
+            ),
+            result: "regular".to_string(),
+            human_score,
+            ai_score,
+            model: "schell_table-peg_table-13.215".to_string(),
+            ended_at: "2026-09-05T11:00:00Z".to_string(),
+            human_scoring: ScoringTotals::default(),
+            ai_scoring: ScoringTotals::default(),
+            analyzed: false,
+            errors: 0,
+        };
+        let uploads = HashMap::from([
+            ("win".to_string(), game("win", 121, 110)),
+            ("loss".to_string(), game("loss", 100, 121)),
+        ]);
+        let as_of = parse_utc_timestamp_millis("2026-09-05T12:00:00Z").unwrap();
+        let summary = serde_json::from_str::<Value>(&leaderboard_summary_json_with_handicaps_at(
+            &uploads,
+            &HashMap::new(),
+            as_of,
+        ))
+        .unwrap();
+        let player = &summary["playerStatsByWindow"]["allTime"][0];
+
+        assert_eq!(player["cribbagePointsScored"], 221);
+        assert_eq!(player["cribbagePointsAgainst"], 231);
+        assert_eq!(player["pointDifferential"], -10);
+    }
+
+    #[test]
+    fn leaderboard_excludes_scoreless_test_uploads_from_every_board() {
+        let game = |game_id: &str,
+                    player: &str,
+                    winner: &str,
+                    result: &str,
+                    human_score: i32,
+                    ai_score: i32| UploadedGame {
+            game_id: game_id.to_string(),
+            player: player.to_string(),
+            winner: Some(winner.to_string()),
+            result: result.to_string(),
+            human_score,
+            ai_score,
+            model: "schell_table-peg_table-13.215".to_string(),
+            ended_at: "2026-09-05T11:00:00Z".to_string(),
+            human_scoring: ScoringTotals::default(),
+            ai_scoring: ScoringTotals::default(),
+            analyzed: false,
+            errors: 0,
+        };
+        let uploads = HashMap::from([
+            (
+                "real".to_string(),
+                game("real", "Garrett", "human", "regular", 121, 110),
+            ),
+            (
+                "test-skunk".to_string(),
+                game("test-skunk", "Test", "human", "skunk", 0, 0),
+            ),
+            (
+                "test-garrett".to_string(),
+                game("test-garrett", "Garrett", "ai", "regular", 0, 0),
+            ),
+        ]);
+        let as_of = parse_utc_timestamp_millis("2026-09-05T12:00:00Z").unwrap();
+        let summary = serde_json::from_str::<Value>(&leaderboard_summary_json_with_handicaps_at(
+            &uploads,
+            &HashMap::new(),
+            as_of,
+        ))
+        .unwrap();
+
+        assert_eq!(summary["games"], 1);
+        assert_eq!(summary["playerStats"].as_array().unwrap().len(), 1);
+        assert_eq!(summary["playerStats"][0]["player"], "Garrett");
+        assert_eq!(summary["playerStats"][0]["games"], 1);
+        assert!(summary["playerStatsByWindow"]["allTime"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|player| player["player"] != "Test"));
+        assert!(summary["mostSkunks"].as_array().unwrap().is_empty());
     }
 
     #[test]

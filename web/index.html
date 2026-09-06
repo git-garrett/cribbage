@@ -130,6 +130,12 @@
                 <em class="pathway-login-note">Sign in required</em>
                 <b aria-hidden="true">→</b>
               </button>
+              <button id="pathway-leaderboard" class="pathway-card" type="button">
+                <span class="pathway-card-kicker">See who’s setting the pace</span>
+                <strong>Leaderboard</strong>
+                <span>Compare current handicaps and results against Ace.</span>
+                <b aria-hidden="true">→</b>
+              </button>
               <button class="pathway-card" type="button" data-pathway-target="settings">
                 <span class="pathway-card-kicker">Make it yours</span>
                 <strong>Settings</strong>
@@ -544,7 +550,7 @@
           <h1 class="visually-hidden">Strong Cribbage</h1>
         </a>
         <button id="app-back" class="pathway-back app-back" type="button">
-          <span aria-hidden="true">←</span> Play
+          <span aria-hidden="true">←</span> <span id="app-back-label">Play</span>
         </button>
         <div id="settings-panel" class="settings-panel" hidden>
           <label class="font-size-control" for="font-size-select">
@@ -583,7 +589,6 @@
             <strong id="current-model">-</strong>
           </div>
           <button id="game-log-open" type="button">Game log</button>
-          <button id="leaderboard-open" type="button">Leaderboard</button>
           <button id="model-info-open" type="button">Model info</button>
           <button id="export-game-log" type="button">Export games</button>
           <details id="admin-menu" class="admin-menu" hidden>
@@ -968,11 +973,9 @@
             <h2 id="analytics-title">Analytics</h2>
             <p id="analytics-summary">No gameplay recorded yet.</p>
           </div>
-          <button id="analytics-close" type="button">Done</button>
         </div>
         <div id="stats-view-tabs" class="my-stats-opponent-tabs stats-view-tabs" role="tablist" aria-label="Statistics views" hidden>
           <button type="button" role="tab" data-stats-view="stats" aria-selected="true">My Stats</button>
-          <button type="button" role="tab" data-stats-view="leaderboard" aria-selected="false">Leaderboard</button>
           <button type="button" role="tab" data-stats-view="game-log" aria-selected="false">Game Log</button>
         </div>
         <div id="my-stats-opponent-tabs" class="my-stats-opponent-tabs" role="tablist" aria-label="Stats by opponent" hidden>
@@ -983,14 +986,6 @@
           <button type="button" role="tab" data-my-stats-opponent="grandmaster" data-stats-available="false" aria-selected="false" disabled>Legend</button>
           <button type="button" role="tab" data-my-stats-opponent="dynamic" aria-selected="false">Dynamic</button>
         </div>
-        <section id="stats-leaderboard" class="stats-leaderboard" aria-labelledby="stats-leaderboard-title" hidden>
-          <header>
-            <h2 id="stats-leaderboard-title">Leaderboard</h2>
-            <p id="stats-leaderboard-summary">No leaderboard data yet.</p>
-          </header>
-          <div id="stats-leaderboard-highlights" class="analytics-totals"></div>
-          <div id="stats-leaderboard-list" class="analytics-list"></div>
-        </section>
         <section id="stats-game-log" class="stats-game-log" aria-labelledby="stats-game-log-title" hidden>
           <header>
             <div>
@@ -1063,9 +1058,23 @@
             <h2>Leaderboard</h2>
             <p id="leaderboard-summary">No leaderboard data yet.</p>
           </div>
-          <button id="leaderboard-close" type="button">Done</button>
         </div>
-        <div id="leaderboard-highlights" class="analytics-totals"></div>
+        <div class="leaderboard-controls">
+          <div id="leaderboard-metric-tabs" class="leaderboard-tabs" role="tablist" aria-label="Leaderboard metric">
+            <button type="button" role="tab" data-leaderboard-metric="handicap" aria-selected="true">Handicap</button>
+            <button type="button" role="tab" data-leaderboard-metric="pointsPerGame" aria-selected="false">Points / game</button>
+            <button type="button" role="tab" data-leaderboard-metric="winPercentage" aria-selected="false">Win %</button>
+            <button type="button" role="tab" data-leaderboard-metric="pointDifferential" aria-selected="false">Point differential</button>
+            <button type="button" role="tab" data-leaderboard-metric="totalPoints" aria-selected="false">Points scored</button>
+            <button type="button" role="tab" data-leaderboard-metric="totalWins" aria-selected="false">Total wins</button>
+          </div>
+          <div id="leaderboard-window-tabs" class="leaderboard-tabs leaderboard-window-tabs" role="tablist" aria-label="Leaderboard time window" hidden>
+            <button type="button" role="tab" data-leaderboard-window="daily" aria-selected="false">Daily</button>
+            <button type="button" role="tab" data-leaderboard-window="weekly" aria-selected="false">Weekly</button>
+            <button type="button" role="tab" data-leaderboard-window="monthly" aria-selected="true">Monthly</button>
+            <button type="button" role="tab" data-leaderboard-window="allTime" aria-selected="false">All Time</button>
+          </div>
+        </div>
         <div id="leaderboard-list" class="analytics-list"></div>
       </section>
 

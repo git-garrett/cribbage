@@ -26,7 +26,7 @@ describe("Concept B mobile playing UI", () => {
     expect(html).toMatch(/id="app-back" class="pathway-back app-back"/);
     expect(html).not.toMatch(/id="hand-number"/);
     expect(html).not.toMatch(/id="new-game"/);
-    expect(mainSource).toMatch(/els\.appBack\.addEventListener\("click", \(\) => \{[\s\S]*leaveActivePathwayGame\("play"\)/);
+    expect(mainSource).toMatch(/els\.appBack\.addEventListener\("click", \(\) => \{[\s\S]*parent === "play"[\s\S]*leaveActivePathwayGame\(parent\)/);
   });
 
   it("moves the text-size selector inside the hamburger menu", () => {

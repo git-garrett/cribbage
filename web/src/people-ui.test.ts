@@ -42,14 +42,16 @@ describe("human clubhouse UI", () => {
     expect(source).toContain('[data-my-stats-opponent="grandmaster"]');
   });
 
-  it("puts leaderboard and account actions into the shared statistics and clubhouse surfaces", () => {
+  it("keeps Leaderboard separate from My Stats and account actions in the clubhouse", () => {
     expect(html).toContain('id="stats-view-tabs"');
-    expect(html).toContain('data-stats-view="leaderboard"');
-    expect(html).toContain('id="stats-leaderboard"');
+    expect(html).not.toContain('data-stats-view="leaderboard"');
+    expect(html).not.toContain('id="stats-leaderboard"');
+    expect(html).toContain('id="pathway-leaderboard"');
+    expect(html).toContain('id="leaderboard-page"');
     expect(html).toContain('id="auth-account-profile"');
     expect(html).toContain('id="auth-login"');
     expect(html).not.toContain('id="menu-toggle"');
-    expect(source).toContain("function renderStatsLeaderboard");
+    expect(source).not.toContain("function renderStatsLeaderboard");
   });
 
   it("keeps the complete game log inside Stats and reopens detailed reports", () => {
@@ -85,7 +87,8 @@ describe("human clubhouse UI", () => {
     expect(source).toContain("function setPlayerIdentity");
     expect(source).toContain('marker.className = "player-handicap"');
     expect(source).toContain("HANDICAP_EXPLANATION");
-    expect(source).toContain('const HANDICAP_EXPLANATION = "Handicap measures win probability of cribbage decisions."');
+    expect(source).toContain('const HANDICAP_EXPLANATION = "Handicap is a skill-only (no chance or cards component) measure of cribbage skill."');
+    expect(source).not.toContain('HANDICAP_EXPLANATION = "Handicap is a skill-only (no chance or cards component) measure of cribbage skill. Learn More"');
     expect(source).toContain("playerHandicaps");
     expect(source).toContain('document.addEventListener("mouseover"');
     expect(source).toContain('document.addEventListener("focusin"');

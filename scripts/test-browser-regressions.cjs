@@ -116,8 +116,117 @@ async function readyPeoplePage(browser, baseUrl) {
   await installStaticBuild(page);
   await installPeopleFixture(page);
   await page.goto(`${baseUrl}/?pathwayView=home`, { waitUntil: "domcontentloaded" });
-  await page.locator('body[data-ready="true"][data-auth="signed-in"]').waitFor();
+  await page.locator('body[data-ready="true"][data-auth="signed-in"]').waitFor({ timeout: 5000 });
   return page;
+}
+
+async function installPathwayFixture(page) {
+  const user = { username: "qa-player", displayName: "QA Player", email: "qa@example.test" };
+  const directory = { onlineCount: 1, players: [], incomingChallenges: [], outgoingChallenges: [], activeTable: null };
+  await page.route("**/api/**", async (route) => {
+    const apiPath = new URL(route.request().url()).pathname;
+    if (apiPath === "/api/auth/session") return route.fulfill({ json: { authenticated: true, user } });
+    if (apiPath === "/api/people/me") {
+      return route.fulfill({ json: { profile: { ...user, online: true, lookingForGame: false, isSelf: true } } });
+    }
+    if (apiPath === "/api/people/presence" || apiPath === "/api/people/online") {
+      return route.fulfill({ json: directory });
+    }
+    if (apiPath === "/api/people/challenges/watch") return route.abort();
+    if (apiPath === "/api/leaderboard") {
+      return route.fulfill({
+        json: {
+          generatedAt: "2026-09-05T12:00:00.000Z",
+          games: 0,
+          playerStats: [],
+          playerStatsByOpponent: { master: [] },
+          playerStatsByWindow: { daily: [], weekly: [], monthly: [], allTime: [] },
+          playerHandicaps: {
+            "Production calibration": {
+              wpPerGame: -0.061050096,
+              cycles: 8,
+              cyclesPerGame: 4.516,
+              evaluatorVersion: "schell_table-peg_table-13.0",
+            },
+          },
+          bestWins: [],
+          mostSkunks: [],
+        },
+      });
+    }
+    return route.fulfill({ status: 404, json: { error: `Unhandled QA route: ${apiPath}` } });
+  });
+}
+
+async function readyPathwayPage(browser, baseUrl, route = "home") {
+  const page = await browser.newPage({ viewport: { width: 1000, height: 800 } });
+  await installStaticBuild(page);
+  await installPathwayFixture(page);
+  const query = route === "home" ? "" : `?pathwayView=${route}`;
+  await page.goto(`${baseUrl}/${query}`, { waitUntil: "domcontentloaded" });
+  await page.locator('body[data-ready="true"][data-auth="signed-in"]').waitFor({ timeout: 5000 });
+  return page;
+}
+
+async function assertPathwayRoute(page, route) {
+  const expected = route === "home" ? "[data-pathway-view='home']" : `[data-pathway-view='${route}']`;
+  try {
+    await page.locator(expected).waitFor({ state: "visible", timeout: 5000 });
+  } catch {
+    const state = await page.evaluate(() => ({
+      url: location.href,
+      pathwayHidden: document.querySelector("#pathway-page").hidden,
+      pathwayView: document.querySelector("#pathway-page").dataset.view,
+      visibleViews: [...document.querySelectorAll("[data-pathway-view]")]
+        .filter((element) => !element.hidden)
+        .map((element) => element.dataset.pathwayView),
+    }));
+    throw new Error(`Expected visible ${route} route: ${JSON.stringify(state)}`);
+  }
+  const actual = new URL(page.url()).searchParams.get("pathwayView") || "home";
+  if (actual !== route) throw new Error(`Expected ${route} route, received ${actual}.`);
+}
+
+async function testPathwayParentNavigation(browser, baseUrl) {
+  let page = await readyPathwayPage(browser, baseUrl, "leaderboard");
+  await page.locator("#leaderboard-page").waitFor({ state: "visible" });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.locator('body[data-ready="true"]').waitFor({ timeout: 5000 });
+  await page.locator("#leaderboard-page").waitFor({ state: "visible" });
+  if (await page.locator("#app-back-label").innerText() !== "Home") {
+    throw new Error("Leaderboard back did not identify Home as its parent.");
+  }
+  await page.locator("#app-back").click();
+  await assertPathwayRoute(page, "home");
+  await page.close();
+
+  page = await readyPathwayPage(browser, baseUrl);
+  await page.locator("#pathway-statistics").click();
+  await page.locator("#analytics-page").waitFor({ state: "visible" });
+  if (await page.locator("#app-back-label").innerText() !== "Home") {
+    throw new Error("Statistics back did not identify Home as its parent.");
+  }
+  await page.locator("#app-back").click();
+  await assertPathwayRoute(page, "home");
+  await page.close();
+
+  for (const [route, parent] of [
+    ["play", "home"],
+    ["human", "play"],
+    ["tutorial", "home"],
+    ["settings", "home"],
+    ["gameplay", "settings"],
+  ]) {
+    page = await readyPathwayPage(browser, baseUrl, route);
+    await assertPathwayRoute(page, route);
+    const localBack = page.locator(`[data-pathway-view='${route}'] [data-pathway-back]`);
+    if (await localBack.isVisible()) await localBack.click();
+    else await page.locator("#pathway-header-home").click();
+    await assertPathwayRoute(page, parent);
+    await page.close();
+  }
+
+  return { leaderboardRefresh: true, utilityParents: true, pathwayParents: true };
 }
 
 async function testPeopleInteractions(browser, baseUrl) {
@@ -132,8 +241,11 @@ async function testPeopleInteractions(browser, baseUrl) {
 
   await page.locator("#auth-account-profile .player-handicap").hover();
   const tooltip = page.locator("#player-handicap-tooltip");
-  if (await tooltip.innerText() !== "Handicap measures win probability of cribbage decisions.") {
+  if (await tooltip.innerText() !== "Handicap is a skill-only (no chance or cards component) measure of cribbage skill.") {
     throw new Error("Handicap help copy did not match the product copy.");
+  }
+  if ((await tooltip.innerText()).includes("Learn More")) {
+    throw new Error("Handicap help exposed Learn More before the explanation page is active.");
   }
   const playerRow = page.locator("#people-online-list .people-list-item").first();
   const rowHandicap = playerRow.locator(".player-handicap");
@@ -335,9 +447,10 @@ async function main() {
       throw new Error(`Authentication recovery regression: ${JSON.stringify(state)}`);
     }
     await page.close();
+    const pathwayNavigation = await testPathwayParentNavigation(browser, baseUrl);
     const people = await testPeopleInteractions(browser, baseUrl);
     const engagement = await testEngagementDashboard(browser, baseUrl);
-    console.log(JSON.stringify({ authenticationRecovery: state, people, engagement }));
+    console.log(JSON.stringify({ authenticationRecovery: state, pathwayNavigation, people, engagement }));
   } finally {
     await browser.close();
   }

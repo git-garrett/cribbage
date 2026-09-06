@@ -49,7 +49,13 @@ import {
   helpCountForGame,
   pendingAnalysisGameIds,
 } from "./game-analysis";
-import { leaderboardScore, rankLeaderboardPlayers, rankLeaderboardWins } from "./leaderboard";
+import {
+  leaderboardMetricValue,
+  rankLeaderboardHandicaps,
+  rankLeaderboardMetricPlayers,
+  type LeaderboardMetric,
+  type LeaderboardWindow,
+} from "./leaderboard";
 import { mergedLifetimeResults, type LifetimeScoringStats } from "./my-stats";
 import { myStatsTableRows } from "./my-stats-table";
 import { resumablePathwayDestinations } from "./pathway-resume";
@@ -144,8 +150,11 @@ interface LeaderboardPlayer {
   skunks: number;
   skunked: number;
   leaderboardPoints?: number;
+  cribbagePointsScored?: number;
+  cribbagePointsAgainst?: number;
   leaderboardScore?: number;
   leaderboardPointsPerGame?: number;
+  pointDifferential?: number;
   winRate: number;
   avgMargin: number;
   scoringGames?: number;
@@ -179,6 +188,7 @@ interface LeaderboardSummarySource {
   games: number;
   playerStats: LeaderboardPlayer[];
   playerStatsByOpponent?: Partial<Record<MyStatsOpponent, LeaderboardPlayer[]>>;
+  playerStatsByWindow?: Partial<Record<LeaderboardWindow, LeaderboardPlayer[]>>;
   playerHandicaps?: Record<string, DynamicHandicapSummary>;
   bestWinRate?: LeaderboardPlayer[];
   winRate14_3?: LeaderboardPlayer[];
@@ -227,9 +237,9 @@ type ServerBusyRetry = () => void | Promise<void>;
 type AppFontSize = "normal" | "large" | "x-large";
 type ScoringTransitionStage = "leaving" | "entering" | null;
 type PathwayView = "home" | "play" | "human" | "tutorial" | "settings" | "gameplay";
-type PathwayRoute = PathwayView | "statistics";
+type PathwayRoute = PathwayView | "statistics" | "leaderboard";
 type MyStatsOpponent = "master" | "human" | "easy" | "tough" | "grandmaster" | "dynamic";
-type StatsView = "stats" | "leaderboard" | "game-log";
+type StatsView = "stats" | "game-log";
 type GameLogView = "games" | "errors";
 
 const MY_STATS_OPPONENT_LABEL: Record<MyStatsOpponent, string> = {
@@ -324,6 +334,8 @@ const state: {
   gameLogView: GameLogView;
   myStatsOpponent: MyStatsOpponent;
   leaderboardOpen: boolean;
+  leaderboardMetric: LeaderboardMetric;
+  leaderboardWindow: LeaderboardWindow;
   leaderboardLoading: boolean;
   leaderboardLoaded: boolean;
   leaderboardFetched: boolean;
@@ -390,6 +402,8 @@ const state: {
   gameLogView: "games",
   myStatsOpponent: "master",
   leaderboardOpen: false,
+  leaderboardMetric: "handicap",
+  leaderboardWindow: "monthly",
   leaderboardLoading: false,
   leaderboardLoaded: cachedLeaderboardSummary !== null,
   leaderboardFetched: false,
@@ -519,6 +533,7 @@ const els = {
   pathwayDestinationButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-destination]")],
   dynamicCardCopy: document.querySelector("#dynamic-card-copy") as HTMLElement,
   pathwayStatistics: document.querySelector("#pathway-statistics") as HTMLButtonElement,
+  pathwayLeaderboard: document.querySelector("#pathway-leaderboard") as HTMLButtonElement,
   engagementPathwayOpen: document.querySelector("#engagement-pathway-open") as HTMLButtonElement,
   bugReportOpen: document.querySelector("#bug-report-open") as HTMLButtonElement,
   bugReportDialog: document.querySelector("#bug-report-dialog") as HTMLDialogElement,
@@ -614,6 +629,7 @@ const els = {
   board: document.querySelector("#board") as HTMLElement,
   appBrandHome: document.querySelector("#app-brand-home") as HTMLAnchorElement,
   appBack: document.querySelector("#app-back") as HTMLButtonElement,
+  appBackLabel: document.querySelector("#app-back-label") as HTMLElement,
   mobileHeaderReveal: document.querySelector("#mobile-header-reveal") as HTMLButtonElement,
   fontSizeSelect: document.querySelector("#font-size-select") as HTMLSelectElement,
   fastCounting: document.querySelector("#fast-counting") as HTMLInputElement,
@@ -665,7 +681,6 @@ const els = {
   engagementDaily: document.querySelector("#engagement-daily") as HTMLElement,
   exportGameLog: document.querySelector("#export-game-log") as HTMLButtonElement,
   troubleGame: document.querySelector("#trouble-game") as HTMLButtonElement,
-  analyticsClose: document.querySelector("#analytics-close") as HTMLButtonElement,
   analyticsPage: document.querySelector("#analytics-page") as HTMLElement,
   analyticsTitle: document.querySelector("#analytics-title") as HTMLElement,
   analyticsSummary: document.querySelector("#analytics-summary") as HTMLElement,
@@ -673,10 +688,6 @@ const els = {
   statsViewTabButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-stats-view]")],
   myStatsOpponentTabs: document.querySelector("#my-stats-opponent-tabs") as HTMLElement,
   myStatsOpponentTabButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-my-stats-opponent]")],
-  statsLeaderboard: document.querySelector("#stats-leaderboard") as HTMLElement,
-  statsLeaderboardSummary: document.querySelector("#stats-leaderboard-summary") as HTMLElement,
-  statsLeaderboardHighlights: document.querySelector("#stats-leaderboard-highlights") as HTMLElement,
-  statsLeaderboardList: document.querySelector("#stats-leaderboard-list") as HTMLElement,
   statsGameLog: document.querySelector("#stats-game-log") as HTMLElement,
   analyticsTotals: document.querySelector("#analytics-totals") as HTMLElement,
   analyticsGames: document.querySelector("#analytics-games") as HTMLElement,
@@ -695,12 +706,12 @@ const els = {
   gameLogResult: document.querySelector("#game-log-result") as HTMLSelectElement,
   gameLogMatchType: document.querySelector("#game-log-match-type") as HTMLSelectElement,
   gameLogList: document.querySelector("#game-log-list") as HTMLElement,
-  leaderboardOpen: document.querySelector("#leaderboard-open") as HTMLButtonElement,
-  leaderboardClose: document.querySelector("#leaderboard-close") as HTMLButtonElement,
   leaderboardPage: document.querySelector("#leaderboard-page") as HTMLElement,
   leaderboardSummary: document.querySelector("#leaderboard-summary") as HTMLElement,
-  leaderboardHighlights: document.querySelector("#leaderboard-highlights") as HTMLElement,
   leaderboardList: document.querySelector("#leaderboard-list") as HTMLElement,
+  leaderboardMetricTabButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-leaderboard-metric]")],
+  leaderboardWindowTabs: document.querySelector("#leaderboard-window-tabs") as HTMLElement,
+  leaderboardWindowTabButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-leaderboard-window]")],
   modelInfoOpen: document.querySelector("#model-info-open") as HTMLButtonElement,
   modelInfoClose: document.querySelector("#model-info-close") as HTMLButtonElement,
   modelInfoPage: document.querySelector("#model-info-page") as HTMLElement,
@@ -1179,7 +1190,6 @@ interface AuthMessageResponse {
 
 let authenticatedUser: AuthUser | null = null;
 let pendingAuthEmail = "";
-let pathwayStatsReturn = false;
 let selectedPathwayOpponent: Opponent | null = null;
 let remoteResumableModelGames = new Map<Opponent, Phase>();
 let pathwayResumeRefreshGeneration = 0;
@@ -1511,7 +1521,6 @@ function applySimpleNetworkMode(): void {
   els.opponent.disabled = true;
   els.opponent.closest("label")?.setAttribute("hidden", "");
   els.gameLogOpen.hidden = true;
-  els.leaderboardOpen.hidden = false;
   els.modelInfoOpen.hidden = true;
   els.exportGameLog.hidden = true;
   els.modelLoading.hidden = true;
@@ -1875,7 +1884,7 @@ function peopleInitials(player: Pick<PeoplePlayer, "displayName" | "username">):
   return `${words[0][0] || ""}${words.length > 1 ? words.at(-1)?.[0] || "" : words[0][1] || ""}`.toUpperCase();
 }
 
-const HANDICAP_EXPLANATION = "Handicap measures win probability of cribbage decisions.";
+const HANDICAP_EXPLANATION = "Handicap is a skill-only (no chance or cards component) measure of cribbage skill.";
 const HANDICAP_TOOLTIP_ID = "player-handicap-tooltip";
 let handicapTooltipOwner: HTMLElement | null = null;
 
@@ -3472,7 +3481,7 @@ async function forfeitSavedMasterGame(): Promise<void> {
 
 function pathwayRouteFromLocation(): PathwayRoute {
   const route = new URL(window.location.href).searchParams.get(PATHWAY_VIEW_PARAM);
-  if (route === "play" || route === "human" || route === "tutorial" || route === "settings" || route === "gameplay" || route === "statistics") return route;
+  if (route === "play" || route === "human" || route === "tutorial" || route === "settings" || route === "gameplay" || route === "statistics" || route === "leaderboard") return route;
   return "home";
 }
 
@@ -3483,11 +3492,19 @@ function pathwayParentRoute(route: PathwayRoute): PathwayRoute | null {
   return "home";
 }
 
+function currentAppBackRoute(): PathwayRoute {
+  const route = pathwayRouteFromLocation();
+  if (state.analyticsOpen && route === "statistics") return pathwayParentRoute(route) ?? "home";
+  if (state.leaderboardOpen && route === "leaderboard") return pathwayParentRoute(route) ?? "home";
+  return "play";
+}
+
 function pathwayRouteLabel(route: PathwayRoute): string {
   if (route === "play") return "Play";
   if (route === "settings") return "Settings";
   if (route === "tutorial") return "Training";
   if (route === "statistics") return "Statistics";
+  if (route === "leaderboard") return "Leaderboard";
   if (route === "human") return "Human Opponents";
   if (route === "gameplay") return "Gameplay";
   return "Home";
@@ -3520,19 +3537,25 @@ function applyPathwayRoute(route: PathwayRoute): void {
       requestAuthentication({ kind: "statistics" }, "Sign in to view your statistics.");
       return;
     }
-    pathwayStatsReturn = true;
     els.pathwayPage.hidden = true;
     state.splashOpen = false;
     document.body.dataset.splash = "false";
     openAnalytics("my");
     return;
   }
+  if (route === "leaderboard") {
+    els.pathwayPage.hidden = true;
+    state.splashOpen = false;
+    document.body.dataset.splash = "false";
+    openLeaderboard();
+    return;
+  }
 
-  pathwayStatsReturn = false;
   if (state.analyticsOpen) {
     state.analyticsOpen = false;
     render(state.game);
   }
+  state.leaderboardOpen = false;
   showPathwayView(route);
   trackActivityPageView(`pathway:${route}`);
 }
@@ -3548,7 +3571,6 @@ function applyPathwayNavigation(): void {
   if (!PATHWAY_NAV_ENABLED) return;
   const route = pathwayRouteFromLocation();
   window.history.replaceState(pathwayHistoryState(route), "", pathwayUrl(route));
-  applyPathwayRoute(route);
 }
 
 function buildBoard(): void {
@@ -6898,7 +6920,6 @@ function renderAnalytics(): void {
   const personalStats = state.analyticsMode === "my";
   els.statsViewTabs.hidden = !personalStats;
   els.myStatsOpponentTabs.hidden = !personalStats || state.statsView !== "stats";
-  els.statsLeaderboard.hidden = !personalStats || state.statsView !== "leaderboard";
   els.statsGameLog.hidden = !personalStats || state.statsView !== "game-log";
   els.analyticsTotals.hidden = personalStats && state.statsView !== "stats";
   const events = loadAnalytics().events;
@@ -6914,12 +6935,6 @@ function renderAnalytics(): void {
   const peggingEvents = events.filter((event): event is Extract<AnalyticsEvent, { type: "pegging" }> =>
     event.type === "pegging"
   );
-
-  if (personalStats && state.statsView === "leaderboard") {
-    renderStatsViewTabs();
-    renderStatsLeaderboard();
-    return;
-  }
 
   if (personalStats && state.statsView === "game-log") {
     renderStatsViewTabs();
@@ -7269,28 +7284,6 @@ function percentage(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
-function playerLeaderboardPoints(player: LeaderboardPlayer): number {
-  return typeof player.leaderboardPoints === "number" && Number.isFinite(player.leaderboardPoints)
-    ? player.leaderboardPoints
-    : player.wins + player.skunks;
-}
-
-function playerLeaderboardRate(player: LeaderboardPlayer): number {
-  if (typeof player.leaderboardScore === "number" && Number.isFinite(player.leaderboardScore)) {
-    return player.leaderboardScore;
-  }
-  return leaderboardScore(player);
-}
-
-function formatLeaderboardScore(player: LeaderboardPlayer): string {
-  return percentage(playerLeaderboardRate(player));
-}
-
-function formatLeaderboardPointsDetail(player: LeaderboardPlayer): string {
-  const weightedResults = playerLeaderboardPoints(player) + player.losses + player.skunked;
-  return `${playerLeaderboardPoints(player)}/${weightedResults} weighted results`;
-}
-
 function leaderboardSummaryKey(summary: LeaderboardSummarySource): string {
   return JSON.stringify(summary);
 }
@@ -7341,7 +7334,7 @@ interface LeaderboardRowData {
 }
 
 function leaderboardPlayerIdentity(player: string): PlayerIdentityContent {
-  return { player, handicap: handicapForPlayer(player) };
+  return { player, handicap: null };
 }
 
 function leaderboardContentKey(content: LeaderboardContent): string {
@@ -7369,94 +7362,112 @@ function setLeaderboardContent(element: HTMLElement, content: LeaderboardContent
 
 let renderedLeaderboardKey = "";
 
+const LEADERBOARD_METRIC_LABELS: Record<LeaderboardMetric, string> = {
+  handicap: "Current handicap",
+  pointsPerGame: "Points per game",
+  winPercentage: "Win percentage",
+  pointDifferential: "Point differential",
+  totalPoints: "Points scored",
+  totalWins: "Total wins",
+};
+
+const LEADERBOARD_WINDOW_LABELS: Record<LeaderboardWindow, string> = {
+  daily: "Past 24 hours",
+  weekly: "Past 7 days",
+  monthly: "Past 30 days",
+  allTime: "All time",
+};
+
+function renderLeaderboardTabs(): void {
+  for (const button of els.leaderboardMetricTabButtons) {
+    const selected = button.dataset.leaderboardMetric === state.leaderboardMetric;
+    button.classList.toggle("is-selected", selected);
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  }
+  const handicap = state.leaderboardMetric === "handicap";
+  els.leaderboardWindowTabs.hidden = handicap;
+  for (const button of els.leaderboardWindowTabButtons) {
+    const selected = button.dataset.leaderboardWindow === state.leaderboardWindow;
+    button.classList.toggle("is-selected", selected);
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  }
+}
+
+function leaderboardMetricCopy(player: LeaderboardPlayer, metric: Exclude<LeaderboardMetric, "handicap">): string {
+  const value = leaderboardMetricValue(player, metric);
+  if (metric === "pointsPerGame") return `${value.toFixed(2)} pts/game`;
+  if (metric === "winPercentage") return percentage(value);
+  if (metric === "pointDifferential") return formatSigned(value);
+  return String(Math.round(value));
+}
+
 function renderLeaderboard(): void {
   const loading = state.leaderboardLoading && !state.leaderboardLoaded;
   const summary = state.leaderboardSummary;
-  const renderKey = `${loading ? "loading" : "ready"}:${leaderboardSummaryKey(summary)}`;
+  const renderKey = `${loading ? "loading" : "ready"}:${state.leaderboardMetric}:${state.leaderboardWindow}:${leaderboardSummaryKey(summary)}`;
   if (renderKey === renderedLeaderboardKey) return;
   renderedLeaderboardKey = renderKey;
-  const acePlayers = summary.playerStatsByOpponent?.master ?? summary.playerStats ?? summary.winRate14_3 ?? [];
-  const rankedPlayers = rankLeaderboardPlayers(acePlayers);
-  const bestWins = rankLeaderboardWins(
-    (summary.bestWins ?? []).filter((win) => statsOpponentForModel(win.opponent) === "master"),
-  );
-  const aceGames = acePlayers.reduce((games, player) => games + player.games, 0);
-  els.leaderboardSummary.textContent = loading
-    ? "Loading leaderboard..."
-    : `${aceGames} completed production Ace game${aceGames === 1 ? "" : "s"}. Ranked by (wins + skunks) / (wins + skunks + losses + skunked).`;
+  renderLeaderboardTabs();
   if (loading) {
-    els.leaderboardHighlights.replaceChildren();
     els.leaderboardList.replaceChildren(leaderboardLoadingElement());
+    els.leaderboardSummary.textContent = "Loading leaderboard...";
     return;
   }
 
   const animate = state.leaderboardAnimateNext;
   state.leaderboardAnimateNext = false;
-  const topPlayer = rankedPlayers[0] ?? null;
-  const skunks = [...rankedPlayers]
-    .filter((player) => player.skunks > 0)
-    .sort((left, right) => right.skunks - left.skunks || left.player.localeCompare(right.player));
-  reconcileLeaderboardCard(
-    "top-score",
-    "Top leaderboard score",
-    topPlayer
-      ? [
-        leaderboardPlayerIdentity(topPlayer.player),
-        ` ${formatLeaderboardScore(topPlayer)} (${formatLeaderboardPointsDetail(topPlayer)})`,
-      ]
-      : "No games yet",
-    animate,
-  );
-  reconcileLeaderboardCard(
-    "skunks",
-    "Skunked Ace:",
-    skunks.length
-      ? skunks.flatMap((player, index) => [
-        index ? ", " : "",
-        leaderboardPlayerIdentity(player.player),
-        ` ${player.skunks}`,
-      ])
-      : "No skunks yet",
-    animate,
-  );
+  els.leaderboardList.querySelector(".leaderboard-loading")?.remove();
+
+  if (state.leaderboardMetric === "handicap") {
+    const handicaps = rankLeaderboardHandicaps(
+      Object.entries(summary.playerHandicaps ?? {})
+        .filter(([, handicap]) => Number.isFinite(handicap.wpPerGame))
+        .map(([player, handicap]) => ({ player, ...handicap })),
+    );
+    els.leaderboardSummary.textContent = handicaps.length
+      ? `${handicaps.length} calibrated player${handicaps.length === 1 ? "" : "s"}. A smaller handicap is closer to Ace.`
+      : "No calibrated handicaps yet.";
+    reconcileLeaderboardSection(
+      "ranking",
+      LEADERBOARD_METRIC_LABELS.handicap,
+      handicaps.map((handicap, index) => ({
+        key: handicap.player,
+        cells: [
+          [`${index + 1}. `, leaderboardPlayerIdentity(handicap.player)],
+          `${dynamicHandicapPointsCopy(handicap.wpPerGame)} WP pts/game`,
+          `${handicap.cycles} calibrated cycle${handicap.cycles === 1 ? "" : "s"}`,
+        ],
+      })),
+      animate,
+    );
+    reconcileLeaderboardEmpty(handicaps.length === 0);
+    return;
+  }
+
+  const fallbackAllTime = summary.playerStatsByOpponent?.master ?? summary.playerStats ?? summary.winRate14_3 ?? [];
+  const players = summary.playerStatsByWindow?.[state.leaderboardWindow]
+    ?? (state.leaderboardWindow === "allTime" ? fallbackAllTime : []);
+  const rankedPlayers = rankLeaderboardMetricPlayers(players, state.leaderboardMetric);
+  const games = players.reduce((total, player) => total + player.games, 0);
+  const windowLabel = LEADERBOARD_WINDOW_LABELS[state.leaderboardWindow];
+  const metricLabel = LEADERBOARD_METRIC_LABELS[state.leaderboardMetric];
+  els.leaderboardSummary.textContent = `${windowLabel} · ${games} completed Ace game${games === 1 ? "" : "s"}.`;
   reconcileLeaderboardSection(
-    "players",
-    "Leaderboard score against Ace",
-    rankedPlayers.map((player) => ({
+    "ranking",
+    `${metricLabel} · ${windowLabel}`,
+    rankedPlayers.map((player, index) => ({
       key: player.player,
       cells: [
-        [leaderboardPlayerIdentity(player.player)],
-        `${formatLeaderboardScore(player)} (${formatLeaderboardPointsDetail(player)})`,
-        `${player.wins}-${player.losses}; skunks ${player.skunks}`,
+        [`${index + 1}. `, leaderboardPlayerIdentity(player.player)],
+        leaderboardMetricCopy(player, state.leaderboardMetric as Exclude<LeaderboardMetric, "handicap">),
+        `${player.wins}-${player.losses} · ${player.games} game${player.games === 1 ? "" : "s"}`,
       ],
     })),
     animate,
   );
-  reconcileLeaderboardSection(
-    "wins",
-    "Biggest wins against Ace",
-    bestWins.map((win) => ({
-      key: `${win.player}\u0000${win.endedAt}\u0000${win.margin}`,
-      cells: [
-        [leaderboardPlayerIdentity(win.player)],
-        `Margin ${formatSigned(win.margin)}`,
-        `${engineName(win.opponent)} · ${shortDate(win.endedAt)}${win.result !== "regular" ? ` · ${win.result}` : ""}`,
-      ],
-    })),
-    animate,
-  );
-  reconcileLeaderboardEmpty(rankedPlayers.length === 0 && bestWins.length === 0);
-}
-
-function renderStatsLeaderboard(): void {
-  renderLeaderboard();
-  els.statsLeaderboardSummary.textContent = els.leaderboardSummary.textContent;
-  els.statsLeaderboardHighlights.replaceChildren(
-    ...Array.from(els.leaderboardHighlights.children).map((element) => element.cloneNode(true)),
-  );
-  els.statsLeaderboardList.replaceChildren(
-    ...Array.from(els.leaderboardList.children).map((element) => element.cloneNode(true)),
-  );
+  reconcileLeaderboardEmpty(rankedPlayers.length === 0);
 }
 
 function leaderboardLoadingElement(): HTMLElement {
@@ -7470,25 +7481,6 @@ function leaderboardLoadingElement(): HTMLElement {
   label.textContent = "Loading leaderboard...";
   loading.append(throbber, label);
   return loading;
-}
-
-function reconcileLeaderboardCard(key: string, label: string, value: LeaderboardContent, animate: boolean): void {
-  let card = Array.from(els.leaderboardHighlights.children).find(
-    (element) => (element as HTMLElement).dataset.leaderboardCard === key,
-  ) as HTMLElement | undefined;
-  if (!card) {
-    card = document.createElement("div");
-    card.className = "analytics-total";
-    card.dataset.leaderboardCard = key;
-    const title = document.createElement("span");
-    const strong = document.createElement("strong");
-    card.append(title, strong);
-    els.leaderboardHighlights.append(card);
-  }
-  const [title, strong] = Array.from(card.children) as [HTMLElement, HTMLElement];
-  title.textContent = label;
-  const changed = setLeaderboardContent(strong, value);
-  if (changed && animate) pulseLeaderboardElement(card, "leaderboard-card-updated");
 }
 
 function reconcileLeaderboardSection(
@@ -8348,6 +8340,7 @@ function renderUtilityPages(): void {
   els.leaderboardPage.hidden = !state.leaderboardOpen;
   els.modelInfoPage.hidden = !state.modelInfoOpen;
   els.decisionReviewPage.hidden = !state.decisionReviewOpen;
+  els.appBackLabel.textContent = pathwayRouteLabel(currentAppBackRoute());
   if (state.analyticsOpen) renderAnalytics();
   if (state.leaderboardOpen) renderLeaderboard();
   if (state.modelInfoOpen) renderModelInfoPage();
@@ -8987,7 +8980,9 @@ els.appBrandHome.addEventListener("click", (event) => {
 
 els.appBack.addEventListener("click", () => {
   if (PATHWAY_NAV_ENABLED) {
-    leaveActivePathwayGame("play");
+    const parent = currentAppBackRoute();
+    if (parent === "play") leaveActivePathwayGame(parent);
+    else navigatePathway(parent);
     return;
   }
   state.splashOpen = true;
@@ -9047,6 +9042,8 @@ els.pathwayStatistics.addEventListener("click", () => {
   }
   navigatePathway("statistics");
 });
+
+els.pathwayLeaderboard.addEventListener("click", () => navigatePathway("leaderboard"));
 
 els.peoplePresenceToggle.addEventListener("click", () => {
   const open = els.peoplePresencePanel.hidden;
@@ -9645,7 +9642,6 @@ els.engagementExport.addEventListener("click", () => {
 function openAnalytics(mode: "my" | "full"): void {
   if (mode === "my" && PATHWAY_NAV_ENABLED && pathwayRouteFromLocation() !== "statistics") {
     window.history.pushState(pathwayHistoryState("statistics"), "", pathwayUrl("statistics"));
-    pathwayStatsReturn = true;
     els.pathwayPage.hidden = true;
   }
   closeDecisionSnapshot();
@@ -9687,7 +9683,6 @@ for (const button of els.statsViewTabButtons) {
   button.addEventListener("click", () => {
     state.statsView = button.dataset.statsView as StatsView;
     render(state.game);
-    if (state.statsView === "leaderboard") void loadInitialLeaderboard();
   });
 }
 
@@ -9702,19 +9697,6 @@ els.gameLogAnalyzeAll.addEventListener("click", () => {
   void analyzeAllLoggedGames();
 });
 
-els.analyticsClose.addEventListener("click", () => {
-  if (pathwayStatsReturn && pathwayRouteFromLocation() === "statistics") {
-    window.history.back();
-    return;
-  }
-  state.analyticsOpen = false;
-  render(state.game);
-  if (pathwayStatsReturn) {
-    pathwayStatsReturn = false;
-    showPathwayView("home");
-  }
-});
-
 function openStatsGameLog(): void {
   openAnalytics("my");
   state.statsView = "game-log";
@@ -9723,9 +9705,11 @@ function openStatsGameLog(): void {
 
 els.gameLogOpen.addEventListener("click", openStatsGameLog);
 
-els.leaderboardOpen.addEventListener("click", () => {
+function openLeaderboard(): void {
   closeDecisionSnapshot();
   state.leaderboardOpen = true;
+  state.leaderboardMetric = "handicap";
+  state.leaderboardWindow = "monthly";
   state.engagementOpen = false;
   state.analyticsOpen = false;
   state.modelInfoOpen = false;
@@ -9734,10 +9718,33 @@ els.leaderboardOpen.addEventListener("click", () => {
   els.menuToggle.setAttribute("aria-expanded", "false");
   render(state.game);
   void loadInitialLeaderboard();
+}
+
+function bindLeaderboardTabs(
+  buttons: HTMLButtonElement[],
+  select: (button: HTMLButtonElement) => void,
+): void {
+  for (const button of buttons) {
+    button.addEventListener("click", () => select(button));
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const index = buttons.indexOf(button);
+      const offset = event.key === "ArrowRight" ? 1 : -1;
+      const next = buttons[(index + offset + buttons.length) % buttons.length];
+      next.click();
+      next.focus();
+    });
+  }
+}
+
+bindLeaderboardTabs(els.leaderboardMetricTabButtons, (button) => {
+  state.leaderboardMetric = button.dataset.leaderboardMetric as LeaderboardMetric;
+  render(state.game);
 });
 
-els.leaderboardClose.addEventListener("click", () => {
-  state.leaderboardOpen = false;
+bindLeaderboardTabs(els.leaderboardWindowTabButtons, (button) => {
+  state.leaderboardWindow = button.dataset.leaderboardWindow as LeaderboardWindow;
   render(state.game);
 });
 
