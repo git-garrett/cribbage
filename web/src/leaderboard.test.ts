@@ -60,7 +60,7 @@ describe("rankLeaderboardMetricPlayers", () => {
     expect(leaderboardMetricValue(players[0], "pointsPerGame")).toBe(0.6);
     expect(leaderboardMetricValue(players[0], "winPercentage")).toBe(0.5);
     expect(leaderboardMetricValue(players[0], "pointDifferential"))
-      .toBe(players[0].cribbagePointsScored - players[0].cribbagePointsAgainst);
+      .toBe((players[0].cribbagePointsScored - players[0].cribbagePointsAgainst) / players[0].games);
     expect(leaderboardMetricValue(players[0], "totalPoints")).toBe(438);
     expect(leaderboardMetricValue(players[0], "totalWins")).toBe(2);
   });

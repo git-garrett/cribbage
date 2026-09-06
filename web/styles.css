@@ -2548,6 +2548,64 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   outline-offset: 2px;
 }
 
+.leaderboard-metric-with-info {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+}
+
+.leaderboard-tabs .leaderboard-metric-info {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-color: var(--entry-border-strong);
+  border-radius: 50%;
+  background: var(--entry-panel);
+  color: var(--entry-link);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 16px;
+  font-weight: 800;
+  text-transform: lowercase;
+}
+
+.leaderboard-metric-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  width: min(300px, calc(100vw - 48px));
+  padding: 10px 12px;
+  border: 1px solid var(--entry-border-strong);
+  border-radius: 10px;
+  background: var(--entry-panel);
+  color: var(--entry-ink);
+  box-shadow: var(--entry-card-shadow-raised);
+  font-size: var(--access-small);
+  font-weight: 650;
+  line-height: 1.4;
+  opacity: 0;
+  pointer-events: none;
+  translate: 0 -3px;
+  transition: opacity 140ms ease, translate 140ms ease;
+}
+
+.leaderboard-metric-info:hover + .leaderboard-metric-tooltip,
+.leaderboard-metric-info:focus-visible + .leaderboard-metric-tooltip {
+  opacity: 1;
+  translate: 0 0;
+}
+
+@media (min-width: 641px) {
+  #leaderboard-metric-tabs {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+}
+
 .leaderboard-window-tabs {
   width: fit-content;
   max-width: 100%;
@@ -7528,6 +7586,17 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   perspective: 1200px;
 }
 
+.pathway-primary-grid {
+  gap: 18px;
+}
+
+.pathway-card-fan {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  perspective: 1200px;
+}
+
 .pathway-card,
 .pathway-choice {
   position: relative;
@@ -7751,13 +7820,27 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
     font-size: clamp(44px, 5vw, 64px);
   }
 
-  .pathway-primary-grid,
+  .pathway-card-fan,
   .pathway-choice-grid:not(.pathway-choice-grid-play) {
     flex-direction: row;
     align-items: flex-end;
     justify-content: center;
-    min-height: 390px;
-    padding: 30px 30px 0;
+    min-height: 236px;
+    padding: 18px 30px 0;
+  }
+
+  .pathway-primary-grid {
+    align-self: center;
+    width: min(100%, 900px);
+    gap: 8px;
+    padding: 20px 30px 8px;
+  }
+
+  .pathway-card-fan-secondary {
+    width: 90%;
+    margin-top: 4px;
+    margin-right: auto;
+    margin-left: auto;
   }
 
   .pathway-primary-grid .pathway-card,
@@ -7765,30 +7848,25 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
     flex: 1 1 0;
     align-content: end;
     min-width: 0;
-    min-height: 330px;
+    min-height: 218px;
     margin: 0 -8px;
-    padding: 34px 26px 40px;
+    padding: 30px 26px 34px;
     border-radius: 22px;
   }
 
-  .pathway-primary-grid > :nth-child(1),
+  .pathway-card-fan > :nth-child(1),
   .pathway-choice-grid:not(.pathway-choice-grid-play) > :nth-child(1) {
-    transform: rotate(-5deg) translateY(19px);
+    transform: rotate(-5deg) translateY(16px);
   }
 
-  .pathway-primary-grid > :nth-child(2),
+  .pathway-card-fan > :nth-child(2),
   .pathway-choice-grid:not(.pathway-choice-grid-play) > :nth-child(2) {
-    transform: rotate(-1.8deg) translateY(3px);
+    transform: rotate(0deg) translateY(0);
   }
 
-  .pathway-primary-grid > :nth-child(3),
+  .pathway-card-fan > :nth-child(3),
   .pathway-choice-grid:not(.pathway-choice-grid-play) > :nth-child(3) {
-    transform: rotate(1.8deg) translateY(3px);
-  }
-
-  .pathway-primary-grid > :nth-child(4),
-  .pathway-choice-grid:not(.pathway-choice-grid-play) > :nth-child(4) {
-    transform: rotate(5deg) translateY(19px);
+    transform: rotate(5deg) translateY(16px);
   }
 
   .pathway-choice-grid-settings .pathway-choice {
@@ -9523,35 +9601,28 @@ body[data-font-size="x-large"] .pathway-choice {
 }
 
 @media (min-width: 850px) {
-  .pathway-primary-grid > .pathway-card,
+  .pathway-card-fan > .pathway-card,
   .pathway-choice-grid:not(.pathway-choice-grid-play) > .pathway-choice {
     transform: translateY(var(--pathway-rest-y));
   }
 
-  .pathway-primary-grid > :nth-child(1),
+  .pathway-card-fan > :nth-child(1),
   .pathway-choice-grid:not(.pathway-choice-grid-play) > :nth-child(1) {
-    --pathway-rest-y: 19px;
+    --pathway-rest-y: 16px;
     --pathway-rest-rotate: -5deg;
     --pathway-hover-rotate: -3.75deg;
   }
 
-  .pathway-primary-grid > :nth-child(2),
+  .pathway-card-fan > :nth-child(2),
   .pathway-choice-grid:not(.pathway-choice-grid-play) > :nth-child(2) {
-    --pathway-rest-y: 3px;
-    --pathway-rest-rotate: -1.8deg;
-    --pathway-hover-rotate: -0.7deg;
+    --pathway-rest-y: 0px;
+    --pathway-rest-rotate: 0deg;
+    --pathway-hover-rotate: 1.15deg;
   }
 
-  .pathway-primary-grid > :nth-child(3),
+  .pathway-card-fan > :nth-child(3),
   .pathway-choice-grid:not(.pathway-choice-grid-play) > :nth-child(3) {
-    --pathway-rest-y: 3px;
-    --pathway-rest-rotate: 1.8deg;
-    --pathway-hover-rotate: 0.7deg;
-  }
-
-  .pathway-primary-grid > :nth-child(4),
-  .pathway-choice-grid:not(.pathway-choice-grid-play) > :nth-child(4) {
-    --pathway-rest-y: 19px;
+    --pathway-rest-y: 16px;
     --pathway-rest-rotate: 5deg;
     --pathway-hover-rotate: 3.75deg;
   }

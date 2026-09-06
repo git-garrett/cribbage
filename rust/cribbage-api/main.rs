@@ -3505,15 +3505,29 @@ fn load_session(server: &Server, body: &str) -> Response {
 
 fn upload_game(server: &Server, body: &str) -> Response {
     let result = (|| -> Result<(bool, String), String> {
-        let game_id =
-            json_string(body, "gameId").ok_or_else(|| "Missing completed game id.".to_string())?;
-        let player = json_string(body, "tag").unwrap_or_else(|| "Anonymous".to_string());
-        let winner = json_string(body, "winner");
-        let result = json_string(body, "result").unwrap_or_else(|| "regular".to_string());
-        let model = json_string(body, "model").unwrap_or_else(|| ACE_MODEL.to_string());
-        let human_score = json_number_after(body, "human").unwrap_or(0) as i32;
-        let ai_score = json_number_after(body, "ai").unwrap_or(0) as i32;
-        let ended_at = completed_game_timestamp(body)
+        let payload = serde_json::from_str::<Value>(body)
+            .map_err(|_| "Completed game upload is not valid JSON.".to_string())?;
+        let game_id = payload
+            .get("gameId")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| "Missing completed game id.".to_string())?;
+        let player = payload
+            .get("tag")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| "Anonymous".to_string());
+        let winner = completed_game_string(&payload, "winner");
+        let result = completed_game_string(&payload, "result")
+            .unwrap_or_else(|| "regular".to_string());
+        let model = payload
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| ACE_MODEL.to_string());
+        let human_score = completed_game_score(&payload, "human");
+        let ai_score = completed_game_score(&payload, "ai");
+        let ended_at = completed_game_timestamp_value(&payload)
             .or_else(|| game_start_timestamp(&game_id))
             .unwrap_or_else(isoish_now);
         let (human_scoring, ai_scoring) = scoring_totals_from_upload(body);
@@ -3588,10 +3602,29 @@ fn upload_game(server: &Server, body: &str) -> Response {
     }
 }
 
-fn completed_game_timestamp(body: &str) -> Option<String> {
-    let payload = serde_json::from_str::<Value>(body).ok()?;
+fn completed_game_timestamp_value(payload: &Value) -> Option<String> {
     let value = payload.get("finalResult")?.get("at")?.as_str()?;
     canonical_utc_timestamp(value)
+}
+
+fn completed_game_string(payload: &Value, key: &str) -> Option<String> {
+    payload
+        .get("finalResult")
+        .and_then(|final_result| final_result.get(key))
+        .or_else(|| payload.get(key))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn completed_game_score(payload: &Value, player: &str) -> i32 {
+    payload
+        .get("finalResult")
+        .and_then(|final_result| final_result.get("finalScores"))
+        .and_then(|scores| scores.get(player))
+        .or_else(|| payload.get(player))
+        .and_then(Value::as_i64)
+        .and_then(|score| i32::try_from(score).ok())
+        .unwrap_or(0)
 }
 
 /// Historical browser game IDs encode their creation instant in base 36;
@@ -3995,9 +4028,6 @@ fn leaderboard_window_player_json(
         if !is_completed_leaderboard_game(upload) {
             continue;
         }
-        if stats_opponent_family(&upload.model) != "master" {
-            continue;
-        }
         if let Some(cutoff) = cutoff {
             let Some(ended_at) = parse_utc_timestamp_millis(&upload.ended_at) else {
                 continue;
@@ -4145,30 +4175,6 @@ fn json_number(input: &str, key: &str) -> Option<u64> {
         .take_while(|character| character.is_ascii_digit())
         .collect::<String>();
     (!digits.is_empty()).then(|| digits.parse().ok()).flatten()
-}
-
-fn json_number_after(input: &str, key: &str) -> Option<u64> {
-    let marker = format!("\"{}\"", key);
-    let mut remainder = input;
-    while let Some(index) = remainder.find(&marker) {
-        let after_marker = &remainder[index + marker.len()..];
-        let candidate = after_marker
-            .trim_start()
-            .strip_prefix(':')
-            .map(str::trim_start)
-            .and_then(|value| {
-                let digits = value
-                    .chars()
-                    .take_while(|character| character.is_ascii_digit())
-                    .collect::<String>();
-                (!digits.is_empty()).then(|| digits.parse().ok()).flatten()
-            });
-        if candidate.is_some() {
-            return candidate;
-        }
-        remainder = after_marker;
-    }
-    None
 }
 
 fn json_number_array(input: &str, key: &str) -> Vec<u64> {
@@ -4811,7 +4817,7 @@ mod tests {
     }
 
     #[test]
-    fn leaderboard_time_windows_use_a_fixed_as_of_and_only_include_ace_games() {
+    fn leaderboard_time_windows_use_a_fixed_as_of_and_include_every_completed_game() {
         let game = |game_id: &str, player: &str, model: &str, ended_at: &str| UploadedGame {
             game_id: game_id.to_string(),
             player: player.to_string(),
@@ -4884,12 +4890,15 @@ mod tests {
                 .map(|row| row["player"].as_str().unwrap())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(names("daily"), vec!["Daily"]);
-        assert_eq!(names("weekly"), vec!["Daily", "Weekly"]);
-        assert_eq!(names("monthly"), vec!["Daily", "Monthly", "Weekly"]);
+        assert_eq!(names("daily"), vec!["Daily", "Not Ace"]);
+        assert_eq!(names("weekly"), vec!["Daily", "Not Ace", "Weekly"]);
+        assert_eq!(
+            names("monthly"),
+            vec!["Daily", "Monthly", "Not Ace", "Weekly"]
+        );
         assert_eq!(
             names("allTime"),
-            vec!["All Time", "Daily", "Monthly", "Weekly"]
+            vec!["All Time", "Daily", "Monthly", "Not Ace", "Weekly"]
         );
         assert_eq!(summary["generatedAt"], "2026-09-05T12:00:00.000Z");
     }
@@ -5174,6 +5183,47 @@ mod tests {
     }
 
     #[test]
+    fn completed_upload_reads_final_scores_instead_of_earlier_snapshot_scores() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-final-score-upload-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let server = Server {
+            state: Mutex::new(AppState {
+                sessions: HashMap::new(),
+                uploads: HashMap::new(),
+                leaderboard_summary: leaderboard_summary_json(&HashMap::new()),
+            }),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+        let game = r#"{
+          "gameId":"finished-game",
+          "tag":"Garrett",
+          "model":"schell_table-peg_table-13.0",
+          "snapshot":{"scores":{"human":0,"ai":0}},
+          "finalResult":{
+            "winner":"human",
+            "result":"regular",
+            "finalScores":{"human":121,"ai":100}
+          }
+        }"#;
+
+        let response = upload_game(&server, game);
+        let response_json = serde_json::from_str::<Value>(&response.body).unwrap();
+
+        assert_eq!(response_json["leaderboard"]["games"], 1);
+        assert_eq!(response_json["leaderboard"]["playerStats"][0]["wins"], 1);
+        assert_eq!(
+            response_json["leaderboard"]["playerStats"][0]["cribbagePointsScored"],
+            121
+        );
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
     fn historical_batch_uploads_preserve_each_completed_game_time() {
         let data_dir = std::env::temp_dir().join(format!(
             "cribbage-api-historical-upload-test-{}-{}",
@@ -5195,6 +5245,7 @@ mod tests {
 
         upload_game(&server, june_game);
         let response = upload_game(&server, july_game);
+        let response_json = serde_json::from_str::<Value>(&response.body).unwrap();
 
         assert!(response
             .body
@@ -5202,6 +5253,12 @@ mod tests {
         assert!(response
             .body
             .contains("\"endedAt\":\"2026-07-09T15:49:01.234Z\""));
+        assert_eq!(response_json["leaderboard"]["games"], 2);
+        assert_eq!(response_json["leaderboard"]["playerStats"][0]["wins"], 2);
+        assert_eq!(
+            response_json["leaderboard"]["playerStats"][0]["cribbagePointsScored"],
+            242
+        );
         std::fs::remove_dir_all(data_dir).unwrap();
     }
 
