@@ -35,6 +35,7 @@ use serde_json::{json, Value};
 mod activity;
 mod auth;
 mod email;
+mod email_audit;
 mod engagement;
 mod feedback;
 mod people;

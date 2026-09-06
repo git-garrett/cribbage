@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde_json::json;
 
-use super::open_game_database;
+use super::{email_audit, open_game_database};
 
 const DELIVERY_RETRY_SECONDS: u64 = 60;
 const CLAIM_LEASE_SECONDS: i64 = 5 * 60;
@@ -543,11 +543,14 @@ fn send_via_sendgrid(queued: &QueuedEmail) -> Result<(), String> {
     if api_key == "local-email-disabled" {
         return Ok(());
     }
+    let mut payload: serde_json::Value = serde_json::from_str(&queued.payload)
+        .map_err(|error| format!("parse queued email: {}", error))?;
+    email_audit::reserve_and_tag(&mut payload)?;
     match ureq::post("https://api.sendgrid.com/v3/mail/send")
         .timeout(Duration::from_secs(10))
         .set("Authorization", &format!("Bearer {}", api_key))
         .set("Content-Type", "application/json")
-        .send_string(&queued.payload)
+        .send_string(&payload.to_string())
     {
         Ok(response) if response.status() == 202 => Ok(()),
         Ok(response) => Err(format!("SendGrid returned HTTP {}", response.status())),
@@ -556,7 +559,7 @@ fn send_via_sendgrid(queued: &QueuedEmail) -> Result<(), String> {
     }
 }
 
-fn unix_seconds() -> i64 {
+pub(super) fn unix_seconds() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()

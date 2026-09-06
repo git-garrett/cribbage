@@ -158,6 +158,11 @@ by root and outside the deployment archive:
 
 ```dotenv
 SENDGRID_API_KEY=SG_REPLACE_ME
+EMAIL_AUDIT_URL=https://worldliteraturetoday.org/status-email-audit.php
+EMAIL_AUDIT_SOURCE_ID=strong-cribbage
+EMAIL_AUDIT_SECRET=REPLACE_WITH_SHARED_HMAC_SECRET
+# Keep disabled until every sender using the SendGrid account is enrolled.
+EMAIL_AUDIT_REQUIRED=false
 CRIBBAGE_EMAIL_DELIVERY_PAUSED=true
 CRIBBAGE_AUTH_PEPPER=REPLACE_WITH_AT_LEAST_32_RANDOM_BYTES
 CRIBBAGE_AUTH_ADMIN_KEY=REPLACE_WITH_AT_LEAST_32_RANDOM_BYTES
