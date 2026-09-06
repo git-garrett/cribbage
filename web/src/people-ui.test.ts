@@ -42,14 +42,16 @@ describe("human clubhouse UI", () => {
     expect(source).toContain('[data-my-stats-opponent="grandmaster"]');
   });
 
-  it("puts leaderboard and account actions into the shared statistics and clubhouse surfaces", () => {
+  it("keeps Leaderboard separate from My Stats and account actions in the clubhouse", () => {
     expect(html).toContain('id="stats-view-tabs"');
-    expect(html).toContain('data-stats-view="leaderboard"');
-    expect(html).toContain('id="stats-leaderboard"');
+    expect(html).not.toContain('data-stats-view="leaderboard"');
+    expect(html).not.toContain('id="stats-leaderboard"');
+    expect(html).toContain('id="pathway-leaderboard"');
+    expect(html).toContain('id="leaderboard-page"');
     expect(html).toContain('id="auth-account-profile"');
     expect(html).toContain('id="auth-login"');
     expect(html).not.toContain('id="menu-toggle"');
-    expect(source).toContain("function renderStatsLeaderboard");
+    expect(source).not.toContain("function renderStatsLeaderboard");
   });
 
   it("keeps the complete game log inside Stats and reopens detailed reports", () => {

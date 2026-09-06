@@ -218,7 +218,7 @@ describe("local pathway navigation", () => {
   it("links every view to its immediate parent in the pathway hierarchy", () => {
     expect(html).toMatch(/id="pathway-header-parent-label"[^>]*>Home<\/span>/);
     expect(html).toMatch(/data-pathway-view="human"[\s\S]*?data-pathway-back="play"[\s\S]*?←<\/span> Play/);
-    expect(html).toMatch(/id="app-back"[\s\S]*?←<\/span> Play/);
+    expect(html).toMatch(/id="app-back"[\s\S]*?←<\/span> <span id="app-back-label">Play<\/span>/);
     expect(source).toMatch(/function pathwayParentRoute[\s\S]*route === "human"[\s\S]*return "play"[\s\S]*route === "gameplay"[\s\S]*return "settings"/);
     expect(source).toMatch(/pathwayHeaderHome\.addEventListener[\s\S]*pathwayParentRoute/);
   });

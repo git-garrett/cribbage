@@ -5,6 +5,7 @@ import { shouldRestoreSavedGameSurface } from "./resume-surface";
 describe("saved-game surface restoration", () => {
   it("preserves an explicit authenticated Stats route when an active game also exists", () => {
     expect(shouldRestoreSavedGameSurface({ route: "statistics", activeGame: true })).toBe(false);
+    expect(shouldRestoreSavedGameSurface({ route: "leaderboard", activeGame: true })).toBe(false);
   });
 
   it("restores an active game only when the URL does not identify another surface", () => {
