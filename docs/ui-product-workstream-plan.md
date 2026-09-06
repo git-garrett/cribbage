@@ -218,7 +218,8 @@ production release; leave PR open and never merge to `master`.
   - Points scored (total cribbage points scored)
   - Total wins
 - [x] Add Daily, Weekly, Monthly, and All Time subtabs for every metric other
-  than Handicap; Handicap is a current-value metric with no time-window tabs.
+  than Handicap, defaulting those metrics to Monthly; Handicap is a
+  current-value metric with no time-window tabs.
 - [x] Extend the API aggregation only where current leaderboard records cannot
   calculate a metric/window accurately.
 - [x] Define stable ordering and tie-breakers for every board.
@@ -242,7 +243,8 @@ production release; leave PR open and never merge to `master`.
 
 - The homepage card opens Leaderboard directly and My Stats no longer owns the
   entry point.
-- Current Handicap is selected by default, with no time-window tabs.
+- Current Handicap is selected by default, with no time-window tabs. When a
+  windowed metric is selected, Monthly is the default timeframe.
 - Metric and time-window combinations produce deterministic seeded results and
   preserve keyboard-accessible tab semantics.
 

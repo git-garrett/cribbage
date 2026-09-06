@@ -403,7 +403,7 @@ const state: {
   myStatsOpponent: "master",
   leaderboardOpen: false,
   leaderboardMetric: "handicap",
-  leaderboardWindow: "allTime",
+  leaderboardWindow: "monthly",
   leaderboardLoading: false,
   leaderboardLoaded: cachedLeaderboardSummary !== null,
   leaderboardFetched: false,
@@ -9728,7 +9728,7 @@ function openLeaderboard(): void {
   closeDecisionSnapshot();
   state.leaderboardOpen = true;
   state.leaderboardMetric = "handicap";
-  state.leaderboardWindow = "allTime";
+  state.leaderboardWindow = "monthly";
   state.engagementOpen = false;
   state.analyticsOpen = false;
   state.modelInfoOpen = false;

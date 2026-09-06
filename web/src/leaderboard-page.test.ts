@@ -18,7 +18,9 @@ describe("standalone leaderboard pathway", () => {
 
   it("defaults to current Handicap without time-window controls", () => {
     expect(source).toContain('leaderboardMetric: "handicap"');
+    expect(source).toContain('leaderboardWindow: "monthly"');
     expect(html).toMatch(/data-leaderboard-metric="handicap" aria-selected="true"/);
+    expect(html).toMatch(/data-leaderboard-window="monthly" aria-selected="true"/);
     expect(html).toMatch(/id="leaderboard-window-tabs"[^>]*hidden/);
     expect(source).toMatch(/const handicap = state\.leaderboardMetric === "handicap";[\s\S]*leaderboardWindowTabs\.hidden = handicap/);
   });
