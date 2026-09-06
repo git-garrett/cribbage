@@ -708,9 +708,7 @@ const els = {
   gameLogList: document.querySelector("#game-log-list") as HTMLElement,
   leaderboardPage: document.querySelector("#leaderboard-page") as HTMLElement,
   leaderboardSummary: document.querySelector("#leaderboard-summary") as HTMLElement,
-  leaderboardHighlights: document.querySelector("#leaderboard-highlights") as HTMLElement,
   leaderboardList: document.querySelector("#leaderboard-list") as HTMLElement,
-  leaderboardMetricTabs: document.querySelector("#leaderboard-metric-tabs") as HTMLElement,
   leaderboardMetricTabButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-leaderboard-metric]")],
   leaderboardWindowTabs: document.querySelector("#leaderboard-window-tabs") as HTMLElement,
   leaderboardWindowTabButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-leaderboard-window]")],
@@ -1192,7 +1190,6 @@ interface AuthMessageResponse {
 
 let authenticatedUser: AuthUser | null = null;
 let pendingAuthEmail = "";
-let pathwayStatsReturn = false;
 let selectedPathwayOpponent: Opponent | null = null;
 let remoteResumableModelGames = new Map<Opponent, Phase>();
 let pathwayResumeRefreshGeneration = 0;
@@ -3540,7 +3537,6 @@ function applyPathwayRoute(route: PathwayRoute): void {
       requestAuthentication({ kind: "statistics" }, "Sign in to view your statistics.");
       return;
     }
-    pathwayStatsReturn = true;
     els.pathwayPage.hidden = true;
     state.splashOpen = false;
     document.body.dataset.splash = "false";
@@ -3548,7 +3544,6 @@ function applyPathwayRoute(route: PathwayRoute): void {
     return;
   }
   if (route === "leaderboard") {
-    pathwayStatsReturn = false;
     els.pathwayPage.hidden = true;
     state.splashOpen = false;
     document.body.dataset.splash = "false";
@@ -3556,7 +3551,6 @@ function applyPathwayRoute(route: PathwayRoute): void {
     return;
   }
 
-  pathwayStatsReturn = false;
   if (state.analyticsOpen) {
     state.analyticsOpen = false;
     render(state.game);
@@ -7417,7 +7411,6 @@ function renderLeaderboard(): void {
   renderedLeaderboardKey = renderKey;
   renderLeaderboardTabs();
   if (loading) {
-    els.leaderboardHighlights.replaceChildren();
     els.leaderboardList.replaceChildren(leaderboardLoadingElement());
     els.leaderboardSummary.textContent = "Loading leaderboard...";
     return;
@@ -7425,7 +7418,6 @@ function renderLeaderboard(): void {
 
   const animate = state.leaderboardAnimateNext;
   state.leaderboardAnimateNext = false;
-  els.leaderboardHighlights.replaceChildren();
   els.leaderboardList.querySelector(".leaderboard-loading")?.remove();
 
   if (state.leaderboardMetric === "handicap") {
@@ -9650,7 +9642,6 @@ els.engagementExport.addEventListener("click", () => {
 function openAnalytics(mode: "my" | "full"): void {
   if (mode === "my" && PATHWAY_NAV_ENABLED && pathwayRouteFromLocation() !== "statistics") {
     window.history.pushState(pathwayHistoryState("statistics"), "", pathwayUrl("statistics"));
-    pathwayStatsReturn = true;
     els.pathwayPage.hidden = true;
   }
   closeDecisionSnapshot();

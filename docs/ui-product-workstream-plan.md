@@ -12,8 +12,8 @@ set narrow enough to test, preview, and release independently.
   workstream into `master` without a new, explicit instruction.
 - Production releases use `master` and `scripts/deploy-nanode.sh deploy`.
 - PRs 1–4 are complete and deployed to production.
-- PR 5 also stops at local review because no production deployment was
-  specified.
+- PR 5 is authorized for merge to `master` and production deployment after its
+  checks and required review pass.
 - Work on only one PR at a time. Do not begin the next review PR until the
   current PR reaches its stated gate.
 - Preserve unrelated workspace changes, including `capacitor.config.ts` and
@@ -201,8 +201,7 @@ Every PR must:
 
 - **Branch:** `work/standalone-leaderboard`
 - **Target:** `master`
-- **Release gate:** Local runtime only unless a later instruction authorizes a
-production release; leave PR open and never merge to `master`.
+- **Release status:** Complete and deployed to production.
 
 ### Scope
 
@@ -257,7 +256,7 @@ production release; leave PR open and never merge to `master`.
 
 ### Verification evidence
 
-- `npm test`: 286 Rust tests across 18 targets passed.
+- `npm test`: 290 Rust tests across 18 targets passed.
 - `npm run test:web`, `npm run typecheck`, and `npm run build`: passed.
 - Chromium interaction and visual QA passed at 1440×1050 and 390×844 in light
   and dark mode using fixed signed-in leaderboard fixtures. The pass covered
@@ -273,4 +272,4 @@ production release; leave PR open and never merge to `master`.
 - [x] PR 2 complete and deployed to production.
 - [x] PR 3 complete and deployed to production.
 - [x] PR 4 complete and deployed to production.
-- [x] PR 5 available on the local runtime for review.
+- [x] PR 5 complete and deployed to production.
