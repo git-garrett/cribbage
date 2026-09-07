@@ -20,11 +20,12 @@ struct SelectedSession {
 struct PlayerResult {
     player: String,
     calibration_completed_at: String,
+    calibration_evaluator_version: String,
     selected_sessions: usize,
     selected_session_ids: Vec<String>,
     completed_analyses: usize,
-    cycles: Option<usize>,
-    completed_games: Option<usize>,
+    cycles: usize,
+    completed_games: usize,
     handicap_before: Option<f64>,
     handicap_after: Option<f64>,
 }
@@ -66,7 +67,7 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
                 );
             }
             "--dry-run" if apply.is_none() => apply = Some(false),
-            "--apply" if apply.is_none() => apply = Some(true),
+            "--apply-offline" if apply.is_none() => apply = Some(true),
             option => return Err(format!("unknown or duplicate backfill option: {option}")),
         }
         index += 1;
@@ -77,7 +78,8 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
     Ok(Options {
         players: players.ok_or_else(|| "--players is required".to_string())?,
         through,
-        apply: apply.ok_or_else(|| "choose exactly one of --dry-run or --apply".to_string())?,
+        apply: apply
+            .ok_or_else(|| "choose exactly one of --dry-run or --apply-offline".to_string())?,
     })
 }
 
@@ -105,10 +107,13 @@ fn player_identity(connection: &Connection, requested: &str) -> Result<(i64, Str
 fn calibration_boundary(
     connection: &Connection,
     user_id: i64,
-) -> Result<(String, HashSet<String>), String> {
+) -> Result<(String, String, HashSet<String>), String> {
+    // Calibration is a player milestone that survives evaluator upgrades. Pick
+    // the first evaluator under which the player reached the full threshold;
+    // never combine partial progress from different evaluator versions.
     let stored = connection
         .prepare(
-            "SELECT DISTINCT c.session_id, c.first_hand_number, s.session_json
+            "SELECT DISTINCT c.evaluator_version, c.session_id, c.first_hand_number, s.session_json
              FROM dynamic_profile_cycles c
              JOIN cribbage_game_sessions s ON s.session_id = c.session_id
              WHERE c.user_id = ?1",
@@ -117,41 +122,46 @@ fn calibration_boundary(
         .query_map([user_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                row.get::<_, u32>(1)?,
-                row.get::<_, String>(2)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, u32>(2)?,
+                row.get::<_, String>(3)?,
             ))
         })
         .map_err(|error| format!("read calibration history: {error}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("collect calibration history: {error}"))?;
-    let mut rows = stored
-        .into_iter()
-        .map(|(session_id, first_hand, text)| {
-            let session = serde_json::from_str::<PersistedSession>(&text)
-                .map_err(|error| format!("parse calibration session {session_id}: {error}"))
-                .and_then(restore_persisted_session)?;
-            Ok((
-                cycle_completed_at(&session, first_hand),
-                session_id,
-                first_hand,
-            ))
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    rows.sort();
-    let minimum = usize::try_from(MIN_COMPLETE_CYCLES).unwrap_or(usize::MAX);
-    if rows.len() < minimum {
-        return Err(format!(
-            "player has {} calibrated cycles; {} are required",
-            rows.len(),
-            MIN_COMPLETE_CYCLES
+    let mut by_evaluator = HashMap::<String, Vec<(String, String, u32)>>::new();
+    for (evaluator, session_id, first_hand, text) in stored {
+        let session = serde_json::from_str::<PersistedSession>(&text)
+            .map_err(|error| format!("parse calibration session {session_id}: {error}"))
+            .and_then(restore_persisted_session)?;
+        by_evaluator.entry(evaluator).or_default().push((
+            cycle_completed_at(&session, first_hand),
+            session_id,
+            first_hand,
         ));
     }
+    let minimum = usize::try_from(MIN_COMPLETE_CYCLES).unwrap_or(usize::MAX);
+    let mut candidates = by_evaluator
+        .into_iter()
+        .filter_map(|(evaluator, mut rows)| {
+            rows.sort();
+            (rows.len() >= minimum).then(|| (rows[minimum - 1].0.clone(), evaluator, rows))
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
+    let Some((completed_at, evaluator, rows)) = candidates.into_iter().next() else {
+        return Err(format!(
+            "player has not completed {} calibration cycles under one evaluator",
+            MIN_COMPLETE_CYCLES
+        ));
+    };
     let baseline_sessions = rows
         .iter()
         .take(minimum)
         .map(|(_, session_id, _)| session_id.clone())
         .collect();
-    Ok((rows[minimum - 1].0.clone(), baseline_sessions))
+    Ok((completed_at, evaluator, baseline_sessions))
 }
 
 fn completed_at(session: &Session) -> Option<&str> {
@@ -178,18 +188,16 @@ fn should_select_session(
 
 fn load_selected_sessions(
     connection: &Connection,
+    user_id: i64,
     display_name: &str,
     baseline_sessions: &HashSet<String>,
     calibration_completed_at: &str,
     through: &str,
 ) -> Result<Vec<Session>, String> {
     let stored = connection
-        .prepare(
-            "SELECT session_json FROM cribbage_game_sessions
-             WHERE lower(trim(tag)) = lower(trim(?1)) ORDER BY created_at, session_id",
-        )
+        .prepare("SELECT session_json FROM cribbage_game_sessions ORDER BY created_at, session_id")
         .map_err(|error| format!("prepare sessions for {display_name}: {error}"))?
-        .query_map([display_name], |row| row.get::<_, String>(0))
+        .query_map([], |row| row.get::<_, String>(0))
         .map_err(|error| format!("read sessions for {display_name}: {error}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("collect sessions for {display_name}: {error}"))?;
@@ -205,12 +213,18 @@ fn load_selected_sessions(
             sessions
                 .into_iter()
                 .filter(|session| {
-                    should_select_session(
-                        session,
-                        baseline_sessions,
-                        calibration_completed_at,
-                        through,
-                    )
+                    let owned = session.owner_user_id == Some(user_id);
+                    let legacy_match = session.owner_user_id.is_none()
+                        && session.tag.as_deref().is_some_and(|tag| {
+                            tag.trim().eq_ignore_ascii_case(display_name.trim())
+                        });
+                    (owned || legacy_match)
+                        && should_select_session(
+                            session,
+                            baseline_sessions,
+                            calibration_completed_at,
+                            through,
+                        )
                 })
                 .collect()
         })
@@ -230,58 +244,44 @@ fn cycle_completed_at(session: &Session, first_hand: u32) -> String {
         .to_string()
 }
 
-fn prepare_session(
-    mut session: Session,
-    model_root: &str,
-    apply: bool,
-) -> Result<SelectedSession, String> {
+fn prepare_session(mut session: Session, model_root: &str) -> Result<SelectedSession, String> {
     let missing = session
         .decision_reviews
         .iter()
         .filter(|review| saved_decision_analysis(review, DYNAMIC_EVALUATOR_VERSION).is_none())
         .count();
-    if apply {
-        for review in &mut session.decision_reviews {
-            if saved_decision_analysis(review, DYNAMIC_EVALUATOR_VERSION).is_some() {
-                continue;
-            }
-            let completed = evaluate_saved_decision_review(review, model_root)
-                .map_err(|error| format!("analyze {} in {}: {error}", review.id, session.id))?;
-            save_completed_decision_analysis(review, completed);
+    for review in &mut session.decision_reviews {
+        if saved_decision_analysis(review, DYNAMIC_EVALUATOR_VERSION).is_some() {
+            continue;
         }
-        let stored = serde_json::to_string(&persisted_session(&session))
-            .map_err(|error| format!("canonicalize {}: {error}", session.id))?;
-        session = serde_json::from_str::<PersistedSession>(&stored)
-            .map_err(|error| format!("parse canonical {}: {error}", session.id))
-            .and_then(restore_persisted_session)?;
+        let completed = evaluate_saved_decision_review(review, model_root)
+            .map_err(|error| format!("analyze {} in {}: {error}", review.id, session.id))?;
+        save_completed_decision_analysis(review, completed);
     }
-    let cycle_samples = if apply {
-        eligible_dynamic_cycle_samples(&session)
-            .into_iter()
-            .map(|cycle| {
-                (
-                    cycle.first_hand,
-                    cycle_completed_at(&session, cycle.first_hand),
-                    cycle.strength_sample,
-                )
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-    let game_length = if apply {
-        eligible_dynamic_game_length(&session).map(|length| {
+    let stored = serde_json::to_string(&persisted_session(&session))
+        .map_err(|error| format!("canonicalize {}: {error}", session.id))?;
+    session = serde_json::from_str::<PersistedSession>(&stored)
+        .map_err(|error| format!("parse canonical {}: {error}", session.id))
+        .and_then(restore_persisted_session)?;
+    let cycle_samples = eligible_dynamic_cycle_samples(&session)
+        .into_iter()
+        .map(|cycle| {
             (
-                session
-                    .completed_at
-                    .clone()
-                    .unwrap_or_else(|| session.updated_at.clone()),
-                length,
+                cycle.first_hand,
+                cycle_completed_at(&session, cycle.first_hand),
+                cycle.strength_sample,
             )
         })
-    } else {
-        None
-    };
+        .collect();
+    let game_length = eligible_dynamic_game_length(&session).map(|length| {
+        (
+            session
+                .completed_at
+                .clone()
+                .unwrap_or_else(|| session.updated_at.clone()),
+            length,
+        )
+    });
     Ok(SelectedSession {
         session,
         cycle_samples,
@@ -367,17 +367,23 @@ fn persist_player(
         .map_err(|error| format!("clear current game lengths: {error}"))?;
 
     for selected in sessions.iter_mut() {
-        if selected.session.model == ModelId::Dynamic {
-            selected.session.use_dynamic_profile(profile.clone());
+        // Active and forfeited Dynamic sessions may contribute already-played
+        // complete cycles, but the repair must not alter their resumable state.
+        if completed_at(&selected.session).is_some() {
+            if selected.session.model == ModelId::Dynamic {
+                selected.session.use_dynamic_profile(profile.clone());
+            }
+            let session_json = serde_json::to_string(&persisted_session(&selected.session))
+                .map_err(|error| format!("serialize {}: {error}", selected.session.id))?;
+            transaction
+                .execute(
+                    "UPDATE cribbage_game_sessions SET session_json = ?1 WHERE session_id = ?2",
+                    params![session_json, selected.session.id],
+                )
+                .map_err(|error| {
+                    format!("save reviewed session {}: {error}", selected.session.id)
+                })?;
         }
-        let session_json = serde_json::to_string(&persisted_session(&selected.session))
-            .map_err(|error| format!("serialize {}: {error}", selected.session.id))?;
-        transaction
-            .execute(
-                "UPDATE cribbage_game_sessions SET session_json = ?1 WHERE session_id = ?2",
-                params![session_json, selected.session.id],
-            )
-            .map_err(|error| format!("save reviewed session {}: {error}", selected.session.id))?;
         for (first_hand, at, sample) in &selected.cycle_samples {
             transaction
                 .execute(
@@ -477,10 +483,11 @@ pub fn run(arguments: &[String], data_dir: &Path, model_root: &str) -> Result<()
     for requested in &options.players {
         let (user_id, display_name) = player_identity(&connection, requested)?;
         let before = current_handicap(&connection, user_id)?;
-        let (calibration_completed_at, baseline_sessions) =
+        let (calibration_completed_at, calibration_evaluator_version, baseline_sessions) =
             calibration_boundary(&connection, user_id)?;
         let sessions = load_selected_sessions(
             &connection,
+            user_id,
             &display_name,
             &baseline_sessions,
             &calibration_completed_at,
@@ -494,13 +501,14 @@ pub fn run(arguments: &[String], data_dir: &Path, model_root: &str) -> Result<()
             .any(|session| session.model == ModelId::Dynamic);
         let prepared = sessions
             .into_iter()
-            .map(|session| prepare_session(session, model_root, options.apply))
+            .map(|session| prepare_session(session, model_root))
             .collect::<Result<Vec<_>, _>>()?;
         plans.push((
             user_id,
             display_name,
             before,
             calibration_completed_at,
+            calibration_evaluator_version,
             started_dynamic,
             prepared,
         ));
@@ -516,18 +524,25 @@ pub fn run(arguments: &[String], data_dir: &Path, model_root: &str) -> Result<()
         .transpose()
         .map_err(|error| format!("begin handicap backfill: {error}"))?;
     let mut results = Vec::new();
-    for (user_id, display_name, before, calibration_completed_at, started_dynamic, mut sessions) in
-        plans
+    for (
+        user_id,
+        display_name,
+        before,
+        calibration_completed_at,
+        calibration_evaluator_version,
+        started_dynamic,
+        mut sessions,
+    ) in plans
     {
         let completed_analyses = sessions
             .iter()
             .map(|session| session.completed_analyses)
             .sum();
-        let (cycles, games, after) = if options.apply {
-            let profile = rebuild_profile(&sessions, started_dynamic);
-            let cycles = usize::try_from(profile.handicap_cycles).unwrap_or(usize::MAX);
-            let games = usize::try_from(profile.length_games).unwrap_or(usize::MAX);
-            let after = profile.handicap_per_game();
+        let profile = rebuild_profile(&sessions, started_dynamic);
+        let cycles = usize::try_from(profile.handicap_cycles).unwrap_or(usize::MAX);
+        let games = usize::try_from(profile.length_games).unwrap_or(usize::MAX);
+        let after = profile.handicap_per_game();
+        if options.apply {
             persist_player(
                 transaction
                     .as_ref()
@@ -536,13 +551,11 @@ pub fn run(arguments: &[String], data_dir: &Path, model_root: &str) -> Result<()
                 &mut sessions,
                 &profile,
             )?;
-            (Some(cycles), Some(games), after)
-        } else {
-            (None, None, None)
-        };
+        }
         results.push(PlayerResult {
             player: display_name,
             calibration_completed_at,
+            calibration_evaluator_version,
             selected_sessions: sessions.len(),
             selected_session_ids: sessions
                 .iter()
@@ -577,9 +590,172 @@ pub fn run(arguments: &[String], data_dir: &Path, model_root: &str) -> Result<()
 mod tests {
     use super::*;
 
+    fn completed_review(selected: f64, recommended: f64) -> CompletedDecisionReview {
+        CompletedDecisionReview {
+            evaluator_model: DYNAMIC_EVALUATOR_VERSION.to_string(),
+            selected_card_ids: vec![0],
+            recommended_card_ids: vec![1],
+            selected_ev: 0.0,
+            recommended_ev: 0.0,
+            selected_win_probability: Some(selected),
+            recommended_win_probability: Some(recommended),
+        }
+    }
+
+    fn review(
+        id: &str,
+        hand_number: u32,
+        human_is_dealer: bool,
+        kind: ReviewKind,
+        at: &str,
+    ) -> SavedDecisionReview {
+        use cribbage_shadow_engine::game::PegTurn;
+
+        let mut game = CribbageGame::new_with_seed(hand_number, HUMAN);
+        game.hand_number = hand_number;
+        game.dealer = if human_is_dealer { HUMAN } else { AI };
+        game.pone = game.dealer.other();
+        let selected_card_ids = match kind {
+            ReviewKind::Discard => vec![0, 1],
+            ReviewKind::Peg => {
+                game.phase = Phase::Pegging;
+                game.turn = if human_is_dealer {
+                    PegTurn::Dealer
+                } else {
+                    PegTurn::Pone
+                };
+                game.player_mut(HUMAN).hand = vec![Card::new(0).unwrap(), Card::new(2).unwrap()];
+                vec![0]
+            }
+        };
+        SavedDecisionReview {
+            id: id.to_string(),
+            at: at.to_string(),
+            kind,
+            game,
+            selected_card_ids,
+            completed: Some(completed_review(0.45, 0.50)),
+            prior_analyses: Vec::new(),
+            prepared_analysis: None,
+        }
+    }
+
+    fn completed_hand_event(hand_number: u32, dealer: Side, at: &str) -> SavedScoreEvent {
+        SavedScoreEvent {
+            id: format!("hand-{hand_number}-crib"),
+            at: at.to_string(),
+            hand_number,
+            player: dealer,
+            dealer,
+            category: SavedScoreCategory::Crib,
+            points: 0,
+            reason: "Crib".to_string(),
+            total_score: 0,
+            scores: [12 * hand_number as i32, 10 * hand_number as i32],
+            cards: Vec::new(),
+            turn_card: None,
+            count: None,
+            score_components: None,
+        }
+    }
+
+    fn reviewed_session(model: ModelId, id: &str, day: u32) -> Session {
+        let at = format!("2026-01-{day:02}T00:00:00.000Z");
+        let mut session = new_session_from_seed(model, Some("Travis".to_string()), day, 1);
+        session.id = id.to_string();
+        session.created_at = at.clone();
+        session.updated_at = at.clone();
+        session.completed_at = Some(at.clone());
+        session.game.hand_number = 3;
+        session.game.phase = Phase::GameOver;
+        session.score_events = vec![
+            completed_hand_event(1, HUMAN, &at),
+            completed_hand_event(2, AI, &at),
+        ];
+        session.decision_reviews = vec![
+            review("dealer-discard", 1, true, ReviewKind::Discard, &at),
+            review("dealer-peg", 1, true, ReviewKind::Peg, &at),
+            review("pone-discard", 2, false, ReviewKind::Discard, &at),
+            review("pone-peg", 2, false, ReviewKind::Peg, &at),
+        ];
+        session
+    }
+
+    type DatabaseState = (
+        String,
+        Vec<(String, u32, String, String)>,
+        Vec<(String, String, String)>,
+        Vec<(String, String)>,
+    );
+
+    fn database_state(data_dir: &Path, user_id: i64) -> DatabaseState {
+        let connection = open_game_database(data_dir).unwrap();
+        let profile = connection
+            .query_row(
+                "SELECT profile_json FROM dynamic_player_profiles
+                 WHERE user_id = ?1 AND evaluator_version = ?2",
+                params![user_id, DYNAMIC_EVALUATOR_VERSION],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let cycles = connection
+            .prepare(
+                "SELECT session_id, first_hand_number, sample_json, applied_at
+                 FROM dynamic_profile_cycles
+                 WHERE user_id = ?1 AND evaluator_version = ?2
+                 ORDER BY applied_at, session_id, first_hand_number",
+            )
+            .unwrap()
+            .query_map(params![user_id, DYNAMIC_EVALUATOR_VERSION], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let games = connection
+            .prepare(
+                "SELECT session_id, sample_json, applied_at FROM dynamic_profile_games
+                 WHERE user_id = ?1 AND evaluator_version = ?2
+                 ORDER BY applied_at, session_id",
+            )
+            .unwrap()
+            .query_map(params![user_id, DYNAMIC_EVALUATOR_VERSION], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let sessions = connection
+            .prepare(
+                "SELECT session_id, session_json FROM cribbage_game_sessions
+                 WHERE tag = 'Travis' ORDER BY session_id",
+            )
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        (profile, cycles, games, sessions)
+    }
+
+    fn backup_count(data_dir: &Path) -> usize {
+        std::fs::read_dir(data_dir.join("handicap-backups"))
+            .unwrap()
+            .count()
+    }
+
     #[test]
     fn command_requires_an_explicit_mode_and_scope() {
         assert!(parse_options(&["backfill-handicaps".to_string()]).is_err());
+        assert!(parse_options(&[
+            "backfill-handicaps".to_string(),
+            "--players".to_string(),
+            "Shane,Garrett".to_string(),
+            "--through".to_string(),
+            "2026-09-07T05:00:00Z".to_string(),
+            "--apply".to_string(),
+        ])
+        .is_err());
         assert_eq!(
             parse_options(&[
                 "backfill-handicaps".to_string(),
@@ -644,5 +820,86 @@ mod tests {
             calibration,
             through
         ));
+    }
+
+    #[test]
+    fn apply_is_idempotent_backed_up_and_transactional() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-handicap-backfill-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        auth::initialize(&data_dir).unwrap();
+        let connection = open_game_database(&data_dir).unwrap();
+        let user_id = connection
+            .query_row(
+                "SELECT id FROM auth_users WHERE username = 'Travis'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        drop(connection);
+
+        let mut sessions = (1..=6)
+            .map(|day| reviewed_session(ModelId::Myrmidon5, &format!("baseline-{day}"), day))
+            .collect::<Vec<_>>();
+        let mut active_dynamic = reviewed_session(ModelId::Dynamic, "dynamic-7", 7);
+        active_dynamic.game.phase = Phase::Discard;
+        active_dynamic.completed_at = None;
+        sessions.push(active_dynamic);
+        sessions.push(reviewed_session(ACE_MODEL_ID, "ace-8", 8));
+        for session in &mut sessions {
+            session.owner_user_id = Some(user_id);
+            persist_session_event(&data_dir, session, "new", "{}").unwrap();
+            sync_dynamic_player_profile(&data_dir, user_id, session).unwrap();
+        }
+
+        let mut arguments = vec![
+            "backfill-handicaps".to_string(),
+            "--players".to_string(),
+            "Travis".to_string(),
+            "--through".to_string(),
+            "2026-01-10T00:00:00Z".to_string(),
+            "--dry-run".to_string(),
+        ];
+        let before = database_state(&data_dir, user_id);
+        let active_before = before
+            .3
+            .iter()
+            .find(|(id, _)| id == "dynamic-7")
+            .unwrap()
+            .1
+            .clone();
+        run(&arguments, &data_dir, ".").unwrap();
+        assert_eq!(database_state(&data_dir, user_id), before);
+        assert!(!data_dir.join("handicap-backups").exists());
+
+        *arguments.last_mut().unwrap() = "--apply-offline".to_string();
+        run(&arguments, &data_dir, ".").unwrap();
+        let first = database_state(&data_dir, user_id);
+        assert_eq!(first.1.len(), 8);
+        assert_eq!(
+            first.3.iter().find(|(id, _)| id == "dynamic-7").unwrap().1,
+            active_before
+        );
+        assert_eq!(backup_count(&data_dir), 1);
+
+        run(&arguments, &data_dir, ".").unwrap();
+        assert_eq!(database_state(&data_dir, user_id), first);
+        assert_eq!(backup_count(&data_dir), 2);
+
+        let connection = open_game_database(&data_dir).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER fail_backfill BEFORE INSERT ON dynamic_profile_cycles
+                 BEGIN SELECT RAISE(ABORT, 'forced backfill failure'); END;",
+            )
+            .unwrap();
+        drop(connection);
+        assert!(run(&arguments, &data_dir, ".").is_err());
+        assert_eq!(database_state(&data_dir, user_id), first);
+
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 }
