@@ -38,6 +38,7 @@ mod email;
 mod email_audit;
 mod engagement;
 mod feedback;
+mod handicap_backfill;
 mod people;
 
 const HUMAN: Side = Side::Left;
@@ -302,6 +303,7 @@ struct Server {
 }
 
 fn main() {
+    let arguments = env::args().skip(1).collect::<Vec<_>>();
     let host = env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port = env::var("PORT").unwrap_or_else(|_| "8787".to_string());
     let address = format!("{}:{}", host, port);
@@ -314,6 +316,11 @@ fn main() {
     let data_dir = env::var("CRIBBAGE_DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(&model_root).join("data"));
+    if !arguments.is_empty() {
+        handicap_backfill::run(&arguments, &data_dir, &model_root)
+            .unwrap_or_else(|error| panic!("handicap backfill failed: {error}"));
+        return;
+    }
     initialize_game_database(&data_dir).unwrap_or_else(|error| {
         panic!(
             "could not initialize durable game storage in {}: {}",
@@ -3518,8 +3525,8 @@ fn upload_game(server: &Server, body: &str) -> Response {
             .map(str::to_string)
             .unwrap_or_else(|| "Anonymous".to_string());
         let winner = completed_game_string(&payload, "winner");
-        let result = completed_game_string(&payload, "result")
-            .unwrap_or_else(|| "regular".to_string());
+        let result =
+            completed_game_string(&payload, "result").unwrap_or_else(|| "regular".to_string());
         let model = payload
             .get("model")
             .and_then(Value::as_str)
@@ -4050,7 +4057,8 @@ fn is_public_leaderboard_player(player: &str) -> bool {
 }
 
 fn is_included_leaderboard_game(upload: &UploadedGame) -> bool {
-    is_public_leaderboard_player(&upload.player) && (upload.human_score != 0 || upload.ai_score != 0)
+    is_public_leaderboard_player(&upload.player)
+        && (upload.human_score != 0 || upload.ai_score != 0)
 }
 
 fn leaderboard_weighted_results(total: &PlayerTotals) -> i64 {
@@ -4797,7 +4805,10 @@ mod tests {
         assert_eq!(summary["playerStats"].as_array().unwrap().len(), 1);
         assert_eq!(summary["playerStats"][0]["player"], "Garrett");
         assert!(summary["playerHandicaps"].get("test").is_none());
-        assert!(!summary.to_string().to_ascii_lowercase().contains("\"player\":\"test\""));
+        assert!(!summary
+            .to_string()
+            .to_ascii_lowercase()
+            .contains("\"player\":\"test\""));
     }
 
     #[test]
@@ -5291,7 +5302,10 @@ mod tests {
         }
         assert_eq!(response_json["leaderboard"]["bestWinRate"][0]["wins"], 1);
         assert_eq!(response_json["leaderboard"]["winRate14_3"][0]["wins"], 1);
-        assert_eq!(response_json["leaderboard"]["bestWins"][0]["player"], "Garrett");
+        assert_eq!(
+            response_json["leaderboard"]["bestWins"][0]["player"],
+            "Garrett"
+        );
         assert_eq!(
             response_json["leaderboard"]["playerStats"][0]["cribbagePointsScored"],
             121
@@ -5797,10 +5811,8 @@ mod tests {
 
         let mut before = None;
         for cycle in 0..MIN_COMPLETE_CYCLES {
-            let baseline = reviewed_cycle_session(
-                ModelId::Myrmidon5,
-                &format!("baseline-cycle-{cycle}"),
-            );
+            let baseline =
+                reviewed_cycle_session(ModelId::Myrmidon5, &format!("baseline-cycle-{cycle}"));
             before = sync_dynamic_player_profile(&data_dir, travis.id, &baseline).unwrap();
         }
         let before = before.unwrap();
