@@ -304,6 +304,77 @@ async function testIndexedDbLeaderboardBackfill(browser, baseUrl) {
   return { indexedDbOnlyCompletionUploaded: true };
 }
 
+async function testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl) {
+  const page = await browser.newPage({ viewport: { width: 1000, height: 800 } });
+  await installStaticBuild(page);
+  await page.goto(`${baseUrl}/coming-soon.html`, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => {
+    const events = [
+      {
+        id: "blocked-db-game-start",
+        at: "2026-09-02T00:00:00.000Z",
+        type: "game",
+        action: "start",
+        gameId: "blocked-db-game",
+        opponent: "schell_table-peg_table-13.0",
+      },
+      {
+        id: "blocked-db-game-end",
+        at: "2026-09-02T00:30:00.000Z",
+        type: "game",
+        action: "end",
+        gameId: "blocked-db-game",
+        opponent: "schell_table-peg_table-13.0",
+        winner: "human",
+        loser: "ai",
+        result: "regular",
+        finalScores: { human: 121, ai: 110 },
+      },
+    ];
+    localStorage.setItem("strong-cribbage.analytics.v1", JSON.stringify({ version: 1, events }));
+  });
+  await page.addInitScript(() => {
+    Object.defineProperty(window.indexedDB, "open", {
+      configurable: true,
+      value() {
+        throw new DOMException("IndexedDB is temporarily unavailable.", "InvalidStateError");
+      },
+    });
+  });
+
+  const uploads = [];
+  const user = { username: "qa-player", displayName: "QA Player", email: "qa@example.test" };
+  await page.route("**/api/**", async (route) => {
+    const apiPath = new URL(route.request().url()).pathname;
+    if (apiPath === "/api/auth/session") return route.fulfill({ json: { authenticated: true, user } });
+    if (apiPath === "/api/people/me") {
+      return route.fulfill({ json: { profile: { ...user, online: true, lookingForGame: false, isSelf: true } } });
+    }
+    if (apiPath === "/api/people/presence" || apiPath === "/api/people/online") {
+      return route.fulfill({ json: { onlineCount: 1, players: [], incomingChallenges: [], outgoingChallenges: [], activeTable: null } });
+    }
+    if (apiPath === "/api/people/challenges/watch") return route.abort();
+    if (apiPath === "/api/games") {
+      uploads.push(route.request().postDataJSON());
+      return route.fulfill({ json: { ok: true, updated: false } });
+    }
+    return route.fulfill({ status: 404, json: { error: `Unhandled QA route: ${apiPath}` } });
+  });
+
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await page.locator('body[data-ready="true"][data-auth="signed-in"]').waitFor({ timeout: 5000 });
+  await page.waitForFunction(() => localStorage.getItem("strong-cribbage.serverUploadedGames.v1") !== null);
+  const marker = await page.evaluate(() => localStorage.getItem("strong-cribbage.serverUploadBackfill.v2"));
+  if (uploads.length !== 1) {
+    throw new Error(`LocalStorage history was not uploaded while IndexedDB was blocked: ${JSON.stringify(uploads)}`);
+  }
+  if (marker !== null) {
+    throw new Error(`Blocked IndexedDB was incorrectly marked as inspected: ${marker}`);
+  }
+  await page.close();
+  return { localStorageUploaded: true, backfillStillPending: true };
+}
+
 async function testPeopleInteractions(browser, baseUrl) {
   let page = await readyPeoplePage(browser, baseUrl);
   const startedAt = Date.now();
@@ -524,9 +595,10 @@ async function main() {
     await page.close();
     const pathwayNavigation = await testPathwayParentNavigation(browser, baseUrl);
     const leaderboardBackfill = await testIndexedDbLeaderboardBackfill(browser, baseUrl);
+    const blockedIndexedDb = await testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl);
     const people = await testPeopleInteractions(browser, baseUrl);
     const engagement = await testEngagementDashboard(browser, baseUrl);
-    console.log(JSON.stringify({ authenticationRecovery: state, pathwayNavigation, leaderboardBackfill, people, engagement }));
+    console.log(JSON.stringify({ authenticationRecovery: state, pathwayNavigation, leaderboardBackfill, blockedIndexedDb, people, engagement }));
   } finally {
     await browser.close();
   }

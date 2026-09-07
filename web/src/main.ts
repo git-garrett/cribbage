@@ -3158,14 +3158,26 @@ function markGameUploaded(gameId: string): void {
   safeLocalStorageSet(SERVER_UPLOAD_KEY, JSON.stringify([...ids]));
 }
 
-async function storedAnalyticsEvents(): Promise<AnalyticsEvent[]> {
+type StoredAnalyticsHistory = {
+  events: AnalyticsEvent[];
+  indexedDbInspected: boolean;
+};
+
+async function storedAnalyticsEvents(): Promise<StoredAnalyticsHistory> {
   const localStorageEvents = loadAnalytics().events;
+  if (!("indexedDB" in window)) {
+    return { events: localStorageEvents, indexedDbInspected: true };
+  }
   try {
     const db = await openPhoneGameDb();
+    if (!db) return { events: localStorageEvents, indexedDbInspected: false };
     const indexedDbEvents = await readPhoneStore<AnalyticsEvent>(db, "events");
-    return mergeStoredAnalyticsEvents(localStorageEvents, indexedDbEvents);
+    return {
+      events: mergeStoredAnalyticsEvents(localStorageEvents, indexedDbEvents),
+      indexedDbInspected: true,
+    };
   } catch {
-    return localStorageEvents;
+    return { events: localStorageEvents, indexedDbInspected: false };
   }
 }
 
@@ -3184,7 +3196,8 @@ async function uploadCompletedGame(
     alreadyUploaded: uploadedGameIds().has(gameId),
     playerTag,
   })) return true;
-  const events = (storedEvents ?? await storedAnalyticsEvents())
+  const historyEvents = storedEvents ?? (await storedAnalyticsEvents()).events;
+  const events = historyEvents
     .filter((event) => event.gameId === gameId)
     .map((event) => tagPhoneRecord(event));
   if (!events.length) return false;
@@ -3218,15 +3231,15 @@ async function uploadCompletedGame(
   }
 }
 
-async function uploadLocalCompletedGames(force = false): Promise<boolean> {
+async function uploadLocalCompletedGames(force = false, requireIndexedDbInspection = false): Promise<boolean> {
   if (LOCAL_QA_MODE) return true;
   if (!usesRemoteAi() || !authenticatedUser) return false;
-  const events = await storedAnalyticsEvents();
+  const history = await storedAnalyticsEvents();
   let uploaded = true;
-  for (const gameId of completedGameIds(events)) {
-    if (!await uploadCompletedGame(gameId, force, events)) uploaded = false;
+  for (const gameId of completedGameIds(history.events)) {
+    if (!await uploadCompletedGame(gameId, force, history.events)) uploaded = false;
   }
-  return uploaded;
+  return uploaded && (!requireIndexedDbInspection || history.indexedDbInspected);
 }
 
 let localCompletedGameBackfill: Promise<void> | null = null;
@@ -3238,7 +3251,7 @@ function backfillLocalCompletedGames(): Promise<void> {
     return Promise.resolve();
   }
   localCompletedGameBackfill = (async () => {
-    if (await uploadLocalCompletedGames(true)) {
+    if (await uploadLocalCompletedGames(true, true)) {
       safeLocalStorageSet(SERVER_UPLOAD_BACKFILL_KEY, marker);
     }
   })().finally(() => {
@@ -3267,10 +3280,7 @@ async function exportPhoneGameLog(): Promise<void> {
     readPhoneStore<Record<string, unknown>>(db, "games"),
     readPhoneStore<AnalyticsEvent>(db, "events"),
   ]);
-  const eventsById = new Map<string, AnalyticsEvent>();
-  for (const event of store.events) eventsById.set(event.id, event);
-  for (const event of indexedDbEvents) eventsById.set(event.id, event);
-  const events = [...eventsById.values()].sort((a, b) => a.at.localeCompare(b.at));
+  const events = mergeStoredAnalyticsEvents(store.events, indexedDbEvents);
   const exportRecord = {
     schemaVersion: 1,
     source: "phone",
