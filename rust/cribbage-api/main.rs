@@ -3929,10 +3929,9 @@ fn leaderboard_summary_json_with_handicaps_at(
         HashMap::new();
     let mut best_wins = Vec::new();
     for upload in uploads.values() {
-        if !is_included_leaderboard_game(upload) {
+        if !is_included_player_stats_game(upload) {
             continue;
         }
-        add_upload_to_player_totals(totals.entry(upload.player.clone()).or_default(), upload);
         add_upload_to_player_totals(
             totals_by_opponent
                 .entry(stats_opponent_family(&upload.model))
@@ -3941,6 +3940,10 @@ fn leaderboard_summary_json_with_handicaps_at(
                 .or_default(),
             upload,
         );
+        if !is_included_leaderboard_game(upload) {
+            continue;
+        }
+        add_upload_to_player_totals(totals.entry(upload.player.clone()).or_default(), upload);
         let won = upload.winner.as_deref() == Some("human");
         let margin = upload.human_score - upload.ai_score;
         if won {
@@ -4093,8 +4096,12 @@ fn is_public_leaderboard_player(player: &str) -> bool {
 }
 
 fn is_included_leaderboard_game(upload: &UploadedGame) -> bool {
-    is_public_leaderboard_player(&upload.player)
+    is_included_player_stats_game(upload)
         && ModelId::from_str(&upload.model).is_ok_and(|model| model.is_ace())
+}
+
+fn is_included_player_stats_game(upload: &UploadedGame) -> bool {
+    is_public_leaderboard_player(&upload.player)
         && (upload.human_score != 0 || upload.ai_score != 0)
 }
 
@@ -4921,10 +4928,9 @@ mod tests {
         assert_eq!(summary["playerStatsByOpponent"]["master"][0]["games"], 2);
         assert_eq!(summary["playerStatsByOpponent"]["master"][0]["wins"], 1);
         assert_eq!(summary["playerStatsByOpponent"]["master"][0]["losses"], 1);
-        assert!(summary["playerStatsByOpponent"]["easy"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert_eq!(summary["playerStatsByOpponent"]["easy"][0]["games"], 1);
+        assert_eq!(summary["playerStatsByOpponent"]["easy"][0]["wins"], 1);
+        assert_eq!(summary["playerStatsByOpponent"]["easy"][0]["skunks"], 1);
         assert_eq!(summary["playerHandicaps"]["Garrett"]["wpPerGame"], -0.125);
     }
 
