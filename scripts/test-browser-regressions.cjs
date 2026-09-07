@@ -229,6 +229,28 @@ async function testPathwayParentNavigation(browser, baseUrl) {
   return { leaderboardRefresh: true, utilityParents: true, pathwayParents: true };
 }
 
+async function installLeaderboardBackfillApiFixture(page) {
+  const uploads = [];
+  const user = { username: "qa-player", displayName: "QA Player", email: "qa@example.test" };
+  await page.route("**/api/**", async (route) => {
+    const apiPath = new URL(route.request().url()).pathname;
+    if (apiPath === "/api/auth/session") return route.fulfill({ json: { authenticated: true, user } });
+    if (apiPath === "/api/people/me") {
+      return route.fulfill({ json: { profile: { ...user, online: true, lookingForGame: false, isSelf: true } } });
+    }
+    if (apiPath === "/api/people/presence" || apiPath === "/api/people/online") {
+      return route.fulfill({ json: { onlineCount: 1, players: [], incomingChallenges: [], outgoingChallenges: [], activeTable: null } });
+    }
+    if (apiPath === "/api/people/challenges/watch") return route.abort();
+    if (apiPath === "/api/games") {
+      uploads.push(route.request().postDataJSON());
+      return route.fulfill({ json: { ok: true, updated: false } });
+    }
+    return route.fulfill({ status: 404, json: { error: `Unhandled QA route: ${apiPath}` } });
+  });
+  return uploads;
+}
+
 async function testIndexedDbLeaderboardBackfill(browser, baseUrl) {
   const page = await browser.newPage({ viewport: { width: 1000, height: 800 } });
   await installStaticBuild(page);
@@ -275,24 +297,7 @@ async function testIndexedDbLeaderboardBackfill(browser, baseUrl) {
     });
   });
 
-  const uploads = [];
-  const user = { username: "qa-player", displayName: "QA Player", email: "qa@example.test" };
-  await page.route("**/api/**", async (route) => {
-    const apiPath = new URL(route.request().url()).pathname;
-    if (apiPath === "/api/auth/session") return route.fulfill({ json: { authenticated: true, user } });
-    if (apiPath === "/api/people/me") {
-      return route.fulfill({ json: { profile: { ...user, online: true, lookingForGame: false, isSelf: true } } });
-    }
-    if (apiPath === "/api/people/presence" || apiPath === "/api/people/online") {
-      return route.fulfill({ json: { onlineCount: 1, players: [], incomingChallenges: [], outgoingChallenges: [], activeTable: null } });
-    }
-    if (apiPath === "/api/people/challenges/watch") return route.abort();
-    if (apiPath === "/api/games") {
-      uploads.push(route.request().postDataJSON());
-      return route.fulfill({ json: { ok: true, updated: false } });
-    }
-    return route.fulfill({ status: 404, json: { error: `Unhandled QA route: ${apiPath}` } });
-  });
+  const uploads = await installLeaderboardBackfillApiFixture(page);
 
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
   await page.locator('body[data-ready="true"][data-auth="signed-in"]').waitFor({ timeout: 5000 });
@@ -342,24 +347,7 @@ async function testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl) {
     });
   });
 
-  const uploads = [];
-  const user = { username: "qa-player", displayName: "QA Player", email: "qa@example.test" };
-  await page.route("**/api/**", async (route) => {
-    const apiPath = new URL(route.request().url()).pathname;
-    if (apiPath === "/api/auth/session") return route.fulfill({ json: { authenticated: true, user } });
-    if (apiPath === "/api/people/me") {
-      return route.fulfill({ json: { profile: { ...user, online: true, lookingForGame: false, isSelf: true } } });
-    }
-    if (apiPath === "/api/people/presence" || apiPath === "/api/people/online") {
-      return route.fulfill({ json: { onlineCount: 1, players: [], incomingChallenges: [], outgoingChallenges: [], activeTable: null } });
-    }
-    if (apiPath === "/api/people/challenges/watch") return route.abort();
-    if (apiPath === "/api/games") {
-      uploads.push(route.request().postDataJSON());
-      return route.fulfill({ json: { ok: true, updated: false } });
-    }
-    return route.fulfill({ status: 404, json: { error: `Unhandled QA route: ${apiPath}` } });
-  });
+  const uploads = await installLeaderboardBackfillApiFixture(page);
 
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
   await page.locator('body[data-ready="true"][data-auth="signed-in"]').waitFor({ timeout: 5000 });
