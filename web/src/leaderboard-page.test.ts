@@ -52,4 +52,12 @@ describe("standalone leaderboard pathway", () => {
     expect(leaderboardRenderer).not.toContain("calibrated cycle");
     expect(leaderboardRenderer).not.toContain("A smaller handicap is closer to Ace");
   });
+
+  it("backfills completed browser games after pathway authentication", () => {
+    const authentication = source.slice(
+      source.indexOf("function finishAuthentication"),
+      source.indexOf("async function initializeAuthentication"),
+    );
+    expect(authentication).toContain("backfillLocalCompletedGames()");
+  });
 });

@@ -31,6 +31,7 @@ import {
 import { AuthenticationRequiredError, shouldRecoverExpiredSession } from "./auth-recovery";
 import { circularTurnCutPresentation, createCircularBoard, updateCircularBoard } from "./circular-board";
 import { comparisonTone, type ComparisonTone } from "./comparison-difference";
+import { completedGameIds, mergeStoredAnalyticsEvents } from "./completed-game-history";
 import {
   DYNAMIC_CALIBRATING_LABEL,
   dynamicCardCopy,
@@ -953,6 +954,7 @@ const SIMPLE_NETWORK_LOCAL_AI_MODE = SIMPLE_NETWORK_MODE &&
   LOCAL_NETWORK_MODE &&
   (REMOTE_AI_DISABLED || (IS_VITE_DEV && !REMOTE_AI_EXPLICIT));
 const SERVER_UPLOAD_KEY = "strong-cribbage.serverUploadedGames.v1";
+const SERVER_UPLOAD_BACKFILL_KEY = "strong-cribbage.serverUploadBackfill.v2";
 const ADMIN_HASH = "#strong-admin-13";
 
 let playerFirstName = (safeLocalStorageGet(PLAYER_FIRST_NAME_KEY) || "").trim();
@@ -1604,37 +1606,43 @@ function openPhoneGameDb(): Promise<IDBDatabase | null> {
   return phoneGameDbPromise;
 }
 
-function persistPhoneGameEvents(events: AnalyticsEvent[]): void {
+async function persistPhoneGameEvents(events: AnalyticsEvent[]): Promise<void> {
   if (!events.length) return;
-  void openPhoneGameDb().then((db) => {
+  try {
+    const db = await openPhoneGameDb();
     if (!db) return;
-    const transaction = db.transaction(["events", "games"], "readwrite");
-    const eventStore = transaction.objectStore("events");
-    const gameStore = transaction.objectStore("games");
-    for (const event of events) {
-      const taggedEvent = tagPhoneRecord(event);
-      eventStore.put(taggedEvent);
-      if (event.type === "game" && event.action === "end") {
-        gameStore.put({
-          gameId: event.gameId,
-          source: "phone",
-          opponent: event.opponent,
-          winner: event.winner ?? null,
-          loser: event.loser ?? null,
-          result: event.result ?? null,
-          finalScores: event.finalScores ?? null,
-          endedAt: event.at,
-          includedInTables: 1,
-          tags: currentSessionTag() ? [currentSessionTag()] : [],
-          sessionTag: currentSessionTag() || null,
-          notes: currentSessionTag() ? `tag:${currentSessionTag()}` : "",
-          randomSeed: null,
-        });
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(["events", "games"], "readwrite");
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+      const eventStore = transaction.objectStore("events");
+      const gameStore = transaction.objectStore("games");
+      for (const event of events) {
+        const taggedEvent = tagPhoneRecord(event);
+        eventStore.put(taggedEvent);
+        if (event.type === "game" && event.action === "end") {
+          gameStore.put({
+            gameId: event.gameId,
+            source: "phone",
+            opponent: event.opponent,
+            winner: event.winner ?? null,
+            loser: event.loser ?? null,
+            result: event.result ?? null,
+            finalScores: event.finalScores ?? null,
+            endedAt: event.at,
+            includedInTables: 1,
+            tags: currentSessionTag() ? [currentSessionTag()] : [],
+            sessionTag: currentSessionTag() || null,
+            notes: currentSessionTag() ? `tag:${currentSessionTag()}` : "",
+            randomSeed: null,
+          });
+        }
       }
-    }
-  }).catch(() => {
+    });
+  } catch {
     // localStorage remains the fallback analytics store if IndexedDB is unavailable.
-  });
+  }
 }
 
 function tagPhoneRecord<T extends object>(record: T): T & { tags?: string[]; sessionTag?: string } {
@@ -1687,7 +1695,7 @@ function saveSplashName(): boolean {
   els.splashFirstName.setCustomValidity("");
   playerFirstName = name;
   safeLocalStorageSet(PLAYER_FIRST_NAME_KEY, playerFirstName);
-  uploadLocalCompletedGames();
+  void uploadLocalCompletedGames();
   return true;
 }
 
@@ -3077,6 +3085,7 @@ function finishAuthentication(user: AuthUser): void {
   cleanUrl.searchParams.delete("reset");
   cleanUrl.searchParams.delete("invite");
   window.history.replaceState({}, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+  void backfillLocalCompletedGames();
 }
 
 async function initializeAuthentication(): Promise<boolean> {
@@ -3149,9 +3158,36 @@ function markGameUploaded(gameId: string): void {
   safeLocalStorageSet(SERVER_UPLOAD_KEY, JSON.stringify([...ids]));
 }
 
-function uploadCompletedGame(gameId: string, force = false): void {
-  if (LOCAL_QA_MODE) return;
-  if (!authenticatedUser) return;
+type StoredAnalyticsHistory = {
+  events: AnalyticsEvent[];
+  indexedDbInspected: boolean;
+};
+
+async function storedAnalyticsEvents(): Promise<StoredAnalyticsHistory> {
+  const localStorageEvents = loadAnalytics().events;
+  if (!("indexedDB" in window)) {
+    return { events: localStorageEvents, indexedDbInspected: true };
+  }
+  try {
+    const db = await openPhoneGameDb();
+    if (!db) return { events: localStorageEvents, indexedDbInspected: false };
+    const indexedDbEvents = await readPhoneStore<AnalyticsEvent>(db, "events");
+    return {
+      events: mergeStoredAnalyticsEvents(localStorageEvents, indexedDbEvents),
+      indexedDbInspected: true,
+    };
+  } catch {
+    return { events: localStorageEvents, indexedDbInspected: false };
+  }
+}
+
+async function uploadCompletedGame(
+  gameId: string,
+  force = false,
+  storedEvents?: AnalyticsEvent[],
+): Promise<boolean> {
+  if (LOCAL_QA_MODE) return true;
+  if (!authenticatedUser) return false;
   const playerTag = currentSessionTag();
   if (!shouldUploadCompletedGame({
     remoteEnabled: usesRemoteAi(),
@@ -3159,43 +3195,69 @@ function uploadCompletedGame(gameId: string, force = false): void {
     force,
     alreadyUploaded: uploadedGameIds().has(gameId),
     playerTag,
-  })) return;
-  const store = loadAnalytics();
-  const events = store.events.filter((event) => event.gameId === gameId).map((event) => tagPhoneRecord(event));
-  if (!events.length) return;
-  const endEvent = events.find((event) => event.type === "game" && event.action === "end");
-  if (!endEvent) return;
+  })) return true;
+  const historyEvents = storedEvents ?? (await storedAnalyticsEvents()).events;
+  const events = historyEvents
+    .filter((event) => event.gameId === gameId)
+    .map((event) => tagPhoneRecord(event));
+  if (!events.length) return false;
+  const endEvent = events.find(
+    (event): event is Extract<AnalyticsEvent, { type: "game" }> & { action: "end" } =>
+      event.type === "game" && event.action === "end",
+  );
+  if (!endEvent) return false;
   const startEvent = events.find(
     (event): event is Extract<AnalyticsEvent, { type: "game" }> & { tags?: string[]; sessionTag?: string } =>
       event.type === "game" && event.action === "start",
   );
-  void serverJson<CompletedGameUploadResponse>("/api/games", {
-    gameId,
-    tag: playerTag,
-    appVersion: __APP_VERSION__,
-    model: startEvent?.opponent ?? currentSnapshot?.opponent ?? SIMPLE_NETWORK_OPPONENT,
-    finalResult: endEvent,
-    snapshot: currentSnapshot?.gameId === gameId ? currentSnapshot : null,
-    events,
-  }).then((response) => {
+  try {
+    const response = await serverJson<CompletedGameUploadResponse>("/api/games", {
+      gameId,
+      tag: playerTag,
+      appVersion: __APP_VERSION__,
+      model: startEvent?.opponent ?? endEvent.opponent ?? currentSnapshot?.opponent ?? SIMPLE_NETWORK_OPPONENT,
+      finalResult: endEvent,
+      snapshot: currentSnapshot?.gameId === gameId ? currentSnapshot : null,
+      events,
+    });
     if (endEvent) markGameUploaded(gameId);
     if (response.updated && response.leaderboard) {
       applyLeaderboardSummary(response.leaderboard, { animate: true });
     }
-  }).catch((error) => {
+    return true;
+  } catch (error) {
     console.warn("Completed game upload failed", error);
-  });
+    return false;
+  }
 }
 
-function uploadLocalCompletedGames(force = false): void {
-  if (LOCAL_QA_MODE) return;
-  if (!usesRemoteAi()) return;
-  const completedGameIds = new Set(
-    loadAnalytics().events
-      .filter((event) => event.type === "game" && event.action === "end")
-      .map((event) => event.gameId),
-  );
-  for (const gameId of completedGameIds) uploadCompletedGame(gameId, force);
+async function uploadLocalCompletedGames(force = false, requireIndexedDbInspection = false): Promise<boolean> {
+  if (LOCAL_QA_MODE) return true;
+  if (!usesRemoteAi() || !authenticatedUser) return false;
+  const history = await storedAnalyticsEvents();
+  let uploaded = true;
+  for (const gameId of completedGameIds(history.events)) {
+    if (!await uploadCompletedGame(gameId, force, history.events)) uploaded = false;
+  }
+  return uploaded && (!requireIndexedDbInspection || history.indexedDbInspected);
+}
+
+let localCompletedGameBackfill: Promise<void> | null = null;
+
+function backfillLocalCompletedGames(): Promise<void> {
+  if (localCompletedGameBackfill) return localCompletedGameBackfill;
+  const marker = `v2:${authenticatedUser?.username ?? ""}`;
+  if (!authenticatedUser || safeLocalStorageGet(SERVER_UPLOAD_BACKFILL_KEY) === marker) {
+    return Promise.resolve();
+  }
+  localCompletedGameBackfill = (async () => {
+    if (await uploadLocalCompletedGames(true, true)) {
+      safeLocalStorageSet(SERVER_UPLOAD_BACKFILL_KEY, marker);
+    }
+  })().finally(() => {
+    localCompletedGameBackfill = null;
+  });
+  return localCompletedGameBackfill;
 }
 
 function idbRequest<T>(request: IDBRequest<T>): Promise<T> {
@@ -3218,10 +3280,7 @@ async function exportPhoneGameLog(): Promise<void> {
     readPhoneStore<Record<string, unknown>>(db, "games"),
     readPhoneStore<AnalyticsEvent>(db, "events"),
   ]);
-  const eventsById = new Map<string, AnalyticsEvent>();
-  for (const event of store.events) eventsById.set(event.id, event);
-  for (const event of indexedDbEvents) eventsById.set(event.id, event);
-  const events = [...eventsById.values()].sort((a, b) => a.at.localeCompare(b.at));
+  const events = mergeStoredAnalyticsEvents(store.events, indexedDbEvents);
   const exportRecord = {
     schemaVersion: 1,
     source: "phone",
@@ -3266,11 +3325,17 @@ function syncAnalytics(events: AnalyticsEvent[]): void {
   }
   store.events.sort((a, b) => a.at.localeCompare(b.at));
   saveAnalytics(store);
-  persistPhoneGameEvents(changedEvents);
-  for (const event of changedEvents) {
-    if (event.type === "game" && event.action === "end") uploadCompletedGame(event.gameId, true);
-    else if ("review" in event && event.review) uploadCompletedGame(event.gameId, true);
-  }
+  const persisted = persistPhoneGameEvents(changedEvents);
+  const uploadIds = new Set(changedEvents
+    .filter((event) => (
+      event.type === "game" && event.action === "end"
+    ) || (
+      "review" in event && Boolean(event.review)
+    ))
+    .map((event) => event.gameId));
+  void persisted.then(async () => {
+    for (const gameId of uploadIds) await uploadCompletedGame(gameId, true);
+  });
 }
 
 function markAppReady(): void {
@@ -10486,7 +10551,7 @@ window.addEventListener("resize", () => {
 });
 window.addEventListener("pagehide", () => {
   activityTracker.trackPageExit();
-  uploadLocalCompletedGames(true);
+  void uploadLocalCompletedGames();
 });
 
 let authenticationRecovery: Promise<void> | null = null;
@@ -10600,7 +10665,7 @@ async function finishDiscardInBackground(
 
 async function initializeGameState(): Promise<void> {
   try {
-    uploadLocalCompletedGames(true);
+    void backfillLocalCompletedGames();
     const remoteGame = await loadRemoteActiveGameSession();
     const initialGame = remoteGame ?? await api("/api/state");
     startCutForDealPreparation(initialGame);

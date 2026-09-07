@@ -4792,6 +4792,23 @@ mod tests {
                     errors: 0,
                 },
             ),
+            (
+                "ace-current-win".to_string(),
+                UploadedGame {
+                    game_id: "ace-current-win".to_string(),
+                    player: "Garrett".to_string(),
+                    winner: Some("human".to_string()),
+                    result: "regular".to_string(),
+                    human_score: 121,
+                    ai_score: 110,
+                    model: "schell_table-peg_table-13.215".to_string(),
+                    ended_at: "2026-09-03T00:00:00Z".to_string(),
+                    human_scoring: ScoringTotals::default(),
+                    ai_scoring: ScoringTotals::default(),
+                    analyzed: false,
+                    errors: 0,
+                },
+            ),
         ]);
 
         let handicaps = HashMap::from([(
@@ -4807,8 +4824,9 @@ mod tests {
             &uploads, &handicaps,
         ))
         .unwrap();
-        assert_eq!(summary["playerStats"][0]["games"], 2);
-        assert_eq!(summary["playerStatsByOpponent"]["master"][0]["games"], 1);
+        assert_eq!(summary["playerStats"][0]["games"], 3);
+        assert_eq!(summary["playerStatsByOpponent"]["master"][0]["games"], 2);
+        assert_eq!(summary["playerStatsByOpponent"]["master"][0]["wins"], 1);
         assert_eq!(summary["playerStatsByOpponent"]["master"][0]["losses"], 1);
         assert_eq!(summary["playerStatsByOpponent"]["easy"][0]["games"], 1);
         assert_eq!(summary["playerStatsByOpponent"]["easy"][0]["wins"], 1);
