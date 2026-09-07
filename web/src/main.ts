@@ -711,6 +711,8 @@ const els = {
   leaderboardSummary: document.querySelector("#leaderboard-summary") as HTMLElement,
   leaderboardList: document.querySelector("#leaderboard-list") as HTMLElement,
   leaderboardMetricTabButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-leaderboard-metric]")],
+  leaderboardMetricInfo: document.querySelector(".leaderboard-metric-info") as HTMLButtonElement,
+  leaderboardPointsHelp: document.querySelector("#leaderboard-points-help") as HTMLElement,
   leaderboardWindowTabs: document.querySelector("#leaderboard-window-tabs") as HTMLElement,
   leaderboardWindowTabButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-leaderboard-window]")],
   modelInfoOpen: document.querySelector("#model-info-open") as HTMLButtonElement,
@@ -9808,6 +9810,36 @@ bindLeaderboardTabs(els.leaderboardMetricTabButtons, (button) => {
 bindLeaderboardTabs(els.leaderboardWindowTabButtons, (button) => {
   state.leaderboardWindow = button.dataset.leaderboardWindow as LeaderboardWindow;
   render(state.game);
+});
+
+let leaderboardPointsHelpPinned = false;
+
+function setLeaderboardPointsHelpOpen(open: boolean): void {
+  els.leaderboardMetricInfo.setAttribute("aria-expanded", String(open));
+  els.leaderboardPointsHelp.classList.toggle("is-open", open);
+}
+
+els.leaderboardMetricInfo.addEventListener("pointerenter", () => setLeaderboardPointsHelpOpen(true));
+els.leaderboardMetricInfo.addEventListener("pointerleave", () => {
+  if (!leaderboardPointsHelpPinned) setLeaderboardPointsHelpOpen(false);
+});
+els.leaderboardMetricInfo.addEventListener("focus", () => setLeaderboardPointsHelpOpen(true));
+els.leaderboardMetricInfo.addEventListener("blur", () => {
+  if (!leaderboardPointsHelpPinned) setLeaderboardPointsHelpOpen(false);
+});
+els.leaderboardMetricInfo.addEventListener("click", () => {
+  leaderboardPointsHelpPinned = !leaderboardPointsHelpPinned;
+  setLeaderboardPointsHelpOpen(leaderboardPointsHelpPinned);
+});
+els.leaderboardMetricInfo.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  leaderboardPointsHelpPinned = false;
+  setLeaderboardPointsHelpOpen(false);
+});
+document.addEventListener("click", (event) => {
+  if (event.target instanceof Node && els.leaderboardMetricInfo.contains(event.target)) return;
+  leaderboardPointsHelpPinned = false;
+  setLeaderboardPointsHelpOpen(false);
 });
 
 els.modelInfoOpen.addEventListener("click", () => {

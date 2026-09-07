@@ -25,7 +25,7 @@ describe("standalone leaderboard pathway", () => {
     expect(source).toMatch(/const handicap = state\.leaderboardMetric === "handicap";[\s\S]*leaderboardWindowTabs\.hidden = handicap/);
   });
 
-  it("offers all result metrics and rolling time windows as keyboard tabs", () => {
+  it("offers accessible result metrics and horizontally scrolling time windows", () => {
     for (const metric of ["handicap", "pointsPerGame", "winPercentage", "pointDifferential", "totalPoints", "totalWins"]) {
       expect(html).toContain(`data-leaderboard-metric="${metric}"`);
     }
@@ -39,7 +39,10 @@ describe("standalone leaderboard pathway", () => {
     }
     expect(source).toMatch(/bindLeaderboardTabs[\s\S]*ArrowLeft[\s\S]*ArrowRight/);
     expect(css).toMatch(/\.leaderboard-tabs button:focus-visible/);
-    expect(css).toMatch(/\.leaderboard-metric-info:hover\s*\+\s*\.leaderboard-metric-tooltip/);
+    expect(html).toMatch(/leaderboard-metric-info[^>]*aria-expanded="false"/);
+    expect(source).toMatch(/leaderboardMetricInfo\.addEventListener\("click"[\s\S]*setLeaderboardPointsHelpOpen/);
+    expect(css).toMatch(/\.leaderboard-tabs\s*\{[\s\S]*overflow-x: auto;[\s\S]*overflow-y: hidden;[\s\S]*scrollbar-width: none;/);
+    expect(css).toMatch(/\.leaderboard-tabs::\-webkit-scrollbar\s*\{[\s\S]*display: none;/);
   });
 
   it("renders handicap as the bare two-decimal value", () => {

@@ -2512,10 +2512,18 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   gap: 8px;
   padding: 4px;
   overflow-x: auto;
+  overflow-y: hidden;
   border: 1px solid var(--entry-border);
   border-radius: 15px;
   background: color-mix(in srgb, var(--entry-panel-soft) 88%, var(--entry-panel-alt));
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.leaderboard-tabs::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .leaderboard-tabs[hidden] {
@@ -2548,8 +2556,12 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   outline-offset: 2px;
 }
 
-.leaderboard-metric-with-info {
+.leaderboard-metric-control {
   position: relative;
+  min-width: 0;
+}
+
+.leaderboard-metric-with-info {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
@@ -2559,8 +2571,8 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
 .leaderboard-tabs .leaderboard-metric-info {
   display: grid;
   place-items: center;
-  width: 28px;
-  min-height: 28px;
+  width: 44px;
+  min-height: 44px;
   padding: 0;
   border-color: var(--entry-border-strong);
   border-radius: 50%;
@@ -2575,7 +2587,7 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
 .leaderboard-metric-tooltip {
   position: absolute;
   top: calc(100% + 8px);
-  left: 0;
+  left: 4px;
   z-index: 20;
   width: min(300px, calc(100vw - 48px));
   padding: 10px 12px;
@@ -2593,8 +2605,7 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   transition: opacity 140ms ease, translate 140ms ease;
 }
 
-.leaderboard-metric-info:hover + .leaderboard-metric-tooltip,
-.leaderboard-metric-info:focus-visible + .leaderboard-metric-tooltip {
+.leaderboard-metric-tooltip.is-open {
   opacity: 1;
   translate: 0 0;
 }

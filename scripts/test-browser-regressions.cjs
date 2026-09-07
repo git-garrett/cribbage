@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
-const { chromium } = require("@playwright/test");
+const { chromium, webkit } = require("@playwright/test");
 
 const root = path.resolve(__dirname, "../dist");
 const contentTypes = {
@@ -227,6 +227,46 @@ async function testPathwayParentNavigation(browser, baseUrl) {
   }
 
   return { leaderboardRefresh: true, utilityParents: true, pathwayParents: true };
+}
+
+async function testLeaderboardTourneyInfoTap(browser, baseUrl) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await installStaticBuild(page);
+  await installPathwayFixture(page);
+  await page.goto(`${baseUrl}/?pathwayView=leaderboard`, { waitUntil: "domcontentloaded" });
+  await page.locator('body[data-ready="true"][data-auth="signed-in"]').waitFor({ timeout: 5000 });
+  const info = page.getByRole("button", { name: "About Tourney Points per Game" });
+  await info.tap();
+  await page.waitForTimeout(250);
+  const infoState = {
+    expanded: await info.getAttribute("aria-expanded"),
+    bounds: await info.boundingBox(),
+    opacity: await page.locator("#leaderboard-points-help").evaluate(
+      (tooltip) => getComputedStyle(tooltip).opacity,
+    ),
+  };
+  const scrollStates = await page.locator(".leaderboard-tabs").evaluateAll((tabLists) => tabLists.map((tabList) => {
+    const style = getComputedStyle(tabList);
+    tabList.scrollTop = 20;
+    return {
+      overflowX: style.overflowX,
+      overflowY: style.overflowY,
+      scrollbarWidth: style.scrollbarWidth,
+      scrollTop: tabList.scrollTop,
+    };
+  }));
+  const failures = [];
+  if (infoState.expanded !== "true" || infoState.opacity !== "1" || !infoState.bounds || infoState.bounds.width < 44 || infoState.bounds.height < 44) {
+    failures.push(`info ${JSON.stringify(infoState)}`);
+  }
+  if (scrollStates.some((state) => state.overflowX !== "auto" || state.overflowY !== "hidden" || state.scrollbarWidth !== "none" || state.scrollTop !== 0)) {
+    failures.push(`tab scrolling ${JSON.stringify(scrollStates)}`);
+  }
+  if (failures.length) {
+    throw new Error(`Leaderboard mobile controls failed: ${failures.join("; ")}`);
+  }
+  await page.close();
+  return { touchTapOpensTooltip: true, horizontalScrollOnly: true, scrollbarsHidden: true };
 }
 
 async function installLeaderboardBackfillApiFixture(page) {
@@ -529,7 +569,8 @@ async function main() {
   if (!fs.existsSync(path.join(root, "index.html"))) {
     throw new Error("Missing dist/index.html; run npm run build first.");
   }
-  const browser = await chromium.launch({ headless: true });
+  const browserType = process.env.BROWSER_ENGINE === "webkit" ? webkit : chromium;
+  const browser = await browserType.launch({ headless: true });
   try {
     const baseUrl = "https://strong-cribbage.test";
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
@@ -582,11 +623,12 @@ async function main() {
     }
     await page.close();
     const pathwayNavigation = await testPathwayParentNavigation(browser, baseUrl);
+    const leaderboardInfo = await testLeaderboardTourneyInfoTap(browser, baseUrl);
     const leaderboardBackfill = await testIndexedDbLeaderboardBackfill(browser, baseUrl);
     const blockedIndexedDb = await testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl);
     const people = await testPeopleInteractions(browser, baseUrl);
     const engagement = await testEngagementDashboard(browser, baseUrl);
-    console.log(JSON.stringify({ authenticationRecovery: state, pathwayNavigation, leaderboardBackfill, blockedIndexedDb, people, engagement }));
+    console.log(JSON.stringify({ authenticationRecovery: state, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
   } finally {
     await browser.close();
   }

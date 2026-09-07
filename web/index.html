@@ -1064,17 +1064,19 @@
           </div>
         </div>
         <div class="leaderboard-controls">
-          <div id="leaderboard-metric-tabs" class="leaderboard-tabs" role="tablist" aria-label="Leaderboard metric">
-            <button type="button" role="tab" data-leaderboard-metric="handicap" aria-selected="true">Handicap</button>
-            <span class="leaderboard-metric-with-info" role="presentation">
-              <button type="button" role="tab" data-leaderboard-metric="pointsPerGame" aria-selected="false">Tourney Points / Game</button>
-              <button class="leaderboard-metric-info" type="button" aria-label="About Tourney Points per Game" aria-describedby="leaderboard-points-help" title="One point per game, two points per skunk, with a penalty for losses and getting skunked.">i</button>
-              <span id="leaderboard-points-help" class="leaderboard-metric-tooltip" role="tooltip">One point per game, two points per skunk, with a penalty for losses and getting skunked.</span>
-            </span>
-            <button type="button" role="tab" data-leaderboard-metric="winPercentage" aria-selected="false">Win %</button>
-            <button type="button" role="tab" data-leaderboard-metric="pointDifferential" aria-selected="false">Point differential / game</button>
-            <button type="button" role="tab" data-leaderboard-metric="totalPoints" aria-selected="false">Points scored</button>
-            <button type="button" role="tab" data-leaderboard-metric="totalWins" aria-selected="false">Total wins</button>
+          <div class="leaderboard-metric-control">
+            <div id="leaderboard-metric-tabs" class="leaderboard-tabs" role="tablist" aria-label="Leaderboard metric">
+              <button type="button" role="tab" data-leaderboard-metric="handicap" aria-selected="true">Handicap</button>
+              <span class="leaderboard-metric-with-info" role="presentation">
+                <button type="button" role="tab" data-leaderboard-metric="pointsPerGame" aria-selected="false">Tourney Points / Game</button>
+                <button class="leaderboard-metric-info" type="button" aria-label="About Tourney Points per Game" aria-controls="leaderboard-points-help" aria-expanded="false" title="One point per game, two points per skunk, with a penalty for losses and getting skunked.">i</button>
+              </span>
+              <button type="button" role="tab" data-leaderboard-metric="winPercentage" aria-selected="false">Win %</button>
+              <button type="button" role="tab" data-leaderboard-metric="pointDifferential" aria-selected="false">Point differential / game</button>
+              <button type="button" role="tab" data-leaderboard-metric="totalPoints" aria-selected="false">Points scored</button>
+              <button type="button" role="tab" data-leaderboard-metric="totalWins" aria-selected="false">Total wins</button>
+            </div>
+            <span id="leaderboard-points-help" class="leaderboard-metric-tooltip" role="tooltip">One point per game, two points per skunk, with a penalty for losses and getting skunked.</span>
           </div>
           <div id="leaderboard-window-tabs" class="leaderboard-tabs leaderboard-window-tabs" role="tablist" aria-label="Leaderboard time window" hidden>
             <button type="button" role="tab" data-leaderboard-window="daily" aria-selected="false">Daily</button>
