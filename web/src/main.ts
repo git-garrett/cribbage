@@ -7364,9 +7364,9 @@ let renderedLeaderboardKey = "";
 
 const LEADERBOARD_METRIC_LABELS: Record<LeaderboardMetric, string> = {
   handicap: "Current handicap",
-  pointsPerGame: "Points per game",
+  pointsPerGame: "Tourney Points / Game",
   winPercentage: "Win percentage",
-  pointDifferential: "Point differential",
+  pointDifferential: "Point differential / game",
   totalPoints: "Points scored",
   totalWins: "Total wins",
 };
@@ -7426,9 +7426,7 @@ function renderLeaderboard(): void {
         .filter(([, handicap]) => Number.isFinite(handicap.wpPerGame))
         .map(([player, handicap]) => ({ player, ...handicap })),
     );
-    els.leaderboardSummary.textContent = handicaps.length
-      ? `${handicaps.length} calibrated player${handicaps.length === 1 ? "" : "s"}. A smaller handicap is closer to Ace.`
-      : "No calibrated handicaps yet.";
+    els.leaderboardSummary.textContent = "";
     reconcileLeaderboardSection(
       "ranking",
       LEADERBOARD_METRIC_LABELS.handicap,
@@ -7436,8 +7434,7 @@ function renderLeaderboard(): void {
         key: handicap.player,
         cells: [
           [`${index + 1}. `, leaderboardPlayerIdentity(handicap.player)],
-          `${dynamicHandicapPointsCopy(handicap.wpPerGame)} WP pts/game`,
-          `${handicap.cycles} calibrated cycle${handicap.cycles === 1 ? "" : "s"}`,
+          dynamicHandicapPointsCopy(handicap.wpPerGame),
         ],
       })),
       animate,
@@ -7453,7 +7450,7 @@ function renderLeaderboard(): void {
   const games = players.reduce((total, player) => total + player.games, 0);
   const windowLabel = LEADERBOARD_WINDOW_LABELS[state.leaderboardWindow];
   const metricLabel = LEADERBOARD_METRIC_LABELS[state.leaderboardMetric];
-  els.leaderboardSummary.textContent = `${windowLabel} · ${games} completed Ace game${games === 1 ? "" : "s"}.`;
+  els.leaderboardSummary.textContent = `${windowLabel} · ${games} completed game${games === 1 ? "" : "s"}.`;
   reconcileLeaderboardSection(
     "ranking",
     `${metricLabel} · ${windowLabel}`,
