@@ -38,6 +38,7 @@ mod email;
 mod email_audit;
 mod engagement;
 mod feedback;
+mod handicap_backfill;
 mod people;
 
 const HUMAN: Side = Side::Left;
@@ -302,6 +303,7 @@ struct Server {
 }
 
 fn main() {
+    let arguments = env::args().skip(1).collect::<Vec<_>>();
     let host = env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port = env::var("PORT").unwrap_or_else(|_| "8787".to_string());
     let address = format!("{}:{}", host, port);
@@ -314,6 +316,11 @@ fn main() {
     let data_dir = env::var("CRIBBAGE_DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(&model_root).join("data"));
+    if !arguments.is_empty() {
+        handicap_backfill::run(&arguments, &data_dir, &model_root)
+            .unwrap_or_else(|error| panic!("handicap backfill failed: {error}"));
+        return;
+    }
     initialize_game_database(&data_dir).unwrap_or_else(|error| {
         panic!(
             "could not initialize durable game storage in {}: {}",
@@ -3518,8 +3525,8 @@ fn upload_game(server: &Server, body: &str) -> Response {
             .map(str::to_string)
             .unwrap_or_else(|| "Anonymous".to_string());
         let winner = completed_game_string(&payload, "winner");
-        let result = completed_game_string(&payload, "result")
-            .unwrap_or_else(|| "regular".to_string());
+        let result =
+            completed_game_string(&payload, "result").unwrap_or_else(|| "regular".to_string());
         let model = payload
             .get("model")
             .and_then(Value::as_str)
@@ -3565,7 +3572,6 @@ fn upload_game(server: &Server, body: &str) -> Response {
                 return Ok((false, app.leaderboard_summary.clone()));
             }
         }
-        let is_new = !app.uploads.contains_key(&game_id);
         let previous = app.uploads.insert(game_id.clone(), upload);
         if let Err(error) = persist_uploads(&server.data_dir, &app.uploads) {
             if let Some(previous) = previous {
@@ -3588,7 +3594,7 @@ fn upload_game(server: &Server, body: &str) -> Response {
         }
         app.leaderboard_summary =
             leaderboard_summary_json_for_data_dir(&app.uploads, &server.data_dir);
-        Ok((is_new, app.leaderboard_summary.clone()))
+        Ok((true, app.leaderboard_summary.clone()))
     })();
     match result {
         Ok((updated, leaderboard)) => Response::json(
@@ -4051,7 +4057,8 @@ fn is_public_leaderboard_player(player: &str) -> bool {
 }
 
 fn is_included_leaderboard_game(upload: &UploadedGame) -> bool {
-    is_public_leaderboard_player(&upload.player) && (upload.human_score != 0 || upload.ai_score != 0)
+    is_public_leaderboard_player(&upload.player)
+        && (upload.human_score != 0 || upload.ai_score != 0)
 }
 
 fn leaderboard_weighted_results(total: &PlayerTotals) -> i64 {
@@ -4798,7 +4805,10 @@ mod tests {
         assert_eq!(summary["playerStats"].as_array().unwrap().len(), 1);
         assert_eq!(summary["playerStats"][0]["player"], "Garrett");
         assert!(summary["playerHandicaps"].get("test").is_none());
-        assert!(!summary.to_string().to_ascii_lowercase().contains("\"player\":\"test\""));
+        assert!(!summary
+            .to_string()
+            .to_ascii_lowercase()
+            .contains("\"player\":\"test\""));
     }
 
     #[test]
@@ -5167,7 +5177,7 @@ mod tests {
         let refreshed = upload_game(&server, analyzed_game);
         let refreshed_json = serde_json::from_str::<Value>(&refreshed.body).unwrap();
         let row = &refreshed_json["leaderboard"]["playerStats"][0];
-        assert!(refreshed.body.contains("\"updated\":false"));
+        assert!(refreshed.body.contains("\"updated\":true"));
         assert_eq!(row["analyzedGames"], 1);
         assert_eq!(row["errors"], 1);
 
@@ -5280,6 +5290,22 @@ mod tests {
 
         assert_eq!(response_json["leaderboard"]["games"], 1);
         assert_eq!(response_json["leaderboard"]["playerStats"][0]["wins"], 1);
+        assert_eq!(
+            response_json["leaderboard"]["playerStatsByOpponent"]["master"][0]["games"],
+            1
+        );
+        for window in ["daily", "weekly", "monthly", "allTime"] {
+            assert_eq!(
+                response_json["leaderboard"]["playerStatsByWindow"][window][0]["games"],
+                1
+            );
+        }
+        assert_eq!(response_json["leaderboard"]["bestWinRate"][0]["wins"], 1);
+        assert_eq!(response_json["leaderboard"]["winRate14_3"][0]["wins"], 1);
+        assert_eq!(
+            response_json["leaderboard"]["bestWins"][0]["player"],
+            "Garrett"
+        );
         assert_eq!(
             response_json["leaderboard"]["playerStats"][0]["cribbagePointsScored"],
             121
@@ -5761,6 +5787,71 @@ mod tests {
             calibration_review("pone-peg", 2, false, ReviewKind::Peg, 0.50, 0.50),
         ];
         session
+    }
+
+    #[test]
+    fn completed_ace_game_updates_the_existing_handicap_without_a_backfill() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-ace-handicap-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        auth::initialize(&data_dir).unwrap();
+        let connection = open_game_database(&data_dir).unwrap();
+        let travis = connection
+            .query_row(
+                "SELECT id, username, display_name, email, password_hash
+                 FROM auth_users WHERE username = 'Travis'",
+                [],
+                auth::user_from_row,
+            )
+            .unwrap();
+        drop(connection);
+
+        let mut before = None;
+        for cycle in 0..MIN_COMPLETE_CYCLES {
+            let baseline =
+                reviewed_cycle_session(ModelId::Myrmidon5, &format!("baseline-cycle-{cycle}"));
+            before = sync_dynamic_player_profile(&data_dir, travis.id, &baseline).unwrap();
+        }
+        let before = before.unwrap();
+        let mut ace = reviewed_cycle_session(ACE_MODEL_ID, "completed-ace-game");
+        for review in &mut ace.decision_reviews {
+            let completed = review.completed.as_mut().unwrap();
+            completed.selected_win_probability = Some(0.45);
+            completed.recommended_win_probability = Some(0.50);
+        }
+        let after = sync_dynamic_player_profile(&data_dir, travis.id, &ace)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(after.handicap_cycles, before.handicap_cycles + 1);
+        assert_ne!(after.handicap_per_game(), before.handicap_per_game());
+
+        let server = Server {
+            state: Mutex::new(AppState::default()),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+        let response = upload_game(
+            &server,
+            &format!(
+                r#"{{"gameId":"completed-ace-game","tag":"Travis","winner":"human","result":"regular","model":"{}","human":121,"ai":110}}"#,
+                ACE_MODEL
+            ),
+        );
+        let response_json = serde_json::from_str::<Value>(&response.body).unwrap();
+        assert_eq!(
+            response_json["leaderboard"]["playerHandicaps"]["Travis"]["cycles"],
+            after.handicap_cycles
+        );
+        assert_eq!(
+            response_json["leaderboard"]["playerHandicaps"]["Travis"]["wpPerGame"],
+            after.handicap_per_game().unwrap()
+        );
+
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[test]

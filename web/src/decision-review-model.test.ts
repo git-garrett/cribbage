@@ -17,6 +17,12 @@ describe("postgame decision reviewer", () => {
     expect(reviewImplementation.match(/ACE_MODEL_ID/g)).toHaveLength(2);
   });
 
+  it("keeps the completed analysis action visible and disabled", () => {
+    expect(mainSource).toContain("All ${reviewed.length} decisions for ${reviewName} have been analyzed.");
+    expect(mainSource).toContain('analyze.textContent = pending.length ? state.completingReviews ? "Analyzing" : `Analyze with ${DECISION_REVIEWER_NAME}` : "Analysis complete"');
+    expect(mainSource).toContain("analyze.disabled = !pending.length || state.completingReviews || state.pending");
+  });
+
   it("gives both postgame calls to action the branded rounded treatment", () => {
     const sharedActions = stylesSource.match(/\.report-new-game,\n\.decision-review-analyze \{[\s\S]*?\n\}/)?.[0] ?? "";
 

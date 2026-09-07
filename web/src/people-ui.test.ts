@@ -179,6 +179,14 @@ describe("human clubhouse UI", () => {
     expect(css).toContain(".people-presence.has-game:not(.has-challenge)");
   });
 
+  it("uses matching red dots for a resumable game without adding Resume to the closed pill", () => {
+    expect(html).toContain('id="people-presence-game-dot"');
+    expect(source).toContain('els.peoplePresenceLabel.textContent = `${peopleDirectory.onlineCount} online`;');
+    expect(source).toContain("els.peoplePresenceGameDot.hidden = !activeTable");
+    expect(source).toContain('indicator.className = "people-game-dot"');
+    expect(css).toMatch(/\.people-presence-game-dot,[\s\S]*\.people-game-dot\s*\{[^}]*background:\s*#b61f32/);
+  });
+
   it("keeps each online row a single tap target and dismisses handicap help before navigation", () => {
     expect(source).toMatch(/setPlayerIdentity\(name, player\.displayName, player\.dynamicHandicap \?\? null, \{ interactive: false \}\)/);
     expect(css).toMatch(/\.people-list-item \.player-handicap\s*\{[^}]*pointer-events:\s*none/s);
