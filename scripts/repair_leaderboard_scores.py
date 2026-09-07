@@ -97,7 +97,70 @@ def load_authoritative_scores(sqlite_path: Path) -> dict[str, tuple[int, int]]:
                 scores[game_id] = scores_from_result(
                     payload.get("finalResult"), game_id
                 )
+        for game_id, session in load_completed_session_rows(sqlite_path).items():
+            scores.setdefault(game_id, (session.human_score, session.ai_score))
         return scores
+    finally:
+        connection.close()
+
+
+def load_completed_session_rows(sqlite_path: Path) -> dict[str, LedgerRow]:
+    if not sqlite_path.exists():
+        raise ValueError(f"SQLite database does not exist: {sqlite_path}")
+    connection = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
+    try:
+        has_sessions = connection.execute(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'cribbage_game_sessions')"
+        ).fetchone()[0]
+        if not has_sessions:
+            return {}
+        sessions: dict[str, LedgerRow] = {}
+        for session_id_value, tag_value, model_value, updated_at, session_json in connection.execute(
+            "SELECT session_id, tag, model, updated_at, session_json "
+            "FROM cribbage_game_sessions WHERE status = 'complete'"
+        ):
+            session_id = str(session_id_value or "")
+            if not session_id:
+                raise ValueError("completed game session has an empty ID")
+            session = parsed_json(session_json, session_id)
+            game = session.get("game")
+            players = game.get("players") if isinstance(game, dict) else None
+            if not isinstance(players, list) or len(players) != 2:
+                raise ValueError(f"completed game session {session_id} has invalid players")
+            human = players[0] if isinstance(players[0], dict) else {}
+            ai = players[1] if isinstance(players[1], dict) else {}
+            human_score = completed_score(human.get("score"), "human", session_id)
+            ai_score = completed_score(ai.get("score"), "AI", session_id)
+            if human_score < 121 and ai_score < 121:
+                raise ValueError(f"completed game session {session_id} has no winner")
+            winner = "human" if human_score >= 121 else "ai"
+            lower_score = min(human_score, ai_score)
+            result = (
+                "double-skunk"
+                if lower_score < 61
+                else "skunk"
+                if lower_score < 91
+                else "regular"
+            )
+            ended_at_value = session.get("completed_at") or updated_at
+            if not isinstance(ended_at_value, str) or not ended_at_value:
+                raise ValueError(f"completed game session {session_id} has no timestamp")
+            tag = str(tag_value or "").strip()[:40] or "Anonymous"
+            model = str(model_value or "")
+            if not model:
+                raise ValueError(f"completed game session {session_id} has no model")
+            sessions[session_id] = LedgerRow(
+                game_id=session_id,
+                player=tag,
+                winner=winner,
+                result=result,
+                human_score=human_score,
+                ai_score=ai_score,
+                model=model,
+                ended_at=ended_at_value,
+            )
+        return sessions
     finally:
         connection.close()
 
@@ -132,24 +195,33 @@ def repair_ledger(
     *,
     dry_run: bool,
 ) -> dict[str, int]:
-    rows = load_tsv(tsv_path)
+    existing_rows = load_tsv(tsv_path)
+    completed_sessions = load_completed_session_rows(sqlite_path)
+    recovered_sessions = {
+        game_id: row
+        for game_id, row in completed_sessions.items()
+        if game_id not in existing_rows
+    }
+    rows = {**recovered_sessions, **existing_rows}
     authoritative = load_authoritative_scores(sqlite_path)
     repaired_rows, repair_stats = repair_rows(rows, authoritative)
     stats = {
         "records": len(rows),
+        "recovered_sessions": len(recovered_sessions),
         "score_sources": len(authoritative),
         "repaired": repair_stats.repaired,
         "unchanged": repair_stats.unchanged,
         "without_source": repair_stats.without_source,
     }
-    if dry_run or repaired_rows == rows:
+    if dry_run or repaired_rows == existing_rows:
         return stats
 
     backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup = backup_dir / f"{tsv_path.name}.{timestamp}.pre-score-repair"
-    shutil.copy2(tsv_path, backup)
-    os.chmod(backup, 0o600)
+    if tsv_path.exists():
+        backup = backup_dir / f"{tsv_path.name}.{timestamp}.pre-score-repair"
+        shutil.copy2(tsv_path, backup)
+        os.chmod(backup, 0o600)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{tsv_path.name}.", suffix=".tmp", dir=tsv_path.parent, text=True
     )

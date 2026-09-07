@@ -7,6 +7,7 @@ import unittest
 
 from scripts.repair_leaderboard_scores import (
     load_authoritative_scores,
+    load_completed_session_rows,
     repair_ledger,
     repair_rows,
 )
@@ -89,6 +90,54 @@ class RepairLeaderboardScoresTest(unittest.TestCase):
 
             self.assertEqual(scores["legacy-game"], (121, 111))
             self.assertEqual(scores["updated-game"], (121, 104))
+
+    def test_recovers_completed_native_session_without_a_browser_upload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "cribbage-server.sqlite"
+            connection = sqlite3.connect(database)
+            connection.execute(
+                "CREATE TABLE cribbage_game_sessions ("
+                "session_id TEXT, tag TEXT, model TEXT, status TEXT, "
+                "updated_at TEXT, session_json TEXT)"
+            )
+            connection.execute(
+                "INSERT INTO cribbage_game_sessions VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    "rust-complete",
+                    "Shane",
+                    "schell_table-peg_table-13.215",
+                    "complete",
+                    "2026-09-06T10:05:00.000Z",
+                    json.dumps(
+                        {
+                            "completed_at": "2026-09-06T10:04:00.000Z",
+                            "game": {"players": [{"score": 121}, {"score": 84}]},
+                        }
+                    ),
+                ),
+            )
+            connection.commit()
+            connection.close()
+
+            sessions = load_completed_session_rows(database)
+            scores = load_authoritative_scores(database)
+
+            recovered = sessions["rust-complete"]
+            self.assertEqual(recovered.player, "Shane")
+            self.assertEqual(recovered.winner, "human")
+            self.assertEqual(recovered.result, "skunk")
+            self.assertEqual((recovered.human_score, recovered.ai_score), (121, 84))
+            self.assertEqual(recovered.model, "schell_table-peg_table-13.215")
+            self.assertEqual(recovered.ended_at, "2026-09-06T10:04:00.000Z")
+            self.assertEqual(scores["rust-complete"], (121, 84))
+
+            ledger = root / "leaderboard-games.tsv"
+            ledger.write_text("", encoding="utf-8")
+            stats = repair_ledger(database, ledger, root / "backups", dry_run=False)
+
+            self.assertEqual(stats["recovered_sessions"], 1)
+            self.assertIn("rust-complete\tShane\thuman\tskunk\t121\t84", ledger.read_text())
 
     def test_repairs_mismatched_scores_and_preserves_ledger_only_rows(self):
         broken = ledger_row("broken", 0, 0)

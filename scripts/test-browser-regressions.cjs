@@ -229,6 +229,81 @@ async function testPathwayParentNavigation(browser, baseUrl) {
   return { leaderboardRefresh: true, utilityParents: true, pathwayParents: true };
 }
 
+async function testIndexedDbLeaderboardBackfill(browser, baseUrl) {
+  const page = await browser.newPage({ viewport: { width: 1000, height: 800 } });
+  await installStaticBuild(page);
+  await page.goto(`${baseUrl}/coming-soon.html`, { waitUntil: "domcontentloaded" });
+  await page.evaluate(async () => {
+    const start = {
+      id: "recovery-game-start",
+      at: "2026-09-01T00:00:00.000Z",
+      type: "game",
+      action: "start",
+      gameId: "recovery-game",
+      opponent: "schell_table-peg_table-13.0",
+    };
+    const end = {
+      id: "recovery-game-end",
+      at: "2026-09-01T00:30:00.000Z",
+      type: "game",
+      action: "end",
+      gameId: "recovery-game",
+      opponent: "schell_table-peg_table-13.0",
+      winner: "human",
+      loser: "ai",
+      result: "regular",
+      finalScores: { human: 121, ai: 110 },
+    };
+    localStorage.setItem("strong-cribbage.analytics.v1", JSON.stringify({ version: 1, events: [start] }));
+    await new Promise((resolve, reject) => {
+      const request = indexedDB.open("cribbage-game-log", 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore("events", { keyPath: "id" });
+        request.result.createObjectStore("games", { keyPath: "gameId" });
+      };
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const transaction = request.result.transaction("events", "readwrite");
+        transaction.objectStore("events").put(start);
+        transaction.objectStore("events").put(end);
+        transaction.onerror = () => reject(transaction.error);
+        transaction.oncomplete = () => {
+          request.result.close();
+          resolve();
+        };
+      };
+    });
+  });
+
+  const uploads = [];
+  const user = { username: "qa-player", displayName: "QA Player", email: "qa@example.test" };
+  await page.route("**/api/**", async (route) => {
+    const apiPath = new URL(route.request().url()).pathname;
+    if (apiPath === "/api/auth/session") return route.fulfill({ json: { authenticated: true, user } });
+    if (apiPath === "/api/people/me") {
+      return route.fulfill({ json: { profile: { ...user, online: true, lookingForGame: false, isSelf: true } } });
+    }
+    if (apiPath === "/api/people/presence" || apiPath === "/api/people/online") {
+      return route.fulfill({ json: { onlineCount: 1, players: [], incomingChallenges: [], outgoingChallenges: [], activeTable: null } });
+    }
+    if (apiPath === "/api/people/challenges/watch") return route.abort();
+    if (apiPath === "/api/games") {
+      uploads.push(route.request().postDataJSON());
+      return route.fulfill({ json: { ok: true, updated: false } });
+    }
+    return route.fulfill({ status: 404, json: { error: `Unhandled QA route: ${apiPath}` } });
+  });
+
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await page.locator('body[data-ready="true"][data-auth="signed-in"]').waitFor({ timeout: 5000 });
+  await page.waitForFunction(() => localStorage.getItem("strong-cribbage.serverUploadBackfill.v2") !== null);
+  if (uploads.length !== 1 || !uploads[0].events.some((event) => event.id === "recovery-game-end")) {
+    throw new Error(`IndexedDB leaderboard history was not backfilled: ${JSON.stringify(uploads)}`);
+  }
+  await page.close();
+  return { indexedDbOnlyCompletionUploaded: true };
+}
+
 async function testPeopleInteractions(browser, baseUrl) {
   let page = await readyPeoplePage(browser, baseUrl);
   const startedAt = Date.now();
@@ -448,9 +523,10 @@ async function main() {
     }
     await page.close();
     const pathwayNavigation = await testPathwayParentNavigation(browser, baseUrl);
+    const leaderboardBackfill = await testIndexedDbLeaderboardBackfill(browser, baseUrl);
     const people = await testPeopleInteractions(browser, baseUrl);
     const engagement = await testEngagementDashboard(browser, baseUrl);
-    console.log(JSON.stringify({ authenticationRecovery: state, pathwayNavigation, people, engagement }));
+    console.log(JSON.stringify({ authenticationRecovery: state, pathwayNavigation, leaderboardBackfill, people, engagement }));
   } finally {
     await browser.close();
   }
