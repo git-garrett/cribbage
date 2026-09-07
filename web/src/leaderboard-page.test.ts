@@ -29,11 +29,27 @@ describe("standalone leaderboard pathway", () => {
     for (const metric of ["handicap", "pointsPerGame", "winPercentage", "pointDifferential", "totalPoints", "totalWins"]) {
       expect(html).toContain(`data-leaderboard-metric="${metric}"`);
     }
+    expect(html).toContain('data-leaderboard-metric="pointsPerGame" aria-selected="false">Tourney Points / Game</button>');
+    expect(html).toContain('class="leaderboard-metric-info"');
+    expect(html).toContain('One point per game, two points per skunk, with a penalty for losses and getting skunked.');
+    expect(html).toContain('data-leaderboard-metric="pointDifferential" aria-selected="false">Point differential / game</button>');
     expect(html).toContain('data-leaderboard-metric="totalPoints" aria-selected="false">Points scored</button>');
     for (const window of ["daily", "weekly", "monthly", "allTime"]) {
       expect(html).toContain(`data-leaderboard-window="${window}"`);
     }
     expect(source).toMatch(/bindLeaderboardTabs[\s\S]*ArrowLeft[\s\S]*ArrowRight/);
     expect(css).toMatch(/\.leaderboard-tabs button:focus-visible/);
+    expect(css).toMatch(/\.leaderboard-metric-info:hover\s*\+\s*\.leaderboard-metric-tooltip/);
+  });
+
+  it("renders handicap as the bare two-decimal value", () => {
+    const leaderboardRenderer = source.slice(
+      source.indexOf("function renderLeaderboard(): void"),
+      source.indexOf("function leaderboardLoadingElement"),
+    );
+    expect(leaderboardRenderer).toMatch(/dynamicHandicapPointsCopy\(handicap\.wpPerGame\),/);
+    expect(leaderboardRenderer).not.toContain("WP pts/game");
+    expect(leaderboardRenderer).not.toContain("calibrated cycle");
+    expect(leaderboardRenderer).not.toContain("A smaller handicap is closer to Ace");
   });
 });

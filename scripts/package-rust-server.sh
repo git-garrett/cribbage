@@ -42,6 +42,7 @@ COPYFILE_DISABLE=1 tar --no-xattrs -czf "$ARCHIVE" \
   rust/cribbage-runner \
   rust/cribbage-shadow-engine \
   scripts/migrate-legacy-leaderboard.py \
+  scripts/repair_leaderboard_scores.py \
   scripts/repair_leaderboard_timestamps.py \
   docs/nanode-rocky-server-setup.md \
   -C "$MANIFEST_DIR" deployment.json

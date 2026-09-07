@@ -136,7 +136,7 @@
                 <button id="pathway-leaderboard" class="pathway-card" type="button">
                   <span class="pathway-card-kicker">See who’s setting the pace</span>
                   <strong>Leaderboard</strong>
-                  <span>Compare current handicaps and results against Ace.</span>
+                  <span>Compare current handicaps and results.</span>
                   <b aria-hidden="true">→</b>
                 </button>
                 <button class="pathway-card" type="button" data-pathway-target="settings">
@@ -1066,9 +1066,13 @@
         <div class="leaderboard-controls">
           <div id="leaderboard-metric-tabs" class="leaderboard-tabs" role="tablist" aria-label="Leaderboard metric">
             <button type="button" role="tab" data-leaderboard-metric="handicap" aria-selected="true">Handicap</button>
-            <button type="button" role="tab" data-leaderboard-metric="pointsPerGame" aria-selected="false">Points / game</button>
+            <span class="leaderboard-metric-with-info" role="presentation">
+              <button type="button" role="tab" data-leaderboard-metric="pointsPerGame" aria-selected="false">Tourney Points / Game</button>
+              <button class="leaderboard-metric-info" type="button" aria-label="About Tourney Points per Game" aria-describedby="leaderboard-points-help" title="One point per game, two points per skunk, with a penalty for losses and getting skunked.">i</button>
+              <span id="leaderboard-points-help" class="leaderboard-metric-tooltip" role="tooltip">One point per game, two points per skunk, with a penalty for losses and getting skunked.</span>
+            </span>
             <button type="button" role="tab" data-leaderboard-metric="winPercentage" aria-selected="false">Win %</button>
-            <button type="button" role="tab" data-leaderboard-metric="pointDifferential" aria-selected="false">Point differential</button>
+            <button type="button" role="tab" data-leaderboard-metric="pointDifferential" aria-selected="false">Point differential / game</button>
             <button type="button" role="tab" data-leaderboard-metric="totalPoints" aria-selected="false">Points scored</button>
             <button type="button" role="tab" data-leaderboard-metric="totalWins" aria-selected="false">Total wins</button>
           </div>
