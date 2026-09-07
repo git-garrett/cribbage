@@ -9816,7 +9816,7 @@ let leaderboardPointsHelpPinned = false;
 
 function setLeaderboardPointsHelpOpen(open: boolean): void {
   els.leaderboardMetricInfo.setAttribute("aria-expanded", String(open));
-  els.leaderboardPointsHelp.classList.toggle("is-open", open);
+  els.leaderboardPointsHelp.hidden = !open;
 }
 
 els.leaderboardMetricInfo.addEventListener("pointerenter", () => setLeaderboardPointsHelpOpen(true));

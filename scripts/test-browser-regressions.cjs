@@ -235,16 +235,25 @@ async function testLeaderboardTourneyInfoTap(browser, baseUrl) {
   await installPathwayFixture(page);
   await page.goto(`${baseUrl}/?pathwayView=leaderboard`, { waitUntil: "domcontentloaded" });
   await page.locator('body[data-ready="true"][data-auth="signed-in"]').waitFor({ timeout: 5000 });
+  const headerHeight = await page.locator("#leaderboard-page .analytics-header").evaluate(
+    (header) => header.getBoundingClientRect().height,
+  );
   const info = page.getByRole("button", { name: "About Tourney Points per Game" });
   await info.tap();
   await page.waitForTimeout(250);
+  const metricTabs = page.locator("#leaderboard-metric-tabs");
   const infoState = {
     expanded: await info.getAttribute("aria-expanded"),
     bounds: await info.boundingBox(),
-    opacity: await page.locator("#leaderboard-points-help").evaluate(
-      (tooltip) => getComputedStyle(tooltip).opacity,
-    ),
+    tooltip: await page.locator("#leaderboard-points-help").evaluate((tooltip) => {
+      const bounds = tooltip.getBoundingClientRect();
+      return { opacity: getComputedStyle(tooltip).opacity, top: bounds.top, bottom: bounds.bottom };
+    }),
   };
+  const metricBounds = await metricTabs.boundingBox();
+  const leaderboardListTop = await page.locator("#leaderboard-list").evaluate(
+    (list) => list.getBoundingClientRect().top,
+  );
   const scrollStates = await page.locator(".leaderboard-tabs").evaluateAll((tabLists) => tabLists.map((tabList) => {
     const style = getComputedStyle(tabList);
     tabList.scrollTop = 20;
@@ -252,21 +261,53 @@ async function testLeaderboardTourneyInfoTap(browser, baseUrl) {
       overflowX: style.overflowX,
       overflowY: style.overflowY,
       scrollbarWidth: style.scrollbarWidth,
+      clientHeight: tabList.clientHeight,
+      scrollHeight: tabList.scrollHeight,
       scrollTop: tabList.scrollTop,
     };
   }));
+  const metricStates = [];
+  for (const metric of ["handicap", "pointsPerGame", "winPercentage", "pointDifferential", "totalPoints", "totalWins"]) {
+    await page.locator(`[data-leaderboard-metric="${metric}"]`).tap();
+    const dimensions = await metricTabs.evaluate((tabList) => ({
+      clientHeight: tabList.clientHeight,
+      scrollHeight: tabList.scrollHeight,
+    }));
+    metricStates.push({
+      metric,
+      ...dimensions,
+      windowTabsHidden: await page.locator("#leaderboard-window-tabs").getAttribute("hidden") !== null,
+    });
+  }
+  const horizontalScroll = await metricTabs.evaluate((tabList) => {
+    tabList.scrollLeft = 80;
+    return { clientWidth: tabList.clientWidth, scrollWidth: tabList.scrollWidth, scrollLeft: tabList.scrollLeft };
+  });
   const failures = [];
-  if (infoState.expanded !== "true" || infoState.opacity !== "1" || !infoState.bounds || infoState.bounds.width < 44 || infoState.bounds.height < 44) {
+  if (infoState.expanded !== "true" || infoState.tooltip.opacity !== "1" || !infoState.bounds || infoState.bounds.width < 44 || infoState.bounds.height < 44) {
     failures.push(`info ${JSON.stringify(infoState)}`);
   }
-  if (scrollStates.some((state) => state.overflowX !== "auto" || state.overflowY !== "hidden" || state.scrollbarWidth !== "none" || state.scrollTop !== 0)) {
+  const tooltipGap = metricBounds ? infoState.tooltip.top - (metricBounds.y + metricBounds.height) : -1;
+  if (!metricBounds || tooltipGap < 7 || tooltipGap > 12 || infoState.tooltip.bottom > leaderboardListTop || infoState.tooltip.bottom > 844) {
+    failures.push(`tooltip placement ${JSON.stringify({ metricBounds, tooltip: infoState.tooltip, tooltipGap, leaderboardListTop })}`);
+  }
+  if (scrollStates.some((state) => state.overflowX !== "auto" || state.overflowY !== "hidden" || state.scrollbarWidth !== "none" || state.scrollTop !== 0 || state.scrollHeight !== state.clientHeight)) {
     failures.push(`tab scrolling ${JSON.stringify(scrollStates)}`);
+  }
+  if (metricStates.some((state) => state.clientHeight > 54 || state.scrollHeight !== state.clientHeight || state.windowTabsHidden !== (state.metric === "handicap"))) {
+    failures.push(`metric heights ${JSON.stringify(metricStates)}`);
+  }
+  if (horizontalScroll.scrollWidth <= horizontalScroll.clientWidth || horizontalScroll.scrollLeft <= 0) {
+    failures.push(`horizontal scrolling ${JSON.stringify(horizontalScroll)}`);
+  }
+  if (headerHeight > 140) {
+    failures.push(`stretched header ${headerHeight}`);
   }
   if (failures.length) {
     throw new Error(`Leaderboard mobile controls failed: ${failures.join("; ")}`);
   }
   await page.close();
-  return { touchTapOpensTooltip: true, horizontalScrollOnly: true, scrollbarsHidden: true };
+  return { touchTapOpensTooltip: true, compactMetricRows: true, horizontalScrollOnly: true, scrollbarsHidden: true };
 }
 
 async function installLeaderboardBackfillApiFixture(page) {

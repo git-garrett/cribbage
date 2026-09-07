@@ -2502,6 +2502,10 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   overflow: visible;
 }
 
+.leaderboard-page {
+  align-content: start;
+}
+
 .leaderboard-controls {
   display: grid;
   gap: 12px;
@@ -2557,7 +2561,6 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
 }
 
 .leaderboard-metric-control {
-  position: relative;
   min-width: 0;
 }
 
@@ -2585,11 +2588,9 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
 }
 
 .leaderboard-metric-tooltip {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 4px;
-  z-index: 20;
+  display: block;
   width: min(300px, calc(100vw - 48px));
+  margin: 8px 4px 0;
   padding: 10px 12px;
   border: 1px solid var(--entry-border-strong);
   border-radius: 10px;
@@ -2599,15 +2600,11 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   font-size: var(--access-small);
   font-weight: 650;
   line-height: 1.4;
-  opacity: 0;
   pointer-events: none;
-  translate: 0 -3px;
-  transition: opacity 140ms ease, translate 140ms ease;
 }
 
-.leaderboard-metric-tooltip.is-open {
-  opacity: 1;
-  translate: 0 0;
+.leaderboard-metric-tooltip[hidden] {
+  display: none;
 }
 
 @media (min-width: 641px) {
