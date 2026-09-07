@@ -7426,9 +7426,7 @@ function renderLeaderboard(): void {
         .filter(([, handicap]) => Number.isFinite(handicap.wpPerGame))
         .map(([player, handicap]) => ({ player, ...handicap })),
     );
-    els.leaderboardSummary.textContent = handicaps.length
-      ? `${handicaps.length} calibrated player${handicaps.length === 1 ? "" : "s"}. A smaller handicap is closer to Ace.`
-      : "No calibrated handicaps yet.";
+    els.leaderboardSummary.textContent = "";
     reconcileLeaderboardSection(
       "ranking",
       LEADERBOARD_METRIC_LABELS.handicap,

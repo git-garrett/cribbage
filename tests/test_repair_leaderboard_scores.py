@@ -63,6 +63,23 @@ def create_history_database(path: Path) -> None:
 
 
 class RepairLeaderboardScoresTest(unittest.TestCase):
+    def test_production_deploy_previews_then_applies_score_repair(self):
+        deploy = (
+            Path(__file__).parents[1] / "scripts" / "deploy-nanode.sh"
+        ).read_text(encoding="utf-8")
+
+        dry_run = (
+            "'$release_dir/scripts/repair_leaderboard_scores.py' --dry-run"
+        )
+        apply = "'$release_dir/scripts/repair_leaderboard_scores.py'"
+        self.assertIn(dry_run, deploy)
+        self.assertIn("systemctl stop cribbage", deploy)
+        apply_index = deploy.index(apply, deploy.index(dry_run) + len(dry_run))
+        self.assertGreater(apply_index, 0)
+        self.assertGreater(
+            deploy.index("systemctl restart cribbage", apply_index), apply_index
+        )
+
     def test_loads_both_history_tables_with_current_uploads_authoritative(self):
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "cribbage-server.sqlite"

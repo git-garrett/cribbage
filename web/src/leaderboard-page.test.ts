@@ -50,5 +50,6 @@ describe("standalone leaderboard pathway", () => {
     expect(leaderboardRenderer).toMatch(/dynamicHandicapPointsCopy\(handicap\.wpPerGame\),/);
     expect(leaderboardRenderer).not.toContain("WP pts/game");
     expect(leaderboardRenderer).not.toContain("calibrated cycle");
+    expect(leaderboardRenderer).not.toContain("A smaller handicap is closer to Ace");
   });
 });

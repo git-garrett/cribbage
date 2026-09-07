@@ -123,12 +123,6 @@ describe("local pathway navigation", () => {
     expect(css).not.toContain("scroll-snap-type: inline mandatory");
   });
 
-  it("deals the six Home pathways into two three-card desktop fans", () => {
-    expect(html).toMatch(/class="pathway-card-fan pathway-card-fan-primary"[\s\S]*Play Now[\s\S]*Training[\s\S]*Statistics[\s\S]*<\/div>\s*<div class="pathway-card-fan pathway-card-fan-secondary"[\s\S]*Leaderboard[\s\S]*Settings[\s\S]*Engagement/);
-    expect(css).toMatch(/@media \(min-width: 850px\)[\s\S]*\.pathway-card-fan,?[\s\S]*\{[\s\S]*flex-direction:\s*row/);
-    expect(css).toMatch(/\.pathway-card-fan-secondary\s*\{[\s\S]*margin-top:/);
-  });
-
   it("keeps suit marks legible over the brass hover medallion", () => {
     expect(css).toContain("--pathway-suit-dark-rich: #101714");
     expect(css).toContain("--pathway-suit-red-rich: #a71927");
@@ -240,7 +234,7 @@ describe("local pathway navigation", () => {
   it("gives every enabled pathway card the same gentle relative tilt", () => {
     expect(css).not.toContain("@keyframes pathway-card-rock");
     expect(css).toMatch(/\.pathway-card:not\(:disabled\):hover,[\s\S]*\.pathway-choice:not\(:disabled\):hover[\s\S]*calc\(var\(--pathway-rest-y\) - 5px\)[\s\S]*rotate: var\(--pathway-hover-rotate\)/);
-    expect(css).toMatch(/\.pathway-card-fan > \.pathway-card,[\s\S]*\.pathway-choice-grid:not\(\.pathway-choice-grid-play\) > \.pathway-choice[\s\S]*translateY\(var\(--pathway-rest-y\)\)/);
+    expect(css).toMatch(/\.pathway-primary-grid > \.pathway-card,[\s\S]*\.pathway-choice-grid:not\(\.pathway-choice-grid-play\) > \.pathway-choice[\s\S]*translateY\(var\(--pathway-rest-y\)\)/);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*\.pathway-card:not\(:disabled\):hover,[\s\S]*animation: none/);
     expect(css).toMatch(/\.pathway-choice-human\s*{[\s\S]*var\(--pathway-featured\)[\s\S]*color: var\(--pathway-ivory\)/);
   });
