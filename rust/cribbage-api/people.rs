@@ -2145,8 +2145,8 @@ fn human_scoring_controller(record: &HumanGameRecord) -> Option<Side> {
         });
     }
     match game.phase {
-        Phase::PeggingComplete | Phase::ScorePone => Some(game.pone),
-        Phase::ScoreDealer | Phase::ScoreCrib => Some(game.dealer),
+        Phase::PeggingComplete => Some(game.pone),
+        Phase::ScorePone | Phase::ScoreDealer | Phase::ScoreCrib => Some(game.dealer),
         _ => None,
     }
 }
@@ -3280,8 +3280,8 @@ mod tests {
         for key in ["category", "points", "cards", "turnCard", "scoreComponents"] {
             assert_eq!(pone_event[key], dealer_event[key]);
         }
-        assert_eq!(pone_after["canContinueScoring"], true);
-        assert_eq!(dealer_after["canContinueScoring"], false);
+        assert_eq!(pone_after["canContinueScoring"], false);
+        assert_eq!(dealer_after["canContinueScoring"], true);
 
         std::fs::remove_dir_all(server.data_dir).unwrap();
     }
