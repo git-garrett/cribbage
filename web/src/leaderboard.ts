@@ -47,7 +47,10 @@ export function rankLeaderboardPlayers<T extends RankedLeaderboardPlayer>(player
 export function leaderboardMetricValue(player: RankedLeaderboardPlayer, metric: Exclude<LeaderboardMetric, "handicap">): number {
   if (metric === "pointsPerGame") return leaderboardScore(player);
   if (metric === "winPercentage") return player.wins / Math.max(1, player.games ?? player.wins + player.losses);
-  if (metric === "pointDifferential") return player.pointDifferential ?? (player.avgMargin ?? 0) * (player.games ?? 0);
+  if (metric === "pointDifferential") {
+    const games = Math.max(1, player.games ?? player.wins + player.losses);
+    return (player.pointDifferential ?? (player.avgMargin ?? 0) * games) / games;
+  }
   if (metric === "totalPoints") return player.cribbagePointsScored ?? 0;
   return player.wins;
 }

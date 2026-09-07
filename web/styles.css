@@ -2548,6 +2548,64 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   outline-offset: 2px;
 }
 
+.leaderboard-metric-with-info {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+}
+
+.leaderboard-tabs .leaderboard-metric-info {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-color: var(--entry-border-strong);
+  border-radius: 50%;
+  background: var(--entry-panel);
+  color: var(--entry-link);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 16px;
+  font-weight: 800;
+  text-transform: lowercase;
+}
+
+.leaderboard-metric-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  width: min(300px, calc(100vw - 48px));
+  padding: 10px 12px;
+  border: 1px solid var(--entry-border-strong);
+  border-radius: 10px;
+  background: var(--entry-panel);
+  color: var(--entry-ink);
+  box-shadow: var(--entry-card-shadow-raised);
+  font-size: var(--access-small);
+  font-weight: 650;
+  line-height: 1.4;
+  opacity: 0;
+  pointer-events: none;
+  translate: 0 -3px;
+  transition: opacity 140ms ease, translate 140ms ease;
+}
+
+.leaderboard-metric-info:hover + .leaderboard-metric-tooltip,
+.leaderboard-metric-info:focus-visible + .leaderboard-metric-tooltip {
+  opacity: 1;
+  translate: 0 0;
+}
+
+@media (min-width: 641px) {
+  #leaderboard-metric-tabs {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+}
+
 .leaderboard-window-tabs {
   width: fit-content;
   max-width: 100%;

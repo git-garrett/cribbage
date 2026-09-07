@@ -264,6 +264,10 @@ CADDY
   remote_exec "caddy fmt --overwrite '$caddy_candidate' >/dev/null && \
     caddy validate --adapter caddyfile --config '$caddy_candidate' >/dev/null"
 
+  echo "Validating leaderboard score reconciliation..."
+  remote_exec "runuser -u cribbage -- python3 \
+    '$release_dir/scripts/repair_leaderboard_scores.py' --dry-run"
+
   echo "Atomically activating release $GIT_COMMIT..."
   if ! remote_exec "set -e
     rm -rf '$backup_dir'
@@ -288,6 +292,8 @@ CADDY
     systemctl enable cribbage >/dev/null
     systemctl enable --now caddy >/dev/null
     systemctl reload caddy
+    systemctl stop cribbage
+    runuser -u cribbage -- python3 '$release_dir/scripts/repair_leaderboard_scores.py'
     systemctl restart cribbage"; then
     rollback_release "$backup_dir"
     return 1
