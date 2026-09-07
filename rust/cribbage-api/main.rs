@@ -3887,7 +3887,7 @@ fn leaderboard_summary_json_with_handicaps_at(
         HashMap::new();
     let mut best_wins = Vec::new();
     for upload in uploads.values() {
-        if !is_completed_leaderboard_game(upload) {
+        if !is_included_leaderboard_game(upload) {
             continue;
         }
         add_upload_to_player_totals(totals.entry(upload.player.clone()).or_default(), upload);
@@ -3929,7 +3929,10 @@ fn leaderboard_summary_json_with_handicaps_at(
         })
         .collect::<Vec<_>>()
         .join(",");
-    let mut handicap_rows = handicaps.iter().collect::<Vec<_>>();
+    let mut handicap_rows = handicaps
+        .iter()
+        .filter(|(player, _)| is_public_leaderboard_player(player))
+        .collect::<Vec<_>>();
     handicap_rows.sort_by(|(left, _), (right, _)| left.cmp(right));
     let handicap_json = handicap_rows
         .into_iter()
@@ -4004,7 +4007,7 @@ fn leaderboard_summary_json_with_handicaps_at(
         iso8601_from_unix_millis(as_of_millis),
         uploads
             .values()
-            .filter(|upload| is_completed_leaderboard_game(upload))
+            .filter(|upload| is_included_leaderboard_game(upload))
             .count(),
         player_stats,
         player_stats_by_opponent,
@@ -4025,7 +4028,7 @@ fn leaderboard_window_player_json(
     let cutoff = duration_millis.map(|duration| as_of_millis.saturating_sub(duration));
     let mut totals: HashMap<String, PlayerTotals> = HashMap::new();
     for upload in uploads.values() {
-        if !is_completed_leaderboard_game(upload) {
+        if !is_included_leaderboard_game(upload) {
             continue;
         }
         if let Some(cutoff) = cutoff {
@@ -4043,8 +4046,12 @@ fn leaderboard_window_player_json(
     leaderboard_player_json(&rows)
 }
 
-fn is_completed_leaderboard_game(upload: &UploadedGame) -> bool {
-    upload.human_score != 0 || upload.ai_score != 0
+fn is_public_leaderboard_player(player: &str) -> bool {
+    !player.trim().eq_ignore_ascii_case("test")
+}
+
+fn is_included_leaderboard_game(upload: &UploadedGame) -> bool {
+    is_public_leaderboard_player(&upload.player) && (upload.human_score != 0 || upload.ai_score != 0)
 }
 
 fn leaderboard_weighted_results(total: &PlayerTotals) -> i64 {
@@ -4753,6 +4760,45 @@ mod tests {
         assert!(summary.contains("\"player\":\"Kurtis\""));
         assert!(summary.contains("\"bestWins\":[{\"player\":\"Garrett\""));
         assert!(summary.contains("\"mostSkunks\":[{\"player\":\"Garrett\""));
+    }
+
+    #[test]
+    fn leaderboard_summary_suppresses_the_test_account() {
+        let game = |game_id: &str, player: &str| UploadedGame {
+            game_id: game_id.to_string(),
+            player: player.to_string(),
+            winner: Some("human".to_string()),
+            result: "skunk".to_string(),
+            human_score: 121,
+            ai_score: 80,
+            model: "schell_table-peg_table-13.215".to_string(),
+            ended_at: "2026-09-05T11:00:00Z".to_string(),
+            human_scoring: ScoringTotals::default(),
+            ai_scoring: ScoringTotals::default(),
+            analyzed: false,
+            errors: 0,
+        };
+        let uploads = HashMap::from([
+            ("garrett".to_string(), game("garrett", "Garrett")),
+            ("test".to_string(), game("test", "TeSt")),
+        ]);
+        let handicaps = HashMap::from([
+            ("Garrett".to_string(), json!({ "wpPerGame": -0.125 })),
+            ("test".to_string(), json!({ "wpPerGame": 0.0 })),
+        ]);
+
+        let summary = serde_json::from_str::<Value>(&leaderboard_summary_json_with_handicaps_at(
+            &uploads,
+            &handicaps,
+            1_778_000_000_000,
+        ))
+        .unwrap();
+
+        assert_eq!(summary["games"], 1);
+        assert_eq!(summary["playerStats"].as_array().unwrap().len(), 1);
+        assert_eq!(summary["playerStats"][0]["player"], "Garrett");
+        assert!(summary["playerHandicaps"].get("test").is_none());
+        assert!(!summary.to_string().to_ascii_lowercase().contains("\"player\":\"test\""));
     }
 
     #[test]
