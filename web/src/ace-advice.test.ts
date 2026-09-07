@@ -74,7 +74,7 @@ describe("Ace advice preparation", () => {
     const pendingAdvice = new Promise<{ kind: "play"; cardIds: number[] }>((resolve) => {
       finishAdvice = resolve;
     });
-    const review = mistakeAdviceForChoice("play", [8], pendingAdvice);
+    const review = mistakeAdviceForChoice("play", [8], pendingAdvice, 0.01);
 
     finishAdvice({ kind: "play", cardIds: [7] });
 
@@ -91,6 +91,7 @@ describe("Ace advice preparation", () => {
       "play",
       [9],
       pendingAdvice,
+      0.01,
       () => choiceRevision === 1,
     );
 
@@ -98,6 +99,13 @@ describe("Ace advice preparation", () => {
     finishAdvice({ kind: "play", cardIds: [7] });
 
     await expect(review).resolves.toBeNull();
+  });
+
+  it("reports only errors meeting the minimum win-probability impact", async () => {
+    const advice = { kind: "play" as const, cardIds: [7] };
+
+    await expect(mistakeAdviceForChoice("play", [8], advice, 0.00249)).resolves.toBeNull();
+    await expect(mistakeAdviceForChoice("play", [8], advice, 0.0025)).resolves.toEqual(advice);
   });
 
   it("keys advice to the exact pegging decision", () => {
@@ -109,7 +117,7 @@ describe("Ace advice preparation", () => {
 
   it("prepares eligible advice before a click and retains a pending comparison", () => {
     expect(mainSource).toContain("startAceAdvicePreparation(game)");
-    expect(mainSource).toMatch(/if \(!game \|\| !preparation\) return;/);
+    expect(mainSource).toMatch(/if \(!game \|\| !gameId \|\| !preparation\) return;/);
     expect(mainSource).toContain("preparation.advice ?? preparation.promise");
     expect(mainSource).toContain('reviewUserChoiceWithAce(state.game, "discard", selectedIds)');
     expect(mainSource).toContain('reviewUserChoiceWithAce(state.game, "play", [card.id])');
@@ -117,7 +125,7 @@ describe("Ace advice preparation", () => {
 
   it("expires the prior Error notice when a new user play is reviewed", () => {
     expect(mainSource).toMatch(/function reviewUserChoiceWithAce[\s\S]*const choiceRevision = \+\+aceMistakeChoiceRevision;[\s\S]*state\.aceMistake = null;/s);
-    expect(mainSource).toMatch(/mistakeAdviceForChoice\([\s\S]*\(\) => aceMistakeChoiceRevision === choiceRevision/s);
+    expect(mainSource).toMatch(/function publishPendingAceMistake[\s\S]*mistakeAdviceForChoice\([\s\S]*\(\) => aceMistakeChoiceRevision === pending\.choiceRevision/s);
   });
 
   it("places an accessible review badge on the cut interface as soon as a discard error is known", () => {

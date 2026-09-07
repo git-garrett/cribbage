@@ -7,6 +7,10 @@ const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const source = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 
 describe("standalone leaderboard pathway", () => {
+  it("invalidates leaderboard caches created before Ace-only competitive results", () => {
+    expect(source).toContain('const LEADERBOARD_CACHE_KEY = "strong-cribbage.leaderboard.v2"');
+  });
+
   it("opens from its own home card and no longer belongs to My Stats", () => {
     expect(html).toContain('id="pathway-leaderboard"');
     expect(source).toContain('navigatePathway("leaderboard")');

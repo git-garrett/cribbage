@@ -849,6 +849,9 @@ mod tests {
         active_dynamic.completed_at = None;
         sessions.push(active_dynamic);
         sessions.push(reviewed_session(ACE_MODEL_ID, "ace-8", 8));
+        let calibration_start =
+            new_session_from_seed(ModelId::Dynamic, Some("Travis".to_string()), 19, 1);
+        sync_dynamic_player_profile(&data_dir, user_id, &calibration_start).unwrap();
         for session in &mut sessions {
             session.owner_user_id = Some(user_id);
             persist_session_event(&data_dir, session, "new", "{}").unwrap();

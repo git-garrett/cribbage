@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -11,19 +11,20 @@ use cribbage_shadow_engine::decision::{
     DecisionReview as EngineDecisionReview,
 };
 use cribbage_shadow_engine::dynamic::{
-    DYNAMIC_EVALUATOR_VERSION, MIN_COMPLETE_CYCLES, MIN_COMPLETE_GAMES_FOR_PERSONAL_LENGTH,
-    UNIVERSAL_CYCLES_PER_GAME,
+    DynamicCycleSample, DYNAMIC_EVALUATOR_VERSION, MIN_COMPLETE_CYCLES,
+    MIN_COMPLETE_GAMES_FOR_PERSONAL_LENGTH, UNIVERSAL_CYCLES_PER_GAME,
 };
 use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
-#[cfg(test)]
-use cribbage_shadow_engine::model_id::ModelId;
 use cribbage_shadow_engine::model_id::ACE_MODEL_ID;
 use rand_core::{OsRng, RngCore};
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{auth::AuthUser, open_game_database, Request, Response, Server};
+use super::{
+    auth::AuthUser, open_game_database, refresh_leaderboard_summary, sync_dynamic_profile_evidence,
+    EligibleDynamicCycle, Request, Response, Server,
+};
 
 const ONLINE_SECONDS: i64 = 15 * 60;
 const CHALLENGE_SECONDS: i64 = 10 * 60;
@@ -1742,9 +1743,18 @@ fn human_game_review(
             review_saved = true;
         }
     }
+    let profile_changed = if review_saved {
+        sync_human_dynamic_profiles(&transaction, &row, &record)?
+    } else {
+        false
+    };
     transaction
         .commit()
         .map_err(|error| PeopleError::internal("commit player decision review", error))?;
+    if profile_changed {
+        refresh_leaderboard_summary(server)
+            .map_err(|error| PeopleError::internal("refresh player handicaps", error))?;
+    }
     if review_saved {
         notify_human_game_watchers();
     }
@@ -1866,6 +1876,146 @@ fn human_completed_review(review: EngineDecisionReview) -> HumanCompletedDecisio
         selected_win_probability: review.selected.win_probability,
         recommended_win_probability: review.recommended.win_probability,
     }
+}
+
+fn human_reviewed_decision_regret(review: &HumanDecisionReview) -> Option<f64> {
+    if review.kind == HumanReviewKind::Peg {
+        if review.game.legal_cards(review.player).len() <= 1 {
+            return None;
+        }
+        let selected = *review.selected_card_ids.first()?;
+        let mut result = review.game.clone();
+        result.play_card(review.player, selected).ok()?;
+        if result.phase == Phase::GameOver {
+            return None;
+        }
+    }
+
+    let completed = review.completed.as_ref()?;
+    if completed.evaluator_model != DYNAMIC_EVALUATOR_VERSION {
+        return None;
+    }
+    let selected = completed.selected_win_probability?;
+    let recommended = completed.recommended_win_probability?;
+    if !selected.is_finite()
+        || !recommended.is_finite()
+        || !(0.0..=1.0).contains(&selected)
+        || !(0.0..=1.0).contains(&recommended)
+        || recommended + f64::EPSILON < selected
+    {
+        return None;
+    }
+    Some(recommended - selected)
+}
+
+fn eligible_human_dynamic_cycle_samples(
+    record: &HumanGameRecord,
+    player: Side,
+) -> Vec<EligibleDynamicCycle> {
+    let completed_hands = record
+        .score_events
+        .iter()
+        .filter(|event| event.category == HumanScoreCategory::Crib)
+        .map(|event| event.hand_number)
+        .collect::<HashSet<_>>();
+    let mut samples = Vec::new();
+
+    for first_hand in (1..=record.game.hand_number).step_by(2) {
+        let second_hand = first_hand + 1;
+        if !completed_hands.contains(&first_hand) || !completed_hands.contains(&second_hand) {
+            continue;
+        }
+        let reviews = record
+            .decision_reviews
+            .iter()
+            .filter(|review| {
+                review.player == player
+                    && (review.game.hand_number == first_hand
+                        || review.game.hand_number == second_hand)
+            })
+            .collect::<Vec<_>>();
+        if reviews.is_empty()
+            || reviews.iter().any(|review| {
+                review
+                    .completed
+                    .as_ref()
+                    .is_none_or(|completed| completed.evaluator_model != DYNAMIC_EVALUATOR_VERSION)
+            })
+        {
+            continue;
+        }
+
+        let mut sums = [0.0; 4];
+        let mut counts = [0_u32; 4];
+        let mut total_regret = 0.0;
+        for review in reviews {
+            let Some(regret) = human_reviewed_decision_regret(review) else {
+                continue;
+            };
+            let dealer = review.game.dealer == player;
+            let bucket = match (dealer, review.kind) {
+                (true, HumanReviewKind::Discard) => 0,
+                (true, HumanReviewKind::Peg) => 1,
+                (false, HumanReviewKind::Discard) => 2,
+                (false, HumanReviewKind::Peg) => 3,
+            };
+            sums[bucket] += regret;
+            counts[bucket] += 1;
+            total_regret += regret;
+        }
+        if counts.iter().any(|count| *count == 0) {
+            continue;
+        }
+        samples.push(EligibleDynamicCycle {
+            first_hand,
+            strength_sample: DynamicCycleSample {
+                dealer_discard_regret: sums[0] / f64::from(counts[0]),
+                dealer_pegging_regret: sums[1] / f64::from(counts[1]),
+                pone_discard_regret: sums[2] / f64::from(counts[2]),
+                pone_pegging_regret: sums[3] / f64::from(counts[3]),
+                total_regret,
+            },
+        });
+    }
+    samples
+}
+
+fn sync_human_dynamic_profiles(
+    transaction: &rusqlite::Transaction<'_>,
+    row: &TableRow,
+    record: &HumanGameRecord,
+) -> Result<bool, PeopleError> {
+    let game_length = (record.game.phase == Phase::GameOver
+        && record.pending_final_scoring.is_none())
+    .then(|| f64::from(record.game.hand_number) / 2.0);
+    let mut changed = false;
+    for (player, user_id) in [
+        (Side::Left, row.challenger_id),
+        (Side::Right, row.challenged_id),
+    ] {
+        let samples = eligible_human_dynamic_cycle_samples(record, player);
+        let has_analyzed_play = record.decision_reviews.iter().any(|review| {
+            review.player == player
+                && review
+                    .completed
+                    .as_ref()
+                    .is_some_and(|completed| completed.evaluator_model == DYNAMIC_EVALUATOR_VERSION)
+        });
+        if samples.is_empty() && (!has_analyzed_play || game_length.is_none()) {
+            continue;
+        }
+        changed |= sync_dynamic_profile_evidence(
+            transaction,
+            user_id,
+            &record.game_id,
+            false,
+            samples,
+            game_length.filter(|_| has_analyzed_play),
+        )
+        .map_err(|error| PeopleError::internal("sync player handicap", error))?
+        .is_some();
+    }
+    Ok(changed)
 }
 
 fn table_viewer_side(row: &TableRow, viewer_id: i64) -> Result<Side, PeopleError> {
@@ -3874,12 +4024,7 @@ mod tests {
                 );
                 let row = table_row(&connection, "t").unwrap();
                 let mut reviewed = record.clone();
-                for side in [Side::Left, Side::Right] {
-                    let saved = reviewed
-                        .decision_reviews
-                        .iter_mut()
-                        .find(|review| review.player == side)
-                        .unwrap();
+                for saved in &mut reviewed.decision_reviews {
                     saved.completed = Some(HumanCompletedDecisionReview {
                         evaluator_model: DYNAMIC_EVALUATOR_VERSION.to_string(),
                         selected_card_ids: saved.selected_card_ids.clone(),
@@ -3903,6 +4048,35 @@ mod tests {
                         reviewed_players,
                         std::collections::HashSet::from(["human", "ai"])
                     );
+                }
+                let mut connection = open_game_database(&server.data_dir).unwrap();
+                let transaction = connection.transaction().unwrap();
+                assert!(!sync_human_dynamic_profiles(&transaction, &row, &reviewed).unwrap());
+                for user_id in [row.challenger_id, row.challenged_id] {
+                    assert!(sync_dynamic_profile_evidence(
+                        &transaction,
+                        user_id,
+                        &format!("calibration-start-{user_id}"),
+                        true,
+                        Vec::new(),
+                        None,
+                    )
+                    .unwrap()
+                    .is_some());
+                }
+                assert!(sync_human_dynamic_profiles(&transaction, &row, &reviewed).unwrap());
+                transaction.commit().unwrap();
+                for user_id in [row.challenger_id, row.challenged_id] {
+                    let cycles = connection
+                        .query_row(
+                            "SELECT json_extract(profile_json, '$.handicap_cycles')
+                             FROM dynamic_player_profiles
+                             WHERE user_id = ?1 AND evaluator_version = ?2",
+                            params![user_id, DYNAMIC_EVALUATOR_VERSION],
+                            |row| row.get::<_, u32>(0),
+                        )
+                        .unwrap();
+                    assert!(cycles > 0);
                 }
                 std::fs::remove_dir_all(server.data_dir).unwrap();
                 return;
