@@ -7,6 +7,8 @@ export interface AceRecommendation {
   cardIds: number[];
 }
 
+export const MIN_ERROR_WIN_PROBABILITY_DELTA = 0.0025;
+
 export function isAceAdviceOpponent(opponent: string | undefined): boolean {
   return opponent === "myrmidon-5"
     || opponent === "schell_table-peg_table-9.1"
@@ -43,9 +45,14 @@ export async function mistakeAdviceForChoice<Advice extends AceRecommendation>(
   action: AceAdviceAction,
   selectedCardIds: readonly number[],
   pendingAdvice: Advice | PromiseLike<Advice>,
+  winProbabilityDelta: number | PromiseLike<number>,
   shouldPublish: () => boolean = () => true,
 ): Promise<Advice | null> {
-  const advice = await pendingAdvice;
+  const [advice, impact] = await Promise.all([pendingAdvice, winProbabilityDelta]);
   if (!shouldPublish()) return null;
-  return choiceDiffersFromAce(action, selectedCardIds, advice) ? advice : null;
+  return choiceDiffersFromAce(action, selectedCardIds, advice)
+    && Number.isFinite(impact)
+    && impact >= MIN_ERROR_WIN_PROBABILITY_DELTA
+    ? advice
+    : null;
 }

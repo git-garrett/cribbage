@@ -15,6 +15,7 @@ import type {
 import {
   aceAdviceDecisionKey,
   isAceAdviceOpponent,
+  MIN_ERROR_WIN_PROBABILITY_DELTA,
   mistakeAdviceForChoice,
   type AceAdviceAction,
 } from "./ace-advice";
@@ -462,11 +463,13 @@ type TurnCutProgress = "ai-turn" | "user-turn" | null;
 let interactionEpoch = 0;
 let gameStateGeneration = 0;
 let aceMistakeChoiceRevision = 0;
+let pendingAceMistakeReview: PendingAceMistakeReview | null = null;
 
 function resetTransientGameUi(): void {
   interactionEpoch += 1;
   gameStateGeneration += 1;
   aceMistakeChoiceRevision += 1;
+  pendingAceMistakeReview = null;
   state.selected.clear();
   state.resultOverride = null;
   state.serverBusy = null;
@@ -1289,7 +1292,7 @@ interface AnalyticsTotals {
 }
 
 type ScoreKey = "peggingDealer" | "peggingPone" | "handDealer" | "handPone" | "crib";
-const ERROR_WIN_PROBABILITY_THRESHOLD = 0.0025;
+const ERROR_WIN_PROBABILITY_THRESHOLD = MIN_ERROR_WIN_PROBABILITY_DELTA;
 const ERROR_SCORE_KEYS: ScoreKey[] = ["peggingDealer", "peggingPone", "handDealer", "handPone", "crib"];
 type GameEndEvent = Extract<AnalyticsEvent, { type: "game" }> & { action: "end" };
 type DiscardEvent = Extract<AnalyticsEvent, { type: "discard" }>;
@@ -4347,6 +4350,16 @@ interface AceMistake {
   advice: AceAdvice;
 }
 
+interface PendingAceMistakeReview {
+  choiceRevision: number;
+  gameId: string;
+  handNumber: number;
+  action: AceAdviceAction;
+  selectedCardIds: number[];
+  selectedCards: string[];
+  advice: AceAdvice | PromiseLike<AceAdvice>;
+}
+
 interface ServerMasterHintResponse extends ServerGameActionResponse {
   hint: MasterHint;
 }
@@ -4579,21 +4592,50 @@ function reviewUserChoiceWithAce(
 ): void {
   const choiceRevision = ++aceMistakeChoiceRevision;
   state.aceMistake = null;
+  pendingAceMistakeReview = null;
   const preparation = preparedAceAdviceFor(game);
   state.aceAdvicePreparation = null;
-  if (!game || !preparation) return;
+  const gameId = currentSnapshot?.gameId;
+  if (!game || !gameId || !preparation) return;
   if (!state.errorNoticesEnabled) return;
-  const handNumber = game.handNumber;
-  void mistakeAdviceForChoice(
+  pendingAceMistakeReview = {
+    choiceRevision,
+    gameId,
+    handNumber: game.handNumber,
     action,
-    selectedCardIds,
-    preparation.advice ?? preparation.promise,
-    () => aceMistakeChoiceRevision === choiceRevision,
-  ).then((advice) => {
-    if (!advice || !state.errorNoticesEnabled || state.game?.handNumber !== handNumber) return;
-    state.aceMistake = { handNumber, advice };
-    render(state.game);
-  }).catch(() => undefined);
+    selectedCardIds: [...selectedCardIds],
+    selectedCards: selectedCardIds
+      .map((id) => game.humanHand.find((card) => card.id === id)?.label)
+      .filter((label): label is string => Boolean(label)),
+    advice: preparation.advice ?? preparation.promise,
+  };
+}
+
+async function publishPendingAceMistake(gameId: string): Promise<void> {
+  const pending = pendingAceMistakeReview;
+  if (!pending || pending.gameId !== gameId) return;
+  const reviewed = [...loadAnalytics().events].reverse().find((event): event is DecisionReviewEvent => {
+    if (event.type !== "discard" && event.type !== "pegging") return false;
+    if (!event.review) return false;
+    return event.gameId === pending.gameId
+      && event.handNumber === pending.handNumber
+      && event.player === "human"
+      && ((pending.action === "discard" && event.type === "discard")
+        || (pending.action === "play" && event.type === "pegging" && event.action === "play"))
+      && sameCards(event.review.selected, pending.selectedCards);
+  });
+  if (!reviewed) return;
+  const advice = await mistakeAdviceForChoice(
+    pending.action,
+    pending.selectedCardIds,
+    pending.advice,
+    decisionMistakeMagnitude(reviewed),
+    () => aceMistakeChoiceRevision === pending.choiceRevision,
+  );
+  if (!advice || !state.errorNoticesEnabled || state.game?.handNumber !== pending.handNumber) return;
+  pendingAceMistakeReview = null;
+  state.aceMistake = { handNumber: pending.handNumber, advice };
+  render(state.game);
 }
 
 async function requestMasterHint(): Promise<void> {
@@ -8871,6 +8913,7 @@ function mergeReviewedDynamicCalibration(
 
 function storeLiveDecisionReview(gameId: string): void {
   void requestNextStoredDecisionReview(gameId).then(() => {
+    void publishPendingAceMistake(gameId).catch(() => undefined);
     if (state.analyticsOpen || state.decisionReviewOpen || currentSnapshot?.gameId === gameId) render(state.game);
   }).catch((error) => {
     console.warn("Live Ace decision review will be backfilled later", error);

@@ -904,6 +904,7 @@ fn review_game(
             }
         }
 
+        let mut profile_changed = false;
         if let Some(user) = authenticated_user {
             let mut app = server
                 .state
@@ -915,11 +916,15 @@ fn review_game(
                 .ok_or_else(|| "The saved game is no longer available.".to_string())?;
             if let Some(profile) = sync_dynamic_player_profile(&server.data_dir, user.id, session)?
             {
+                profile_changed = true;
                 if let Some(dynamic) = session.dynamic.as_mut() {
                     dynamic.use_profile(profile, session.seed);
                     persist_session_snapshot(&server.data_dir, session)?;
                 }
             }
+        }
+        if profile_changed {
+            refresh_leaderboard_summary(server)?;
         }
 
         let app = server
@@ -1537,6 +1542,28 @@ fn sync_dynamic_player_profile(
     let transaction = connection
         .transaction()
         .map_err(|error| format!("begin Dynamic profile transaction: {}", error))?;
+    let profile = sync_dynamic_profile_evidence(
+        &transaction,
+        user_id,
+        &session.id,
+        session.model == ModelId::Dynamic,
+        samples,
+        game_length,
+    )?;
+    transaction
+        .commit()
+        .map_err(|error| format!("commit Dynamic player profile: {}", error))?;
+    Ok(profile)
+}
+
+fn sync_dynamic_profile_evidence(
+    transaction: &rusqlite::Transaction<'_>,
+    user_id: i64,
+    session_id: &str,
+    started_dynamic: bool,
+    samples: Vec<EligibleDynamicCycle>,
+    game_length: Option<f64>,
+) -> Result<Option<DynamicProfile>, String> {
     let saved = transaction
         .query_row(
             "SELECT profile_json FROM dynamic_player_profiles
@@ -1558,9 +1585,12 @@ fn sync_dynamic_player_profile(
         .unwrap_or(true);
     let mut profile = parsed.map(DynamicProfile::into_current).unwrap_or_default();
     let mut changed = false;
-    if session.model == ModelId::Dynamic && !profile.started_dynamic {
+    if started_dynamic && !profile.started_dynamic {
         profile.started_dynamic = true;
         changed = true;
+    }
+    if !profile.started_dynamic {
+        return Ok(None);
     }
 
     for cycle in samples {
@@ -1576,7 +1606,7 @@ fn sync_dynamic_player_profile(
                 params![
                     user_id,
                     DYNAMIC_EVALUATOR_VERSION,
-                    session.id,
+                    session_id,
                     first_hand,
                     sample_json,
                     isoish_now(),
@@ -1599,7 +1629,7 @@ fn sync_dynamic_player_profile(
                 params![
                     user_id,
                     DYNAMIC_EVALUATOR_VERSION,
-                    session.id,
+                    session_id,
                     sample_json,
                     isoish_now(),
                 ],
@@ -1631,9 +1661,6 @@ fn sync_dynamic_player_profile(
             )
             .map_err(|error| format!("save Dynamic player profile: {}", error))?;
     }
-    transaction
-        .commit()
-        .map_err(|error| format!("commit Dynamic player profile: {}", error))?;
     Ok((changed || needs_initial_save).then_some(profile))
 }
 
@@ -3876,6 +3903,15 @@ fn leaderboard_summary_json_for_data_dir(
     leaderboard_summary_json_with_handicaps(uploads, &handicaps)
 }
 
+fn refresh_leaderboard_summary(server: &Server) -> Result<(), String> {
+    let mut app = server
+        .state
+        .lock()
+        .map_err(|_| "server state lock poisoned".to_string())?;
+    app.leaderboard_summary = leaderboard_summary_json_for_data_dir(&app.uploads, &server.data_dir);
+    Ok(())
+}
+
 fn leaderboard_summary_json_with_handicaps(
     uploads: &HashMap<String, UploadedGame>,
     handicaps: &HashMap<String, Value>,
@@ -4058,6 +4094,7 @@ fn is_public_leaderboard_player(player: &str) -> bool {
 
 fn is_included_leaderboard_game(upload: &UploadedGame) -> bool {
     is_public_leaderboard_player(&upload.player)
+        && ModelId::from_str(&upload.model).is_ok_and(|model| model.is_ace())
         && (upload.human_score != 0 || upload.ai_score != 0)
 }
 
@@ -4733,7 +4770,7 @@ mod tests {
                     result: "skunk".to_string(),
                     human_score: 121,
                     ai_score: 90,
-                    model: "schell_table-peg_table-15.2".to_string(),
+                    model: "schell_table-peg_table-13.215".to_string(),
                     ended_at: "2026-07-01T00:00:00Z".to_string(),
                     human_scoring: ScoringTotals::default(),
                     ai_scoring: ScoringTotals::default(),
@@ -4880,13 +4917,14 @@ mod tests {
             &uploads, &handicaps,
         ))
         .unwrap();
-        assert_eq!(summary["playerStats"][0]["games"], 3);
+        assert_eq!(summary["playerStats"][0]["games"], 2);
         assert_eq!(summary["playerStatsByOpponent"]["master"][0]["games"], 2);
         assert_eq!(summary["playerStatsByOpponent"]["master"][0]["wins"], 1);
         assert_eq!(summary["playerStatsByOpponent"]["master"][0]["losses"], 1);
-        assert_eq!(summary["playerStatsByOpponent"]["easy"][0]["games"], 1);
-        assert_eq!(summary["playerStatsByOpponent"]["easy"][0]["wins"], 1);
-        assert_eq!(summary["playerStatsByOpponent"]["easy"][0]["skunks"], 1);
+        assert!(summary["playerStatsByOpponent"]["easy"]
+            .as_array()
+            .unwrap()
+            .is_empty());
         assert_eq!(summary["playerHandicaps"]["Garrett"]["wpPerGame"], -0.125);
     }
 
@@ -4964,15 +5002,12 @@ mod tests {
                 .map(|row| row["player"].as_str().unwrap())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(names("daily"), vec!["Daily", "Not Ace"]);
-        assert_eq!(names("weekly"), vec!["Daily", "Not Ace", "Weekly"]);
-        assert_eq!(
-            names("monthly"),
-            vec!["Daily", "Monthly", "Not Ace", "Weekly"]
-        );
+        assert_eq!(names("daily"), vec!["Daily"]);
+        assert_eq!(names("weekly"), vec!["Daily", "Weekly"]);
+        assert_eq!(names("monthly"), vec!["Daily", "Monthly", "Weekly"]);
         assert_eq!(
             names("allTime"),
-            vec!["All Time", "Daily", "Monthly", "Not Ace", "Weekly"]
+            vec!["All Time", "Daily", "Monthly", "Weekly"]
         );
         assert_eq!(summary["generatedAt"], "2026-09-05T12:00:00.000Z");
     }
@@ -5252,6 +5287,44 @@ mod tests {
         assert!(duplicate.body.contains("\"updated\":false"));
         assert_eq!(leaderboard_json(&server).unwrap(), cached_after_first);
         assert_eq!(server.state.lock().unwrap().uploads.len(), 1);
+
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn competitive_leaderboards_include_only_ace_games() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-api-ace-only-leaderboard-test-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let server = Server {
+            state: Mutex::new(AppState {
+                sessions: HashMap::new(),
+                uploads: HashMap::new(),
+                leaderboard_summary: leaderboard_summary_json(&HashMap::new()),
+            }),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+
+        let easy = r#"{"gameId":"easy-game","tag":"Garrett","winner":"human","result":"regular","model":"myrmidon-5","human":121,"ai":100}"#;
+        let easy_response =
+            serde_json::from_str::<Value>(&upload_game(&server, easy).body).unwrap();
+        assert_eq!(easy_response["leaderboard"]["games"], 0);
+        assert!(easy_response["leaderboard"]["playerStats"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+
+        let ace = r#"{"gameId":"ace-game","tag":"Garrett","winner":"human","result":"regular","model":"schell_table-peg_table-13.215","human":121,"ai":100}"#;
+        let ace_response = serde_json::from_str::<Value>(&upload_game(&server, ace).body).unwrap();
+        assert_eq!(ace_response["leaderboard"]["games"], 1);
+        assert_eq!(
+            ace_response["leaderboard"]["playerStats"][0]["player"],
+            "Garrett"
+        );
 
         std::fs::remove_dir_all(data_dir).unwrap();
     }
@@ -5809,6 +5882,10 @@ mod tests {
             .unwrap();
         drop(connection);
 
+        let calibration_start =
+            new_session_from_seed(ModelId::Dynamic, Some("Travis".to_string()), 16, 1);
+        sync_dynamic_player_profile(&data_dir, travis.id, &calibration_start).unwrap();
+
         let mut before = None;
         for cycle in 0..MIN_COMPLETE_CYCLES {
             let baseline =
@@ -5958,7 +6035,7 @@ mod tests {
     }
 
     #[test]
-    fn player_profile_is_idempotent_cross_opponent_and_evaluator_versioned() {
+    fn player_profile_starts_with_dynamic_then_accepts_any_analyzed_opponent() {
         let data_dir = std::env::temp_dir().join(format!(
             "cribbage-api-dynamic-profile-test-{}-{}",
             std::process::id(),
@@ -5978,6 +6055,21 @@ mod tests {
         drop(connection);
         let easy = reviewed_cycle_session(ModelId::Myrmidon5, "easy-cycle");
         let tough = reviewed_cycle_session(ModelId::Schell911, "tough-cycle");
+        assert!(sync_dynamic_player_profile(&data_dir, travis.id, &easy)
+            .unwrap()
+            .is_none());
+        assert!(load_dynamic_profile(&data_dir, travis.id)
+            .unwrap()
+            .is_none());
+
+        let calibration_start =
+            new_session_from_seed(ModelId::Dynamic, Some("Travis".to_string()), 18, 1);
+        let started = sync_dynamic_player_profile(&data_dir, travis.id, &calibration_start)
+            .unwrap()
+            .unwrap();
+        assert!(started.started_dynamic);
+        assert_eq!(started.handicap_cycles, 0);
+
         let first = sync_dynamic_player_profile(&data_dir, travis.id, &easy)
             .unwrap()
             .unwrap();
