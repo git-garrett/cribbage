@@ -8081,6 +8081,27 @@ body[data-auth="signed-in"] .pathway-login-note {
   line-height: 1;
 }
 
+.people-presence-game-dot,
+.people-game-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #b61f32;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #b61f32 16%, transparent);
+}
+
+.people-presence-game-dot[hidden] {
+  display: none;
+}
+
+.people-list-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .people-presence.has-challenge .people-presence-toggle {
   border-color: #e8c575;
   background: var(--entry-featured);

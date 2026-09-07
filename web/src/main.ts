@@ -31,7 +31,11 @@ import {
 import { AuthenticationRequiredError, shouldRecoverExpiredSession } from "./auth-recovery";
 import { circularTurnCutPresentation, createCircularBoard, updateCircularBoard } from "./circular-board";
 import { comparisonTone, type ComparisonTone } from "./comparison-difference";
-import { completedGameIds, mergeStoredAnalyticsEvents } from "./completed-game-history";
+import {
+  completedGameIds,
+  mergeStoredAnalyticsEvents,
+  preferredAnalyticsEvent,
+} from "./completed-game-history";
 import {
   DYNAMIC_CALIBRATING_LABEL,
   dynamicCardCopy,
@@ -556,6 +560,7 @@ const els = {
   peoplePresence: document.querySelector("#people-presence") as HTMLElement,
   peoplePresenceToggle: document.querySelector("#people-presence-toggle") as HTMLButtonElement,
   peoplePresenceLabel: document.querySelector("#people-presence-label") as HTMLElement,
+  peoplePresenceGameDot: document.querySelector("#people-presence-game-dot") as HTMLElement,
   peoplePresenceAlert: document.querySelector("#people-presence-alert") as HTMLElement,
   peoplePresencePanel: document.querySelector("#people-presence-panel") as HTMLElement,
   peoplePresenceClose: document.querySelector("#people-presence-close") as HTMLButtonElement,
@@ -2074,6 +2079,12 @@ function peopleListItem(
   const action = document.createElement("span");
   action.className = "people-list-action";
   action.textContent = options.actionLabel || "View";
+  if (options.game) {
+    const indicator = document.createElement("i");
+    indicator.className = "people-game-dot";
+    indicator.setAttribute("aria-hidden", "true");
+    action.prepend(indicator);
+  }
   button.append(avatar, copy, action);
   return button;
 }
@@ -2191,9 +2202,8 @@ function renderPeopleDirectory(options: { animate?: boolean } = {}): void {
   els.peopleOnlineList.classList.toggle("people-directory-updated", animate);
   els.humanDirectory.classList.toggle("people-directory-updated", animate);
   const activeTable = resumableHumanTable();
-  els.peoplePresenceLabel.textContent = activeTable
-    ? `${peopleDirectory.onlineCount} online · Resume`
-    : `${peopleDirectory.onlineCount} online`;
+  els.peoplePresenceLabel.textContent = `${peopleDirectory.onlineCount} online`;
+  els.peoplePresenceGameDot.hidden = !activeTable;
   const challengeCount = peopleDirectory.incomingChallenges.length;
   els.peoplePresenceAlert.hidden = challengeCount === 0;
   els.peoplePresenceAlert.textContent = String(challengeCount);
@@ -3320,9 +3330,10 @@ function syncAnalytics(events: AnalyticsEvent[]): void {
       changedEvents.push(taggedEvent);
       continue;
     }
-    if (JSON.stringify(store.events[existingIndex]) !== JSON.stringify(taggedEvent)) {
-      store.events[existingIndex] = taggedEvent;
-      changedEvents.push(taggedEvent);
+    const preferredEvent = preferredAnalyticsEvent(store.events[existingIndex], taggedEvent);
+    if (JSON.stringify(store.events[existingIndex]) !== JSON.stringify(preferredEvent)) {
+      store.events[existingIndex] = preferredEvent;
+      changedEvents.push(preferredEvent);
     }
   }
   store.events.sort((a, b) => a.at.localeCompare(b.at));
@@ -6160,13 +6171,15 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
   const pending = pendingDecisionReviews(events, end.gameId, reviewPlayer);
   const reviewed = reviewedUserDecisions(events, end.gameId, reviewPlayer);
 
-  if (pending.length) {
+  if (pending.length || reviewed.length) {
     const pendingNotice = document.createElement("div");
     pendingNotice.className = "decision-review-pending";
     const pendingBody = document.createElement("div");
     pendingBody.className = "decision-review-pending-body";
     const pendingText = document.createElement("span");
-    pendingText.textContent = `${pending.length} ${reviewName} decision${pending.length === 1 ? "" : "s"} still need${pending.length === 1 ? "s" : ""} ${DECISION_REVIEWER_NAME} analysis.`;
+    pendingText.textContent = pending.length
+      ? `${pending.length} ${reviewName} decision${pending.length === 1 ? "" : "s"} still need${pending.length === 1 ? "s" : ""} ${DECISION_REVIEWER_NAME} analysis.`
+      : `All ${reviewed.length} decisions for ${reviewName} have been analyzed.`;
     pendingBody.append(pendingText);
     if (state.completingReviews && state.reviewProgress) {
       const total = Math.max(1, state.reviewProgress.total);
@@ -6186,8 +6199,8 @@ function singleGameDecisionReview(events: AnalyticsEvent[], end: GameEndEvent): 
     const analyze = document.createElement("button");
     analyze.type = "button";
     analyze.className = "decision-review-analyze";
-    analyze.textContent = state.completingReviews ? "Analyzing" : `Analyze with ${DECISION_REVIEWER_NAME}`;
-    analyze.disabled = state.completingReviews || state.pending;
+    analyze.textContent = pending.length ? state.completingReviews ? "Analyzing" : `Analyze with ${DECISION_REVIEWER_NAME}` : "Analysis complete";
+    analyze.disabled = !pending.length || state.completingReviews || state.pending;
     analyze.addEventListener("click", () => {
       void analyzeGameDecisionReviews(end.gameId);
     });
