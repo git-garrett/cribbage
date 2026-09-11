@@ -167,6 +167,8 @@ deploy() {
         cp -a '$REMOTE_APP_DIR/dist/assets/.' '$incoming_dir/dist/assets/'; \
       fi && \
       tar -xzf '$remote_archive' -C '$incoming_dir' && \
+      find '$incoming_dir/rust/cribbage-shadow-engine/assets' -type d -exec chmod 755 {} + && \
+      find '$incoming_dir/rust/cribbage-shadow-engine/assets' -type f -exec chmod 644 {} + && \
       cd '$incoming_dir/rust' && \
       CRIBBAGE_BUILD_GIT_COMMIT='$GIT_COMMIT' CARGO_TARGET_DIR='$REMOTE_BUILD_DIR/target' cargo build --locked --release --manifest-path cribbage-api/Cargo.toml && \
       install -d -m 755 '$incoming_dir/rust/target/release' && \
