@@ -6608,9 +6608,11 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   transition: opacity 180ms ease, transform 180ms ease, filter 180ms ease;
 }
 
-.app[data-view="game"] .deal-cut-choice:hover .deal-cut-card {
-  filter: brightness(1.1);
-  transform: translateY(-5px);
+@media (hover: hover) and (pointer: fine) {
+  .app[data-view="game"] .deal-cut-choice:hover .deal-cut-card {
+    filter: brightness(1.1);
+    transform: translateY(-5px);
+  }
 }
 
 .app[data-view="game"] .deal-cut-choice:focus-visible {

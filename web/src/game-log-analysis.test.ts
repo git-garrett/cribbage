@@ -30,6 +30,14 @@ describe("game log decision analysis", () => {
     expect(apiSource).toContain("completed.evaluator_model");
   });
 
+  it("reviews the just-played decision even when older work is queued", () => {
+    expect(source).toMatch(/function pendingAceMistakeReviewId[\s\S]*!event\.review[\s\S]*event\.id/s);
+    expect(source).toContain("requestNextStoredDecisionReview(gameId, reviewId)");
+    expect(source).toMatch(/serverJson<ServerGameActionResponse>\("\/api\/game\/review"[\s\S]*reviewId,/s);
+    expect(apiSource).toContain('let review_id = json_string(body, "reviewId")');
+    expect(apiSource).toContain("pending_decision_review(session, review_id.as_deref())");
+  });
+
   it("adds a browsable error ledger beneath the Game Log tab", () => {
     expect(html).toContain('data-game-log-view="errors"');
     expect(html).toContain('id="game-log-errors-list"');
