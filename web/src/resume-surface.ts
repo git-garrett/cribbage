@@ -1,4 +1,4 @@
-export type RestoredPathwayRoute = "home" | "play" | "human" | "tutorial" | "settings" | "gameplay" | "statistics" | "leaderboard";
+export type RestoredPathwayRoute = "home" | "play" | "human" | "tutorial" | "settings" | "gameplay" | "sounds" | "statistics" | "leaderboard";
 
 export function shouldRestoreSavedGameSurface(options: {
   route: RestoredPathwayRoute | null;

@@ -1,4 +1,5 @@
 import { Capacitor } from "@capacitor/core";
+import { cardSounds } from "./card-sounds";
 
 import type {
   AnalyticsDecisionReview,
@@ -212,7 +213,7 @@ type GameNoticeBase = {
 };
 
 type GameNotice = GameNoticeBase & (
-  | { kind: "score"; points: number }
+  | { kind: "score"; points: number; chimePoints: number }
   | { kind: "go"; callout: "GO"; playerText: string }
   | { kind: "start"; callout: string; playerText: string }
 );
@@ -242,7 +243,7 @@ const EMPTY_LEADERBOARD_SUMMARY: LeaderboardSummarySource = {
 type ServerBusyRetry = () => void | Promise<void>;
 type AppFontSize = "normal" | "large" | "x-large";
 type ScoringTransitionStage = "leaving" | "entering" | null;
-type PathwayView = "home" | "play" | "human" | "tutorial" | "settings" | "gameplay";
+type PathwayView = "home" | "play" | "human" | "tutorial" | "settings" | "gameplay" | "sounds";
 type PathwayRoute = PathwayView | "statistics" | "leaderboard";
 type MyStatsOpponent = "master" | "human" | "easy" | "tough" | "grandmaster" | "dynamic";
 type StatsView = "stats" | "game-log";
@@ -261,6 +262,8 @@ const FONT_SIZE_STORAGE_KEY = "strong-cribbage.fontSize";
 const FAST_COUNTING_STORAGE_KEY = "strong-cribbage.fastCounting.v1";
 const HINTS_ENABLED_STORAGE_KEY = "strong-cribbage.hintsEnabled.v1";
 const ERROR_NOTICES_ENABLED_STORAGE_KEY = "strong-cribbage.errorNoticesEnabled.v1";
+const SOUNDS_ENABLED_STORAGE_KEY = "strong-cribbage.sounds.enabled";
+const SOUNDS_VOLUME_STORAGE_KEY = "strong-cribbage.sounds.volume";
 const DISMISSED_GAME_OVER_STORAGE_KEY = "strong-cribbage.dismissedGameOverId";
 const LEADERBOARD_CACHE_KEY = "strong-cribbage.leaderboard.v2";
 const PEOPLE_IDLE_MS = 15 * 60 * 1000;
@@ -364,6 +367,7 @@ const state: {
   noticeTimer: number | null;
   activeNotice: GameNotice | null;
   peggingScoreNoticeHeld: boolean;
+  peggingArrivingCardId: number | null;
   scoreNoticeCursor: ScoreNoticeCursor;
   announcedGoNoticeKeys: Set<string>;
   dealCutRevealStage: "cutting" | "human" | "ai" | null;
@@ -432,6 +436,7 @@ const state: {
   noticeTimer: null,
   activeNotice: null,
   peggingScoreNoticeHeld: false,
+  peggingArrivingCardId: null,
   scoreNoticeCursor: createScoreNoticeCursor(),
   announcedGoNoticeKeys: new Set(),
   dealCutRevealStage: null,
@@ -466,6 +471,7 @@ let aceMistakeChoiceRevision = 0;
 let pendingAceMistakeReview: PendingAceMistakeReview | null = null;
 
 function resetTransientGameUi(): void {
+  cardSounds.stop();
   interactionEpoch += 1;
   gameStateGeneration += 1;
   aceMistakeChoiceRevision += 1;
@@ -481,6 +487,7 @@ function resetTransientGameUi(): void {
   state.completingReviews = false;
   state.reviewProgress = null;
   state.noticeResultLines = [];
+  state.peggingArrivingCardId = null;
   state.scoreNoticeCursor = createScoreNoticeCursor();
   state.announcedGoNoticeKeys = new Set();
   clearNoticeQueue();
@@ -607,6 +614,10 @@ const els = {
   sizeDialogClose: document.querySelector("#size-dialog-close") as HTMLButtonElement,
   sizeDialogSave: document.querySelector("#size-dialog-save") as HTMLButtonElement,
   sizeDialogStatus: document.querySelector("#size-dialog-status") as HTMLElement,
+  soundsDialog: document.querySelector("#sounds-dialog") as HTMLDialogElement,
+  soundsDialogClose: document.querySelector("#sounds-dialog-close") as HTMLButtonElement,
+  gameplayDialog: document.querySelector("#gameplay-dialog") as HTMLDialogElement,
+  gameplayDialogClose: document.querySelector("#gameplay-dialog-close") as HTMLButtonElement,
   authPage: document.querySelector("#auth-page") as HTMLElement,
   authTitle: document.querySelector("#auth-title") as HTMLElement,
   authIntro: document.querySelector("#auth-intro") as HTMLElement,
@@ -2861,6 +2872,16 @@ function openSizeDialog(): void {
   els.sizeDialog.showModal();
 }
 
+function openSettingsDialog(dialog: HTMLDialogElement): void {
+  if (!dialog.open) dialog.showModal();
+}
+
+function closeSettingsDialog(dialog: HTMLDialogElement, route: "sounds" | "gameplay"): void {
+  if (dialog.open) dialog.close();
+  if (pathwayRouteFromLocation() !== route) return;
+  window.history.replaceState(pathwayHistoryState("settings"), "", pathwayUrl("settings", true));
+}
+
 async function saveSizePreference(): Promise<void> {
   const selected = els.sizeDialog.querySelector<HTMLInputElement>('input[name="pathway-size"]:checked');
   if (!selected) return;
@@ -3385,6 +3406,7 @@ function markAppReady(): void {
 
 function showPathwayView(view: PathwayView): void {
   if (!PATHWAY_NAV_ENABLED) return;
+  cardSounds.stop();
   state.engagementOpen = false;
   els.engagementPage.hidden = true;
   if (els.pathwayPage.hidden && isActiveGame(state.game)) suspendActiveGameForPathway();
@@ -3587,14 +3609,14 @@ async function forfeitSavedMasterGame(): Promise<void> {
 
 function pathwayRouteFromLocation(): PathwayRoute {
   const route = new URL(window.location.href).searchParams.get(PATHWAY_VIEW_PARAM);
-  if (route === "play" || route === "human" || route === "tutorial" || route === "settings" || route === "gameplay" || route === "statistics" || route === "leaderboard") return route;
+  if (route === "play" || route === "human" || route === "tutorial" || route === "settings" || route === "gameplay" || route === "sounds" || route === "statistics" || route === "leaderboard") return route;
   return "home";
 }
 
 function pathwayParentRoute(route: PathwayRoute): PathwayRoute | null {
   if (route === "home") return null;
   if (route === "human") return "play";
-  if (route === "gameplay") return "settings";
+  if (route === "gameplay" || route === "sounds") return "settings";
   return "home";
 }
 
@@ -3613,6 +3635,7 @@ function pathwayRouteLabel(route: PathwayRoute): string {
   if (route === "leaderboard") return "Leaderboard";
   if (route === "human") return "Human Opponents";
   if (route === "gameplay") return "Gameplay";
+  if (route === "sounds") return "Sounds";
   return "Home";
 }
 
@@ -3656,6 +3679,19 @@ function applyPathwayRoute(route: PathwayRoute): void {
     openLeaderboard();
     return;
   }
+
+  if (route === "gameplay" || route === "sounds") {
+    if (route !== "gameplay" && els.gameplayDialog.open) els.gameplayDialog.close();
+    if (route !== "sounds" && els.soundsDialog.open) els.soundsDialog.close();
+    showPathwayView("settings");
+    const dialog = route === "gameplay" ? els.gameplayDialog : els.soundsDialog;
+    if (!dialog.open) dialog.showModal();
+    trackActivityPageView(`pathway:${route}`);
+    return;
+  }
+
+  if (els.gameplayDialog.open) els.gameplayDialog.close();
+  if (els.soundsDialog.open) els.soundsDialog.close();
 
   if (state.analyticsOpen) {
     state.analyticsOpen = false;
@@ -4985,6 +5021,7 @@ function cardElement(card: GameState["humanHand"][number], options: { clickable?
   button.dataset.index = String(card.index);
   button.dataset.id = String(card.id);
   if (card.owner) button.dataset.owner = card.owner;
+  if (state.peggingArrivingCardId === card.id) button.classList.add("pegging-card-arriving");
   if (state.selected.has(card.id)) button.classList.add("selected");
   if (options.disabled && button instanceof HTMLButtonElement) button.disabled = true;
   if (options.clickable && button instanceof HTMLButtonElement) {
@@ -5196,12 +5233,12 @@ function makeTurnCutControl(element: HTMLElement, ariaLabel: string): void {
   element.setAttribute("role", "button");
   element.tabIndex = 0;
   element.setAttribute("aria-label", ariaLabel);
-  element.addEventListener("click", completeTurnCutInteraction);
-  element.addEventListener("keydown", (event) => {
+  element.onclick = completeTurnCutInteraction;
+  element.onkeydown = (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
     completeTurnCutInteraction();
-  });
+  };
 }
 
 function prepareTurnCardReveal(row: HTMLElement, deck: HTMLElement, card: HTMLElement): void {
@@ -5220,6 +5257,7 @@ function prepareTurnCardReveal(row: HTMLElement, deck: HTMLElement, card: HTMLEl
 function renderTurnCut(game: GameState): void {
   const presentation = turnCutPresentation(state.turnCutRevealStage);
   if (!presentation) return;
+  const existingDeck = els.plays.querySelector<HTMLElement>(".turn-cut-deck");
   els.plays.innerHTML = "";
   els.plays.hidden = false;
   const row = document.createElement("div");
@@ -5228,8 +5266,15 @@ function renderTurnCut(game: GameState): void {
   emptySlot.className = "cut-slot cut-slot-human";
   const cutSlot = document.createElement("div");
   cutSlot.className = "cut-slot cut-slot-ai";
-  const deck = cardBack();
-  deck.classList.add("turn-cut-deck");
+  // Safari briefly paints a newly created deck at its uncut origin between
+  // these stages. Reusing the node keeps the completed cut and reveal joined.
+  const deck = existingDeck ?? cardBack();
+  deck.className = "card back turn-cut-deck";
+  deck.setAttribute("role", "img");
+  deck.setAttribute("aria-label", "Hidden card");
+  deck.removeAttribute("tabindex");
+  deck.onclick = null;
+  deck.onkeydown = null;
   if (state.turnCutRevealStage === "user-cutting" || state.turnCutRevealStage === "ai-cutting") {
     deck.classList.add("turn-cut-deck-cutting");
   } else if (
@@ -5430,7 +5475,10 @@ async function animatePeggingPlay(
   source: PeggingPlaySource | null,
 ): Promise<void> {
   const card = newlyPlayedCard(previous, next, player);
-  if (!card || !source || tableMotionDisabled()) return;
+  if (!card) return;
+  const animate = Boolean(source) && !tableMotionDisabled();
+  cardSounds.play("play", animate ? (player === "ai" ? 0.56 : 0.48) : 0);
+  if (!source || !animate) return;
   const destinations = [...els.plays.querySelectorAll<HTMLElement>(
     `.played-active.pegging-row .card:not(.pegging-overflow-card)[data-id="${card.id}"]`,
   )];
@@ -5508,12 +5556,16 @@ async function renderPeggingPlayWithMotion(
   player: PlayerKey,
   source: PeggingPlaySource | null,
 ): Promise<void> {
+  const card = newlyPlayedCard(previous, next, player);
+  const animate = Boolean(card && source && !tableMotionDisabled());
   const holdScoreNotice = shouldHoldPeggingScoreNotice(previous, next, player, source);
   if (holdScoreNotice) state.peggingScoreNoticeHeld = true;
+  state.peggingArrivingCardId = animate ? card?.id ?? null : null;
   render(next);
   try {
     await animatePeggingPlay(previous, next, player, source);
   } finally {
+    state.peggingArrivingCardId = null;
     if (holdScoreNotice) {
       state.peggingScoreNoticeHeld = false;
       drainNoticeQueue();
@@ -5546,8 +5598,7 @@ function discardFlightCard(source: HTMLElement | null): HTMLElement {
 function discardFlightSources(player: PlayerKey, cardIds: readonly number[]): DiscardFlightSource[] {
   if (player === "human") {
     return cardIds.flatMap((id) => {
-      const element = els.plays.querySelector<HTMLElement>(`.card[data-id="${id}"]`)
-        ?? els.humanHand.querySelector<HTMLElement>(`.card[data-id="${id}"]`);
+      const element = els.humanHand.querySelector<HTMLElement>(`.card[data-id="${id}"]`);
       if (!element) return [];
       const rect = element.getBoundingClientRect();
       return rect.width && rect.height ? [{ element, rect, card: discardFlightCard(element) }] : [];
@@ -5715,9 +5766,18 @@ async function playDiscardToCribAnimation(
   const key = discardAnimationKey(game, player);
   if (state.animatedDiscardKeys.has(key)) return;
   state.animatedDiscardKeys.add(key);
-  if (tableMotionDisabled()) return;
+  const animate = !tableMotionDisabled();
+  if (!animate) {
+    cardSounds.play("discard");
+    cardSounds.play("discard", 0.13);
+    return;
+  }
   const sources = discardFlightSources(player, cardIds);
-  if (sources.length !== 2) return;
+  if (sources.length !== 2) {
+    cardSounds.play("discard");
+    cardSounds.play("discard", 0.13);
+    return;
+  }
 
   const destination = cribFlightDestination();
   const layer = document.createElement("div");
@@ -5743,7 +5803,7 @@ async function playDiscardToCribAnimation(
     const dy = destination.y - startY + (index * 4);
     const midX = dx * 0.46;
     const midY = (dy * 0.46) - 34;
-    return source.card.animate([
+    const animation = source.card.animate([
       { opacity: 1, transform: "translate3d(0, 0, 0) scale(1) rotate(0deg)" },
       { offset: 0.5, opacity: 1, transform: `translate3d(${midX}px, ${midY}px, 0) scale(1.02) rotate(${index ? 5 : -5}deg)` },
       { opacity: 0.96, transform: `translate3d(${dx}px, ${dy}px, 0) scale(0.96) rotate(${index ? 4 : -4}deg)` },
@@ -5752,7 +5812,8 @@ async function playDiscardToCribAnimation(
       delay: index * 130,
       easing: "cubic-bezier(0.22, 0.72, 0.24, 1)",
       fill: "forwards",
-    }).finished.catch(() => undefined);
+    });
+    return animation.finished.then(() => cardSounds.play("discard")).catch(() => undefined);
   });
 
   await Promise.all(flights);
@@ -5962,6 +6023,7 @@ function newScoreNotices(game: GameState): GameNotice[] {
         text: `${part.label}. ${player} scores ${part.points} ${pointLabel}.`,
         label: part.label,
         points: part.points,
+        chimePoints: event.category === "pegging" ? (index === 0 ? event.points : 0) : part.points,
         player: event.player,
         anchor: event.reason === "Heels" ? "cut" : event.category === "pegging" ? "play" : "scoring",
         emphasizedCardIds: scoreNoticeEmphasisCardIds(
@@ -6076,6 +6138,7 @@ function maybeOpenScoreSummary(): void {
 }
 
 function showNoticeBubble(notice: GameNotice): void {
+  if (notice.kind === "score") cardSounds.playScore(notice.chimePoints);
   els.result.innerHTML = "";
   const bubble = document.createElement("div");
   bubble.className = `game-notification game-notification-score${notice.kind === "go" ? " game-notification-go" : notice.kind === "start" ? " game-notification-start" : ""}`;
@@ -8541,6 +8604,7 @@ function render(game: GameState | null): void {
   els.splashFirstName.value = playerFirstName || els.splashFirstName.value;
   els.app.dataset.phase = game.phase;
   els.app.dataset.fastCounting = state.fastCounting ? "true" : "false";
+  els.app.dataset.turnCutActive = state.turnCutRevealStage ? "true" : "false";
   const showingDealCut = Boolean(state.dealCutRevealStage) || game.phase === "cut_for_deal";
   els.app.dataset.dealCutActive = showingDealCut ? "true" : "false";
   els.app.dataset.dealAnimationActive = state.dealAnimation ? "true" : "false";
@@ -8761,6 +8825,9 @@ async function playDealAnimationIfNeeded(game: GameState): Promise<void> {
   const key = dealAnimationKey(game);
   if (!key || state.animatedDealKeys.has(key)) return;
   state.animatedDealKeys.add(key);
+  // The fan sample is a whole dealing gesture, not a per-card impact.
+  if (game.handNumber > 1) cardSounds.play("shuffle");
+  cardSounds.play("deal", game.handNumber > 1 ? 0.72 : 0);
   if (tableMotionDisabled()) return;
   const dealer = game.dealer;
   const pone = dealer === "User" ? "AI" : "User";
@@ -8800,6 +8867,7 @@ async function revealAndConfirmTurnCard(): Promise<GameState> {
     throw new Error("The server did not reveal the turn card.");
   }
   showTurnCutStage(revealedGame, "revealed", `Cut card is ${cutCardText(revealedGame.turnCard)}.`);
+  cardSounds.play("cut");
   const confirmed = waitForTurnCutInteraction();
   await waitForPaint();
   await confirmed;
@@ -9166,6 +9234,44 @@ els.pathwayHeaderHome.addEventListener("click", () => {
   if (parent) navigatePathway(parent);
 });
 
+const soundsEnabled = document.querySelector<HTMLInputElement>("#sounds-enabled")!;
+const soundsVolume = document.querySelector<HTMLInputElement>("#sounds-volume")!;
+soundsEnabled.checked = safeLocalStorageGet(SOUNDS_ENABLED_STORAGE_KEY) !== "0";
+const savedSoundVolume = Number(safeLocalStorageGet(SOUNDS_VOLUME_STORAGE_KEY) ?? "0.5");
+soundsVolume.value = String(Number.isFinite(savedSoundVolume) ? Math.max(0, Math.min(1, savedSoundVolume)) : 0.5);
+cardSounds.setEnabled(soundsEnabled.checked);
+cardSounds.setVolume(Number(soundsVolume.value));
+document.addEventListener("click", (event) => {
+  const target = event.target instanceof Element
+    ? event.target.closest("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [role='button']:not([aria-disabled='true'])")
+    : null;
+  // The enabling toggle must turn audio on before its own feedback is played.
+  if (target === soundsEnabled && soundsEnabled.checked) cardSounds.setEnabled(true);
+  cardSounds.unlock();
+  if (target && !target.matches("button.card")) cardSounds.play("tick");
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") cardSounds.unlock();
+}, { capture: true });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) cardSounds.stop();
+});
+soundsEnabled.addEventListener("change", () => {
+  safeLocalStorageSet(SOUNDS_ENABLED_STORAGE_KEY, soundsEnabled.checked ? "1" : "0");
+  if (soundsEnabled.checked) {
+    cardSounds.setEnabled(true);
+    cardSounds.unlock();
+  } else {
+    // Let the switch's own 35 ms tick finish before muting table audio.
+    window.setTimeout(() => {
+      if (!soundsEnabled.checked) cardSounds.setEnabled(false);
+    }, 50);
+  }
+});
+soundsVolume.addEventListener("input", () => {
+  cardSounds.setVolume(Number(soundsVolume.value));
+  safeLocalStorageSet(SOUNDS_VOLUME_STORAGE_KEY, soundsVolume.value);
+});
 for (const button of els.pathwayDestinationButtons) {
   if (button.disabled) continue;
   const destination = button.dataset.pathwayDestination;
@@ -9189,7 +9295,11 @@ for (const button of els.pathwayDestinationButtons) {
     continue;
   }
   if (destination === "gameplay") {
-    button.addEventListener("click", () => navigatePathway("gameplay"));
+    button.addEventListener("click", () => openSettingsDialog(els.gameplayDialog));
+    continue;
+  }
+  if (destination === "sounds") {
+    button.addEventListener("click", () => openSettingsDialog(els.soundsDialog));
     continue;
   }
   const opponent = pathwayOpponent(destination);
@@ -9372,10 +9482,15 @@ els.sizeDialog.addEventListener("submit", (event) => {
 });
 
 els.sizeDialogClose.addEventListener("click", () => els.sizeDialog.close());
+els.soundsDialogClose.addEventListener("click", () => closeSettingsDialog(els.soundsDialog, "sounds"));
+els.gameplayDialogClose.addEventListener("click", () => closeSettingsDialog(els.gameplayDialog, "gameplay"));
+els.soundsDialog.addEventListener("close", () => closeSettingsDialog(els.soundsDialog, "sounds"));
+els.gameplayDialog.addEventListener("close", () => closeSettingsDialog(els.gameplayDialog, "gameplay"));
 
 document.addEventListener("keydown", (event) => {
   recordPeopleActivity();
   if (event.key !== "Escape" || els.pathwayPage.hidden) return;
+  if (els.sizeDialog.open || els.soundsDialog.open || els.gameplayDialog.open) return;
   const parent = pathwayParentRoute(els.pathwayPage.dataset.view as PathwayView);
   if (parent) navigatePathway(parent);
 });
@@ -10115,10 +10230,12 @@ async function cutForDeal(cutIndex = Math.floor(DEAL_CUT_CARD_COUNT / 2)): Promi
       state.dealAiCutIndex = (cutIndex + Math.ceil(DEAL_CUT_CARD_COUNT / 2)) % DEAL_CUT_CARD_COUNT;
       state.dealCutRevealStage = "human";
       render(next);
+      cardSounds.play("cut");
       await waitForPaint();
       await waitForTableMotion(800);
       state.dealCutRevealStage = "ai";
       render(next);
+      cardSounds.play("cut");
       await waitForPaint();
       await waitForTableMotion(1_250);
       state.dealCutRevealStage = null;
@@ -10422,6 +10539,7 @@ async function startNewGameFromUi(
       return;
     }
     const next = await api("/api/new", { opponent: els.opponent.value });
+    cardSounds.play("shuffle");
     state.splashOpen = false;
     state.hasResumableGame = true;
     els.settingsPanel.hidden = true;

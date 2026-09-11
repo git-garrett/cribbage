@@ -4,8 +4,21 @@ import { describe, expect, it } from "vitest";
 
 const mainSource = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+const discardFlightSourcesSource = mainSource.slice(
+  mainSource.indexOf("function discardFlightSources"),
+  mainSource.indexOf("const visibleCards", mainSource.indexOf("function discardFlightSources")),
+);
+const renderTurnCutSource = mainSource.slice(
+  mainSource.indexOf("function renderTurnCut"),
+  mainSource.indexOf("const DEAL_CARD_INTERVAL_MS"),
+);
 
 describe("physical card motion", () => {
+  it("keeps the same deck element when the cut changes into the turn-card reveal", () => {
+    expect(renderTurnCutSource).toContain('els.plays.querySelector<HTMLElement>(".turn-cut-deck")');
+    expect(renderTurnCutSource).toMatch(/const deck = existingDeck \?\? cardBack\(\)/);
+  });
+
   it("deals from the deck to alternating opponent-upper-left and player-lower-left destinations", () => {
     expect(mainSource).toMatch(/const poneOrder = index \* 2;[\s\S]*const dealerOrder = poneOrder \+ 1;/s);
     expect(mainSource).toContain('pone.dataset.owner = state.dealAnimation.pone === "AI" ? "ai" : "human"');
@@ -28,11 +41,20 @@ describe("physical card motion", () => {
   it("flies both player and opponent discards into the crib", () => {
     expect(mainSource).toMatch(/playDiscardToCribAnimation\(state\.game, "human", selectedIds\)/);
     expect(mainSource).toMatch(/playDiscardToCribAnimation\(optimisticNext, "ai"\)/);
+    expect(mainSource).toMatch(/animation\.finished\.then\(\(\) => cardSounds\.play\("discard"\)\)/);
+    expect(discardFlightSourcesSource).toContain("els.humanHand.querySelector");
+    expect(discardFlightSourcesSource).not.toContain("els.plays.querySelector");
     expect(mainSource).toMatch(/function cribFlightDestination[\s\S]*cribTrayStack\.getBoundingClientRect/s);
     expect(mainSource).toMatch(/source\.card\.animate\(\[[\s\S]*translate3d\(\$\{dx\}px, \$\{dy\}px/s);
     expect(css).toMatch(/\.crib-tray\[data-owner="ai"\][^}]*top:\s*18px/s);
     expect(css).toMatch(/\.crib-tray\[data-owner="human"\][^}]*bottom:/s);
     expect(css).toMatch(/\.crib-tray\[data-fill="partial"\][\s\S]*linear-gradient[\s\S]*#284f86/s);
+  });
+
+  it("plays the card placement sound when either player lands a pegging card", () => {
+    expect(mainSource).toMatch(/cardSounds\.play\("play", animate \? \(player === "ai" \? 0\.56 : 0\.48\) : 0\)/);
+    expect(mainSource).toMatch(/renderPeggingPlayWithMotion\(previous, current, "ai", source\)/);
+    expect(mainSource).toMatch(/renderPeggingPlayWithMotion\(previous, next, "human", playSource\)/);
   });
 
   it("flies each pegging play from its hand position into the active series", () => {
@@ -44,6 +66,8 @@ describe("physical card motion", () => {
     expect(css).toMatch(/\.pegging-play-flight-layer\s*\{[^}]*position:\s*fixed[^}]*pointer-events:\s*none/s);
     expect(css).toMatch(/\.pegging-card-arriving\s*\{[^}]*opacity:\s*0\s*!important/s);
     expect(mainSource).toContain("const flyingCard = destination.cloneNode(true) as HTMLElement");
+    expect(mainSource).toMatch(/state\.peggingArrivingCardId = animate \? card\?\.id \?\? null : null;\s*render\(next\);/);
+    expect(mainSource).toMatch(/if \(state\.peggingArrivingCardId === card\.id\) button\.classList\.add\("pegging-card-arriving"\)/);
   });
 
   it("keeps the full deal-cut deck in one stable 52-card ribbon", () => {
@@ -74,5 +98,7 @@ describe("physical card motion", () => {
   it("keeps a complete desktop pegging series on one more-tightly overlapped row", () => {
     expect(css).toMatch(/@media \(min-width: 960px\)[\s\S]*#plays \.played-active\.pegging-row\s*\{[^}]*flex-wrap:\s*nowrap/s);
     expect(css).toMatch(/@media \(min-width: 960px\)[\s\S]*#plays \.played-active\.pegging-row \.card \+ \.card\s*\{[^}]*margin-left:\s*calc\(var\(--game-card-width\) \* -0\.68\)/s);
+    expect(css).toMatch(/@media \(min-width: 960px\)[\s\S]*\.card\.pegging-card-covered \.corner\s*\{[^}]*display:\s*grid !important/s);
+    expect(css).toMatch(/@media \(min-width: 960px\)[\s\S]*\.card\.pegging-card-covered > :is\(\.rank, \.suit\)\s*\{[^}]*display:\s*none/s);
   });
 });

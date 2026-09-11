@@ -265,55 +265,22 @@
               <p>Choose what you want to adjust.</p>
             </header>
             <div class="pathway-choice-grid pathway-choice-grid-settings">
-              <button class="pathway-choice" type="button" data-pathway-destination="size">
+              <button class="pathway-choice" type="button" data-pathway-destination="size" aria-haspopup="dialog">
                 <span>Display</span>
                 <strong>Size</strong>
               </button>
-              <button class="pathway-choice" type="button" data-pathway-destination="gameplay">
+              <button class="pathway-choice" type="button" data-pathway-destination="gameplay" aria-haspopup="dialog">
                 <span>At the table</span>
                 <strong>Gameplay</strong>
               </button>
-              <button class="pathway-choice" type="button" data-pathway-destination="sounds" disabled>
+              <button class="pathway-choice" type="button" data-pathway-destination="sounds" aria-haspopup="dialog">
                 <span>Audio</span>
                 <strong>Sounds</strong>
-                <em class="pathway-coming-soon">Coming soon</em>
+                <small>Card sounds and volume</small>
               </button>
             </div>
           </section>
 
-          <section class="pathway-view pathway-subview pathway-gameplay" data-pathway-view="gameplay" aria-labelledby="pathway-gameplay-title" hidden>
-            <header class="pathway-subhead">
-              <button class="pathway-back" type="button" data-pathway-back="settings">
-                <span aria-hidden="true">←</span> Settings
-              </button>
-              <p class="pathway-eyebrow">Settings · Gameplay</p>
-              <h2 id="pathway-gameplay-title">Tune the pace and guidance.</h2>
-              <p>Choose how much help appears while you play.</p>
-            </header>
-            <div class="gameplay-settings-sheet" aria-label="Gameplay settings">
-              <label class="gameplay-setting" for="fast-counting">
-                <span>
-                  <strong>Fast counting</strong>
-                  <small>Skip score bubbles and card motion. Open each hand or crib summary immediately.</small>
-                </span>
-                <input id="fast-counting" type="checkbox" role="switch">
-              </label>
-              <label class="gameplay-setting" for="hints-enabled">
-                <span>
-                  <strong>Hints</strong>
-                  <small>Show Ask Ace when advice is available.</small>
-                </span>
-                <input id="hints-enabled" type="checkbox" role="switch" checked>
-              </label>
-              <label class="gameplay-setting" for="error-notices-enabled">
-                <span>
-                  <strong>Error notices</strong>
-                  <small>Show the ! badge when your choice differs from Ace’s recommendation.</small>
-                </span>
-                <input id="error-notices-enabled" type="checkbox" role="switch" checked>
-              </label>
-            </div>
-          </section>
         </div>
 
       </div>
@@ -427,6 +394,73 @@
         </div>
         <button id="size-dialog-save" class="people-primary-action" type="submit">Use this size</button>
         <p id="size-dialog-status" class="people-form-status" role="status" aria-live="polite"></p>
+      </form>
+    </dialog>
+
+    <dialog id="sounds-dialog" class="size-dialog settings-dialog" aria-labelledby="sounds-dialog-title">
+      <form method="dialog" class="size-dialog-shell settings-dialog-shell">
+        <header>
+          <div>
+            <p class="people-eyebrow">Settings · Sounds</p>
+            <h2 id="sounds-dialog-title">Hear the cards.</h2>
+          </div>
+          <button id="sounds-dialog-close" class="size-dialog-close" type="button" aria-label="Close sound settings">×</button>
+        </header>
+        <p class="settings-dialog-intro">Choose how sounds play at your table.</p>
+        <div class="gameplay-settings-sheet" aria-label="Sound settings">
+          <label class="gameplay-setting" for="sounds-enabled">
+            <span>
+              <strong>Card sounds</strong>
+              <small>Play sounds for shuffling, dealing, cuts, pegging, and discards.</small>
+            </span>
+            <input id="sounds-enabled" type="checkbox" role="switch" checked>
+          </label>
+          <label class="gameplay-setting sound-volume" for="sounds-volume">
+            <span>
+              <strong>Volume</strong>
+              <small>Adjust card sounds without changing your device volume.</small>
+            </span>
+            <input id="sounds-volume" type="range" min="0" max="1" step="0.05" value="0.5">
+          </label>
+        </div>
+        <button class="people-primary-action" type="submit">Done</button>
+      </form>
+    </dialog>
+
+    <dialog id="gameplay-dialog" class="size-dialog settings-dialog" aria-labelledby="gameplay-dialog-title">
+      <form method="dialog" class="size-dialog-shell settings-dialog-shell">
+        <header>
+          <div>
+            <p class="people-eyebrow">Settings · Gameplay</p>
+            <h2 id="gameplay-dialog-title">Tune the pace and guidance.</h2>
+          </div>
+          <button id="gameplay-dialog-close" class="size-dialog-close" type="button" aria-label="Close gameplay settings">×</button>
+        </header>
+        <p class="settings-dialog-intro">Choose how much help appears while you play.</p>
+        <div class="gameplay-settings-sheet" aria-label="Gameplay settings">
+          <label class="gameplay-setting" for="fast-counting">
+            <span>
+              <strong>Fast counting</strong>
+              <small>Skip score bubbles and card motion. Open each hand or crib summary immediately.</small>
+            </span>
+            <input id="fast-counting" type="checkbox" role="switch">
+          </label>
+          <label class="gameplay-setting" for="hints-enabled">
+            <span>
+              <strong>Hints</strong>
+              <small>Show Ask Ace when advice is available.</small>
+            </span>
+            <input id="hints-enabled" type="checkbox" role="switch" checked>
+          </label>
+          <label class="gameplay-setting" for="error-notices-enabled">
+            <span>
+              <strong>Error notices</strong>
+              <small>Show the ! badge when your choice differs from Ace’s recommendation.</small>
+            </span>
+            <input id="error-notices-enabled" type="checkbox" role="switch" checked>
+          </label>
+        </div>
+        <button class="people-primary-action" type="submit">Done</button>
       </form>
     </dialog>
 

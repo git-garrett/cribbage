@@ -25,6 +25,8 @@ describe("contextual game notifications", () => {
     expect(mainSource).toMatch(/points\.textContent = notice\.kind === "score" \? `\+\$\{notice\.points\}`/);
     expect(mainSource).toContain('player.textContent = notice.kind === "score" ? playerName(notice.player) : notice.playerText');
     expect(mainSource).toMatch(/event\.reason === "Heels"\) return "Heels"/);
+    expect(mainSource).toMatch(/chimePoints: event\.category === "pegging" \? \(index === 0 \? event\.points : 0\) : part\.points/);
+    expect(mainSource).toMatch(/function showNoticeBubble[\s\S]*if \(notice\.kind === "score"\) cardSounds\.playScore\(notice\.chimePoints\)/s);
   });
 
   it("uses the larger branded bubble scale for every scoring category", () => {
