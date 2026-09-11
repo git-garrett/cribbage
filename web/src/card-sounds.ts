@@ -1,15 +1,19 @@
 export const CARD_SOUND_FILES = {
-  shuffle: "/brand/card-fan-1.wav",
-  deal: "/brand/card-fan-2.wav",
-  cut: "/brand/card-place-1.wav",
-  play: "/brand/card-place-2.wav",
-  discard: "/brand/card-place-3.wav",
+  shuffle: "/brand/card-fan-1.mp3",
+  deal: "/brand/card-fan-2.mp3",
+  cut: "/brand/card-place-1.mp3",
+  play: "/brand/card-place-2.mp3",
+  discard: "/brand/card-place-3.mp3",
 } as const;
 
 type RecordedCardSound = keyof typeof CARD_SOUND_FILES;
 type SynthesizedUiSound = "tick" | "chime";
 export type CardSound = RecordedCardSound | SynthesizedUiSound;
 const SCORE_CHIME_LEVEL = 0.7;
+
+function isRecordedCardSound(sound: CardSound): sound is RecordedCardSound {
+  return Object.prototype.hasOwnProperty.call(CARD_SOUND_FILES, sound);
+}
 
 function synthesizedSoundBuffer(context: AudioContext, sound: SynthesizedUiSound): AudioBuffer {
   const duration = sound === "tick" ? 0.035 : 0.22;
@@ -41,7 +45,8 @@ export class CardSounds {
   private context: AudioContext | null = null;
   private gain: GainNode | null = null;
   private buffers = new Map<CardSound, AudioBuffer>();
-  private loading: Promise<void> | null = null;
+  private encoded = new Map<RecordedCardSound, Promise<ArrayBuffer>>();
+  private loading = new Map<RecordedCardSound, Promise<void>>();
   private resuming: Promise<void> | null = null;
   private sources = new Set<AudioBufferSourceNode>();
   private generation = 0;
@@ -58,10 +63,19 @@ export class CardSounds {
     if (this.gain) this.gain.gain.value = this.volume;
   }
 
+  /** Start network loading without creating an AudioContext before user input. */
+  preload(): void {
+    if (!this.enabled) return;
+    for (const sound of Object.keys(CARD_SOUND_FILES) as RecordedCardSound[]) {
+      void this.encodedSound(sound).catch(() => undefined);
+    }
+  }
+
   // Call synchronously from a click/key event, before any network awaits.
   unlock(): void {
     if (!this.enabled) return;
     try {
+      this.preload();
       if (!this.context) {
         this.context = new AudioContext();
         this.gain = this.context.createGain();
@@ -71,14 +85,8 @@ export class CardSounds {
         this.buffers.set("chime", synthesizedSoundBuffer(this.context, "chime"));
       }
       void this.resumeContext();
-      if (!this.loading) {
-        const context = this.context;
-        this.loading = Promise.all((Object.keys(CARD_SOUND_FILES) as RecordedCardSound[]).map(async (sound) => {
-          if (this.buffers.has(sound)) return;
-          const response = await fetch(CARD_SOUND_FILES[sound]);
-          if (!response.ok) throw new Error("Sound unavailable");
-          this.buffers.set(sound, await context.decodeAudioData(await response.arrayBuffer()));
-        })).then(() => undefined).catch(() => { this.loading = null; });
+      for (const sound of Object.keys(CARD_SOUND_FILES) as RecordedCardSound[]) {
+        void this.loadSound(sound).catch(() => undefined);
       }
     } catch {
       // Audio is optional on browsers/devices where it is unavailable.
@@ -93,7 +101,9 @@ export class CardSounds {
       this.startSound(sound, delaySeconds, generation, requestedAt);
       return;
     }
-    const soundReady = this.buffers.has(sound) ? Promise.resolve() : this.loading ?? Promise.resolve();
+    const soundReady = this.buffers.has(sound) || !isRecordedCardSound(sound)
+      ? Promise.resolve()
+      : this.loadSound(sound);
     void Promise.all([this.resumeContext(), soundReady]).then(() => {
       this.startSound(sound, delaySeconds, generation, requestedAt);
     }).catch(() => undefined);
@@ -126,6 +136,40 @@ export class CardSounds {
     source.onended = () => { this.sources.delete(source); source.disconnect(); };
     this.sources.add(source);
     source.start(context.currentTime + delaySeconds);
+  }
+
+  private encodedSound(sound: RecordedCardSound): Promise<ArrayBuffer> {
+    const existing = this.encoded.get(sound);
+    if (existing) return existing;
+    const request = fetch(CARD_SOUND_FILES[sound])
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Sound unavailable");
+        return response.arrayBuffer();
+      })
+      .catch((error) => {
+        this.encoded.delete(sound);
+        throw error;
+      });
+    this.encoded.set(sound, request);
+    return request;
+  }
+
+  private loadSound(sound: RecordedCardSound): Promise<void> {
+    if (this.buffers.has(sound)) return Promise.resolve();
+    const existing = this.loading.get(sound);
+    if (existing) return existing;
+    const context = this.context;
+    if (!context) return Promise.resolve();
+    const loading = this.encodedSound(sound)
+      .then((encoded) => context.decodeAudioData(encoded.slice(0)))
+      .then((buffer) => { this.buffers.set(sound, buffer); })
+      .catch((error) => {
+        this.encoded.delete(sound);
+        throw error;
+      })
+      .finally(() => { this.loading.delete(sound); });
+    this.loading.set(sound, loading);
+    return loading;
   }
 
   private resumeContext(): Promise<void> {

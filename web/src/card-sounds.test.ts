@@ -42,11 +42,35 @@ describe("optional card audio", () => {
     sounds.play("deal", 0.72);
     await flush();
     expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual([
-      "/brand/card-fan-1.wav", "/brand/card-fan-2.wav", "/brand/card-place-1.wav",
-      "/brand/card-place-2.wav", "/brand/card-place-3.wav",
+      "/brand/card-fan-1.mp3", "/brand/card-fan-2.mp3", "/brand/card-place-1.mp3",
+      "/brand/card-place-2.mp3", "/brand/card-place-3.mp3",
     ]);
     expect(sources).toHaveLength(1);
     expect(sources[0].start).toHaveBeenCalledWith(10.72);
+  });
+
+  it("preloads encoded assets without creating audio before user input", async () => {
+    sounds.preload();
+    await flush();
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(5);
+    expect(synthesizedBuffers).toHaveLength(0);
+    sounds.unlock();
+    await flush();
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(5);
+    expect(synthesizedBuffers).toHaveLength(2);
+  });
+
+  it("does not hold a ready effect behind another asset download", async () => {
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (String(url).endsWith("card-fan-1.mp3")) return new Promise(() => undefined);
+      return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) } as Response;
+    });
+    sounds.preload();
+    sounds.unlock();
+    sounds.play("deal");
+    await flush();
+    expect(sources).toHaveLength(1);
+    expect(sources[0].start).toHaveBeenCalledWith(10);
   });
 
   it("cancels queued and playing sounds when muted", async () => {
