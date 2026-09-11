@@ -41,6 +41,10 @@ Metadata uses `social-preview-counted-monogram.png` so social clients do not reu
 the cached square preview. `social-preview.png` remains an identical compatibility
 copy for old links.
 
+The editable card-sound WAV masters live in `audio/`. Their 160 kbps MP3 exports
+live in `web/public/brand/` so browsers and the iOS web view preload only the
+compressed delivery assets.
+
 ## Deprecated assets
 
 The following are retained only for history and must not be used by new code:

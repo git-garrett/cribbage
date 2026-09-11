@@ -9241,6 +9241,7 @@ const savedSoundVolume = Number(safeLocalStorageGet(SOUNDS_VOLUME_STORAGE_KEY) ?
 soundsVolume.value = String(Number.isFinite(savedSoundVolume) ? Math.max(0, Math.min(1, savedSoundVolume)) : 0.5);
 cardSounds.setEnabled(soundsEnabled.checked);
 cardSounds.setVolume(Number(soundsVolume.value));
+cardSounds.preload();
 document.addEventListener("click", (event) => {
   const target = event.target instanceof Element
     ? event.target.closest("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [role='button']:not([aria-disabled='true'])")
