@@ -41,6 +41,8 @@ describe("scoring presentation", () => {
     expect(mainSource).toMatch(/skipCounting\.addEventListener\("click"[\s\S]*clearNoticeQueue\(\)[\s\S]*ensureCurrentScoreSummary\(state\.game\)[\s\S]*maybeOpenScoreSummary\(\)/s);
     expect(mainSource).toContain("els.skipCounting.hidden = !game.scoring || Boolean(state.activeScoreSummary)");
     expect(css).toMatch(/\.skip-counting\s*\{[^}]*position:\s*absolute[^}]*z-index:\s*10/s);
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*data-phase\^="score_"\] \.skip-counting\s*\{[^}]*right:\s*18px[^}]*left:\s*auto/s);
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*data-phase\^="score_"\] \.played > \.score-cut\s*\{[^}]*right:\s*auto[^}]*left:\s*18px/s);
   });
 
   it("keeps the mobile skip control clear of each scoring rack", () => {

@@ -7,6 +7,38 @@ const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const source = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 
 describe("local pathway navigation", () => {
+  it("plays UI feedback after menu navigation has cleared stale table audio", () => {
+    expect(source).toMatch(/document\.addEventListener\("click", \(event\) => \{[\s\S]*cardSounds\.unlock\(\);[\s\S]*cardSounds\.play\("tick"\);\s*\}\);/s);
+  });
+
+  it("keeps card selection quiet while retaining ticks for other controls", () => {
+    expect(source).toContain('if (target && !target.matches("button.card")) cardSounds.play("tick")');
+  });
+
+  it("opens gameplay and sound controls in the same modal shell as Size", () => {
+    const soundSettings = html.slice(
+      html.indexOf('id="sounds-dialog"'),
+      html.indexOf('id="gameplay-dialog"'),
+    );
+    const gameplaySettings = html.slice(html.indexOf('id="gameplay-dialog"'));
+    expect(html).not.toContain('data-pathway-view="sounds"');
+    expect(html).not.toContain('data-pathway-view="gameplay"');
+    expect(soundSettings).toContain('class="size-dialog settings-dialog"');
+    expect(soundSettings).toContain('class="size-dialog-shell settings-dialog-shell"');
+    expect(gameplaySettings).toContain('class="size-dialog settings-dialog"');
+    expect(gameplaySettings).toContain('class="size-dialog-shell settings-dialog-shell"');
+    expect(soundSettings).toContain('class="gameplay-settings-sheet"');
+    expect(soundSettings).toContain('class="gameplay-setting" for="sounds-enabled"');
+    expect(soundSettings).toContain('class="gameplay-setting sound-volume" for="sounds-volume"');
+    expect(soundSettings).not.toContain("data-sound-preview");
+    expect(source).toMatch(/destination === "gameplay"[\s\S]*openSettingsDialog\(els\.gameplayDialog\)/s);
+    expect(source).toMatch(/destination === "sounds"[\s\S]*openSettingsDialog\(els\.soundsDialog\)/s);
+    expect(source).toMatch(/route === "gameplay" \|\| route === "sounds"[\s\S]*showPathwayView\("settings"\)[\s\S]*showModal\(\)/s);
+    expect(css).not.toContain(".sound-previews");
+    expect(css).toMatch(/\.gameplay-settings-sheet\s*\{[^}]*max-width:\s*620px[^}]*gap:\s*9px[^}]*border:\s*0[^}]*background:\s*transparent/s);
+    expect(css).toMatch(/\.gameplay-setting\s*\{[^}]*min-height:\s*72px[^}]*border:\s*1px solid var\(--entry-border\)[^}]*border-radius:\s*15px[^}]*background:\s*var\(--entry-panel-soft\)/s);
+  });
+
   it("offers the requested primary and sub-navigation choices", () => {
     expect(html).toContain('id="pathway-page"');
     expect(html).toContain('data-pathway-target="play"');
@@ -142,11 +174,10 @@ describe("local pathway navigation", () => {
       "tutorial-beginner",
       "tutorial-intermediate",
       "tutorial-expert",
-      "sounds",
     ]) {
       expect(html).toMatch(new RegExp(`data-pathway-destination="${destination}" disabled[\\s\\S]*?Coming soon`));
     }
-    for (const destination of ["easy", "tough", "master", "dynamic", "human", "size", "gameplay"]) {
+    for (const destination of ["easy", "tough", "master", "dynamic", "human", "size", "gameplay", "sounds"]) {
       expect(html).not.toMatch(new RegExp(`data-pathway-destination="${destination}" disabled`));
     }
     expect(css).toMatch(/\.pathway-choice:disabled\s*{[\s\S]*background: color-mix[\s\S]*cursor: not-allowed/);
@@ -214,11 +245,10 @@ describe("local pathway navigation", () => {
     expect(css).toContain('body[data-font-size="x-large"]');
   });
 
-  it("opens Gameplay as a history-backed Settings subpage", () => {
-    expect(html).toContain('data-pathway-view="gameplay"');
-    expect(html).toContain('data-pathway-back="settings"');
-    expect(source).toMatch(/destination === "gameplay"[\s\S]*navigatePathway\("gameplay"\)/);
-    expect(source).toMatch(/dataset\.pathwayBack[\s\S]*pathwayParentRoute\(view\)[\s\S]*"home"/);
+  it("keeps legacy Gameplay and Sounds URLs as modal deep links", () => {
+    expect(source).toMatch(/pathwayRouteFromLocation[\s\S]*route === "gameplay"[\s\S]*route === "sounds"/);
+    expect(source).toMatch(/route === "gameplay" \|\| route === "sounds"[\s\S]*showPathwayView\("settings"\)/);
+    expect(source).toMatch(/closeSettingsDialog[\s\S]*replaceState\(pathwayHistoryState\("settings"\)/);
   });
 
   it("links every view to its immediate parent in the pathway hierarchy", () => {

@@ -215,7 +215,6 @@ async function testPathwayParentNavigation(browser, baseUrl) {
     ["human", "play"],
     ["tutorial", "home"],
     ["settings", "home"],
-    ["gameplay", "settings"],
   ]) {
     page = await readyPathwayPage(browser, baseUrl, route);
     await assertPathwayRoute(page, route);
@@ -223,6 +222,17 @@ async function testPathwayParentNavigation(browser, baseUrl) {
     if (await localBack.isVisible()) await localBack.click();
     else await page.locator("#pathway-header-home").click();
     await assertPathwayRoute(page, parent);
+    await page.close();
+  }
+
+  for (const route of ["gameplay", "sounds"]) {
+    page = await readyPathwayPage(browser, baseUrl, route);
+    await page.locator("[data-pathway-view='settings']").waitFor({ state: "visible" });
+    await page.locator(`#${route}-dialog`).waitFor({ state: "visible" });
+    const actual = new URL(page.url()).searchParams.get("pathwayView");
+    if (actual !== route) throw new Error(`Expected ${route} modal route, received ${actual}.`);
+    await page.locator(`#${route}-dialog-close`).click();
+    await assertPathwayRoute(page, "settings");
     await page.close();
   }
 

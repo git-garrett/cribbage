@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+const mainSource = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 
 describe("branded responsive playing UI", () => {
   it("uses the circular track and retires the legacy lanes throughout the game view", () => {
@@ -38,6 +39,8 @@ describe("branded responsive playing UI", () => {
   });
 
   it("uses one fixed right-center anchor for every desktop turn-cut state", () => {
+    expect(mainSource).toContain('els.app.dataset.turnCutActive = state.turnCutRevealStage ? "true" : "false"');
+    expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*data-turn-cut-active="true"\] \.played\s*\{[^}]*position:\s*static/s);
     expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*\.app\[data-view="game"\] > \.table\s*\{[^}]*position:\s*relative/s);
     expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*data-phase="pegging"\] #plays \.played-active\.pegging-row\s*\{[^}]*padding-right:\s*160px/s);
     expect(css).toMatch(/@media \(min-width:\s*960px\)[\s\S]*\.played > \.score-cut,[\s\S]*\.turn-cut-row \.cut-slot-human,[\s\S]*\.turn-cut-row \.cut-slot-ai,[\s\S]*\.turn-cut-row \.turn-cut-deck\s*\{[^}]*position:\s*absolute[^}]*top:\s*50%[^}]*right:\s*120px[^}]*transform:\s*translate\(50%,\s*-50%\)/s);

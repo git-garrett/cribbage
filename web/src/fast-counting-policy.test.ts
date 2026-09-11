@@ -22,10 +22,11 @@ describe("fast counting", () => {
 
   it("persists an accessible Gameplay setting and opens summaries directly", () => {
     const settingsCard = htmlSource.indexOf('data-pathway-destination="gameplay"');
-    const gameplayPage = htmlSource.indexOf('data-pathway-view="gameplay"');
+    const gameplayDialog = htmlSource.indexOf('id="gameplay-dialog"');
     expect(settingsCard).toBeGreaterThan(-1);
-    expect(gameplayPage).toBeGreaterThan(settingsCard);
-    expect(htmlSource.slice(settingsCard, gameplayPage)).not.toContain('id="fast-counting"');
+    expect(gameplayDialog).toBeGreaterThan(settingsCard);
+    expect(htmlSource.slice(settingsCard, gameplayDialog)).not.toContain('id="fast-counting"');
+    expect(htmlSource.slice(gameplayDialog)).toContain('class="size-dialog-shell settings-dialog-shell"');
     expect(htmlSource).toContain('class="gameplay-settings-sheet"');
     expect(htmlSource).toContain('id="fast-counting"');
     expect(htmlSource).toContain('role="switch"');

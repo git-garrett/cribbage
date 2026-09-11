@@ -6165,6 +6165,12 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
     position: relative;
   }
 
+  /* A turn cut crosses from the discard grid into the pegging grid. Anchor
+     its absolute children to the stable table while that transition runs. */
+  .app[data-view="game"][data-turn-cut-active="true"] .played {
+    position: static;
+  }
+
   .app[data-view="game"][data-phase="cut_for_deal"] > .table,
   .app[data-view="game"][data-phase="discard"] > .table,
   .app[data-view="game"][data-phase="ai_discarding"] > .table {
@@ -6248,6 +6254,12 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   .app[data-view="game"] .played > .score-cut {
     width: var(--game-played-card-width);
     height: var(--game-played-card-height);
+  }
+
+  .app[data-view="game"][data-phase^="score_"] .played > .score-cut {
+    right: auto;
+    left: 18px;
+    transform: translateY(-50%);
   }
 
   .app[data-view="game"] .played > .score-cut #turn-card {
@@ -6386,6 +6398,19 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 
   .app[data-view="game"] #plays .played-active.pegging-row .card + .card {
     margin-left: calc(var(--game-card-width) * -0.68);
+  }
+
+  .app[data-view="game"] #plays .played-active.pegging-row .card.pegging-card-covered .corner {
+    top: 7px;
+    left: 7px;
+    z-index: 1;
+    display: grid !important;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .app[data-view="game"] #plays .played-active.pegging-row .card.pegging-card-covered > :is(.rank, .suit) {
+    display: none;
   }
 }
 
@@ -9213,6 +9238,17 @@ body:has(.app[data-view="game"]) .bug-report-dock {
   gap: 16px;
 }
 
+.settings-dialog-intro {
+  margin: -10px 0 0;
+  color: var(--entry-muted);
+  font-size: var(--access-small);
+  line-height: 1.45;
+}
+
+.settings-dialog .gameplay-settings-sheet {
+  margin-top: 0;
+}
+
 .size-options {
   display: grid;
   gap: 9px;
@@ -9698,29 +9734,14 @@ body[data-font-size="x-large"] .pathway-choice {
 }
 
 .gameplay-settings-sheet {
-  position: relative;
   display: grid;
   width: 100%;
-  max-width: 720px;
+  max-width: 620px;
+  gap: 9px;
   margin: 4px auto 0;
-  overflow: hidden;
-  border: 1px solid var(--entry-border);
-  border-radius: 22px;
-  background: var(--entry-panel-soft);
+  border: 0;
+  background: transparent;
   color: var(--pathway-ink);
-  box-shadow: var(--entry-card-shadow-raised);
-}
-
-.gameplay-settings-sheet::before {
-  position: absolute;
-  z-index: 2;
-  top: 18px;
-  bottom: 18px;
-  left: 12px;
-  width: 6px;
-  background: radial-gradient(circle, var(--entry-accent) 0 2px, transparent 2.5px) center top / 6px 18px repeat-y;
-  content: "";
-  pointer-events: none;
 }
 
 .gameplay-setting {
@@ -9732,15 +9753,22 @@ body[data-font-size="x-large"] .pathway-choice {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
   align-items: center;
-  min-height: 96px;
-  padding: 18px 22px 18px 32px;
-  background: transparent;
+  min-height: 72px;
+  padding: 12px 15px;
+  border: 1px solid var(--entry-border);
+  border-radius: 15px;
+  background: var(--entry-panel-soft);
   cursor: pointer;
-  transition: background-color 160ms ease;
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
 
 .gameplay-setting + .gameplay-setting {
   border-top: 1px solid var(--entry-border);
+}
+
+.gameplay-setting:has(input:checked) {
+  border-color: var(--entry-accent);
+  box-shadow: inset 4px 0 var(--entry-accent);
 }
 
 .gameplay-setting > span {
@@ -9796,6 +9824,21 @@ body[data-font-size="x-large"] .pathway-choice {
   transform: translateX(calc(var(--gameplay-switch-width) - var(--gameplay-switch-height)));
 }
 
+.sound-volume input[type="range"] {
+  appearance: auto;
+  width: min(180px, 35vw);
+  height: 32px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  accent-color: var(--entry-accent);
+}
+
+.sound-volume input[type="range"]::before {
+  content: none;
+}
+
 .gameplay-setting:has(input:focus-visible) {
   outline: 3px solid var(--entry-focus);
   outline-offset: 3px;
@@ -9810,6 +9853,13 @@ body[data-font-size="x-large"] .pathway-choice {
 @media (min-width: 850px) {
   .pathway-choice-grid-settings .pathway-choice {
     flex: 0 1 min(29vw, 330px);
+  }
+}
+
+@media (min-width: 960px) {
+  .app[data-view="game"][data-phase^="score_"] .skip-counting {
+    right: 18px;
+    left: auto;
   }
 }
 
@@ -11422,17 +11472,6 @@ body[data-font-size="x-large"] .pathway-choice {
     box-shadow:
       0 -3px 0 rgba(232, 197, 117, 0.82),
       0 20px 38px rgba(3, 25, 19, 0.28);
-  }
-
-  .gameplay-settings-sheet {
-    border-color: color-mix(in srgb, var(--entry-accent) 58%, var(--entry-border));
-    background:
-      linear-gradient(145deg, rgba(255, 255, 255, 0.7), transparent 48%),
-      var(--entry-panel-soft);
-    box-shadow:
-      0 -3px 0 color-mix(in srgb, var(--entry-accent) 48%, transparent),
-      0 20px 40px rgba(3, 42, 32, 0.23),
-      0 5px 12px rgba(7, 31, 56, 0.1);
   }
 
   :is(
