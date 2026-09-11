@@ -31,7 +31,7 @@ USAGE
 }
 
 service_loaded() {
-  launchctl list "$1" >/dev/null 2>&1
+  launchctl print "gui/$(id -u)/$1" >/dev/null 2>&1
 }
 
 listener_pid() {
@@ -70,8 +70,8 @@ acquire_lock() {
 }
 
 stop_services() {
-  launchctl remove "$WEB_LABEL" >/dev/null 2>&1 || true
-  launchctl remove "$API_LABEL" >/dev/null 2>&1 || true
+  launchctl bootout "gui/$(id -u)/$WEB_LABEL" >/dev/null 2>&1 || true
+  launchctl bootout "gui/$(id -u)/$API_LABEL" >/dev/null 2>&1 || true
   for _ in {1..50}; do
     if [[ -z "$(listener_pid "$WEB_PORT")" && -z "$(listener_pid "$API_PORT")" ]]; then
       return
