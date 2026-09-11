@@ -43,6 +43,7 @@ describe("physical card motion", () => {
     expect(mainSource).toMatch(/const playSource = capturePeggingPlaySource\("human", card\.id\)[\s\S]*renderPeggingPlayWithMotion\(previous, next, "human", playSource\)/s);
     expect(css).toMatch(/\.pegging-play-flight-layer\s*\{[^}]*position:\s*fixed[^}]*pointer-events:\s*none/s);
     expect(css).toMatch(/\.pegging-card-arriving\s*\{[^}]*opacity:\s*0\s*!important/s);
+    expect(mainSource).toContain("const flyingCard = destination.cloneNode(true) as HTMLElement");
   });
 
   it("keeps the full deal-cut deck in one stable 52-card ribbon", () => {
@@ -51,6 +52,7 @@ describe("physical card motion", () => {
     expect(mainSource).toContain('els.plays.classList.toggle("deal-cut-active", showingDealCut)');
     expect(css).toMatch(/\.deal-cut-spread\s*\{[^}]*grid-template-columns:\s*repeat\(52,/s);
     expect(css).toMatch(/@keyframes deal-cut-choice-lift[\s\S]*100% \{ opacity: 0\.18; transform: translateY\(0\)/s);
+    expect(css).toMatch(/@media \(hover: hover\) and \(pointer: fine\)[\s\S]*\.deal-cut-choice:hover \.deal-cut-card/s);
   });
 
   it("lifts a full-size top packet and flips the turn card from the lower deck", () => {

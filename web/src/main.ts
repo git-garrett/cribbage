@@ -873,13 +873,38 @@ els.serverBusyRetry.addEventListener("click", () => {
 });
 
 async function retryAfterServerBusy(retry: ServerBusyRetry): Promise<void> {
+  const before = gameProgressFingerprint(state.game);
   const recovered = await reconcileRemoteGameState();
   if (activeHumanTable) {
     await retry();
     return;
   }
-  if (recovered && await resumeReconciledGame(recovered)) return;
+  if (recovered) {
+    render(recovered);
+    if (await resumeReconciledGame(recovered)) return;
+    if (gameProgressFingerprint(recovered) !== before) return;
+  }
   await retry();
+}
+
+function gameProgressFingerprint(game: GameState | null): string {
+  if (!game) return "";
+  return JSON.stringify({
+    phase: game.phase,
+    handNumber: game.handNumber,
+    scores: game.scores,
+    count: game.count,
+    turn: game.turn,
+    turnCard: game.turnCard?.id ?? null,
+    turnCardRevealed: game.turnCardRevealed,
+    plays: game.plays.map((card) => card.id),
+    completedPlays: game.completedPlays.map((cards) => cards.map((card) => card.id)),
+    humanHand: game.humanHand.map((card) => card.id),
+    aiHandCount: game.aiHandCount,
+    scoring: game.scoring?.stage ?? null,
+    peggingResetPending: game.peggingResetPending,
+    cutForDeal: [game.cutForDeal?.human?.id ?? null, game.cutForDeal?.ai?.id ?? null],
+  });
 }
 
 async function reconcileRemoteGameState(): Promise<GameState | null> {
@@ -1368,6 +1393,12 @@ function canApplySnapshotResponse(requestSnapshot: GameSnapshot | null, requestG
 }
 
 function applyAuthoritativeGameState(snapshot: GameSnapshot, game: GameState): void {
+  const currentScoreEvent = currentScoringScoreEvent(snapshot.gameId ?? null, game);
+  state.scoreSummaryQueue = state.scoreSummaryQueue.filter((summary) => summary.key === currentScoreEvent?.id);
+  if (state.activeScoreSummary && state.activeScoreSummary.key !== currentScoreEvent?.id) {
+    state.activeScoreSummary = null;
+    renderScoreSummaryDialog();
+  }
   currentSnapshot = snapshot;
   state.game = game;
   gameStateGeneration += 1;
@@ -2585,12 +2616,6 @@ function applyHumanGameResponse(response: HumanGameResponse): GameState {
   humanGameRevision = response.revision;
   humanGameCanContinueScoring = response.canContinueScoring;
   humanGameCanAcknowledgePeggingReset = response.canAcknowledgePeggingReset;
-  const currentScoreEvent = currentScoringScoreEvent(response.snapshot.gameId ?? null, response.state);
-  state.scoreSummaryQueue = state.scoreSummaryQueue.filter((summary) => summary.key === currentScoreEvent?.id);
-  if (state.activeScoreSummary && state.activeScoreSummary.key !== currentScoreEvent?.id) {
-    state.activeScoreSummary = null;
-    renderScoreSummaryDialog();
-  }
   if (activeHumanTable && response.state.phase === "game_over") {
     activeHumanTable.phase = "complete";
     if (peopleDirectory.activeTable?.id === activeHumanTable.id) peopleDirectory.activeTable = null;
@@ -4617,12 +4642,7 @@ async function publishPendingAceMistake(gameId: string): Promise<void> {
   const reviewed = [...loadAnalytics().events].reverse().find((event): event is DecisionReviewEvent => {
     if (event.type !== "discard" && event.type !== "pegging") return false;
     if (!event.review) return false;
-    return event.gameId === pending.gameId
-      && event.handNumber === pending.handNumber
-      && event.player === "human"
-      && ((pending.action === "discard" && event.type === "discard")
-        || (pending.action === "play" && event.type === "pegging" && event.action === "play"))
-      && sameCards(event.review.selected, pending.selectedCards);
+    return aceMistakeReviewMatches(event, pending, event.review.selected);
   });
   if (!reviewed) return;
   const advice = await mistakeAdviceForChoice(
@@ -4636,6 +4656,32 @@ async function publishPendingAceMistake(gameId: string): Promise<void> {
   pendingAceMistakeReview = null;
   state.aceMistake = { handNumber: pending.handNumber, advice };
   render(state.game);
+}
+
+function aceMistakeReviewMatches(
+  event: AnalyticsEvent,
+  pending: PendingAceMistakeReview,
+  selectedCards: string[],
+): boolean {
+  if (event.type !== "discard" && event.type !== "pegging") return false;
+  return event.gameId === pending.gameId
+    && event.handNumber === pending.handNumber
+    && event.player === "human"
+    && ((pending.action === "discard" && event.type === "discard")
+      || (pending.action === "play" && event.type === "pegging" && event.action === "play"))
+    && sameCards(selectedCards, pending.selectedCards);
+}
+
+function pendingAceMistakeReviewId(gameId: string): string | undefined {
+  const pending = pendingAceMistakeReview;
+  if (!pending || pending.gameId !== gameId) return undefined;
+  return [...loadAnalytics().events].reverse().find((event) => {
+    if (event.type === "discard") return !event.review && aceMistakeReviewMatches(event, pending, event.cards);
+    if (event.type === "pegging" && event.action === "play" && event.card) {
+      return !event.review && aceMistakeReviewMatches(event, pending, [event.card]);
+    }
+    return false;
+  })?.id;
 }
 
 async function requestMasterHint(): Promise<void> {
@@ -8862,7 +8908,10 @@ async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
 
 const storedReviewQueues = new Map<string, Promise<ReturnType<typeof gameAnalysisProgress>>>();
 
-function requestNextStoredDecisionReview(gameId: string): Promise<ReturnType<typeof gameAnalysisProgress>> {
+function requestNextStoredDecisionReview(
+  gameId: string,
+  reviewId?: string,
+): Promise<ReturnType<typeof gameAnalysisProgress>> {
   const previous = storedReviewQueues.get(gameId) ?? Promise.resolve(gameAnalysisProgress(loadAnalytics().events, gameId));
   const request = previous.catch(() => gameAnalysisProgress(loadAnalytics().events, gameId)).then(async () => {
     if (activeHumanTable && currentSnapshot?.gameId === gameId) {
@@ -8876,6 +8925,7 @@ function requestNextStoredDecisionReview(gameId: string): Promise<ReturnType<typ
     if (!before.pending) return before;
     const response = await serverJson<ServerGameActionResponse>("/api/game/review", {
       gameId,
+      reviewId,
       tag: currentSessionTag() || null,
     });
     syncAnalytics(response.state.analyticsEvents);
@@ -8912,7 +8962,8 @@ function mergeReviewedDynamicCalibration(
 }
 
 function storeLiveDecisionReview(gameId: string): void {
-  void requestNextStoredDecisionReview(gameId).then(() => {
+  const reviewId = pendingAceMistakeReviewId(gameId);
+  void requestNextStoredDecisionReview(gameId, reviewId).then(() => {
     void publishPendingAceMistake(gameId).catch(() => undefined);
     if (state.analyticsOpen || state.decisionReviewOpen || currentSnapshot?.gameId === gameId) render(state.game);
   }).catch((error) => {
@@ -10282,7 +10333,7 @@ els.acknowledgePeggingReset.addEventListener("click", async () => {
 });
 
 els.continueScoring.addEventListener("click", async () => {
-  if (state.pending) return;
+  if (state.pending || !state.game?.scoring) return;
   const dismissedSummary = state.activeScoreSummary;
   const previouslyConfirmedSummaryKey = state.confirmedScoreSummaryKey;
   state.confirmedScoreSummaryKey = dismissedSummary?.key ?? null;

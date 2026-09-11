@@ -850,6 +850,7 @@ fn review_game(
     let result = (|| -> Result<String, String> {
         let game_id =
             json_string(body, "gameId").ok_or_else(|| "Missing completed game id.".to_string())?;
+        let review_id = json_string(body, "reviewId");
         let pending = {
             let mut app = server
                 .state
@@ -870,11 +871,7 @@ fn review_game(
             if !authenticated_owner {
                 return Err("The saved game belongs to another player.".to_string());
             }
-            session
-                .decision_reviews
-                .iter()
-                .find(|review| saved_decision_analysis(review, DYNAMIC_EVALUATOR_VERSION).is_none())
-                .cloned()
+            pending_decision_review(session, review_id.as_deref())
         };
 
         if let Some(pending) = pending {
@@ -2266,6 +2263,20 @@ fn saved_decision_analysis<'a>(
                 .iter()
                 .find(|analysis| analysis.evaluator_model == evaluator_model)
         })
+}
+
+fn pending_decision_review(
+    session: &Session,
+    review_id: Option<&str>,
+) -> Option<SavedDecisionReview> {
+    session
+        .decision_reviews
+        .iter()
+        .find(|review| {
+            review_id.is_none_or(|id| review.id == id)
+                && saved_decision_analysis(review, DYNAMIC_EVALUATOR_VERSION).is_none()
+        })
+        .cloned()
 }
 
 fn save_completed_decision_analysis(
@@ -4630,6 +4641,17 @@ mod tests {
 
         assert_eq!(response.status, 200);
         std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn review_targets_the_requested_pending_decision() {
+        let mut session = reviewed_cycle_session(ModelId::Schell13, "targeted-review");
+        session.decision_reviews[0].completed = None;
+        session.decision_reviews[1].completed = None;
+
+        let pending = pending_decision_review(&session, Some("dealer-peg-1")).unwrap();
+
+        assert_eq!(pending.id, "dealer-peg-1");
     }
 
     #[test]

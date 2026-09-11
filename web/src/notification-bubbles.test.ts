@@ -84,6 +84,12 @@ describe("contextual game notifications", () => {
     expect(mainSource).toMatch(/function ensureCurrentScoreSummary[\s\S]*currentScoringScoreEvent[\s\S]*scoreSummaryQueue\.push\(summary\)/s);
   });
 
+  it("drops a stale score summary instead of replaying an already-applied transition", () => {
+    expect(mainSource).toMatch(/function applyAuthoritativeGameState[\s\S]*currentScoringScoreEvent[\s\S]*activeScoreSummary = null/s);
+    expect(mainSource).toMatch(/function retryAfterServerBusy[\s\S]*gameProgressFingerprint\(recovered\) !== before\) return;/s);
+    expect(mainSource).toContain('if (state.pending || !state.game?.scoring) return;');
+  });
+
   it("names the next dealer hand and crib on scoring-summary actions", () => {
     expect(mainSource).toMatch(/scoring\.stage === "pone"\) return `\$\{playerPossessive\(dealer\)\} Hand Next`/);
     expect(mainSource).toMatch(/scoring\.stage === "dealer"\) return `\$\{playerPossessive\(dealer\)\} Crib Next`/);

@@ -280,7 +280,7 @@ describe("human clubhouse UI", () => {
   });
 
   it("replaces a stale count summary when the other player advances scoring", () => {
-    expect(source).toMatch(/function applyHumanGameResponse[\s\S]*currentScoringScoreEvent\(response\.snapshot\.gameId \?\? null, response\.state\)/);
+    expect(source).toMatch(/function applyAuthoritativeGameState[\s\S]*currentScoringScoreEvent\(snapshot\.gameId \?\? null, game\)/);
     expect(source).toMatch(/state\.activeScoreSummary\.key !== currentScoreEvent\?\.id[\s\S]*state\.activeScoreSummary = null/);
   });
 
