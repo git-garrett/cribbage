@@ -7976,18 +7976,6 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 
 /* Training drills turn the pathway surface into a compact practice table.
    The felt is the focal point; navigation keeps the existing dealt-hand style. */
-.pathway-drill-view {
-  gap: 18px;
-}
-
-.pathway-drill-view .pathway-subhead {
-  gap: 6px;
-}
-
-.pathway-drill-view .pathway-subhead h2 {
-  font-size: clamp(32px, 8vw, 48px);
-}
-
 .drill-table {
   position: relative;
   display: grid;
@@ -8253,22 +8241,39 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
     margin: 0 -8px;
   }
 
-  .pathway-drill-view {
-    padding-top: 34px;
-  }
-
   .drill-table {
     min-height: 430px;
   }
 }
 
-/* Drill tables deliberately reuse the live game's app, scoreboard, board,
-   felt, hand, and action-control vocabulary. Only feedback is training-only. */
-.pathway-drill-view {
-  width: min(100%, 960px);
+/* A drill is a real playing surface, not a game panel nested inside Training.
+   Route-specific chrome disappears and the normal game app owns the viewport. */
+.pathway-page:is([data-view="drill-scoring-play"], [data-view="drill-discard"]) {
+  background: var(--app-bg);
 }
 
-.drill-game-shell.app {
+.pathway-page:is([data-view="drill-scoring-play"], [data-view="drill-discard"]) .pathway-shell {
+  display: block;
+  width: 100%;
+  max-width: none;
+  min-height: 100svh;
+  padding: 0;
+}
+
+.pathway-page:is([data-view="drill-scoring-play"], [data-view="drill-discard"]) :is(.pathway-brandbar, .pathway-rail) {
+  display: none;
+}
+
+.pathway-page:is([data-view="drill-scoring-play"], [data-view="drill-discard"]) .pathway-stage {
+  display: block;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.pathway-page:is([data-view="drill-scoring-play"], [data-view="drill-discard"]) .pathway-drill-view {
   width: 100%;
   padding: 0;
 }
@@ -8279,6 +8284,17 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 
 .drill-game-shell .drill-opponent-score {
   justify-items: end;
+}
+
+.drill-game-shell .app-back {
+  margin-bottom: 0;
+  color: var(--game-cream);
+}
+
+@media (hover: hover) {
+  .drill-game-shell .app-back:hover {
+    color: var(--game-gold);
+  }
 }
 
 .drill-game-shell .drill-game-table {
@@ -8313,6 +8329,18 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   color: var(--game-cream);
   font-weight: 800;
   text-align: center;
+}
+
+.drill-hint-bubble {
+  --notice-y: 48%;
+  width: clamp(210px, 34vw, 280px);
+}
+
+.drill-hint-bubble .game-notification-points {
+  max-width: 92%;
+  font-size: clamp(21px, calc(var(--notice-font) * 1.72), 32px);
+  line-height: 1;
+  text-wrap: balance;
 }
 
 .drill-game-shell .drill-discard-space {
@@ -8389,17 +8417,8 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 }
 
 @media (max-width: 640px) {
-  .pathway-drill-view {
-    padding-inline: 0;
-  }
-
-  .pathway-drill-view .pathway-subhead {
-    padding-inline: 16px;
-  }
-
-  .drill-game-shell.app > .scoreboard,
-  .drill-game-shell.app > .table {
-    padding-inline: 16px;
+  .pathway-page:is([data-view="drill-scoring-play"], [data-view="drill-discard"]) {
+    background: var(--game-green, #0b5b43);
   }
 
   .drill-game-shell[data-phase="discard"] .drill-hand {

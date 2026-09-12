@@ -278,15 +278,16 @@
           </section>
 
           <section class="pathway-view pathway-subview pathway-drill-view" data-pathway-view="drill-scoring-play" aria-labelledby="drill-scoring-title" hidden>
-            <header class="pathway-subhead">
-              <button class="pathway-back" type="button" data-pathway-back="drills-beginner">
-                <span aria-hidden="true">←</span> Beginner drills
-              </button>
-              <p class="pathway-eyebrow">Beginner · Pegging</p>
-              <h2 id="drill-scoring-title">Find the scoring play.</h2>
-              <p data-drill-prompt>Choose the card that scores now.</p>
-            </header>
+            <h2 id="drill-scoring-title" class="visually-hidden">Find the scoring play</h2>
             <div class="drill-game-shell app" data-view="game" data-phase="pegging" data-drill-surface="find-scoring-play">
+              <section class="topbar">
+                <a class="app-brand" href="/" aria-label="Strong Cribbage home">
+                  <img class="app-brand-logo" src="/brand/strong-cribbage-lockup-dark.svg" alt="">
+                </a>
+                <button class="pathway-back app-back" type="button" data-pathway-back="drills-beginner">
+                  <span aria-hidden="true">←</span> Beginner drills
+                </button>
+              </section>
               <section class="scoreboard">
                 <div class="score drill-player-score">
                   <span class="score-label">Player</span><strong>0</strong>
@@ -313,9 +314,16 @@
                 </div>
                 <div class="game-notifications drill-instruction" data-drill-selection-status role="status" aria-live="polite">Choose one card.</div>
                 <div class="user-panel">
-                  <div class="user-panel-header"><h2>Player hand</h2><span class="user-hand-meta">Pegging drill</span></div>
+                  <div class="user-panel-header"><h2>Player hand</h2><span class="user-hand-meta" data-drill-prompt>Choose the card that scores now.</span></div>
                   <div class="user-hand-layout"><div class="cards drill-hand" data-drill-hand aria-label="Your cards"></div></div>
                   <div class="actions"><button type="button" data-drill-submit disabled>Play selected</button></div>
+                </div>
+                <div class="game-notifications drill-hint-layer" aria-live="polite">
+                  <div class="game-notification game-notification-score game-notification-start drill-hint-bubble" data-drill-hint hidden>
+                    <span class="game-notification-label">Look for</span>
+                    <strong class="game-notification-points" data-drill-hint-opportunity></strong>
+                    <span class="game-notification-player">opportunity</span>
+                  </div>
                 </div>
                 <div class="drill-feedback" data-drill-feedback role="status" aria-live="assertive" hidden>
                   <span class="drill-feedback-mark" data-drill-feedback-mark aria-hidden="true"></span>
@@ -326,15 +334,16 @@
           </section>
 
           <section class="pathway-view pathway-subview pathway-drill-view" data-pathway-view="drill-discard" aria-labelledby="drill-discard-title" hidden>
-            <header class="pathway-subhead">
-              <button class="pathway-back" type="button" data-pathway-back="drills-beginner">
-                <span aria-hidden="true">←</span> Beginner drills
-              </button>
-              <p class="pathway-eyebrow">Beginner · Discarding</p>
-              <h2 id="drill-discard-title">Choose your discards.</h2>
-              <p data-drill-prompt>Choose two cards for the crib.</p>
-            </header>
+            <h2 id="drill-discard-title" class="visually-hidden">Choose your discards</h2>
             <div class="drill-game-shell app" data-view="game" data-phase="discard" data-drill-surface="discard">
+              <section class="topbar">
+                <a class="app-brand" href="/" aria-label="Strong Cribbage home">
+                  <img class="app-brand-logo" src="/brand/strong-cribbage-lockup-dark.svg" alt="">
+                </a>
+                <button class="pathway-back app-back" type="button" data-pathway-back="drills-beginner">
+                  <span aria-hidden="true">←</span> Beginner drills
+                </button>
+              </section>
               <section class="scoreboard">
                 <div class="score drill-player-score">
                   <span class="score-label">Player</span><span class="dealer-button" data-drill-player-crib hidden>Crib</span><strong>0</strong>
@@ -360,7 +369,7 @@
                 <div class="played drill-discard-space" aria-hidden="true"></div>
                 <div class="game-notifications drill-instruction" data-drill-selection-status role="status" aria-live="polite">Choose two cards.</div>
                 <div class="user-panel">
-                  <div class="user-panel-header"><h2>Player hand</h2><span class="user-hand-meta">Discard drill</span></div>
+                  <div class="user-panel-header"><h2>Player hand</h2><span class="user-hand-meta" data-drill-prompt>Choose two cards for the crib.</span></div>
                   <div class="user-hand-layout"><div class="cards drill-hand" data-drill-hand aria-label="Your six-card hand"></div></div>
                   <div class="actions"><button type="button" data-drill-submit disabled>Discard selected</button></div>
                 </div>

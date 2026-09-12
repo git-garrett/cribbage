@@ -5180,6 +5180,17 @@ function hideDrillFeedback(surface: HTMLElement): void {
   delete feedback.dataset.state;
 }
 
+function showDrillHint(surface: HTMLElement, opportunity: string): void {
+  const hint = surface.querySelector<HTMLElement>("[data-drill-hint]");
+  const opportunityLabel = surface.querySelector<HTMLElement>("[data-drill-hint-opportunity]");
+  if (!hint || !opportunityLabel) return;
+  opportunityLabel.textContent = opportunity;
+  hint.hidden = true;
+  void hint.offsetWidth;
+  hint.hidden = false;
+  window.setTimeout(() => { hint.hidden = true; }, 2_250);
+}
+
 function chosenDrillCards(surface: HTMLElement): string[] {
   return [...surface.querySelectorAll<HTMLButtonElement>(".drill-dealt-card[aria-pressed='true']")]
     .map((button) => button.dataset.card || "")
@@ -5224,14 +5235,13 @@ function submitTrainingDrill(surface: HTMLElement, drill: BeginnerDrill): void {
   drillAttempts.set(drill.id, attempts);
   if (attempts < 3) {
     const remaining = 3 - attempts;
-    const instruction = drill.kind === "find-scoring-play"
-      ? `Look for ${drill.opportunity || "a scoring"} opportunity. ${remaining} ${remaining === 1 ? "try" : "tries"} left.`
-      : `${remaining} ${remaining === 1 ? "try" : "tries"} left.`;
+    const instruction = `${remaining} ${remaining === 1 ? "try" : "tries"} left.`;
     showDrillFeedback(surface, "failure", "Try again");
     window.setTimeout(() => {
       hideDrillFeedback(surface);
       surface.dataset.answering = "false";
       clearDrillSelection(surface, drill, instruction);
+      if (drill.kind === "find-scoring-play") showDrillHint(surface, drill.opportunity || "a scoring");
     }, 850);
     return;
   }

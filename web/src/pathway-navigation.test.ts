@@ -106,16 +106,18 @@ describe("local pathway navigation", () => {
     expect(html).toMatch(/data-pathway-view="drills-beginner"[\s\S]*Find the Scoring Play[\s\S]*Discard Drills/);
     expect(html).toContain('data-drill-surface="find-scoring-play"');
     expect(html).toContain('data-drill-surface="discard"');
-    expect(html).toMatch(/data-drill-surface="find-scoring-play"[\s\S]*class="scoreboard"[\s\S]*class="table drill-game-table"/);
+    expect(html).toMatch(/data-drill-surface="find-scoring-play"[\s\S]*class="topbar"[\s\S]*class="scoreboard"[\s\S]*class="table drill-game-table"/);
     expect(html).toMatch(/data-drill-surface="discard"[\s\S]*data-drill-submit disabled>Discard selected/);
     expect(html).toContain("data-drill-feedback");
     expect(source).toMatch(/trainingPathwayDestination[\s\S]*navigatePathway\(trainingRoute\)/);
     expect(source).toMatch(/renderTrainingDrill[\s\S]*cardSounds\.play\("deal"\)/);
     expect(source).toMatch(/markSolved[\s\S]*cardSounds\.play\("success"\)/);
-    expect(source).toMatch(/attempts < 3[\s\S]*Look for \$\{drill\.opportunity[\s\S]*The scoring play was/s);
+    expect(source).toMatch(/attempts < 3[\s\S]*showDrillHint\(surface, drill\.opportunity[\s\S]*The scoring play was/s);
+    expect(html).toMatch(/data-drill-hint hidden>[\s\S]*Look for[\s\S]*data-drill-hint-opportunity[\s\S]*opportunity/);
     expect(source).toContain('if (route === "drills") return "drills-beginner";');
     expect(css).toContain("@keyframes drill-card-travel");
     expect(css).not.toContain("pathway-choice-drills");
+    expect(css).toMatch(/data-view="drill-scoring-play"[\s\S]*\.pathway-stage\s*{[^}]*border:\s*0[^}]*background:\s*transparent[^}]*box-shadow:\s*none/s);
   });
 
   it("uses the pathway entry across web and mobile and connects Statistics to My Stats", () => {
