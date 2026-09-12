@@ -75,7 +75,15 @@ import { isCoherentSavedGameState } from "./saved-game-state";
 import { scoringTitle } from "./scoring-title";
 import { analyticsForStatsOpponent, statsOpponentForModel } from "./stats-opponent";
 import type { BeginnerDrill, BeginnerDrillId, DrillProgression } from "./training-drills";
-import type { TrainingIntro, TrainingIntroKind, TrainingIntroStep } from "./training-intros";
+import {
+  correctTrainingIntroChoice,
+  TRAINING_INTROS,
+  trainingIntroAnswer,
+  trainingIntroRequiredSelections,
+  type TrainingIntro,
+  type TrainingIntroKind,
+  type TrainingIntroStep,
+} from "./training-intros";
 import type { PuttingTogetherAction, PuttingTogetherLesson, PuttingTogetherStep } from "./putting-it-together";
 import {
   handScoreNoticeParts,
@@ -5080,6 +5088,8 @@ function cardElement(card: GameState["humanHand"][number], options: { clickable?
 
 let activeTrainingIntro: TrainingIntro | null = null;
 let activeTrainingIntroStep = -1;
+let activeTrainingIntroMode: "example" | "practice" = "example";
+let trainingIntroAttempts = 0;
 
 function trainingIntroKind(view: PathwayRoute): TrainingIntroKind | null {
   if (view === "intro-pegging") return "pegging";
@@ -5126,6 +5136,12 @@ function showTrainingIntroLanding(intro: TrainingIntro, completed = false): void
   syncMobileGameplayHeaderPlacement();
 }
 
+function trainingIntroNextLabel(intro: TrainingIntro): string {
+  return activeTrainingIntroStep + 1 < intro.steps.length
+    ? `Next: ${intro.steps[activeTrainingIntroStep + 1].title}`
+    : "Finish intro";
+}
+
 function trainingIntroScoreNotice(step: TrainingIntroStep): HTMLElement {
   const notice = document.createElement("div");
   notice.className = "game-notification game-notification-score";
@@ -5136,12 +5152,15 @@ function trainingIntroScoreNotice(step: TrainingIntroStep): HTMLElement {
 function completeTrainingIntroExample(): void {
   const intro = activeTrainingIntro;
   const step = intro?.steps[activeTrainingIntroStep];
-  if (!intro || !step) return;
+  if (!intro || !step || activeTrainingIntroMode !== "example") return;
   const button = introElement<HTMLButtonElement>("[data-training-intro-continue]");
   const notices = introElement<HTMLElement>("[data-training-intro-notices]");
   if (!button || !notices) return;
   if (intro.kind === "discard") {
     button.hidden = false;
+    button.disabled = false;
+    button.textContent = "Try it yourself";
+    button.onclick = showTrainingIntroPractice;
     return;
   }
   const hand = introElement<HTMLElement>("[data-training-intro-hand]");
@@ -5166,6 +5185,9 @@ function completeTrainingIntroExample(): void {
     if (boardValue) boardValue.textContent = String(nextCount);
     cardSounds.playScore(step.points);
     button.hidden = false;
+    button.disabled = false;
+    button.textContent = "Try it yourself";
+    button.onclick = showTrainingIntroPractice;
   };
   if (tableMotionDisabled()) {
     finish();
@@ -5177,7 +5199,187 @@ function completeTrainingIntroExample(): void {
     { transform: "translate(0, 0) rotate(0deg)" },
     { transform: `translate(${x}px, ${y}px) rotate(-2deg)` },
   ], { duration: 560, easing: "cubic-bezier(0.22, 0.72, 0.24, 1)", fill: "forwards" });
-  void animation.finished.then(finish).catch(() => { button.hidden = false; });
+  void animation.finished.then(finish, finish);
+}
+
+function trainingIntroSelectionStatus(kind: TrainingIntroKind, selected: number, step?: TrainingIntroStep): string {
+  if (selected === 0) return kind === "pegging"
+    ? "Choose the card that makes this score."
+    : step?.id === "crib-flush"
+      ? "Choose the two suited cards to send to your crib."
+      : `Discard two cards and keep the ${step?.title.toLowerCase() || "scoring cards"} in your hand.`;
+  if (kind === "pegging") return "Card selected.";
+  return selected === 1 ? "One of two cards selected." : "Two cards selected.";
+}
+
+function trainingIntroPracticeCardElement(label: string, cardIndex: number, intro: TrainingIntro): HTMLButtonElement {
+  const card = trainingIntroCard(label, 94_000 + (activeTrainingIntroStep * 20) + cardIndex);
+  const rendered = cardElement(card);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `${rendered.className} drill-dealt-card`;
+  button.innerHTML = rendered.innerHTML;
+  button.setAttribute("aria-label", rendered.getAttribute("aria-label") || label);
+  button.dataset.trainingCard = label;
+  button.setAttribute("aria-pressed", "false");
+  button.addEventListener("click", () => {
+    const game = introElement<HTMLElement>("[data-training-intro-game]");
+    if (!game || game.dataset.answering === "true") return;
+    const required = trainingIntroRequiredSelections(intro.kind);
+    const selected = button.getAttribute("aria-pressed") === "true";
+    const selectedCards = [...game.querySelectorAll<HTMLButtonElement>(".training-intro-hand .drill-dealt-card[aria-pressed='true']")];
+    if (!selected && required === 1) {
+      for (const selectedCard of selectedCards) {
+        selectedCard.classList.remove("selected");
+        selectedCard.setAttribute("aria-pressed", "false");
+      }
+    } else if (!selected && selectedCards.length >= required) {
+      return;
+    }
+    button.classList.toggle("selected", !selected);
+    button.setAttribute("aria-pressed", String(!selected));
+    const selectionCount = game.querySelectorAll(".training-intro-hand .drill-dealt-card[aria-pressed='true']").length;
+    const instruction = introElement<HTMLElement>("[data-training-intro-instruction]");
+    if (instruction) instruction.textContent = trainingIntroSelectionStatus(intro.kind, selectionCount, intro.steps[activeTrainingIntroStep]);
+    const submit = introElement<HTMLButtonElement>("[data-training-intro-continue]");
+    if (submit) submit.disabled = selectionCount !== required;
+  });
+  return button;
+}
+
+function setTrainingIntroFeedback(state: "success" | "failure" | null, copy = ""): void {
+  const feedback = introElement<HTMLElement>("[data-training-intro-feedback]");
+  const mark = introElement<HTMLElement>("[data-training-intro-feedback-mark]");
+  const message = introElement<HTMLElement>("[data-training-intro-feedback-copy]");
+  if (!feedback || !mark || !message) return;
+  feedback.hidden = state === null;
+  if (!state) {
+    delete feedback.dataset.state;
+    return;
+  }
+  feedback.dataset.state = state;
+  mark.textContent = state === "success" ? "✓" : "×";
+  message.textContent = copy;
+}
+
+function chosenTrainingIntroCards(): string[] {
+  return [...document.querySelectorAll<HTMLButtonElement>("[data-pathway-view='training-intro'] .training-intro-hand .drill-dealt-card[aria-pressed='true']")]
+    .map((button) => button.dataset.trainingCard || "")
+    .filter(Boolean);
+}
+
+function clearTrainingIntroPracticeSelection(intro: TrainingIntro, message: string): void {
+  const hand = introElement<HTMLElement>("[data-training-intro-hand]");
+  for (const card of hand?.querySelectorAll<HTMLButtonElement>(".drill-dealt-card") || []) {
+    card.classList.remove("selected", "drill-answer");
+    card.setAttribute("aria-pressed", "false");
+  }
+  const game = introElement<HTMLElement>("[data-training-intro-game]");
+  if (game) game.dataset.answering = "false";
+  const instruction = introElement<HTMLElement>("[data-training-intro-instruction]");
+  if (instruction) instruction.textContent = message || trainingIntroSelectionStatus(intro.kind, 0, intro.steps[activeTrainingIntroStep]);
+  const button = introElement<HTMLButtonElement>("[data-training-intro-continue]");
+  if (button) button.disabled = true;
+}
+
+function submitTrainingIntroPractice(): void {
+  const intro = activeTrainingIntro;
+  const step = intro?.steps[activeTrainingIntroStep];
+  const game = introElement<HTMLElement>("[data-training-intro-game]");
+  if (!intro || !step || !game || game.dataset.answering === "true") return;
+  const chosen = chosenTrainingIntroCards();
+  if (chosen.length !== trainingIntroRequiredSelections(intro.kind)) return;
+  game.dataset.answering = "true";
+  const instruction = introElement<HTMLElement>("[data-training-intro-instruction]");
+  const button = introElement<HTMLButtonElement>("[data-training-intro-continue]");
+
+  if (correctTrainingIntroChoice(step, intro.kind, chosen)) {
+    cardSounds.play("success");
+    setTrainingIntroFeedback("success", "Correct");
+    if (instruction) instruction.textContent = intro.kind === "pegging"
+      ? `Correct. ${step.title} scores ${step.points} points.`
+      : `Correct. You kept the cards that make ${step.title.toLowerCase()}.`;
+    if (intro.kind === "pegging" && step.playedCard) {
+      const hand = introElement<HTMLElement>("[data-training-intro-hand]");
+      hand?.querySelector<HTMLElement>(`[data-training-card="${step.playedCard}"]`)?.remove();
+      const played = introElement<HTMLElement>("[data-training-intro-played]");
+      played?.append(cardElement(trainingIntroCard(step.playedCard, 95_000 + activeTrainingIntroStep)));
+      introElement<HTMLElement>("[data-training-intro-notices]")?.replaceChildren(trainingIntroScoreNotice(step));
+      const nextCount = step.countBefore + trainingIntroCard(step.playedCard, 0).value;
+      const count = introElement<HTMLElement>("[data-training-intro-count]");
+      const playerScore = introElement<HTMLElement>("[data-training-intro-player-score]");
+      const boardValue = introElement<HTMLElement>("[data-training-intro-board] .circular-board-value");
+      if (count) count.textContent = String(nextCount);
+      if (playerScore) playerScore.textContent = String(step.points);
+      if (boardValue) boardValue.textContent = String(nextCount);
+    }
+    if (button) {
+      button.disabled = false;
+      button.textContent = trainingIntroNextLabel(intro);
+      button.onclick = () => showTrainingIntroStep(activeTrainingIntroStep + 1);
+    }
+    window.setTimeout(() => setTrainingIntroFeedback(null), 1_150);
+    return;
+  }
+
+  trainingIntroAttempts += 1;
+  cardSounds.play("failure");
+  setTrainingIntroFeedback("failure", "Try again");
+  if (trainingIntroAttempts < 3) {
+    const remaining = 3 - trainingIntroAttempts;
+    window.setTimeout(() => {
+      setTrainingIntroFeedback(null);
+      clearTrainingIntroPracticeSelection(intro, `${remaining} ${remaining === 1 ? "try" : "tries"} left.`);
+    }, 850);
+    return;
+  }
+
+  const answer = new Set(trainingIntroAnswer(step, intro.kind));
+  for (const card of introElement<HTMLElement>("[data-training-intro-hand]")?.querySelectorAll<HTMLButtonElement>(".drill-dealt-card") || []) {
+    card.classList.toggle("drill-answer", answer.has(card.dataset.trainingCard || ""));
+  }
+  if (instruction) instruction.textContent = intro.kind === "pegging"
+    ? `The scoring play was ${step.playedCard}.`
+    : `Keep the ${step.title.toLowerCase()} by discarding ${step.selected.join(" and ")}.`;
+  if (button) {
+    button.disabled = false;
+    button.textContent = trainingIntroNextLabel(intro);
+    button.onclick = () => showTrainingIntroStep(activeTrainingIntroStep + 1);
+  }
+  window.setTimeout(() => setTrainingIntroFeedback(null), 850);
+}
+
+function showTrainingIntroPractice(): void {
+  const intro = activeTrainingIntro;
+  const step = intro?.steps[activeTrainingIntroStep];
+  if (!intro || !step) return;
+  activeTrainingIntroMode = "practice";
+  trainingIntroAttempts = 0;
+  const game = introElement<HTMLElement>("[data-training-intro-game]");
+  const hand = introElement<HTMLElement>("[data-training-intro-hand]");
+  const played = introElement<HTMLElement>("[data-training-intro-played]");
+  const instruction = introElement<HTMLElement>("[data-training-intro-instruction]");
+  const notices = introElement<HTMLElement>("[data-training-intro-notices]");
+  const button = introElement<HTMLButtonElement>("[data-training-intro-continue]");
+  if (!game || !hand || !played || !instruction || !notices || !button) return;
+  game.dataset.answering = "false";
+  hand.replaceChildren(...step.hand.map((label, index) => trainingIntroPracticeCardElement(label, index, intro)));
+  played.replaceChildren(...step.played.map((label, index) => cardElement(trainingIntroCard(label, 96_000 + (activeTrainingIntroStep * 20) + index))));
+  notices.replaceChildren();
+  setTrainingIntroFeedback(null);
+  instruction.hidden = false;
+  instruction.textContent = trainingIntroSelectionStatus(intro.kind, 0, step);
+  button.hidden = false;
+  button.disabled = true;
+  button.textContent = intro.kind === "pegging" ? "Play selected" : "Discard selected";
+  button.onclick = submitTrainingIntroPractice;
+  const count = introElement<HTMLElement>("[data-training-intro-count]");
+  const playerScore = introElement<HTMLElement>("[data-training-intro-player-score]");
+  const boardValue = introElement<HTMLElement>("[data-training-intro-board] .circular-board-value");
+  if (count) count.textContent = String(step.countBefore);
+  if (playerScore) playerScore.textContent = "0";
+  if (boardValue) boardValue.textContent = intro.kind === "pegging" ? String(step.countBefore) : String(activeTrainingIntroStep + 1);
+  cardSounds.play("deal");
 }
 
 function showTrainingIntroStep(index: number): void {
@@ -5189,6 +5391,8 @@ function showTrainingIntroStep(index: number): void {
   }
   const step = intro.steps[index];
   activeTrainingIntroStep = index;
+  activeTrainingIntroMode = "example";
+  trainingIntroAttempts = 0;
   els.pathwayPage.dataset.introMode = "example";
   const copy = introElement<HTMLElement>("[data-training-intro-copy]");
   const game = introElement<HTMLElement>("[data-training-intro-game]");
@@ -5201,8 +5405,11 @@ function showTrainingIntroStep(index: number): void {
   const crib = introElement<HTMLElement>("[data-training-intro-crib]");
   const button = introElement<HTMLButtonElement>("[data-training-intro-continue]");
   const notices = introElement<HTMLElement>("[data-training-intro-notices]");
+  const instruction = introElement<HTMLElement>("[data-training-intro-instruction]");
   const dialog = introElement<HTMLDialogElement>("[data-training-intro-dialog]");
-  if (!copy || !game || !hand || !played || !cut || !opponent || !count || !meta || !crib || !button || !notices || !dialog) return;
+  const playedWrap = introElement<HTMLElement>("[data-training-intro-played-wrap]");
+  const cutWrap = introElement<HTMLElement>("[data-training-intro-cut-wrap]");
+  if (!copy || !game || !hand || !played || !cut || !opponent || !count || !meta || !crib || !button || !notices || !instruction || !dialog || !playedWrap || !cutWrap) return;
   copy.hidden = true;
   game.hidden = false;
   game.dataset.phase = intro.kind === "pegging" ? "pegging" : "discard";
@@ -5213,7 +5420,9 @@ function showTrainingIntroStep(index: number): void {
     return element;
   }));
   played.replaceChildren(...step.played.map((label, cardIndex) => cardElement(trainingIntroCard(label, 91_000 + (index * 20) + cardIndex))));
-  cut.replaceChildren(...(step.cutCard ? [cardElement(trainingIntroCard(step.cutCard, 93_000 + index))] : []));
+  cut.replaceChildren(...(intro.kind === "pegging" && step.cutCard ? [cardElement(trainingIntroCard(step.cutCard, 93_000 + index))] : []));
+  playedWrap.hidden = intro.kind === "discard";
+  cutWrap.hidden = intro.kind === "discard";
   opponent.replaceChildren(...Array.from({ length: intro.kind === "discard" ? 6 : 4 }, () => cardBack()));
   count.textContent = String(step.countBefore);
   const playerScore = introElement<HTMLElement>("[data-training-intro-player-score]");
@@ -5221,9 +5430,10 @@ function showTrainingIntroStep(index: number): void {
   meta.textContent = `${index + 1} of ${intro.steps.length} · ${step.title}`;
   crib.hidden = intro.kind !== "discard";
   notices.replaceChildren();
+  instruction.hidden = true;
+  setTrainingIntroFeedback(null);
   button.hidden = true;
-  button.textContent = index + 1 < intro.steps.length ? `Next: ${intro.steps[index + 1].title}` : "Finish intro";
-  button.onclick = () => showTrainingIntroStep(index + 1);
+  button.disabled = false;
   const board = introElement<HTMLElement>("[data-training-intro-board]");
   if (board) {
     if (!board.hasChildNodes()) board.append(createCircularBoard());
@@ -5240,6 +5450,10 @@ function showTrainingIntroStep(index: number): void {
   if (dialogEyebrow) dialogEyebrow.textContent = intro.eyebrow;
   if (dialogTitle) dialogTitle.textContent = step.title;
   if (dialogCopy) dialogCopy.textContent = step.explanation;
+  const playerLabel = introElement<HTMLElement>("[data-training-intro-player-name]");
+  if (playerLabel) playerLabel.textContent = playerDisplayName();
+  const dealer = introElement<HTMLElement>("[data-training-intro-dealer]");
+  if (dealer) dealer.textContent = intro.kind === "discard" ? playerDisplayName() : "Practice";
   dialog.onclose = completeTrainingIntroExample;
   syncMobileGameplayHeaderPlacement();
   cardSounds.play("deal");
@@ -5249,7 +5463,6 @@ function showTrainingIntroStep(index: number): void {
 async function renderTrainingIntro(view: PathwayView): Promise<void> {
   const kind = trainingIntroKind(view);
   if (!kind) return;
-  const { TRAINING_INTROS } = await import("./training-intros");
   if (trainingIntroKind(pathwayRouteFromLocation()) !== kind) return;
   activeTrainingIntro = TRAINING_INTROS[kind];
   showTrainingIntroLanding(activeTrainingIntro);
@@ -5740,7 +5953,9 @@ async function renderTrainingDrill(view: PathwayView): Promise<void> {
   if (playerCrib) playerCrib.hidden = drill.cribOwner !== "User";
   if (opponentCrib) opponentCrib.hidden = drill.cribOwner !== "Opponent";
   const dealer = surface.querySelector<HTMLElement>("[data-drill-dealer]");
-  if (dealer) dealer.textContent = drill.cribOwner === "User" ? "Player" : "Practice";
+  if (dealer) dealer.textContent = drill.cribOwner === "User" ? playerDisplayName() : "Practice";
+  const playerLabel = surface.querySelector<HTMLElement>("[data-drill-player-name]");
+  if (playerLabel) playerLabel.textContent = playerDisplayName();
   const board = surface.querySelector<HTMLElement>("[data-drill-board]");
   if (board) {
     if (!board.hasChildNodes()) board.append(createCircularBoard());

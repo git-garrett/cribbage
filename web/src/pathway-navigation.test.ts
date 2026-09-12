@@ -110,7 +110,8 @@ describe("local pathway navigation", () => {
     expect(html).toContain('data-drill-surface="find-scoring-play"');
     expect(html).toContain('data-drill-surface="discard"');
     expect(html).toMatch(/data-drill-surface="find-scoring-play"[\s\S]*class="topbar"[\s\S]*class="scoreboard"[\s\S]*class="table drill-game-table"/);
-    expect(html).toMatch(/data-drill-surface="find-scoring-play"[\s\S]*class="mobile-header-reveal"[\s\S]*Beginner drills/);
+    expect(html).toMatch(/data-drill-surface="find-scoring-play"[\s\S]*class="mobile-header-reveal"[\s\S]*←<\/span> Drills/);
+    expect(html).not.toMatch(/data-drill-surface="find-scoring-play"[\s\S]*<h2>Current count<\/h2>[\s\S]*data-drill-surface="discard"/);
     expect(html).toMatch(/data-drill-surface="discard"[\s\S]*data-drill-submit disabled>Discard selected/);
     expect(html).toContain("data-drill-feedback");
     expect(source).toMatch(/trainingPathwayDestination[\s\S]*navigatePathway\(trainingRoute\)/);
@@ -130,6 +131,9 @@ describe("local pathway navigation", () => {
     expect(html).toContain('data-pathway-view="training-intro"');
     expect(html).toContain("data-training-intro-dialog");
     expect(source).toMatch(/showTrainingIntroStep[\s\S]*dialog\.onclose = completeTrainingIntroExample[\s\S]*dialog\.showModal\(\)/s);
+    expect(source).toContain("function showTrainingIntroPractice");
+    expect(source).toContain("function submitTrainingIntroPractice");
+    expect(html).toContain("data-training-intro-instruction");
   });
 
   it("ends beginner training with an interactive complete-game lesson", () => {

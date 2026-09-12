@@ -8357,6 +8357,10 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   min-height: calc(var(--game-card-height) + 14px);
 }
 
+.training-intro-game .training-intro-instruction {
+  position: static;
+}
+
 .training-intro-game .played > [data-training-intro-played] {
   grid-column: 1;
   justify-content: center;
@@ -8392,11 +8396,31 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 }
 
 .drill-game-shell .drill-player-score {
+  justify-self: stretch;
   justify-items: start;
+  width: 100%;
+  text-align: left;
 }
 
 .drill-game-shell .drill-opponent-score {
+  justify-self: stretch;
   justify-items: end;
+  width: 100%;
+  text-align: right;
+}
+
+.training-intro-game .drill-player-score {
+  justify-self: stretch;
+  justify-items: start;
+  width: 100%;
+  text-align: left;
+}
+
+.training-intro-game .drill-opponent-score {
+  justify-self: stretch;
+  justify-items: end;
+  width: 100%;
+  text-align: right;
 }
 
 @media (hover: hover) {
@@ -8532,6 +8556,44 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 
   .pathway-page[data-intro-mode="example"] {
     background: var(--game-green, #0b5b43);
+  }
+
+  .drill-game-shell .score-cut,
+  .training-intro-game .score-cut {
+    display: none;
+  }
+
+  .drill-game-shell .drill-player-score,
+  .training-intro-game .drill-player-score {
+    padding-left: 2px;
+    transform: translateY(50px);
+  }
+
+  .drill-game-shell .drill-opponent-score,
+  .training-intro-game .drill-opponent-score {
+    padding-right: 2px;
+    transform: translateY(50px);
+  }
+
+  body[data-font-size] .drill-game-shell .score .score-label,
+  body[data-font-size] .training-intro-game .score .score-label {
+    display: block;
+    width: 54px;
+    overflow: hidden;
+    font-size: 9px;
+    letter-spacing: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .drill-game-shell .drill-player-score .score-label,
+  .training-intro-game .drill-player-score .score-label {
+    justify-self: start;
+  }
+
+  .drill-game-shell .drill-opponent-score .score-label,
+  .training-intro-game .drill-opponent-score .score-label {
+    justify-self: end;
   }
 
   .training-intro-game[data-phase="discard"] .training-intro-hand {

@@ -24,6 +24,20 @@ export interface TrainingIntro {
   drillRoute: "drill-scoring-play" | "drill-discard";
 }
 
+export function trainingIntroAnswer(step: TrainingIntroStep, kind: TrainingIntroKind): string[] {
+  return kind === "pegging"
+    ? [step.playedCard].filter((card): card is string => Boolean(card))
+    : [...step.selected];
+}
+
+export function trainingIntroRequiredSelections(kind: TrainingIntroKind): number {
+  return kind === "pegging" ? 1 : 2;
+}
+
+export function correctTrainingIntroChoice(step: TrainingIntroStep, kind: TrainingIntroKind, chosen: string[]): boolean {
+  return JSON.stringify([...chosen].sort()) === JSON.stringify(trainingIntroAnswer(step, kind).sort());
+}
+
 export const TRAINING_INTROS: Record<TrainingIntroKind, TrainingIntro> = {
   pegging: {
     kind: "pegging",
