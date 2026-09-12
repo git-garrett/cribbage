@@ -82,6 +82,7 @@ import {
   trainingIntroRequiredSelections,
   type TrainingIntro,
   type TrainingIntroKind,
+  type TrainingIntroSituation,
   type TrainingIntroStep,
 } from "./training-intros";
 import type { PuttingTogetherAction, PuttingTogetherLesson, PuttingTogetherStep } from "./putting-it-together";
@@ -5088,7 +5089,7 @@ function cardElement(card: GameState["humanHand"][number], options: { clickable?
 
 let activeTrainingIntro: TrainingIntro | null = null;
 let activeTrainingIntroStep = -1;
-let activeTrainingIntroMode: "example" | "practice" = "example";
+let activeTrainingIntroMode: "example" | "practice" | "challenge" = "example";
 let trainingIntroAttempts = 0;
 
 function trainingIntroKind(view: PathwayRoute): TrainingIntroKind | null {
@@ -5097,7 +5098,7 @@ function trainingIntroKind(view: PathwayRoute): TrainingIntroKind | null {
   return null;
 }
 
-function trainingIntroCard(label: string, id: number): SerializedCard {
+function trainingIntroCard(label: string, id: number, owner: "human" | "ai" = "human"): SerializedCard {
   const match = /^(A|[2-9]|10|J|Q|K)([cdhs])$/.exec(label);
   if (!match) throw new Error(`Invalid intro card: ${label}`);
   const suits = {
@@ -5109,7 +5110,14 @@ function trainingIntroCard(label: string, id: number): SerializedCard {
   const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
   const [, rank, suitCode] = match;
   const suit = suits[suitCode as keyof typeof suits];
-  return { id, index: null, rank, suit: suit.suit, symbol: suit.symbol, value: Math.min(ranks.indexOf(rank) + 1, 10), label: `${rank}${suit.symbol}`, owner: "User" };
+  return { id, index: null, rank, suit: suit.suit, symbol: suit.symbol, value: Math.min(ranks.indexOf(rank) + 1, 10), label: `${rank}${suit.symbol}`, owner };
+}
+
+function trainingIntroPlayedCards(labels: string[], idBase: number): HTMLElement[] {
+  return labels.map((label, index) => {
+    const owner = (labels.length - index) % 2 === 1 ? "ai" : "human";
+    return cardElement(trainingIntroCard(label, idBase + index, owner));
+  });
 }
 
 function introElement<T extends HTMLElement>(selector: string): T | null {
@@ -5140,6 +5148,10 @@ function trainingIntroNextLabel(intro: TrainingIntro): string {
   return activeTrainingIntroStep + 1 < intro.steps.length
     ? `Next: ${intro.steps[activeTrainingIntroStep + 1].title}`
     : "Finish intro";
+}
+
+function trainingIntroSituation(step: TrainingIntroStep): TrainingIntroSituation {
+  return activeTrainingIntroMode === "challenge" ? step.challenge : step;
 }
 
 function trainingIntroScoreNotice(step: TrainingIntroStep): HTMLElement {
@@ -5203,11 +5215,18 @@ function completeTrainingIntroExample(): void {
 }
 
 function trainingIntroSelectionStatus(kind: TrainingIntroKind, selected: number, step?: TrainingIntroStep): string {
-  if (selected === 0) return kind === "pegging"
-    ? "Choose the card that makes this score."
-    : step?.id === "crib-flush"
-      ? "Choose the two suited cards to send to your crib."
-      : `Discard two cards and keep the ${step?.title.toLowerCase() || "scoring cards"} in your hand.`;
+  if (selected === 0) {
+    if (activeTrainingIntroMode === "challenge" && step) {
+      if (kind === "pegging") return `Find another ${step.title.toLowerCase()}.`;
+      if (step.id === "crib-flush") return "Find another flush in the crib. Choose the two suited cards to send there.";
+      return `Find another ${step.title.toLowerCase()}. Discard two cards and keep it in your hand.`;
+    }
+    return kind === "pegging"
+      ? "Choose the card that makes this score."
+      : step?.id === "crib-flush"
+        ? "Choose the two suited cards to send to your crib."
+        : `Discard two cards and keep the ${step?.title.toLowerCase() || "scoring cards"} in your hand.`;
+  }
   if (kind === "pegging") return "Card selected.";
   return selected === 1 ? "One of two cards selected." : "Two cards selected.";
 }
@@ -5287,25 +5306,26 @@ function submitTrainingIntroPractice(): void {
   const step = intro?.steps[activeTrainingIntroStep];
   const game = introElement<HTMLElement>("[data-training-intro-game]");
   if (!intro || !step || !game || game.dataset.answering === "true") return;
+  const situation = trainingIntroSituation(step);
   const chosen = chosenTrainingIntroCards();
   if (chosen.length !== trainingIntroRequiredSelections(intro.kind)) return;
   game.dataset.answering = "true";
   const instruction = introElement<HTMLElement>("[data-training-intro-instruction]");
   const button = introElement<HTMLButtonElement>("[data-training-intro-continue]");
 
-  if (correctTrainingIntroChoice(step, intro.kind, chosen)) {
+  if (correctTrainingIntroChoice(situation, intro.kind, chosen)) {
     cardSounds.play("success");
     setTrainingIntroFeedback("success", "Correct");
     if (instruction) instruction.textContent = intro.kind === "pegging"
       ? `Correct. ${step.title} scores ${step.points} points.`
       : `Correct. You kept the cards that make ${step.title.toLowerCase()}.`;
-    if (intro.kind === "pegging" && step.playedCard) {
+    if (intro.kind === "pegging" && situation.playedCard) {
       const hand = introElement<HTMLElement>("[data-training-intro-hand]");
-      hand?.querySelector<HTMLElement>(`[data-training-card="${step.playedCard}"]`)?.remove();
+      hand?.querySelector<HTMLElement>(`[data-training-card="${situation.playedCard}"]`)?.remove();
       const played = introElement<HTMLElement>("[data-training-intro-played]");
-      played?.append(cardElement(trainingIntroCard(step.playedCard, 95_000 + activeTrainingIntroStep)));
+      played?.append(cardElement(trainingIntroCard(situation.playedCard, 95_000 + activeTrainingIntroStep)));
       introElement<HTMLElement>("[data-training-intro-notices]")?.replaceChildren(trainingIntroScoreNotice(step));
-      const nextCount = step.countBefore + trainingIntroCard(step.playedCard, 0).value;
+      const nextCount = situation.countBefore + trainingIntroCard(situation.playedCard, 0).value;
       const count = introElement<HTMLElement>("[data-training-intro-count]");
       const playerScore = introElement<HTMLElement>("[data-training-intro-player-score]");
       const boardValue = introElement<HTMLElement>("[data-training-intro-board] .circular-board-value");
@@ -5315,8 +5335,13 @@ function submitTrainingIntroPractice(): void {
     }
     if (button) {
       button.disabled = false;
-      button.textContent = trainingIntroNextLabel(intro);
-      button.onclick = () => showTrainingIntroStep(activeTrainingIntroStep + 1);
+      if (activeTrainingIntroMode === "practice") {
+        button.textContent = `Find another ${step.title.toLowerCase()}`;
+        button.onclick = showTrainingIntroChallenge;
+      } else {
+        button.textContent = trainingIntroNextLabel(intro);
+        button.onclick = () => showTrainingIntroStep(activeTrainingIntroStep + 1);
+      }
     }
     window.setTimeout(() => setTrainingIntroFeedback(null), 1_150);
     return;
@@ -5334,37 +5359,45 @@ function submitTrainingIntroPractice(): void {
     return;
   }
 
-  const answer = new Set(trainingIntroAnswer(step, intro.kind));
+  const answer = new Set(trainingIntroAnswer(situation, intro.kind));
   for (const card of introElement<HTMLElement>("[data-training-intro-hand]")?.querySelectorAll<HTMLButtonElement>(".drill-dealt-card") || []) {
     card.classList.toggle("drill-answer", answer.has(card.dataset.trainingCard || ""));
   }
   if (instruction) instruction.textContent = intro.kind === "pegging"
-    ? `The scoring play was ${step.playedCard}.`
-    : `Keep the ${step.title.toLowerCase()} by discarding ${step.selected.join(" and ")}.`;
+    ? `The scoring play was ${situation.playedCard}.`
+    : `Keep the ${step.title.toLowerCase()} by discarding ${situation.selected.join(" and ")}.`;
   if (button) {
     button.disabled = false;
-    button.textContent = trainingIntroNextLabel(intro);
-    button.onclick = () => showTrainingIntroStep(activeTrainingIntroStep + 1);
+    if (activeTrainingIntroMode === "practice") {
+      button.textContent = `Find another ${step.title.toLowerCase()}`;
+      button.onclick = showTrainingIntroChallenge;
+    } else {
+      button.textContent = trainingIntroNextLabel(intro);
+      button.onclick = () => showTrainingIntroStep(activeTrainingIntroStep + 1);
+    }
   }
   window.setTimeout(() => setTrainingIntroFeedback(null), 850);
 }
 
-function showTrainingIntroPractice(): void {
+function showTrainingIntroDecision(mode: "practice" | "challenge"): void {
   const intro = activeTrainingIntro;
   const step = intro?.steps[activeTrainingIntroStep];
   if (!intro || !step) return;
-  activeTrainingIntroMode = "practice";
+  activeTrainingIntroMode = mode;
   trainingIntroAttempts = 0;
+  const situation = trainingIntroSituation(step);
   const game = introElement<HTMLElement>("[data-training-intro-game]");
   const hand = introElement<HTMLElement>("[data-training-intro-hand]");
   const played = introElement<HTMLElement>("[data-training-intro-played]");
+  const cut = introElement<HTMLElement>("[data-training-intro-cut]");
   const instruction = introElement<HTMLElement>("[data-training-intro-instruction]");
   const notices = introElement<HTMLElement>("[data-training-intro-notices]");
   const button = introElement<HTMLButtonElement>("[data-training-intro-continue]");
-  if (!game || !hand || !played || !instruction || !notices || !button) return;
+  if (!game || !hand || !played || !cut || !instruction || !notices || !button) return;
   game.dataset.answering = "false";
-  hand.replaceChildren(...step.hand.map((label, index) => trainingIntroPracticeCardElement(label, index, intro)));
-  played.replaceChildren(...step.played.map((label, index) => cardElement(trainingIntroCard(label, 96_000 + (activeTrainingIntroStep * 20) + index))));
+  hand.replaceChildren(...situation.hand.map((label, index) => trainingIntroPracticeCardElement(label, index, intro)));
+  played.replaceChildren(...trainingIntroPlayedCards(situation.played, 96_000 + (activeTrainingIntroStep * 20)));
+  cut.replaceChildren(...(intro.kind === "pegging" && situation.cutCard ? [cardElement(trainingIntroCard(situation.cutCard, 97_000 + activeTrainingIntroStep))] : []));
   notices.replaceChildren();
   setTrainingIntroFeedback(null);
   instruction.hidden = false;
@@ -5376,10 +5409,18 @@ function showTrainingIntroPractice(): void {
   const count = introElement<HTMLElement>("[data-training-intro-count]");
   const playerScore = introElement<HTMLElement>("[data-training-intro-player-score]");
   const boardValue = introElement<HTMLElement>("[data-training-intro-board] .circular-board-value");
-  if (count) count.textContent = String(step.countBefore);
+  if (count) count.textContent = String(situation.countBefore);
   if (playerScore) playerScore.textContent = "0";
-  if (boardValue) boardValue.textContent = intro.kind === "pegging" ? String(step.countBefore) : String(activeTrainingIntroStep + 1);
+  if (boardValue) boardValue.textContent = intro.kind === "pegging" ? String(situation.countBefore) : String(activeTrainingIntroStep + 1);
   cardSounds.play("deal");
+}
+
+function showTrainingIntroPractice(): void {
+  showTrainingIntroDecision("practice");
+}
+
+function showTrainingIntroChallenge(): void {
+  showTrainingIntroDecision("challenge");
 }
 
 function showTrainingIntroStep(index: number): void {
@@ -5419,7 +5460,7 @@ function showTrainingIntroStep(index: number): void {
     element.classList.toggle("selected", step.selected.includes(label));
     return element;
   }));
-  played.replaceChildren(...step.played.map((label, cardIndex) => cardElement(trainingIntroCard(label, 91_000 + (index * 20) + cardIndex))));
+  played.replaceChildren(...trainingIntroPlayedCards(step.played, 91_000 + (index * 20)));
   cut.replaceChildren(...(intro.kind === "pegging" && step.cutCard ? [cardElement(trainingIntroCard(step.cutCard, 93_000 + index))] : []));
   playedWrap.hidden = intro.kind === "discard";
   cutWrap.hidden = intro.kind === "discard";

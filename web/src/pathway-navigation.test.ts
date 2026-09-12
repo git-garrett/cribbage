@@ -107,6 +107,7 @@ describe("local pathway navigation", () => {
     expect(html).not.toContain('data-pathway-view="drills"');
     expect(html).not.toContain('data-pathway-destination="drills"');
     expect(html).toMatch(/data-pathway-view="drills-beginner"[\s\S]*Find the Scoring Play[\s\S]*Discard Drills/);
+    expect(html).toContain("Learn the basics of play");
     expect(html).toContain('data-drill-surface="find-scoring-play"');
     expect(html).toContain('data-drill-surface="discard"');
     expect(html).toMatch(/data-drill-surface="find-scoring-play"[\s\S]*class="topbar"[\s\S]*class="scoreboard"[\s\S]*class="table drill-game-table"/);
@@ -132,6 +133,10 @@ describe("local pathway navigation", () => {
     expect(html).toContain("data-training-intro-dialog");
     expect(source).toMatch(/showTrainingIntroStep[\s\S]*dialog\.onclose = completeTrainingIntroExample[\s\S]*dialog\.showModal\(\)/s);
     expect(source).toContain("function showTrainingIntroPractice");
+    expect(source).toContain("function showTrainingIntroChallenge");
+    expect(source).toContain("Find another ${step.title.toLowerCase()}");
+    expect(source).toContain("function trainingIntroPlayedCards");
+    expect(html).not.toMatch(/data-training-intro-played-wrap><h2>Current count<\/h2>/);
     expect(source).toContain("function submitTrainingIntroPractice");
     expect(html).toContain("data-training-intro-instruction");
   });

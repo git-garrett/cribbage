@@ -7,6 +7,10 @@ import {
 } from "./training-intros";
 
 describe("beginner training intros", () => {
+  const rank = (card: string) => card.slice(0, -1);
+  const suit = (card: string) => card.slice(-1);
+  const keptCards = (hand: string[], selected: string[]) => hand.filter((card) => !selected.includes(card));
+
   it("teaches pegging scoring in order before the scoring drill", () => {
     expect(TRAINING_INTROS.pegging.steps.map((step) => step.id)).toEqual(["pair", "fifteen", "run-three", "run-four"]);
     expect(TRAINING_INTROS.pegging.steps.every((step) => step.playedCard && step.selected.length === 0)).toBe(true);
@@ -32,5 +36,45 @@ describe("beginner training intros", () => {
       expect(trainingIntroAnswer(step, "discard")).toEqual(step.selected);
       expect(correctTrainingIntroChoice(step, "discard", [...step.selected].reverse())).toBe(true);
     }
+  });
+
+  it("adds a distinct transfer situation after every guided practice", () => {
+    for (const intro of Object.values(TRAINING_INTROS)) {
+      for (const step of intro.steps) {
+        expect(step.challenge.hand).not.toEqual(step.hand);
+        expect(trainingIntroAnswer(step.challenge, intro.kind)).toHaveLength(trainingIntroRequiredSelections(intro.kind));
+        expect(correctTrainingIntroChoice(step.challenge, intro.kind, trainingIntroAnswer(step.challenge, intro.kind))).toBe(true);
+        if (intro.kind === "pegging" && step.challenge.playedCard) {
+          const values: Record<string, number> = { A: 1, J: 10, Q: 10, K: 10 };
+          const rank = step.challenge.playedCard.slice(0, -1);
+          expect(step.challenge.countBefore + (values[rank] ?? Number(rank))).toBeLessThanOrEqual(31);
+        }
+      }
+    }
+  });
+
+  it("uses a different scoring combination in every transfer situation", () => {
+    for (const step of TRAINING_INTROS.pegging.steps) {
+      const exampleRanks = [...step.played, step.playedCard!].map(rank).sort();
+      const challengeRanks = [...step.challenge.played, step.challenge.playedCard!].map(rank).sort();
+      expect(challengeRanks).not.toEqual(exampleRanks);
+    }
+
+    const discardSteps = Object.fromEntries(TRAINING_INTROS.discard.steps.map((step) => [step.id, step]));
+    const keptRanks = (id: string, challenge = false) => {
+      const step = discardSteps[id];
+      const situation = challenge ? step.challenge : step;
+      return keptCards(situation.hand, situation.selected).map(rank).sort();
+    };
+    for (const id of ["pair", "fifteen", "run-three", "run-four", "double-run"]) {
+      expect(keptRanks(id, true)).not.toEqual(keptRanks(id));
+    }
+
+    const flush = discardSteps.flush;
+    expect(suit(keptCards(flush.challenge.hand, flush.challenge.selected)[0])).not.toBe(suit(keptCards(flush.hand, flush.selected)[0]));
+    const cribFlush = discardSteps["crib-flush"];
+    expect(suit(cribFlush.challenge.selected[0])).not.toBe(suit(cribFlush.selected[0]));
+    const nobs = discardSteps.nobs;
+    expect(nobs.challenge.hand.find((card) => rank(card) === "J")).not.toBe(nobs.hand.find((card) => rank(card) === "J"));
   });
 });
