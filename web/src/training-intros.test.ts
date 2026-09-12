@@ -10,7 +10,18 @@ import {
 describe("beginner training intros", () => {
   const rank = (card: string) => card.slice(0, -1);
   const suit = (card: string) => card.slice(-1);
+  const rankValue = (card: string) => ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"].indexOf(rank(card)) + 1;
+  const cardValue = (card: string) => Math.min(rankValue(card), 10);
   const keptCards = (hand: string[], selected: string[]) => hand.filter((card) => !selected.includes(card));
+  const combinations = <T>(items: T[], size: number): T[][] => {
+    if (size === 0) return [[]];
+    return items.flatMap((item, index) => combinations(items.slice(index + 1), size - 1).map((rest) => [item, ...rest]));
+  };
+  const sameCards = (left: string[], right: string[]) => JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
+  const isRun = (cards: string[]) => {
+    const ranks = cards.map(rankValue).sort((left, right) => left - right);
+    return new Set(ranks).size === cards.length && ranks.at(-1)! - ranks[0] === cards.length - 1;
+  };
 
   it("teaches pegging scoring in order before the scoring drill", () => {
     expect(TRAINING_INTROS.pegging.steps.map((step) => step.id)).toEqual(["pair", "fifteen", "run-three", "run-four"]);
@@ -103,5 +114,46 @@ describe("beginner training intros", () => {
     expect(suit(keptCards(flush.challenge.hand, flush.challenge.selected)[0])).not.toBe(suit(keptCards(flush.hand, flush.selected)[0]));
     const cribFlush = discardSteps["crib-flush"];
     expect(suit(cribFlush.challenge.selected[0])).not.toBe(suit(cribFlush.selected[0]));
+  });
+
+  it("offers only one combination of the score type each situation teaches", () => {
+    for (const step of TRAINING_INTROS.pegging.steps) {
+      for (const situation of [step, step.challenge]) {
+        const scoringChoices = situation.hand.filter((card) => {
+          if (step.id === "pair") return rank(card) === rank(situation.played.at(-1)!);
+          if (step.id === "fifteen") return situation.countBefore + cardValue(card) === 15;
+          return isRun([...situation.played, card]);
+        });
+        expect(scoringChoices).toEqual([situation.playedCard]);
+      }
+    }
+
+    for (const step of TRAINING_INTROS.discard.steps) {
+      for (const situation of [step, step.challenge]) {
+        let matches: string[][];
+        if (step.id === "pair") {
+          matches = combinations(situation.hand, 2).filter(([left, right]) => rank(left) === rank(right));
+        } else if (step.id === "fifteen") {
+          matches = situation.hand.flatMap((_, index) => combinations(situation.hand, index + 1))
+            .filter((cards) => cards.reduce((sum, card) => sum + cardValue(card), 0) === 15);
+        } else if (step.id === "run-three") {
+          matches = combinations(situation.hand, 3).filter(isRun);
+        } else if (step.id === "run-four") {
+          matches = combinations(situation.hand, 4).filter(isRun);
+        } else if (step.id === "double-run") {
+          matches = combinations(situation.hand, 4).filter((cards) => {
+            const ranks = cards.map(rankValue).sort((left, right) => left - right);
+            return new Set(ranks).size === 3 && ranks.at(-1)! - ranks[0] === 2;
+          });
+        } else if (step.id === "flush") {
+          matches = combinations(situation.hand, 4).filter((cards) => new Set(cards.map(suit)).size === 1);
+        } else {
+          matches = [situation.hand.filter((card) => suit(card) === suit(situation.cutCard!))];
+        }
+        const intended = step.id === "crib-flush" ? situation.selected : situation.requiredKeepCards!;
+        expect(matches).toHaveLength(1);
+        expect(sameCards(matches[0], intended)).toBe(true);
+      }
+    }
   });
 });
