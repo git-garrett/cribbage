@@ -52,13 +52,9 @@ describe("local pathway navigation", () => {
       "master",
       "grandmaster",
       "dynamic",
-      "tutorial-beginner",
       "tutorial-intermediate",
       "tutorial-expert",
-      "drills",
       "drills-beginner",
-      "drills-intermediate",
-      "drills-expert",
       "drill-scoring-play",
       "drill-discard",
       "size",
@@ -104,8 +100,9 @@ describe("local pathway navigation", () => {
   });
 
   it("opens beginner drills on the standard game table", () => {
-    expect(html).toMatch(/data-pathway-destination="tutorial-expert"[\s\S]*data-pathway-destination="drills"/);
-    expect(html).toMatch(/data-pathway-view="drills"[\s\S]*data-pathway-destination="drills-beginner"/);
+    expect(html).toMatch(/data-pathway-view="tutorial"[\s\S]*data-pathway-destination="drills-beginner"[\s\S]*<strong>Beginner<\/strong>/);
+    expect(html).not.toContain('data-pathway-view="drills"');
+    expect(html).not.toContain('data-pathway-destination="drills"');
     expect(html).toMatch(/data-pathway-view="drills-beginner"[\s\S]*Find the Scoring Play[\s\S]*Discard Drills/);
     expect(html).toContain('data-drill-surface="find-scoring-play"');
     expect(html).toContain('data-drill-surface="discard"');
@@ -115,10 +112,10 @@ describe("local pathway navigation", () => {
     expect(source).toMatch(/trainingPathwayDestination[\s\S]*navigatePathway\(trainingRoute\)/);
     expect(source).toMatch(/renderTrainingDrill[\s\S]*cardSounds\.play\("deal"\)/);
     expect(source).toMatch(/markSolved[\s\S]*cardSounds\.play\("success"\)/);
-    expect(source).toMatch(/cardSounds\.play\("failure"\)[\s\S]*Look for \$\{drill\.opportunity/s);
+    expect(source).toMatch(/attempts < 3[\s\S]*Look for \$\{drill\.opportunity[\s\S]*The scoring play was/s);
+    expect(source).toContain('if (route === "drills") return "drills-beginner";');
     expect(css).toContain("@keyframes drill-card-travel");
-    expect(css).toMatch(/\.pathway-choice-grid-tutorial > \.pathway-choice-drills\s*{[^}]*grid-column:\s*3 \/ span 2/s);
-    expect(css).toMatch(/\.pathway-choice-grid\.pathway-choice-grid-tutorial > \.pathway-choice\.pathway-choice-drills\s*{[^}]*--pathway-rest-y:\s*0px[^}]*--pathway-rest-rotate:\s*0deg/s);
+    expect(css).not.toContain("pathway-choice-drills");
   });
 
   it("uses the pathway entry across web and mobile and connects Statistics to My Stats", () => {
@@ -195,15 +192,12 @@ describe("local pathway navigation", () => {
   it("leads with playable opponents and marks future modes as unavailable", () => {
     for (const destination of [
       "grandmaster",
-      "tutorial-beginner",
       "tutorial-intermediate",
       "tutorial-expert",
-      "drills-intermediate",
-      "drills-expert",
     ]) {
       expect(html).toMatch(new RegExp(`data-pathway-destination="${destination}" disabled[\\s\\S]*?Coming soon`));
     }
-    for (const destination of ["easy", "tough", "master", "dynamic", "human", "drills", "drills-beginner", "drill-scoring-play", "drill-discard", "size", "gameplay", "sounds"]) {
+    for (const destination of ["easy", "tough", "master", "dynamic", "human", "drills-beginner", "drill-scoring-play", "drill-discard", "size", "gameplay", "sounds"]) {
       expect(html).not.toMatch(new RegExp(`data-pathway-destination="${destination}" disabled`));
     }
     expect(css).toMatch(/\.pathway-choice:disabled\s*{[\s\S]*background: color-mix[\s\S]*cursor: not-allowed/);

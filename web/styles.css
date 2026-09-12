@@ -7976,10 +7976,6 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 
 /* Training drills turn the pathway surface into a compact practice table.
    The felt is the focal point; navigation keeps the existing dealt-hand style. */
-.pathway-choice-drills {
-  border-color: var(--pathway-featured-border);
-}
-
 .pathway-drill-view {
   gap: 18px;
 }
@@ -8255,11 +8251,6 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
     grid-column: span 2;
     min-height: 218px;
     margin: 0 -8px;
-  }
-
-  .pathway-choice-grid-tutorial > .pathway-choice-drills {
-    grid-column: 3 / span 2;
-    margin: 0;
   }
 
   .pathway-drill-view {
@@ -10149,11 +10140,6 @@ body[data-font-size="x-large"] .pathway-choice {
     --pathway-hover-rotate: 3.75deg;
   }
 
-  .pathway-choice-grid.pathway-choice-grid-tutorial > .pathway-choice.pathway-choice-drills {
-    --pathway-rest-y: 0px;
-    --pathway-rest-rotate: 0deg;
-    --pathway-hover-rotate: 1.15deg;
-  }
 }
 
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {

@@ -74,7 +74,7 @@ import { shouldRestoreSavedGameSurface } from "./resume-surface";
 import { isCoherentSavedGameState } from "./saved-game-state";
 import { scoringTitle } from "./scoring-title";
 import { analyticsForStatsOpponent, statsOpponentForModel } from "./stats-opponent";
-import { DrillProgression, type BeginnerDrill, type BeginnerDrillId } from "./training-drills";
+import type { BeginnerDrill, BeginnerDrillId, DrillProgression } from "./training-drills";
 import {
   handScoreNoticeParts,
   peggingScoreNoticeParts,
@@ -250,7 +250,6 @@ type PathwayView =
   | "play"
   | "human"
   | "tutorial"
-  | "drills"
   | "drills-beginner"
   | "drill-scoring-play"
   | "drill-discard"
@@ -3434,7 +3433,7 @@ function showPathwayView(view: PathwayView): void {
     pathwayView.hidden = pathwayView.dataset.pathwayView !== view;
   }
   els.pathwayPage.scrollTo({ top: 0, left: 0 });
-  renderTrainingDrill(view);
+  void renderTrainingDrill(view);
   if (view === "human") renderPeopleDirectory();
   if (authenticatedUser) void refreshPeople({ heartbeat: true });
   if (view === "play") void refreshPathwayResumeSessions();
@@ -3623,15 +3622,15 @@ async function forfeitSavedMasterGame(): Promise<void> {
 
 function pathwayRouteFromLocation(): PathwayRoute {
   const route = new URL(window.location.href).searchParams.get(PATHWAY_VIEW_PARAM);
-  if (route === "play" || route === "human" || route === "tutorial" || route === "drills" || route === "drills-beginner" || route === "drill-scoring-play" || route === "drill-discard" || route === "settings" || route === "gameplay" || route === "sounds" || route === "statistics" || route === "leaderboard") return route;
+  if (route === "drills") return "drills-beginner";
+  if (route === "play" || route === "human" || route === "tutorial" || route === "drills-beginner" || route === "drill-scoring-play" || route === "drill-discard" || route === "settings" || route === "gameplay" || route === "sounds" || route === "statistics" || route === "leaderboard") return route;
   return "home";
 }
 
 function pathwayParentRoute(route: PathwayRoute): PathwayRoute | null {
   if (route === "home") return null;
   if (route === "human") return "play";
-  if (route === "drills") return "tutorial";
-  if (route === "drills-beginner") return "drills";
+  if (route === "drills-beginner") return "tutorial";
   if (route === "drill-scoring-play" || route === "drill-discard") return "drills-beginner";
   if (route === "gameplay" || route === "sounds") return "settings";
   return "home";
@@ -3648,8 +3647,7 @@ function pathwayRouteLabel(route: PathwayRoute): string {
   if (route === "play") return "Play";
   if (route === "settings") return "Settings";
   if (route === "tutorial") return "Training";
-  if (route === "drills") return "Drills";
-  if (route === "drills-beginner") return "Drills";
+  if (route === "drills-beginner") return "Training";
   if (route === "drill-scoring-play") return "Find the Scoring Play";
   if (route === "drill-discard") return "Discard Drills";
   if (route === "statistics") return "Statistics";
@@ -3661,7 +3659,7 @@ function pathwayRouteLabel(route: PathwayRoute): string {
 }
 
 function trainingPathwayDestination(destination: string | undefined): PathwayView | null {
-  if (destination === "drills" || destination === "drills-beginner" || destination === "drill-scoring-play" || destination === "drill-discard") {
+  if (destination === "drills-beginner" || destination === "drill-scoring-play" || destination === "drill-discard") {
     return destination;
   }
   return null;
@@ -5071,7 +5069,7 @@ const DRILL_DEAL_CARD_INTERVAL_MS = 115;
 const DRILL_DEAL_CARD_DURATION_MS = 560;
 let drillDealGeneration = 0;
 let drillFeedbackTimer: number | null = null;
-const drillProgression = new DrillProgression(window.localStorage);
+let drillProgression: DrillProgression | null = null;
 const activeDrills = new Map<BeginnerDrillId, BeginnerDrill>();
 const drillAttempts = new Map<string, number>();
 
@@ -5081,11 +5079,13 @@ function beginnerDrillKind(view: PathwayRoute): BeginnerDrillId | null {
   return null;
 }
 
-function beginnerDrillForView(view: PathwayView): BeginnerDrill | null {
+async function beginnerDrillForView(view: PathwayView): Promise<BeginnerDrill | null> {
   const kind = beginnerDrillKind(view);
   if (!kind) return null;
   const current = activeDrills.get(kind);
   if (current) return current;
+  const { DrillProgression } = await import("./training-drills");
+  if (!drillProgression) drillProgression = new DrillProgression(window.localStorage);
   const selected = drillProgression.next(kind);
   activeDrills.set(kind, selected);
   return selected;
@@ -5196,8 +5196,9 @@ function advanceTrainingDrill(surface: HTMLElement, drill: BeginnerDrill, delay:
   drillFeedbackTimer = window.setTimeout(() => {
     drillFeedbackTimer = null;
     if (beginnerDrillKind(pathwayRouteFromLocation()) !== drill.kind) return;
+    if (!drillProgression) return;
     activeDrills.set(drill.kind, drillProgression.next(drill.kind, drill.id));
-    renderTrainingDrill(drill.kind === "discard" ? "drill-discard" : "drill-scoring-play");
+    void renderTrainingDrill(drill.kind === "discard" ? "drill-discard" : "drill-scoring-play");
   }, delay);
 }
 
@@ -5210,7 +5211,7 @@ function submitTrainingDrill(surface: HTMLElement, drill: BeginnerDrill): void {
 
   if (correctDrillChoice(drill, chosen)) {
     drillAttempts.delete(drill.id);
-    const { cycleCompleted } = drillProgression.markSolved(drill.kind, drill.id);
+    const { cycleCompleted } = drillProgression?.markSolved(drill.kind, drill.id) ?? { cycleCompleted: false };
     cardSounds.play("success");
     showDrillFeedback(surface, "success", cycleCompleted ? "Set complete!" : "Correct");
     if (status) status.textContent = cycleCompleted ? "You completed every drill in this set." : "Correct. Next situation…";
@@ -5219,26 +5220,18 @@ function submitTrainingDrill(surface: HTMLElement, drill: BeginnerDrill): void {
   }
 
   cardSounds.play("failure");
-  if (drill.kind === "find-scoring-play") {
-    const instruction = `Look for ${drill.opportunity || "a scoring"} opportunity.`;
+  const attempts = (drillAttempts.get(drill.id) || 0) + 1;
+  drillAttempts.set(drill.id, attempts);
+  if (attempts < 3) {
+    const remaining = 3 - attempts;
+    const instruction = drill.kind === "find-scoring-play"
+      ? `Look for ${drill.opportunity || "a scoring"} opportunity. ${remaining} ${remaining === 1 ? "try" : "tries"} left.`
+      : `${remaining} ${remaining === 1 ? "try" : "tries"} left.`;
     showDrillFeedback(surface, "failure", "Try again");
     window.setTimeout(() => {
       hideDrillFeedback(surface);
       surface.dataset.answering = "false";
       clearDrillSelection(surface, drill, instruction);
-    }, 850);
-    return;
-  }
-
-  const attempts = (drillAttempts.get(drill.id) || 0) + 1;
-  drillAttempts.set(drill.id, attempts);
-  if (attempts < 3) {
-    const remaining = 3 - attempts;
-    showDrillFeedback(surface, "failure", "Try again");
-    window.setTimeout(() => {
-      hideDrillFeedback(surface);
-      surface.dataset.answering = "false";
-      clearDrillSelection(surface, drill, `${remaining} ${remaining === 1 ? "try" : "tries"} left.`);
     }, 850);
     return;
   }
@@ -5252,13 +5245,16 @@ function submitTrainingDrill(surface: HTMLElement, drill: BeginnerDrill): void {
   const answerLabels = drill.hand
     .filter((card) => drill.answer.includes(`${card.rank}${card.suit[0]}`))
     .map((card) => card.label);
-  if (status) status.textContent = `The discard was ${answerLabels.join(" and ")}.`;
+  if (status) status.textContent = drill.kind === "discard"
+    ? `The discard was ${answerLabels.join(" and ")}.`
+    : `The scoring play was ${answerLabels.join(" and ")}.`;
   advanceTrainingDrill(surface, drill, 1_700);
 }
 
-function renderTrainingDrill(view: PathwayView): void {
-  const drill = beginnerDrillForView(view);
+async function renderTrainingDrill(view: PathwayView): Promise<void> {
+  const drill = await beginnerDrillForView(view);
   if (!drill) return;
+  if (beginnerDrillKind(pathwayRouteFromLocation()) !== drill.kind) return;
   const surface = document.querySelector<HTMLElement>(`[data-drill-surface="${drill.kind}"]`);
   if (!surface) return;
   const hand = surface.querySelector<HTMLElement>("[data-drill-hand]");
