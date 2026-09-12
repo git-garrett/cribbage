@@ -76,6 +76,7 @@ import { scoringTitle } from "./scoring-title";
 import { analyticsForStatsOpponent, statsOpponentForModel } from "./stats-opponent";
 import type { BeginnerDrill, BeginnerDrillId, DrillProgression } from "./training-drills";
 import type { TrainingIntro, TrainingIntroKind, TrainingIntroStep } from "./training-intros";
+import type { PuttingTogetherAction, PuttingTogetherLesson, PuttingTogetherStep } from "./putting-it-together";
 import {
   handScoreNoticeParts,
   peggingScoreNoticeParts,
@@ -254,6 +255,7 @@ type PathwayView =
   | "drills-beginner"
   | "intro-pegging"
   | "intro-discard"
+  | "intro-complete"
   | "drill-scoring-play"
   | "drill-discard"
   | "settings"
@@ -3427,19 +3429,20 @@ function showPathwayView(view: PathwayView): void {
   if (els.pathwayPage.hidden && isActiveGame(state.game)) suspendActiveGameForPathway();
   els.pathwayPage.hidden = false;
   els.pathwayPage.dataset.view = view;
-  if (view !== "intro-pegging" && view !== "intro-discard") delete els.pathwayPage.dataset.introMode;
+  if (view !== "intro-pegging" && view !== "intro-discard" && view !== "intro-complete") delete els.pathwayPage.dataset.introMode;
   const parent = pathwayParentRoute(view);
   els.pathwayHeaderHome.hidden = parent === null;
   if (parent) els.pathwayHeaderParentLabel.textContent = pathwayRouteLabel(parent);
   syncMobileGameplayHeaderPlacement();
   syncPathwayResumePresentation();
-  const visibleView = view === "intro-pegging" || view === "intro-discard" ? "training-intro" : view;
+  const visibleView = view === "intro-pegging" || view === "intro-discard" || view === "intro-complete" ? "training-intro" : view;
   for (const pathwayView of els.pathwayViews) {
     pathwayView.hidden = pathwayView.dataset.pathwayView !== visibleView;
   }
   els.pathwayPage.scrollTo({ top: 0, left: 0 });
   void renderTrainingDrill(view);
   void renderTrainingIntro(view);
+  void renderPuttingItTogether(view);
   if (view === "human") renderPeopleDirectory();
   if (authenticatedUser) void refreshPeople({ heartbeat: true });
   if (view === "play") void refreshPathwayResumeSessions();
@@ -3629,7 +3632,7 @@ async function forfeitSavedMasterGame(): Promise<void> {
 function pathwayRouteFromLocation(): PathwayRoute {
   const route = new URL(window.location.href).searchParams.get(PATHWAY_VIEW_PARAM);
   if (route === "drills") return "drills-beginner";
-  if (route === "play" || route === "human" || route === "tutorial" || route === "drills-beginner" || route === "intro-pegging" || route === "intro-discard" || route === "drill-scoring-play" || route === "drill-discard" || route === "settings" || route === "gameplay" || route === "sounds" || route === "statistics" || route === "leaderboard") return route;
+  if (route === "play" || route === "human" || route === "tutorial" || route === "drills-beginner" || route === "intro-pegging" || route === "intro-discard" || route === "intro-complete" || route === "drill-scoring-play" || route === "drill-discard" || route === "settings" || route === "gameplay" || route === "sounds" || route === "statistics" || route === "leaderboard") return route;
   return "home";
 }
 
@@ -3637,7 +3640,7 @@ function pathwayParentRoute(route: PathwayRoute): PathwayRoute | null {
   if (route === "home") return null;
   if (route === "human") return "play";
   if (route === "drills-beginner") return "tutorial";
-  if (route === "intro-pegging" || route === "intro-discard") return "drills-beginner";
+  if (route === "intro-pegging" || route === "intro-discard" || route === "intro-complete") return "drills-beginner";
   if (route === "drill-scoring-play" || route === "drill-discard") return "drills-beginner";
   if (route === "gameplay" || route === "sounds") return "settings";
   return "home";
@@ -3657,6 +3660,7 @@ function pathwayRouteLabel(route: PathwayRoute): string {
   if (route === "drills-beginner") return "Training";
   if (route === "intro-pegging") return "Pegging Intro";
   if (route === "intro-discard") return "Discard Intro";
+  if (route === "intro-complete") return "Putting It All Together";
   if (route === "drill-scoring-play") return "Find the Scoring Play";
   if (route === "drill-discard") return "Discard Drills";
   if (route === "statistics") return "Statistics";
@@ -3668,7 +3672,7 @@ function pathwayRouteLabel(route: PathwayRoute): string {
 }
 
 function trainingPathwayDestination(destination: string | undefined): PathwayView | null {
-  if (destination === "drills-beginner" || destination === "intro-pegging" || destination === "intro-discard" || destination === "drill-scoring-play" || destination === "drill-discard") {
+  if (destination === "drills-beginner" || destination === "intro-pegging" || destination === "intro-discard" || destination === "intro-complete" || destination === "drill-scoring-play" || destination === "drill-discard") {
     return destination;
   }
   return null;
@@ -5251,6 +5255,252 @@ async function renderTrainingIntro(view: PathwayView): Promise<void> {
   showTrainingIntroLanding(activeTrainingIntro);
 }
 
+let puttingTogetherLesson: PuttingTogetherLesson | null = null;
+let puttingTogetherStepIndex = -1;
+
+function showPuttingTogetherLanding(completed = false): void {
+  const lesson = puttingTogetherLesson;
+  if (!lesson) return;
+  puttingTogetherStepIndex = completed ? lesson.steps.length : -1;
+  els.pathwayPage.dataset.introMode = "copy";
+  const copy = introElement<HTMLElement>("[data-training-intro-copy]");
+  const game = introElement<HTMLElement>("[data-training-intro-game]");
+  const eyebrow = introElement<HTMLElement>("[data-training-intro-eyebrow]");
+  const title = introElement<HTMLElement>("[data-training-intro-title]");
+  const body = introElement<HTMLElement>("[data-training-intro-body]");
+  const next = introElement<HTMLButtonElement>("[data-training-intro-next]");
+  if (!copy || !game || !eyebrow || !title || !body || !next) return;
+  copy.hidden = false;
+  game.hidden = true;
+  eyebrow.textContent = lesson.eyebrow;
+  title.textContent = completed ? lesson.completionTitle : lesson.title;
+  body.textContent = completed ? lesson.completion : lesson.introduction;
+  next.textContent = completed ? "Play a real game against Easy" : "Next: Cut for the deal";
+  next.onclick = () => completed ? void launchPathwayOpponent(PATHWAY_OPPONENTS.easy) : showPuttingTogetherStep(0);
+  syncMobileGameplayHeaderPlacement();
+}
+
+function puttingNextLabel(): string {
+  const lesson = puttingTogetherLesson;
+  if (!lesson) return "Next";
+  return puttingTogetherStepIndex + 1 < lesson.steps.length
+    ? `Next: ${lesson.steps[puttingTogetherStepIndex + 1].title}`
+    : "Finish beginner training";
+}
+
+function finishPuttingTogetherAction(): void {
+  const button = introElement<HTMLButtonElement>("[data-training-intro-continue]");
+  if (!button) return;
+  button.disabled = false;
+  button.textContent = puttingNextLabel();
+  button.onclick = () => showPuttingTogetherStep(puttingTogetherStepIndex + 1);
+}
+
+function showPuttingScore(label: string, points: number): void {
+  const notices = introElement<HTMLElement>("[data-training-intro-notices]");
+  if (!notices) return;
+  notices.replaceChildren(trainingIntroScoreNotice({ title: label, points } as TrainingIntroStep));
+  cardSounds.playScore(points);
+}
+
+function puttingCard(label: string, index: number, selectable: boolean, onSelect?: (element: HTMLElement) => void): HTMLElement {
+  const element = cardElement(trainingIntroCard(label, 96_000 + (puttingTogetherStepIndex * 20) + index));
+  element.dataset.trainingCard = label;
+  if (selectable && onSelect) {
+    element.tabIndex = 0;
+    element.setAttribute("role", "button");
+    const choose = () => onSelect(element);
+    element.addEventListener("click", choose);
+    element.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(); }
+    });
+  }
+  return element;
+}
+
+function runPuttingTogetherAction(action: PuttingTogetherAction): void {
+  const hand = introElement<HTMLElement>("[data-training-intro-hand]");
+  const played = introElement<HTMLElement>("[data-training-intro-played]");
+  const cut = introElement<HTMLElement>("[data-training-intro-cut]");
+  const playerScore = introElement<HTMLElement>("[data-training-intro-player-score]");
+  const boardValue = introElement<HTMLElement>("[data-training-intro-board] .circular-board-value");
+  if (!hand || !played || !cut || !playerScore || !boardValue) return;
+  const actionButton = introElement<HTMLButtonElement>("[data-training-intro-continue]");
+  if (actionButton) actionButton.disabled = true;
+  if (action === "cut") {
+    cardSounds.play("cut");
+    const deck = played.querySelector<HTMLElement>(".putting-cut-deck");
+    deck?.classList.add("putting-cutting");
+    window.setTimeout(() => {
+      played.replaceChildren(cardElement(trainingIntroCard("4c", 97_001)));
+      finishPuttingTogetherAction();
+    }, tableMotionDisabled() ? 0 : 520);
+    return;
+  }
+  if (action === "deal") {
+    const cards = ["5c", "5d", "6s", "9h", "Qc", "Kd"].map((label, index) => {
+      const element = puttingCard(label, index, false);
+      element.classList.add("drill-dealt-card");
+      return element;
+    });
+    hand.replaceChildren(...cards);
+    cardSounds.play("deal");
+    const game = introElement<HTMLElement>("[data-training-intro-game]");
+    if (game && !tableMotionDisabled()) {
+      prepareDrillDeal(game);
+      game.classList.add("drill-deal-ready");
+      window.setTimeout(() => game.classList.remove("drill-deal-ready"), 1_200);
+    }
+    window.setTimeout(finishPuttingTogetherAction, tableMotionDisabled() ? 0 : 1_150);
+    return;
+  }
+  if (action === "discard") {
+    const selected = [...hand.querySelectorAll<HTMLElement>(".selected")];
+    cardSounds.play("discard");
+    cardSounds.play("discard", 0.13);
+    selected.forEach((card) => card.remove());
+    const crib = introElement<HTMLElement>("[data-training-intro-crib]");
+    crib?.classList.add("putting-crib-filled");
+    finishPuttingTogetherAction();
+    return;
+  }
+  if (action === "peg") {
+    const card = hand.querySelector<HTMLElement>(".selected");
+    if (!card) return;
+    const finish = () => {
+      card.remove();
+      played.append(cardElement(trainingIntroCard("9h", 97_009)));
+      const count = introElement<HTMLElement>("[data-training-intro-count]");
+      if (count) count.textContent = "15";
+      boardValue.textContent = "15";
+      playerScore.textContent = "2";
+      showPuttingScore("Fifteen", 2);
+      finishPuttingTogetherAction();
+    };
+    cardSounds.play("play", tableMotionDisabled() ? 0 : 0.42);
+    if (tableMotionDisabled()) { finish(); return; }
+    const from = card.getBoundingClientRect();
+    const to = played.getBoundingClientRect();
+    card.style.zIndex = "20";
+    const animation = card.animate([
+      { transform: "translate(0, 0) rotate(0deg)" },
+      { transform: `translate(${to.left + to.width / 2 - from.left - from.width / 2}px, ${to.top + to.height / 2 - from.top - from.height / 2}px) rotate(-2deg)` },
+    ], { duration: 560, easing: "cubic-bezier(0.22, 0.72, 0.24, 1)", fill: "forwards" });
+    void animation.finished.then(finish, finish);
+    return;
+  }
+  if (action === "count") {
+    for (const card of hand.querySelectorAll<HTMLElement>('[data-training-card^="4"]')) card.classList.add("score-card-lift");
+    playerScore.textContent = "2";
+    showPuttingScore("Pair", 2);
+    finishPuttingTogetherAction();
+    return;
+  }
+  if (action === "alternate") {
+    const playerCrib = introElement<HTMLElement>("[data-training-intro-player-crib]");
+    const opponentCrib = introElement<HTMLElement>("[data-training-intro-opponent-crib]");
+    if (playerCrib) playerCrib.hidden = true;
+    if (opponentCrib) opponentCrib.hidden = false;
+    cardSounds.play("shuffle");
+    finishPuttingTogetherAction();
+    return;
+  }
+  playerScore.textContent = "121";
+  boardValue.textContent = "121";
+  showPuttingScore("Game won", 1);
+  cardSounds.play("success");
+  finishPuttingTogetherAction();
+}
+
+function preparePuttingTogetherAction(step: PuttingTogetherStep): void {
+  const button = introElement<HTMLButtonElement>("[data-training-intro-continue]");
+  if (!button) return;
+  button.hidden = false;
+  button.textContent = step.actionLabel;
+  button.disabled = step.action === "discard" || step.action === "peg";
+  button.onclick = () => runPuttingTogetherAction(step.action);
+}
+
+function showPuttingTogetherStep(index: number): void {
+  const lesson = puttingTogetherLesson;
+  if (!lesson) return;
+  if (index >= lesson.steps.length) { showPuttingTogetherLanding(true); return; }
+  puttingTogetherStepIndex = index;
+  const step = lesson.steps[index];
+  els.pathwayPage.dataset.introMode = "example";
+  const copy = introElement<HTMLElement>("[data-training-intro-copy]");
+  const game = introElement<HTMLElement>("[data-training-intro-game]");
+  const hand = introElement<HTMLElement>("[data-training-intro-hand]");
+  const played = introElement<HTMLElement>("[data-training-intro-played]");
+  const cut = introElement<HTMLElement>("[data-training-intro-cut]");
+  const opponent = introElement<HTMLElement>("[data-training-intro-opponent]");
+  const count = introElement<HTMLElement>("[data-training-intro-count]");
+  const meta = introElement<HTMLElement>("[data-training-intro-meta]");
+  const crib = introElement<HTMLElement>("[data-training-intro-crib]");
+  const notices = introElement<HTMLElement>("[data-training-intro-notices]");
+  const button = introElement<HTMLButtonElement>("[data-training-intro-continue]");
+  if (!copy || !game || !hand || !played || !cut || !opponent || !count || !meta || !crib || !notices || !button) return;
+  copy.hidden = true;
+  game.hidden = false;
+  game.dataset.phase = step.action === "discard" || step.action === "deal" || step.action === "alternate" ? "discard" : "pegging";
+  hand.replaceChildren(); played.replaceChildren(); cut.replaceChildren(); notices.replaceChildren();
+  opponent.replaceChildren(...Array.from({ length: step.action === "deal" || step.action === "discard" ? 6 : 4 }, () => cardBack()));
+  count.textContent = step.action === "peg" ? "6" : "0";
+  meta.textContent = `${index + 1} of ${lesson.steps.length} · ${step.title}`;
+  crib.hidden = step.action !== "discard";
+  crib.classList.remove("putting-crib-filled");
+  const playerCrib = introElement<HTMLElement>("[data-training-intro-player-crib]");
+  const opponentCrib = introElement<HTMLElement>("[data-training-intro-opponent-crib]");
+  if (playerCrib) playerCrib.hidden = step.action !== "alternate";
+  if (opponentCrib) opponentCrib.hidden = true;
+  const playerScore = introElement<HTMLElement>("[data-training-intro-player-score]");
+  const opponentScore = introElement<HTMLElement>("[data-training-intro-opponent-score]");
+  if (playerScore) playerScore.textContent = step.action === "win" ? "120" : "0";
+  if (opponentScore) opponentScore.textContent = step.action === "win" ? "104" : "0";
+  const board = introElement<HTMLElement>("[data-training-intro-board]");
+  if (board) {
+    if (!board.hasChildNodes()) board.append(createCircularBoard());
+    const boardEyebrow = board.querySelector<HTMLElement>(".circular-board-eyebrow");
+    const boardValue = board.querySelector<HTMLElement>(".circular-board-value");
+    const boardDetail = board.querySelector<HTMLElement>(".circular-board-detail");
+    if (boardEyebrow) boardEyebrow.textContent = step.action === "win" ? "Score" : "Step";
+    if (boardValue) boardValue.textContent = step.action === "win" ? "120" : String(index + 1);
+    if (boardDetail) boardDetail.textContent = step.title;
+  }
+  if (step.action === "cut") {
+    const deck = document.createElement("button"); deck.type = "button"; deck.className = "card back putting-cut-deck"; deck.setAttribute("aria-label", "Deck ready to cut"); played.append(deck);
+  } else if (step.action === "discard") {
+    const update = () => { button.disabled = hand.querySelectorAll(".selected").length !== 2; };
+    hand.replaceChildren(...["5c", "5d", "6s", "9h", "Qc", "Kd"].map((label, cardIndex) => puttingCard(label, cardIndex, label === "Qc" || label === "Kd", (element) => { element.classList.toggle("selected"); update(); })));
+  } else if (step.action === "peg") {
+    played.append(cardElement(trainingIntroCard("6c", 97_006)));
+    const update = () => { button.disabled = hand.querySelectorAll(".selected").length !== 1; };
+    hand.replaceChildren(...["9h", "7c", "Qd", "Ks"].map((label, cardIndex) => puttingCard(label, cardIndex, label === "9h", (element) => { element.classList.toggle("selected"); update(); })));
+  } else if (step.action === "count") {
+    hand.replaceChildren(...["4c", "4d", "7s", "Kh"].map((label, cardIndex) => puttingCard(label, cardIndex, false)));
+    cut.append(cardElement(trainingIntroCard("2h", 97_002)));
+  }
+  button.hidden = true;
+  const dialog = introElement<HTMLDialogElement>("[data-training-intro-dialog]");
+  const dialogEyebrow = introElement<HTMLElement>("[data-training-intro-dialog-eyebrow]");
+  const dialogTitle = introElement<HTMLElement>("[data-training-intro-dialog-title]");
+  const dialogCopy = introElement<HTMLElement>("[data-training-intro-dialog-copy]");
+  if (!dialog || !dialogEyebrow || !dialogTitle || !dialogCopy) return;
+  dialogEyebrow.textContent = lesson.eyebrow; dialogTitle.textContent = step.title; dialogCopy.textContent = step.explanation;
+  dialog.onclose = () => preparePuttingTogetherAction(step);
+  syncMobileGameplayHeaderPlacement();
+  dialog.showModal();
+}
+
+async function renderPuttingItTogether(view: PathwayView): Promise<void> {
+  if (view !== "intro-complete") return;
+  const { PUTTING_IT_TOGETHER } = await import("./putting-it-together");
+  if (pathwayRouteFromLocation() !== "intro-complete") return;
+  activeTrainingIntro = null;
+  puttingTogetherLesson = PUTTING_IT_TOGETHER;
+  showPuttingTogetherLanding();
+}
+
 const DRILL_DEAL_CARD_INTERVAL_MS = 115;
 const DRILL_DEAL_CARD_DURATION_MS = 560;
 let drillDealGeneration = 0;
@@ -6160,7 +6410,7 @@ function usesMobileGameplayLayout(): boolean {
 
 function activeGameplayTopbar(): HTMLElement {
   const pathwayView = els.pathwayPage.dataset.view;
-  if (!els.pathwayPage.hidden && (pathwayView === "intro-pegging" || pathwayView === "intro-discard") && els.pathwayPage.dataset.introMode === "example") {
+  if (!els.pathwayPage.hidden && (pathwayView === "intro-pegging" || pathwayView === "intro-discard" || pathwayView === "intro-complete") && els.pathwayPage.dataset.introMode === "example") {
     return els.pathwayPage.querySelector<HTMLElement>("[data-pathway-view='training-intro'] .topbar") ?? els.topbar;
   }
   if (!els.pathwayPage.hidden && (pathwayView === "drill-scoring-play" || pathwayView === "drill-discard")) {
@@ -6172,7 +6422,7 @@ function activeGameplayTopbar(): HTMLElement {
 function mobileGameplayHeaderActive(): boolean {
   if (!usesMobileGameplayLayout()) return false;
   const pathwayView = els.pathwayPage.dataset.view;
-  if (!els.pathwayPage.hidden && (pathwayView === "intro-pegging" || pathwayView === "intro-discard") && els.pathwayPage.dataset.introMode === "example") return true;
+  if (!els.pathwayPage.hidden && (pathwayView === "intro-pegging" || pathwayView === "intro-discard" || pathwayView === "intro-complete") && els.pathwayPage.dataset.introMode === "example") return true;
   if (!els.pathwayPage.hidden && (pathwayView === "drill-scoring-play" || pathwayView === "drill-discard")) return true;
   return els.app.dataset.view === "game" &&
     els.pathwayPage.hidden &&

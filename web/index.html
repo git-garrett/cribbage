@@ -284,6 +284,11 @@
                 <strong>Discard Drills</strong>
                 <small>Choose two cards to send to your crib.</small>
               </button>
+              <button class="pathway-choice pathway-choice-featured" type="button" data-pathway-destination="intro-complete">
+                <span>Play a complete hand</span>
+                <strong>Putting It All Together</strong>
+                <small>Practice the rhythm from the first cut to 121.</small>
+              </button>
             </div>
           </section>
 
@@ -306,11 +311,11 @@
                 <button class="pathway-back app-back" type="button" data-pathway-back="drills-beginner"><span aria-hidden="true">←</span> Beginner</button>
               </section>
               <section class="scoreboard">
-                <div class="score drill-player-score"><span class="score-label">Player</span><strong data-training-intro-player-score>0</strong></div>
-                <div class="score ai drill-opponent-score"><span class="score-label">Practice</span><strong>0</strong></div>
+                <div class="score drill-player-score"><span class="score-label">Player</span><span class="dealer-button" data-training-intro-player-crib hidden>Crib</span><strong data-training-intro-player-score>0</strong></div>
+                <div class="score ai drill-opponent-score"><span class="score-label">Practice</span><span class="dealer-button" data-training-intro-opponent-crib hidden>Crib</span><strong data-training-intro-opponent-score>0</strong></div>
                 <div class="board" data-training-intro-board aria-label="Cribbage board"></div>
               </section>
-              <section class="table training-intro-table">
+              <section class="table training-intro-table drill-game-table">
                 <div class="crib-tray drill-crib-tray" data-training-intro-crib hidden><span class="crib-tray-label">Your crib</span><span class="crib-tray-stack" aria-hidden="true"></span></div>
                 <div class="ai-strip"><h2>Opponent hand</h2><div class="cards small" data-training-intro-opponent aria-hidden="true"></div></div>
                 <div class="status"><span>Dealer: <strong>Practice</strong></span><span>Count: <strong data-training-intro-count>0</strong></span><span>Turn: <strong>You</strong></span></div>

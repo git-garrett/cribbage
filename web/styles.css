@@ -8371,6 +8371,26 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   margin: 0;
 }
 
+.putting-cut-deck {
+  cursor: default;
+  transform-origin: center;
+}
+
+.putting-cut-deck.putting-cutting {
+  animation: putting-cut 500ms cubic-bezier(0.22, 0.72, 0.24, 1) both;
+}
+
+.putting-crib-filled .crib-tray-stack::before,
+.putting-crib-filled .crib-tray-stack::after {
+  opacity: 1;
+}
+
+@keyframes putting-cut {
+  0% { transform: translate(0, 0) rotate(0); }
+  45% { transform: translate(-34%, -18%) rotate(-5deg); }
+  100% { opacity: 0; transform: translate(-48%, -28%) rotate(-7deg); }
+}
+
 .drill-game-shell .drill-player-score {
   justify-items: start;
 }

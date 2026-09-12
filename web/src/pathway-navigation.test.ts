@@ -57,6 +57,7 @@ describe("local pathway navigation", () => {
       "drills-beginner",
       "intro-pegging",
       "intro-discard",
+      "intro-complete",
       "drill-scoring-play",
       "drill-discard",
       "size",
@@ -129,6 +130,14 @@ describe("local pathway navigation", () => {
     expect(html).toContain('data-pathway-view="training-intro"');
     expect(html).toContain("data-training-intro-dialog");
     expect(source).toMatch(/showTrainingIntroStep[\s\S]*dialog\.onclose = completeTrainingIntroExample[\s\S]*dialog\.showModal\(\)/s);
+  });
+
+  it("ends beginner training with an interactive complete-game lesson", () => {
+    expect(html).toMatch(/data-pathway-destination="drill-discard"[\s\S]*data-pathway-destination="intro-complete"/);
+    expect(html).toContain("Putting It All Together");
+    expect(source).toContain("function showPuttingTogetherStep");
+    expect(source).toContain("async function renderPuttingItTogether");
+    expect(source).toContain("launchPathwayOpponent(PATHWAY_OPPONENTS.easy)");
   });
 
   it("uses the pathway entry across web and mobile and connects Statistics to My Stats", () => {
@@ -210,7 +219,7 @@ describe("local pathway navigation", () => {
     ]) {
       expect(html).toMatch(new RegExp(`data-pathway-destination="${destination}" disabled[\\s\\S]*?Coming soon`));
     }
-    for (const destination of ["easy", "tough", "master", "dynamic", "human", "drills-beginner", "intro-pegging", "intro-discard", "drill-scoring-play", "drill-discard", "size", "gameplay", "sounds"]) {
+    for (const destination of ["easy", "tough", "master", "dynamic", "human", "drills-beginner", "intro-pegging", "intro-discard", "intro-complete", "drill-scoring-play", "drill-discard", "size", "gameplay", "sounds"]) {
       expect(html).not.toMatch(new RegExp(`data-pathway-destination="${destination}" disabled`));
     }
     expect(css).toMatch(/\.pathway-choice:disabled\s*{[\s\S]*background: color-mix[\s\S]*cursor: not-allowed/);
