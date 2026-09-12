@@ -8154,8 +8154,12 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   transform-origin: center;
 }
 
-.drill-table[data-dealing="true"]:not(.drill-deal-ready) .drill-dealt-card {
+[data-dealing="true"]:not(.drill-deal-ready) .drill-dealt-card {
   opacity: 0;
+}
+
+.training-intro-game .drill-dealt-card:not(button) {
+  cursor: default;
 }
 
 .drill-deal-ready .drill-dealt-card {

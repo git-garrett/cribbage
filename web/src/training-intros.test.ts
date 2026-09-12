@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   correctTrainingIntroChoice,
+  randomizedTrainingHand,
   TRAINING_INTROS,
   trainingIntroAnswer,
   trainingIntroRequiredSelections,
@@ -19,7 +20,7 @@ describe("beginner training intros", () => {
 
   it("teaches the full beginner discard sequence before discard drills", () => {
     expect(TRAINING_INTROS.discard.steps.map((step) => step.id)).toEqual([
-      "pair", "fifteen", "run-three", "run-four", "double-run", "flush", "crib-flush", "nobs",
+      "pair", "fifteen", "run-three", "run-four", "double-run", "flush", "crib-flush",
     ]);
     expect(TRAINING_INTROS.discard.steps.every((step) => step.selected.length === 2)).toBe(true);
     expect(TRAINING_INTROS.discard.drillRoute).toBe("drill-discard");
@@ -35,6 +36,34 @@ describe("beginner training intros", () => {
       expect(trainingIntroRequiredSelections("discard")).toBe(2);
       expect(trainingIntroAnswer(step, "discard")).toEqual(step.selected);
       expect(correctTrainingIntroChoice(step, "discard", [...step.selected].reverse())).toBe(true);
+    }
+  });
+
+  it("accepts any discard that preserves the instructed scoring cards", () => {
+    const pair = TRAINING_INTROS.discard.steps.find((step) => step.id === "pair")!;
+    expect(correctTrainingIntroChoice(pair, "discard", ["6s", "9h"])).toBe(true);
+    expect(correctTrainingIntroChoice(pair, "discard", ["4c", "9h"])).toBe(false);
+
+    const run = TRAINING_INTROS.discard.steps.find((step) => step.id === "run-three")!;
+    expect(correctTrainingIntroChoice(run, "discard", ["9h", "Qc"])).toBe(true);
+    expect(correctTrainingIntroChoice(run, "discard", ["5s", "Qc"])).toBe(false);
+
+    const cribFlush = TRAINING_INTROS.discard.steps.find((step) => step.id === "crib-flush")!;
+    expect(correctTrainingIntroChoice(cribFlush, "discard", ["Ah", "4h"])).toBe(true);
+    expect(correctTrainingIntroChoice(cribFlush, "discard", ["6c", "8d"])).toBe(false);
+  });
+
+  it("randomizes each hand without putting a correct choice first", () => {
+    for (const intro of Object.values(TRAINING_INTROS)) {
+      for (const step of intro.steps) {
+        for (const situation of [step, step.challenge]) {
+          const answer = trainingIntroAnswer(situation, intro.kind);
+          const randomized = randomizedTrainingHand(situation.hand, answer, () => 0.999);
+          expect(randomized).toHaveLength(situation.hand.length);
+          expect([...randomized].sort()).toEqual([...situation.hand].sort());
+          expect(answer).not.toContain(randomized[0]);
+        }
+      }
     }
   });
 
@@ -74,7 +103,5 @@ describe("beginner training intros", () => {
     expect(suit(keptCards(flush.challenge.hand, flush.challenge.selected)[0])).not.toBe(suit(keptCards(flush.hand, flush.selected)[0]));
     const cribFlush = discardSteps["crib-flush"];
     expect(suit(cribFlush.challenge.selected[0])).not.toBe(suit(cribFlush.selected[0]));
-    const nobs = discardSteps.nobs;
-    expect(nobs.challenge.hand.find((card) => rank(card) === "J")).not.toBe(nobs.hand.find((card) => rank(card) === "J"));
   });
 });

@@ -77,6 +77,7 @@ import { analyticsForStatsOpponent, statsOpponentForModel } from "./stats-oppone
 import type { BeginnerDrill, BeginnerDrillId, DrillProgression } from "./training-drills";
 import {
   correctTrainingIntroChoice,
+  randomizedTrainingHand,
   TRAINING_INTROS,
   trainingIntroAnswer,
   trainingIntroRequiredSelections,
@@ -5091,6 +5092,9 @@ let activeTrainingIntro: TrainingIntro | null = null;
 let activeTrainingIntroStep = -1;
 let activeTrainingIntroMode: "example" | "practice" | "challenge" = "example";
 let trainingIntroAttempts = 0;
+const DRILL_DEAL_CARD_INTERVAL_MS = 115;
+const DRILL_DEAL_CARD_DURATION_MS = 560;
+let drillDealGeneration = 0;
 
 function trainingIntroKind(view: PathwayRoute): TrainingIntroKind | null {
   if (view === "intro-pegging") return "pegging";
@@ -5243,7 +5247,7 @@ function trainingIntroPracticeCardElement(label: string, cardIndex: number, intr
   button.setAttribute("aria-pressed", "false");
   button.addEventListener("click", () => {
     const game = introElement<HTMLElement>("[data-training-intro-game]");
-    if (!game || game.dataset.answering === "true") return;
+    if (!game || game.dataset.dealing === "true" || game.dataset.answering === "true") return;
     const required = trainingIntroRequiredSelections(intro.kind);
     const selected = button.getAttribute("aria-pressed") === "true";
     const selectedCards = [...game.querySelectorAll<HTMLButtonElement>(".training-intro-hand .drill-dealt-card[aria-pressed='true']")];
@@ -5395,7 +5399,8 @@ function showTrainingIntroDecision(mode: "practice" | "challenge"): void {
   const button = introElement<HTMLButtonElement>("[data-training-intro-continue]");
   if (!game || !hand || !played || !cut || !instruction || !notices || !button) return;
   game.dataset.answering = "false";
-  hand.replaceChildren(...situation.hand.map((label, index) => trainingIntroPracticeCardElement(label, index, intro)));
+  const displayedHand = randomizedTrainingHand(situation.hand, trainingIntroAnswer(situation, intro.kind));
+  hand.replaceChildren(...displayedHand.map((label, index) => trainingIntroPracticeCardElement(label, index, intro)));
   played.replaceChildren(...trainingIntroPlayedCards(situation.played, 96_000 + (activeTrainingIntroStep * 20)));
   cut.replaceChildren(...(intro.kind === "pegging" && situation.cutCard ? [cardElement(trainingIntroCard(situation.cutCard, 97_000 + activeTrainingIntroStep))] : []));
   notices.replaceChildren();
@@ -5412,7 +5417,7 @@ function showTrainingIntroDecision(mode: "practice" | "challenge"): void {
   if (count) count.textContent = String(situation.countBefore);
   if (playerScore) playerScore.textContent = "0";
   if (boardValue) boardValue.textContent = intro.kind === "pegging" ? String(situation.countBefore) : String(activeTrainingIntroStep + 1);
-  cardSounds.play("deal");
+  playTrainingDealAnimation(game);
 }
 
 function showTrainingIntroPractice(): void {
@@ -5454,8 +5459,10 @@ function showTrainingIntroStep(index: number): void {
   copy.hidden = true;
   game.hidden = false;
   game.dataset.phase = intro.kind === "pegging" ? "pegging" : "discard";
-  hand.replaceChildren(...step.hand.map((label, cardIndex) => {
+  const displayedHand = randomizedTrainingHand(step.hand, trainingIntroAnswer(step, intro.kind));
+  hand.replaceChildren(...displayedHand.map((label, cardIndex) => {
     const element = cardElement(trainingIntroCard(label, 90_000 + (index * 20) + cardIndex));
+    element.classList.add("drill-dealt-card");
     element.dataset.trainingCard = label;
     element.classList.toggle("selected", step.selected.includes(label));
     return element;
@@ -5495,9 +5502,8 @@ function showTrainingIntroStep(index: number): void {
   if (playerLabel) playerLabel.textContent = playerDisplayName();
   const dealer = introElement<HTMLElement>("[data-training-intro-dealer]");
   if (dealer) dealer.textContent = intro.kind === "discard" ? playerDisplayName() : "Practice";
-  dialog.onclose = completeTrainingIntroExample;
+  dialog.onclose = () => playTrainingDealAnimation(game, completeTrainingIntroExample);
   syncMobileGameplayHeaderPlacement();
-  cardSounds.play("deal");
   dialog.showModal();
 }
 
@@ -5755,9 +5761,6 @@ async function renderPuttingItTogether(view: PathwayView): Promise<void> {
   showPuttingTogetherLanding();
 }
 
-const DRILL_DEAL_CARD_INTERVAL_MS = 115;
-const DRILL_DEAL_CARD_DURATION_MS = 560;
-let drillDealGeneration = 0;
 let drillFeedbackTimer: number | null = null;
 let drillProgression: DrillProgression | null = null;
 const activeDrills = new Map<BeginnerDrillId, BeginnerDrill>();
@@ -5839,6 +5842,36 @@ function prepareDrillDeal(surface: HTMLElement): void {
     card.style.setProperty("--drill-deal-rotation", `${index % 2 === 0 ? -7 : 7}deg`);
     card.style.animationDelay = `${index * DRILL_DEAL_CARD_INTERVAL_MS}ms`;
   }
+}
+
+function playTrainingDealAnimation(surface: HTMLElement, onComplete?: () => void): void {
+  const cardCount = surface.querySelectorAll(".drill-dealt-card").length;
+  const generation = String(++drillDealGeneration);
+  surface.dataset.dealGeneration = generation;
+  surface.dataset.dealing = "true";
+  surface.classList.remove("drill-deal-ready", "drill-deal-complete");
+
+  const finish = () => {
+    if (surface.dataset.dealGeneration !== generation) return;
+    surface.dataset.dealing = "false";
+    surface.classList.remove("drill-deal-ready");
+    surface.classList.add("drill-deal-complete");
+    onComplete?.();
+  };
+
+  window.requestAnimationFrame(() => {
+    if (surface.dataset.dealGeneration !== generation) return;
+    if (tableMotionDisabled()) {
+      cardSounds.play("deal");
+      finish();
+      return;
+    }
+    prepareDrillDeal(surface);
+    surface.classList.add("drill-deal-ready");
+    cardSounds.play("deal");
+    const duration = DRILL_DEAL_CARD_DURATION_MS + (Math.max(0, cardCount - 1) * DRILL_DEAL_CARD_INTERVAL_MS);
+    window.setTimeout(finish, duration + 40);
+  });
 }
 
 function clearDrillSelection(surface: HTMLElement, drill: BeginnerDrill, message: string): void {
@@ -5967,11 +6000,7 @@ async function renderTrainingDrill(view: PathwayView): Promise<void> {
     window.clearTimeout(drillFeedbackTimer);
     drillFeedbackTimer = null;
   }
-  const generation = String(++drillDealGeneration);
-  surface.dataset.dealGeneration = generation;
-  surface.dataset.dealing = "true";
   surface.dataset.answering = "false";
-  surface.classList.remove("drill-deal-ready", "drill-deal-complete");
   hideDrillFeedback(surface);
   hand.replaceChildren(...drill.hand.map((card) => drillCardElement(card, drill, surface)));
   if (played) played.replaceChildren(...drill.played.map((card) => cardElement(card)));
@@ -6015,24 +6044,7 @@ async function renderTrainingDrill(view: PathwayView): Promise<void> {
     opponentHand.replaceChildren(...Array.from({ length: cardCount }, () => cardBack()));
   }
 
-  window.requestAnimationFrame(() => {
-    if (surface.dataset.dealGeneration !== generation) return;
-    cardSounds.play("deal");
-    if (tableMotionDisabled()) {
-      surface.dataset.dealing = "false";
-      surface.classList.add("drill-deal-complete");
-      return;
-    }
-    prepareDrillDeal(surface);
-    surface.classList.add("drill-deal-ready");
-    const duration = DRILL_DEAL_CARD_DURATION_MS + ((drill.hand.length - 1) * DRILL_DEAL_CARD_INTERVAL_MS);
-    window.setTimeout(() => {
-      if (surface.dataset.dealGeneration !== generation) return;
-      surface.dataset.dealing = "false";
-      surface.classList.remove("drill-deal-ready");
-      surface.classList.add("drill-deal-complete");
-    }, duration + 40);
-  });
+  playTrainingDealAnimation(surface);
 }
 
 function cardBack(): HTMLElement {

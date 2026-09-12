@@ -131,7 +131,7 @@ describe("local pathway navigation", () => {
     expect(html).toMatch(/data-pathway-destination="intro-pegging"[\s\S]*data-pathway-destination="drill-scoring-play"[\s\S]*data-pathway-destination="intro-discard"[\s\S]*data-pathway-destination="drill-discard"/);
     expect(html).toContain('data-pathway-view="training-intro"');
     expect(html).toContain("data-training-intro-dialog");
-    expect(source).toMatch(/showTrainingIntroStep[\s\S]*dialog\.onclose = completeTrainingIntroExample[\s\S]*dialog\.showModal\(\)/s);
+    expect(source).toMatch(/showTrainingIntroStep[\s\S]*dialog\.onclose = \(\) => playTrainingDealAnimation\(game, completeTrainingIntroExample\)[\s\S]*dialog\.showModal\(\)/s);
     expect(source).toContain("function showTrainingIntroPractice");
     expect(source).toContain("function showTrainingIntroChallenge");
     expect(source).toContain("Find another ${step.title.toLowerCase()}");

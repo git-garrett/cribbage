@@ -3,6 +3,7 @@ export type TrainingIntroKind = "pegging" | "discard";
 export interface TrainingIntroSituation {
   hand: string[];
   selected: string[];
+  requiredKeepCards?: string[];
   played: string[];
   playedCard: string | null;
   cutCard: string | null;
@@ -38,7 +39,37 @@ export function trainingIntroRequiredSelections(kind: TrainingIntroKind): number
   return kind === "pegging" ? 1 : 2;
 }
 
+export function randomizedTrainingHand(
+  hand: readonly string[],
+  answer: readonly string[],
+  random: () => number = Math.random,
+): string[] {
+  const shuffled = [...hand];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.min(index, Math.floor(random() * (index + 1)));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+
+  if (answer.includes(shuffled[0])) {
+    const alternatives = shuffled
+      .map((card, index) => ({ card, index }))
+      .filter(({ card }) => !answer.includes(card));
+    if (alternatives.length > 0) {
+      const alternative = alternatives[Math.min(alternatives.length - 1, Math.floor(random() * alternatives.length))];
+      [shuffled[0], shuffled[alternative.index]] = [shuffled[alternative.index], shuffled[0]];
+    }
+  }
+  return shuffled;
+}
+
 export function correctTrainingIntroChoice(situation: TrainingIntroSituation, kind: TrainingIntroKind, chosen: string[]): boolean {
+  if (kind === "discard" && situation.requiredKeepCards) {
+    const uniqueChosen = new Set(chosen);
+    return chosen.length === 2
+      && uniqueChosen.size === 2
+      && chosen.every((card) => situation.hand.includes(card))
+      && situation.requiredKeepCards.every((card) => !uniqueChosen.has(card));
+  }
   return JSON.stringify([...chosen].sort()) === JSON.stringify(trainingIntroAnswer(situation, kind).sort());
 }
 
@@ -64,17 +95,16 @@ export const TRAINING_INTROS: Record<TrainingIntroKind, TrainingIntro> = {
     eyebrow: "Beginner · Discarding",
     introduction: "At the start of each hand, choose two of your six cards for the crib. The other four become your hand. Begin by keeping cards that already work together—pairs, fifteens, runs, and flushes—while remembering whose crib receives the two discards.",
     steps: [
-      { id: "pair", title: "Pair", explanation: "A pair scores 2 points. Discard the queen and king here to keep the two 4s together in your four-card hand.", hand: ["4c", "4d", "6s", "9h", "Qc", "Kd"], selected: ["Qc", "Kd"], played: [], playedCard: null, cutCard: "2h", countBefore: 0, points: 2, challenge: { hand: ["7c", "7d", "2s", "9h", "Jc", "Kd"], selected: ["Jc", "Kd"], played: [], playedCard: null, cutCard: "4h", countBefore: 0 } },
-      { id: "fifteen", title: "Fifteen", explanation: "Any combination totaling 15 scores 2 points. Discard the queen and king to keep 5 and 10 together.", hand: ["5c", "10d", "2s", "8h", "Qc", "Kd"], selected: ["Qc", "Kd"], played: [], playedCard: null, cutCard: "3h", countBefore: 0, points: 2, challenge: { hand: ["6c", "9d", "2s", "8h", "Jc", "Kd"], selected: ["Jc", "Kd"], played: [], playedCard: null, cutCard: "3h", countBefore: 0 } },
-      { id: "run-three", title: "Run of three", explanation: "Three consecutive ranks score 3 points. Discard the queen and king to keep 3–4–5.", hand: ["3c", "4d", "5s", "9h", "Qc", "Kd"], selected: ["Qc", "Kd"], played: [], playedCard: null, cutCard: "Ah", countBefore: 0, points: 3, challenge: { hand: ["6c", "7d", "8s", "Ah", "Jc", "Kd"], selected: ["Jc", "Kd"], played: [], playedCard: null, cutCard: "2h", countBefore: 0 } },
-      { id: "run-four", title: "Run of four", explanation: "Four consecutive ranks score 4 points. Discard the queen and king to keep 3–4–5–6 intact.", hand: ["3c", "4d", "5s", "6h", "Qc", "Kd"], selected: ["Qc", "Kd"], played: [], playedCard: null, cutCard: "9h", countBefore: 0, points: 4, challenge: { hand: ["6c", "7d", "8s", "9h", "Jc", "Kd"], selected: ["Jc", "Kd"], played: [], playedCard: null, cutCard: "2h", countBefore: 0 } },
-      { id: "double-run", title: "Double run", explanation: "A repeated rank can make the same run twice. Keeping 3, 3, 4, 5 creates two runs of three plus a pair, for 8 points before the turn card.", hand: ["3c", "3d", "4s", "5h", "Qc", "Kd"], selected: ["Qc", "Kd"], played: [], playedCard: null, cutCard: "9c", countBefore: 0, points: 8, challenge: { hand: ["6c", "6d", "7s", "8h", "Jc", "Kd"], selected: ["Jc", "Kd"], played: [], playedCard: null, cutCard: "2c", countBefore: 0 } },
-      { id: "flush", title: "Flush", explanation: "Four cards of one suit in your hand score 4 points. A turn card of that suit would make it 5. Discard the off-suit 3 and queen here.", hand: ["2h", "5h", "9h", "Kh", "3c", "Qd"], selected: ["3c", "Qd"], played: [], playedCard: null, cutCard: "7s", countBefore: 0, points: 4, challenge: { hand: ["Ac", "4c", "8c", "Kc", "3h", "Qd"], selected: ["3h", "Qd"], played: [], playedCard: null, cutCard: "7s", countBefore: 0 } },
+      { id: "pair", title: "Pair", explanation: "A pair scores 2 points. Discard the queen and king here to keep the two 4s together in your four-card hand.", hand: ["4c", "4d", "6s", "9h", "Qc", "Kd"], selected: ["Qc", "Kd"], requiredKeepCards: ["4c", "4d"], played: [], playedCard: null, cutCard: "2h", countBefore: 0, points: 2, challenge: { hand: ["7c", "7d", "2s", "9h", "Jc", "Kd"], selected: ["Jc", "Kd"], requiredKeepCards: ["7c", "7d"], played: [], playedCard: null, cutCard: "4h", countBefore: 0 } },
+      { id: "fifteen", title: "Fifteen", explanation: "Any combination totaling 15 scores 2 points. Discard the queen and king to keep 5 and 10 together.", hand: ["5c", "10d", "2s", "8h", "Qc", "Kd"], selected: ["Qc", "Kd"], requiredKeepCards: ["5c", "10d"], played: [], playedCard: null, cutCard: "3h", countBefore: 0, points: 2, challenge: { hand: ["6c", "9d", "2s", "8h", "Jc", "Kd"], selected: ["Jc", "Kd"], requiredKeepCards: ["6c", "9d"], played: [], playedCard: null, cutCard: "3h", countBefore: 0 } },
+      { id: "run-three", title: "Run of three", explanation: "Three consecutive ranks score 3 points. Discard the queen and king to keep 3–4–5.", hand: ["3c", "4d", "5s", "9h", "Qc", "Kd"], selected: ["Qc", "Kd"], requiredKeepCards: ["3c", "4d", "5s"], played: [], playedCard: null, cutCard: "Ah", countBefore: 0, points: 3, challenge: { hand: ["6c", "7d", "8s", "Ah", "Jc", "Kd"], selected: ["Jc", "Kd"], requiredKeepCards: ["6c", "7d", "8s"], played: [], playedCard: null, cutCard: "2h", countBefore: 0 } },
+      { id: "run-four", title: "Run of four", explanation: "Four consecutive ranks score 4 points. Discard the queen and king to keep 3–4–5–6 intact.", hand: ["3c", "4d", "5s", "6h", "Qc", "Kd"], selected: ["Qc", "Kd"], requiredKeepCards: ["3c", "4d", "5s", "6h"], played: [], playedCard: null, cutCard: "9h", countBefore: 0, points: 4, challenge: { hand: ["6c", "7d", "8s", "9h", "Jc", "Kd"], selected: ["Jc", "Kd"], requiredKeepCards: ["6c", "7d", "8s", "9h"], played: [], playedCard: null, cutCard: "2h", countBefore: 0 } },
+      { id: "double-run", title: "Double run", explanation: "A repeated rank can make the same run twice. Keeping 3, 3, 4, 5 creates two runs of three plus a pair, for 8 points before the turn card.", hand: ["3c", "3d", "4s", "5h", "Qc", "Kd"], selected: ["Qc", "Kd"], requiredKeepCards: ["3c", "3d", "4s", "5h"], played: [], playedCard: null, cutCard: "9c", countBefore: 0, points: 8, challenge: { hand: ["6c", "6d", "7s", "8h", "Jc", "Kd"], selected: ["Jc", "Kd"], requiredKeepCards: ["6c", "6d", "7s", "8h"], played: [], playedCard: null, cutCard: "2c", countBefore: 0 } },
+      { id: "flush", title: "Flush", explanation: "Four cards of one suit in your hand score 4 points. A turn card of that suit would make it 5. Discard the off-suit 3 and queen here.", hand: ["2h", "5h", "9h", "Kh", "3c", "Qd"], selected: ["3c", "Qd"], requiredKeepCards: ["2h", "5h", "9h", "Kh"], played: [], playedCard: null, cutCard: "7s", countBefore: 0, points: 4, challenge: { hand: ["Ac", "4c", "8c", "Kc", "3h", "Qd"], selected: ["3h", "Qd"], requiredKeepCards: ["Ac", "4c", "8c", "Kc"], played: [], playedCard: null, cutCard: "7s", countBefore: 0 } },
       { id: "crib-flush", title: "Flush in the crib", explanation: "A crib flush is stricter: all four crib cards and the turn card must share a suit. Sending two hearts to your crib creates the possibility, but the other cards and turn must also be hearts. Crib details will return later in training.", hand: ["Ah", "4h", "6c", "8d", "Qs", "Kc"], selected: ["Ah", "4h"], played: [], playedCard: null, cutCard: "9h", countBefore: 0, points: 0, challenge: { hand: ["2s", "7s", "4c", "8d", "Qh", "Kc"], selected: ["2s", "7s"], played: [], playedCard: null, cutCard: "10s", countBefore: 0 } },
-      { id: "nobs", title: "Jack matching the turn", explanation: "A jack in your hand that matches the turn card’s suit scores 1 point. This is often called nobs. Here, the jack of hearts matches the heart turn card.", hand: ["Jh", "2c", "5d", "8s", "Qc", "Kd"], selected: ["Qc", "Kd"], played: [], playedCard: null, cutCard: "7h", countBefore: 0, points: 1, challenge: { hand: ["Js", "2c", "6d", "9h", "Qc", "Kd"], selected: ["Qc", "Kd"], played: [], playedCard: null, cutCard: "4s", countBefore: 0 } },
     ],
     completionTitle: "You understand beginner discarding.",
-    completion: "You can now preserve pairs, fifteens, runs, and flushes, and recognize double runs and a matching jack. The drills will let you practice choosing the two cards to send away.",
+    completion: "You can now preserve pairs, fifteens, runs, and flushes, and recognize double runs. The drills will let you practice choosing the two cards to send away.",
     drillRoute: "drill-discard",
   },
 };
