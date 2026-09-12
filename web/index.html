@@ -122,7 +122,6 @@
                   <span class="pathway-card-kicker">Build your game</span>
                   <strong>Training</strong>
                   <span>Whether you're a beginner or want strategies for mastering the game.</span>
-                  <em class="pathway-coming-soon">Coming soon</em>
                   <b aria-hidden="true">→</b>
                 </button>
                 <button id="pathway-statistics" class="pathway-card" type="button">
@@ -252,6 +251,117 @@
                 <strong>Expert Strategies</strong>
                 <em class="pathway-coming-soon">Coming soon</em>
               </button>
+              <button class="pathway-choice pathway-choice-featured pathway-choice-drills" type="button" data-pathway-destination="drills">
+                <span>Practice at the table</span>
+                <strong>Drills</strong>
+                <small>Work through focused situations at every skill level.</small>
+              </button>
+            </div>
+          </section>
+
+          <section class="pathway-view pathway-subview" data-pathway-view="drills" aria-labelledby="pathway-drills-title" hidden>
+            <header class="pathway-subhead">
+              <button class="pathway-back" type="button" data-pathway-back="tutorial">
+                <span aria-hidden="true">←</span> Training
+              </button>
+              <p class="pathway-eyebrow">Training · Drills</p>
+              <h2 id="pathway-drills-title">Choose your skill level.</h2>
+              <p>Practice one decision at a time, then build toward complete hands.</p>
+            </header>
+            <div class="pathway-choice-grid pathway-choice-grid-drills">
+              <button class="pathway-choice pathway-choice-featured" type="button" data-pathway-destination="drills-beginner">
+                <span>Learn the patterns</span>
+                <strong>Beginner</strong>
+                <small>Spot points and practice the first discard decisions.</small>
+              </button>
+              <button class="pathway-choice" type="button" data-pathway-destination="drills-intermediate" disabled>
+                <span>Build consistency</span>
+                <strong>Intermediate</strong>
+                <em class="pathway-coming-soon">Coming soon</em>
+              </button>
+              <button class="pathway-choice" type="button" data-pathway-destination="drills-expert" disabled>
+                <span>Sharpen strategy</span>
+                <strong>Expert</strong>
+                <em class="pathway-coming-soon">Coming soon</em>
+              </button>
+            </div>
+          </section>
+
+          <section class="pathway-view pathway-subview" data-pathway-view="drills-beginner" aria-labelledby="pathway-beginner-drills-title" hidden>
+            <header class="pathway-subhead">
+              <button class="pathway-back" type="button" data-pathway-back="drills">
+                <span aria-hidden="true">←</span> Drills
+              </button>
+              <p class="pathway-eyebrow">Beginner drills</p>
+              <h2 id="pathway-beginner-drills-title">Start with one decision.</h2>
+              <p>Choose a drill. Each situation is fixed so you can focus on the pattern.</p>
+            </header>
+            <div class="pathway-choice-grid pathway-choice-grid-beginner-drills">
+              <button class="pathway-choice pathway-choice-featured" type="button" data-pathway-destination="drill-scoring-play">
+                <span>Pegging</span>
+                <strong>Find the Scoring Play</strong>
+                <small>Choose the card that scores immediately.</small>
+              </button>
+              <button class="pathway-choice" type="button" data-pathway-destination="drill-discard">
+                <span>Your crib</span>
+                <strong>Discard Drills</strong>
+                <small>Choose two cards to send to your crib.</small>
+              </button>
+            </div>
+          </section>
+
+          <section class="pathway-view pathway-subview pathway-drill-view" data-pathway-view="drill-scoring-play" aria-labelledby="drill-scoring-title" hidden>
+            <header class="pathway-subhead">
+              <button class="pathway-back" type="button" data-pathway-back="drills-beginner">
+                <span aria-hidden="true">←</span> Beginner drills
+              </button>
+              <p class="pathway-eyebrow">Beginner · Pegging</p>
+              <h2 id="drill-scoring-title">Find the scoring play.</h2>
+              <p>The count is 6. Choose the card that scores now.</p>
+            </header>
+            <div class="drill-table" data-drill-surface="find-scoring-play">
+              <div class="drill-table-context" aria-label="Current pegging count: 6">
+                <span>Count</span>
+                <strong>6</strong>
+              </div>
+              <div class="drill-table-center">
+                <div class="drill-played-zone">
+                  <span>Played</span>
+                  <div class="cards small" data-drill-played></div>
+                </div>
+                <div class="card back drill-deck" data-drill-deck role="img" aria-label="Deck"></div>
+              </div>
+              <div class="drill-player-zone">
+                <span>Your cards</span>
+                <div class="cards drill-hand" data-drill-hand aria-label="Your cards"></div>
+                <p data-drill-selection-status aria-live="polite">Choose one card.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="pathway-view pathway-subview pathway-drill-view" data-pathway-view="drill-discard" aria-labelledby="drill-discard-title" hidden>
+            <header class="pathway-subhead">
+              <button class="pathway-back" type="button" data-pathway-back="drills-beginner">
+                <span aria-hidden="true">←</span> Beginner drills
+              </button>
+              <p class="pathway-eyebrow">Beginner · Discarding</p>
+              <h2 id="drill-discard-title">Choose your discards.</h2>
+              <p>You dealt. Choose two cards to send to your crib.</p>
+            </header>
+            <div class="drill-table" data-drill-surface="discard">
+              <div class="drill-table-context drill-crib-owner" aria-label="The crib belongs to you">
+                <span>Crib</span>
+                <strong>Yours</strong>
+              </div>
+              <div class="drill-table-center drill-table-center-discard">
+                <div class="drill-crib-slot" aria-hidden="true"><i></i><i></i></div>
+                <div class="card back drill-deck" data-drill-deck role="img" aria-label="Deck"></div>
+              </div>
+              <div class="drill-player-zone">
+                <span>Your cards</span>
+                <div class="cards drill-hand" data-drill-hand aria-label="Your six-card hand"></div>
+                <p data-drill-selection-status aria-live="polite">Choose two cards.</p>
+              </div>
             </div>
           </section>
 

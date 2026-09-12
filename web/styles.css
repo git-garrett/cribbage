@@ -7459,9 +7459,6 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
     grid-column: 1 / -1;
   }
 
-  .pathway-choice-grid-tutorial .pathway-choice:last-child {
-    grid-column: 1 / -1;
-  }
 }
 
 @media (min-width: 960px) {
@@ -7974,6 +7971,303 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   to {
     opacity: 1;
     translate: 0 0;
+  }
+}
+
+/* Training drills turn the pathway surface into a compact practice table.
+   The felt is the focal point; navigation keeps the existing dealt-hand style. */
+.pathway-choice-drills {
+  border-color: var(--pathway-featured-border);
+}
+
+.pathway-drill-view {
+  gap: 18px;
+}
+
+.pathway-drill-view .pathway-subhead {
+  gap: 6px;
+}
+
+.pathway-drill-view .pathway-subhead h2 {
+  font-size: clamp(32px, 8vw, 48px);
+}
+
+.drill-table {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(112px, 1fr) auto;
+  gap: 14px;
+  width: min(100%, 820px);
+  min-height: 390px;
+  margin: 0 auto;
+  padding: 18px clamp(13px, 4vw, 28px) 20px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--pathway-gold) 62%, var(--pathway-green-deep));
+  border-radius: 28px 28px 15px 15px;
+  background:
+    radial-gradient(circle at 50% 112%, rgba(255, 255, 255, 0.1), transparent 48%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 44%),
+    var(--pathway-green-deep);
+  color: var(--pathway-ivory);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.11),
+    0 18px 34px color-mix(in srgb, var(--pathway-navy) 24%, transparent);
+}
+
+.drill-table::before {
+  position: absolute;
+  inset: 7px;
+  border: 1px solid rgba(232, 197, 117, 0.2);
+  border-radius: 22px 22px 10px 10px;
+  content: "";
+  pointer-events: none;
+}
+
+.drill-table-context {
+  z-index: 1;
+  justify-self: end;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 7px 11px 6px;
+  border: 1px solid rgba(232, 197, 117, 0.45);
+  border-radius: 999px;
+  background: rgba(7, 31, 56, 0.54);
+  color: var(--pathway-gold);
+  line-height: 1;
+}
+
+.drill-table-context span {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.drill-table-context strong {
+  font-family: Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-size: 25px;
+}
+
+.drill-crib-owner strong {
+  font-size: 18px;
+}
+
+.drill-table-center {
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(76px, 1fr) minmax(58px, auto) minmax(76px, 1fr);
+  align-items: center;
+  min-height: 112px;
+}
+
+.drill-played-zone {
+  grid-column: 1;
+  display: grid;
+  gap: 5px;
+  justify-items: center;
+  color: rgba(251, 248, 240, 0.72);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.drill-played-zone .cards {
+  justify-content: center;
+  min-height: 72px;
+}
+
+.drill-deck {
+  grid-column: 2;
+  justify-self: center;
+  width: 58px;
+  height: 82px;
+  border-color: rgba(251, 248, 240, 0.55);
+  box-shadow: 0 9px 17px rgba(0, 0, 0, 0.22);
+}
+
+.drill-table-center-discard .drill-crib-slot {
+  grid-column: 1;
+}
+
+.drill-crib-slot {
+  position: relative;
+  justify-self: center;
+  width: 76px;
+  height: 80px;
+}
+
+.drill-crib-slot i {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  width: 47px;
+  height: 66px;
+  border: 1px dashed rgba(232, 197, 117, 0.52);
+  border-radius: 6px;
+  transform: rotate(-7deg);
+}
+
+.drill-crib-slot i + i {
+  left: 20px;
+  transform: rotate(7deg);
+}
+
+.drill-player-zone {
+  z-index: 1;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  min-width: 0;
+  padding: 12px 8px 10px;
+  border-top: 1px solid rgba(232, 197, 117, 0.28);
+}
+
+.drill-player-zone > span {
+  color: var(--pathway-gold);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.drill-player-zone > p {
+  min-height: 18px;
+  margin: 0;
+  color: rgba(251, 248, 240, 0.8);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.drill-hand {
+  flex-wrap: nowrap;
+  justify-content: center;
+  width: 100%;
+  min-height: 104px;
+  gap: 10px;
+}
+
+.drill-dealt-card {
+  flex: 0 0 auto;
+  isolation: isolate;
+  cursor: pointer;
+}
+
+.drill-dealt-card::after {
+  position: absolute;
+  inset: -1px;
+  z-index: 3;
+  border: 1px solid rgba(251, 248, 240, 0.58);
+  border-radius: inherit;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.18) 25%, transparent 25%) 0 0 / 12px 12px,
+    linear-gradient(135deg, transparent 75%, rgba(255, 255, 255, 0.18) 75%) 0 0 / 12px 12px,
+    #284f86;
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: center;
+}
+
+.drill-table[data-dealing="true"]:not(.drill-deal-ready) .drill-dealt-card {
+  opacity: 0;
+}
+
+.drill-deal-ready .drill-dealt-card {
+  animation: drill-card-travel 560ms cubic-bezier(0.22, 0.72, 0.24, 1) both;
+  pointer-events: none;
+}
+
+.drill-deal-ready .drill-dealt-card::after {
+  animation: drill-card-turn 560ms ease-in-out both;
+  animation-delay: inherit;
+}
+
+.drill-deal-complete .drill-dealt-card {
+  opacity: 1;
+}
+
+.drill-deal-complete .drill-dealt-card::after {
+  opacity: 0;
+}
+
+.drill-dealt-card:focus-visible {
+  outline: 3px solid var(--pathway-gold);
+  outline-offset: 4px;
+}
+
+@keyframes drill-card-travel {
+  0% {
+    opacity: 0;
+    transform: translate(var(--drill-deal-from-x), var(--drill-deal-from-y)) rotate(var(--drill-deal-rotation)) scale(0.96);
+  }
+  7% {
+    opacity: 1;
+  }
+  72% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0) scale(1);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0) scale(1);
+  }
+}
+
+@keyframes drill-card-turn {
+  0%,
+  72% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+  86% {
+    opacity: 1;
+    transform: scaleX(0.04);
+  }
+  87%,
+  100% {
+    opacity: 0;
+    transform: scaleX(0.04);
+  }
+}
+
+@media (max-width: 599px) {
+  [data-drill-surface="discard"] .drill-hand {
+    gap: 0;
+  }
+
+  [data-drill-surface="discard"] .drill-dealt-card + .drill-dealt-card {
+    margin-left: clamp(-34px, calc((100vw - 520px) / 5), -12px);
+  }
+}
+
+@media (min-width: 850px) {
+  .pathway-choice-grid-tutorial {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    align-items: end;
+    row-gap: 20px;
+    min-height: 474px;
+  }
+
+  .pathway-choice-grid-tutorial > .pathway-choice {
+    grid-column: span 2;
+    min-height: 218px;
+    margin: 0 -8px;
+  }
+
+  .pathway-choice-grid-tutorial > .pathway-choice-drills {
+    grid-column: 3 / span 2;
+    margin: 0;
+  }
+
+  .pathway-drill-view {
+    padding-top: 34px;
+  }
+
+  .drill-table {
+    min-height: 430px;
   }
 }
 
@@ -9698,6 +9992,12 @@ body[data-font-size="x-large"] .pathway-choice {
     --pathway-rest-y: 19px;
     --pathway-rest-rotate: 5deg;
     --pathway-hover-rotate: 3.75deg;
+  }
+
+  .pathway-choice-grid.pathway-choice-grid-tutorial > .pathway-choice.pathway-choice-drills {
+    --pathway-rest-y: 0px;
+    --pathway-rest-rotate: 0deg;
+    --pathway-hover-rotate: 1.15deg;
   }
 }
 
@@ -11446,7 +11746,7 @@ body[data-font-size="x-large"] .pathway-choice {
   }
 
   .pathway-card:not(.pathway-card-featured),
-  .pathway-choice:not(.pathway-choice-human):not(.pathway-choice-dynamic) {
+  .pathway-choice:not(.pathway-choice-featured):not(.pathway-choice-human):not(.pathway-choice-dynamic) {
     background:
       linear-gradient(145deg, rgba(255, 255, 255, 0.72), transparent 58%),
       var(--entry-panel-soft);

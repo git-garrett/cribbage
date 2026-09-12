@@ -38,6 +38,8 @@ describe("safe activity pages", () => {
   it("keeps useful routes without recording secrets or arbitrary query values", () => {
     expect(safeActivityPage("https://example.test/?pathwayView=statistics&invite=secret&tag=Garrett"))
       .toBe("/?pathwayView=statistics");
+    expect(safeActivityPage("https://example.test/?pathwayView=drill-discard&invite=secret"))
+      .toBe("/?pathwayView=drill-discard");
     expect(safeActivityPage("https://example.test/?invite=secret")).toBe("/");
   });
 });

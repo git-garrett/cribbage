@@ -12,6 +12,7 @@ import type {
   Phase,
   PlayerKey,
   ScorePhase,
+  SerializedCard,
 } from "./api-types";
 import {
   aceAdviceDecisionKey,
@@ -73,6 +74,7 @@ import { shouldRestoreSavedGameSurface } from "./resume-surface";
 import { isCoherentSavedGameState } from "./saved-game-state";
 import { scoringTitle } from "./scoring-title";
 import { analyticsForStatsOpponent, statsOpponentForModel } from "./stats-opponent";
+import { BEGINNER_DRILLS, type BeginnerDrill } from "./training-drills";
 import {
   handScoreNoticeParts,
   peggingScoreNoticeParts,
@@ -243,7 +245,18 @@ const EMPTY_LEADERBOARD_SUMMARY: LeaderboardSummarySource = {
 type ServerBusyRetry = () => void | Promise<void>;
 type AppFontSize = "normal" | "large" | "x-large";
 type ScoringTransitionStage = "leaving" | "entering" | null;
-type PathwayView = "home" | "play" | "human" | "tutorial" | "settings" | "gameplay" | "sounds";
+type PathwayView =
+  | "home"
+  | "play"
+  | "human"
+  | "tutorial"
+  | "drills"
+  | "drills-beginner"
+  | "drill-scoring-play"
+  | "drill-discard"
+  | "settings"
+  | "gameplay"
+  | "sounds";
 type PathwayRoute = PathwayView | "statistics" | "leaderboard";
 type MyStatsOpponent = "master" | "human" | "easy" | "tough" | "grandmaster" | "dynamic";
 type StatsView = "stats" | "game-log";
@@ -3421,6 +3434,7 @@ function showPathwayView(view: PathwayView): void {
     pathwayView.hidden = pathwayView.dataset.pathwayView !== view;
   }
   els.pathwayPage.scrollTo({ top: 0, left: 0 });
+  renderTrainingDrill(view);
   if (view === "human") renderPeopleDirectory();
   if (authenticatedUser) void refreshPeople({ heartbeat: true });
   if (view === "play") void refreshPathwayResumeSessions();
@@ -3609,13 +3623,16 @@ async function forfeitSavedMasterGame(): Promise<void> {
 
 function pathwayRouteFromLocation(): PathwayRoute {
   const route = new URL(window.location.href).searchParams.get(PATHWAY_VIEW_PARAM);
-  if (route === "play" || route === "human" || route === "tutorial" || route === "settings" || route === "gameplay" || route === "sounds" || route === "statistics" || route === "leaderboard") return route;
+  if (route === "play" || route === "human" || route === "tutorial" || route === "drills" || route === "drills-beginner" || route === "drill-scoring-play" || route === "drill-discard" || route === "settings" || route === "gameplay" || route === "sounds" || route === "statistics" || route === "leaderboard") return route;
   return "home";
 }
 
 function pathwayParentRoute(route: PathwayRoute): PathwayRoute | null {
   if (route === "home") return null;
   if (route === "human") return "play";
+  if (route === "drills") return "tutorial";
+  if (route === "drills-beginner") return "drills";
+  if (route === "drill-scoring-play" || route === "drill-discard") return "drills-beginner";
   if (route === "gameplay" || route === "sounds") return "settings";
   return "home";
 }
@@ -3631,12 +3648,23 @@ function pathwayRouteLabel(route: PathwayRoute): string {
   if (route === "play") return "Play";
   if (route === "settings") return "Settings";
   if (route === "tutorial") return "Training";
+  if (route === "drills") return "Drills";
+  if (route === "drills-beginner") return "Drills";
+  if (route === "drill-scoring-play") return "Find the Scoring Play";
+  if (route === "drill-discard") return "Discard Drills";
   if (route === "statistics") return "Statistics";
   if (route === "leaderboard") return "Leaderboard";
   if (route === "human") return "Human Opponents";
   if (route === "gameplay") return "Gameplay";
   if (route === "sounds") return "Sounds";
   return "Home";
+}
+
+function trainingPathwayDestination(destination: string | undefined): PathwayView | null {
+  if (destination === "drills" || destination === "drills-beginner" || destination === "drill-scoring-play" || destination === "drill-discard") {
+    return destination;
+  }
+  return null;
 }
 
 function pathwayHistoryState(route: PathwayRoute): Record<string, unknown> {
@@ -5037,6 +5065,111 @@ function cardElement(card: GameState["humanHand"][number], options: { clickable?
     <span class="suit">${card.symbol}</span>
   `;
   return button;
+}
+
+const DRILL_DEAL_CARD_INTERVAL_MS = 115;
+const DRILL_DEAL_CARD_DURATION_MS = 560;
+let drillDealGeneration = 0;
+
+function beginnerDrillForView(view: PathwayView): BeginnerDrill | null {
+  if (view === "drill-scoring-play") return BEGINNER_DRILLS["find-scoring-play"];
+  if (view === "drill-discard") return BEGINNER_DRILLS.discard;
+  return null;
+}
+
+function drillSelectionStatus(drill: BeginnerDrill, selected: number): string {
+  if (selected === 0) return drill.requiredSelections === 1 ? "Choose one card." : "Choose two cards.";
+  if (drill.requiredSelections === 1) return "Card selected.";
+  return selected === 1 ? "One of two cards selected." : "Two cards selected.";
+}
+
+function drillCardElement(card: SerializedCard, drill: BeginnerDrill, surface: HTMLElement): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `card ${card.suit} drill-dealt-card`;
+  button.setAttribute("aria-label", `${card.rank} of ${card.suit}`);
+  button.setAttribute("aria-pressed", "false");
+  button.dataset.id = String(card.id);
+  button.innerHTML = `
+    <span class="corner">
+      <span>${card.rank}</span>
+      <span>${card.symbol}</span>
+    </span>
+    <span class="rank">${card.rank}</span>
+    <span class="suit">${card.symbol}</span>
+  `;
+  button.addEventListener("click", () => {
+    if (surface.dataset.dealing === "true") return;
+    const selected = button.getAttribute("aria-pressed") === "true";
+    const selectedCards = [...surface.querySelectorAll<HTMLButtonElement>(".drill-dealt-card[aria-pressed='true']")];
+    if (!selected && drill.requiredSelections === 1) {
+      for (const cardButton of selectedCards) {
+        cardButton.classList.remove("selected");
+        cardButton.setAttribute("aria-pressed", "false");
+      }
+    } else if (!selected && selectedCards.length >= drill.requiredSelections) {
+      return;
+    }
+    button.classList.toggle("selected", !selected);
+    button.setAttribute("aria-pressed", String(!selected));
+    const selectionCount = surface.querySelectorAll(".drill-dealt-card[aria-pressed='true']").length;
+    const status = surface.querySelector<HTMLElement>("[data-drill-selection-status]");
+    if (status) status.textContent = drillSelectionStatus(drill, selectionCount);
+  });
+  return button;
+}
+
+function prepareDrillDeal(surface: HTMLElement): void {
+  const deck = surface.querySelector<HTMLElement>("[data-drill-deck]");
+  if (!deck) return;
+  const deckRect = deck.getBoundingClientRect();
+  const deckX = deckRect.left + (deckRect.width / 2);
+  const deckY = deckRect.top + (deckRect.height / 2);
+  for (const [index, card] of [...surface.querySelectorAll<HTMLElement>(".drill-dealt-card")].entries()) {
+    const cardRect = card.getBoundingClientRect();
+    card.style.setProperty("--drill-deal-from-x", `${deckX - (cardRect.left + (cardRect.width / 2))}px`);
+    card.style.setProperty("--drill-deal-from-y", `${deckY - (cardRect.top + (cardRect.height / 2))}px`);
+    card.style.setProperty("--drill-deal-rotation", `${index % 2 === 0 ? -7 : 7}deg`);
+    card.style.animationDelay = `${index * DRILL_DEAL_CARD_INTERVAL_MS}ms`;
+  }
+}
+
+function renderTrainingDrill(view: PathwayView): void {
+  const drill = beginnerDrillForView(view);
+  if (!drill) return;
+  const surface = document.querySelector<HTMLElement>(`[data-drill-surface="${drill.id}"]`);
+  if (!surface) return;
+  const hand = surface.querySelector<HTMLElement>("[data-drill-hand]");
+  const played = surface.querySelector<HTMLElement>("[data-drill-played]");
+  const status = surface.querySelector<HTMLElement>("[data-drill-selection-status]");
+  if (!hand || !status) return;
+
+  const generation = String(++drillDealGeneration);
+  surface.dataset.dealGeneration = generation;
+  surface.dataset.dealing = "true";
+  surface.classList.remove("drill-deal-ready", "drill-deal-complete");
+  hand.replaceChildren(...drill.hand.map((card) => drillCardElement(card, drill, surface)));
+  if (played) played.replaceChildren(...drill.played.map((card) => cardElement(card)));
+  status.textContent = drillSelectionStatus(drill, 0);
+
+  window.requestAnimationFrame(() => {
+    if (surface.dataset.dealGeneration !== generation) return;
+    cardSounds.play("deal");
+    if (tableMotionDisabled()) {
+      surface.dataset.dealing = "false";
+      surface.classList.add("drill-deal-complete");
+      return;
+    }
+    prepareDrillDeal(surface);
+    surface.classList.add("drill-deal-ready");
+    const duration = DRILL_DEAL_CARD_DURATION_MS + ((drill.hand.length - 1) * DRILL_DEAL_CARD_INTERVAL_MS);
+    window.setTimeout(() => {
+      if (surface.dataset.dealGeneration !== generation) return;
+      surface.dataset.dealing = "false";
+      surface.classList.remove("drill-deal-ready");
+      surface.classList.add("drill-deal-complete");
+    }, duration + 40);
+  });
 }
 
 function cardBack(): HTMLElement {
@@ -9301,6 +9434,11 @@ for (const button of els.pathwayDestinationButtons) {
   }
   if (destination === "sounds") {
     button.addEventListener("click", () => openSettingsDialog(els.soundsDialog));
+    continue;
+  }
+  const trainingRoute = trainingPathwayDestination(destination);
+  if (trainingRoute) {
+    button.addEventListener("click", () => navigatePathway(trainingRoute));
     continue;
   }
   const opponent = pathwayOpponent(destination);
