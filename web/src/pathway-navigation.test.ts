@@ -107,6 +107,7 @@ describe("local pathway navigation", () => {
     expect(html).toContain('data-drill-surface="find-scoring-play"');
     expect(html).toContain('data-drill-surface="discard"');
     expect(html).toMatch(/data-drill-surface="find-scoring-play"[\s\S]*class="topbar"[\s\S]*class="scoreboard"[\s\S]*class="table drill-game-table"/);
+    expect(html).toMatch(/data-drill-surface="find-scoring-play"[\s\S]*class="mobile-header-reveal"[\s\S]*Beginner drills/);
     expect(html).toMatch(/data-drill-surface="discard"[\s\S]*data-drill-submit disabled>Discard selected/);
     expect(html).toContain("data-drill-feedback");
     expect(source).toMatch(/trainingPathwayDestination[\s\S]*navigatePathway\(trainingRoute\)/);
@@ -118,6 +119,7 @@ describe("local pathway navigation", () => {
     expect(css).toContain("@keyframes drill-card-travel");
     expect(css).not.toContain("pathway-choice-drills");
     expect(css).toMatch(/data-view="drill-scoring-play"[\s\S]*\.pathway-stage\s*{[^}]*border:\s*0[^}]*background:\s*transparent[^}]*box-shadow:\s*none/s);
+    expect(source).toMatch(/activeGameplayTopbar[\s\S]*pathwayView === "drill-scoring-play"[\s\S]*mobile-game-header-hidden/s);
   });
 
   it("uses the pathway entry across web and mobile and connects Statistics to My Stats", () => {

@@ -110,7 +110,7 @@ describe("Concept B mobile playing UI", () => {
   it("uses one centered header system for pathway and gameplay views", () => {
     expect(html).toMatch(/id="pathway-header-home"[^>]*>[\s\S]*Home/);
     expect(html).toMatch(/id="mobile-header-reveal"[^>]*aria-label="Show navigation"/);
-    expect(mainSource).toMatch(/function syncMobileGameplayHeaderPlacement\(\)[\s\S]*els\.topbar\.append\(els\.peoplePresence\)[\s\S]*els\.pathwayBrandbar\.append\(els\.peoplePresence\)/s);
+    expect(mainSource).toMatch(/function syncMobileGameplayHeaderPlacement\(\)[\s\S]*const topbar = activeGameplayTopbar\(\)[\s\S]*topbar\.append\(els\.peoplePresence\)[\s\S]*els\.pathwayBrandbar\.append\(els\.peoplePresence\)/s);
     expect(mainSource).toMatch(/function showMobileGameplayHeader\([\s\S]*scheduleMobileGameplayHeaderHide/s);
     expect(mainSource).toMatch(/mobileHeaderTouchStartY = touch\.clientY;[\s\S]*touch\.clientY - mobileHeaderTouchStartY >= 46/s);
     expect(mainSource).not.toMatch(/touch\.clientY <= 42/);

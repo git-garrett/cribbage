@@ -5972,9 +5972,19 @@ function usesMobileGameplayLayout(): boolean {
   return window.innerWidth <= 640;
 }
 
+function activeGameplayTopbar(): HTMLElement {
+  const pathwayView = els.pathwayPage.dataset.view;
+  if (!els.pathwayPage.hidden && (pathwayView === "drill-scoring-play" || pathwayView === "drill-discard")) {
+    return els.pathwayPage.querySelector<HTMLElement>(`[data-pathway-view="${pathwayView}"] .topbar`) ?? els.topbar;
+  }
+  return els.topbar;
+}
+
 function mobileGameplayHeaderActive(): boolean {
-  return usesMobileGameplayLayout() &&
-    els.app.dataset.view === "game" &&
+  if (!usesMobileGameplayLayout()) return false;
+  const pathwayView = els.pathwayPage.dataset.view;
+  if (!els.pathwayPage.hidden && (pathwayView === "drill-scoring-play" || pathwayView === "drill-discard")) return true;
+  return els.app.dataset.view === "game" &&
     els.pathwayPage.hidden &&
     els.splashPage.hidden &&
     els.authPage.hidden &&
@@ -5991,8 +6001,9 @@ function clearMobileGameplayHeaderHideTimer(): void {
 function hideMobileGameplayHeader(): void {
   clearMobileGameplayHeaderHideTimer();
   if (!mobileGameplayHeaderActive() || !els.peoplePresencePanel.hidden) return;
-  if (els.topbar.contains(document.activeElement)) return;
-  els.topbar.classList.add("mobile-game-header-hidden");
+  const topbar = activeGameplayTopbar();
+  if (topbar.contains(document.activeElement)) return;
+  topbar.classList.add("mobile-game-header-hidden");
 }
 
 function scheduleMobileGameplayHeaderHide(delay = 2800): void {
@@ -6003,7 +6014,7 @@ function scheduleMobileGameplayHeaderHide(delay = 2800): void {
 
 function showMobileGameplayHeader(autoHide = true): void {
   if (!mobileGameplayHeaderActive()) return;
-  els.topbar.classList.remove("mobile-game-header-hidden");
+  activeGameplayTopbar().classList.remove("mobile-game-header-hidden");
   if (autoHide) scheduleMobileGameplayHeaderHide();
   else clearMobileGameplayHeaderHideTimer();
 }
@@ -6012,19 +6023,20 @@ function syncMobileGameplayHeaderPlacement(): void {
   const active = mobileGameplayHeaderActive();
   const pathwayHeaderActive = !els.pathwayPage.hidden;
   const utilityHeaderActive = state.analyticsOpen || state.leaderboardOpen || state.modelInfoOpen || state.decisionReviewOpen;
+  const topbar = activeGameplayTopbar();
   document.body.classList.toggle("mobile-game-header-active", active);
   if (active || utilityHeaderActive) {
-    if (els.peoplePresence.parentElement !== els.topbar) els.topbar.append(els.peoplePresence);
+    if (els.peoplePresence.parentElement !== topbar) topbar.append(els.peoplePresence);
     if (active && !mobileGameplayHeaderWasActive) showMobileGameplayHeader();
   } else if (pathwayHeaderActive) {
     clearMobileGameplayHeaderHideTimer();
-    els.topbar.classList.remove("mobile-game-header-hidden");
+    for (const header of document.querySelectorAll(".mobile-game-header-hidden")) header.classList.remove("mobile-game-header-hidden");
     if (els.peoplePresence.parentElement !== els.pathwayBrandbar) {
       els.pathwayBrandbar.append(els.peoplePresence);
     }
   } else {
     clearMobileGameplayHeaderHideTimer();
-    els.topbar.classList.remove("mobile-game-header-hidden");
+    for (const header of document.querySelectorAll(".mobile-game-header-hidden")) header.classList.remove("mobile-game-header-hidden");
     if (els.peoplePresence.parentElement !== document.body) {
       document.body.insertBefore(els.peoplePresence, els.pathwayPage);
     }
@@ -11092,16 +11104,20 @@ document.addEventListener("pointerdown", (event) => {
   if (activityPointerTarget) activityTracker.trackPointer(activityPointerTarget);
   if (!mobileGameplayHeaderActive()) return;
   const target = event.target;
-  if (target instanceof Node && !els.topbar.contains(target)) hideMobileGameplayHeader();
+  if (target instanceof Node && !activeGameplayTopbar().contains(target)) hideMobileGameplayHeader();
 }, { capture: true });
 
-els.mobileHeaderReveal.addEventListener("click", (event) => {
-  event.stopPropagation();
-  showMobileGameplayHeader();
-});
+for (const reveal of document.querySelectorAll<HTMLButtonElement>(".mobile-header-reveal")) {
+  reveal.addEventListener("click", (event) => {
+    event.stopPropagation();
+    showMobileGameplayHeader();
+  });
+}
 
-els.topbar.addEventListener("focusin", () => showMobileGameplayHeader(false));
-els.topbar.addEventListener("focusout", () => scheduleMobileGameplayHeaderHide());
+for (const topbar of document.querySelectorAll<HTMLElement>(".app[data-view='game'] > .topbar")) {
+  topbar.addEventListener("focusin", () => showMobileGameplayHeader(false));
+  topbar.addEventListener("focusout", () => scheduleMobileGameplayHeaderHide());
+}
 
 let activityResizeTimer: number | null = null;
 window.addEventListener("resize", () => {
