@@ -2,6 +2,7 @@
   "version": "16.3.0",
   "scripts": {
     "build": "scripts/run-quiet.sh --show-warnings \"Client build\" scripts/build-client.sh",
+    "build:training-drills": "python3 scripts/build_training_drills.py",
     "build:deploy": "scripts/run-quiet.sh --show-warnings \"Deploy build\" /bin/sh -c 'npm run --silent build && cargo build --manifest-path rust/cribbage-api/Cargo.toml --release'",
     "package:server": "scripts/run-quiet.sh --show-warnings \"Server package\" /bin/sh -c 'scripts/package-rust-server.sh && node scripts/check-server-package.cjs'",
     "qa:predeploy": "scripts/predeploy_qa.sh",
@@ -17,6 +18,7 @@
     "promote:artifact": "node scripts/promote-artifact.cjs",
     "prepare": "git config core.hooksPath .githooks || true",
     "test": "scripts/test-rust.sh",
+    "test:training-drills": "scripts/run-quiet.sh \"Training drill builder tests\" python3 -m unittest scripts/test_build_training_drills.py",
     "test:quiet-wrapper": "scripts/run-quiet.sh \"Quiet wrapper tests\" scripts/test-run-quiet.sh",
     "test:web": "scripts/run-quiet.sh \"Web tests\" node_modules/.bin/vitest run",
     "typecheck": "scripts/run-quiet.sh \"TypeScript typecheck\" node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit"
