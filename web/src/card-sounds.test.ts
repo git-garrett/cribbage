@@ -57,7 +57,7 @@ describe("optional card audio", () => {
     sounds.unlock();
     await flush();
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(5);
-    expect(synthesizedBuffers).toHaveLength(2);
+    expect(synthesizedBuffers).toHaveLength(4);
   });
 
   it("does not hold a ready effect behind another asset download", async () => {
@@ -123,6 +123,16 @@ describe("optional card audio", () => {
     expect(sources[0].start).toHaveBeenCalledWith(10);
     expect(sources[1].start).toHaveBeenCalledWith(10.1);
     expect(sources[2].start).toHaveBeenCalledWith(10.2);
+  });
+
+  it("plays distinct synthesized drill success and failure cues", async () => {
+    sounds.unlock();
+    sounds.play("success");
+    sounds.play("failure");
+    await flush();
+    expect(sources).toHaveLength(2);
+    expect(synthesizedBuffers[2]).toHaveLength(20_286);
+    expect(synthesizedBuffers[3]).toHaveLength(13_230);
   });
 
   it("renders score chimes at seventy percent of their original level", () => {

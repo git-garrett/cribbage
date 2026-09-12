@@ -185,6 +185,7 @@ def select_easy_scoring_plays(events: list[dict]) -> list[dict]:
                 continue
             hand = normalized_cards(event["hand"])
             played = [parse_card(card)[2] for card in event["playedCards"]]
+            cut_card = parse_card(event["cutCard"])[2]
             count_before = event["countBefore"]
             if not 2 <= len(hand) <= 4 or not isinstance(count_before, int):
                 continue
@@ -211,6 +212,7 @@ def select_easy_scoring_plays(events: list[dict]) -> list[dict]:
                 "id": identifier,
                 "hand": hand,
                 "playedCards": played,
+                "cutCard": cut_card,
                 "countBefore": count_before,
                 "answer": winner[0],
                 "points": winner[1],

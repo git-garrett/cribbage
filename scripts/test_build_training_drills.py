@@ -20,6 +20,7 @@ class TrainingDrillBuilderTests(unittest.TestCase):
             "action": "play",
             "hand": ["2h", "5d", "9s", "Kc"],
             "playedCards": ["6c"],
+            "cutCard": "Qh",
             "countBefore": 6,
         }
         ambiguous = {**easy, "hand": ["2h", "5d", "9s", "9h"]}
@@ -83,7 +84,7 @@ class TrainingDrillBuilderTests(unittest.TestCase):
             legacy = [{"type": "game", "sessionTag": "Private Name"}]
             current = [{
                 "type": "pegging", "action": "play", "hand": ["2h", "5d", "9s", "Kc"],
-                "playedCards": ["6c"], "countBefore": 6, "sessionTag": "Private Name",
+                "playedCards": ["6c"], "cutCard": "Qh", "countBefore": 6, "sessionTag": "Private Name",
             }]
             connection.execute("INSERT INTO game_uploads VALUES (?, ?)", ("secret-game", json.dumps(legacy)))
             connection.execute(

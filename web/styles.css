@@ -8271,6 +8271,161 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   }
 }
 
+/* Drill tables deliberately reuse the live game's app, scoreboard, board,
+   felt, hand, and action-control vocabulary. Only feedback is training-only. */
+.pathway-drill-view {
+  width: min(100%, 960px);
+}
+
+.drill-game-shell.app {
+  width: 100%;
+  padding: 0;
+}
+
+.drill-game-shell .drill-player-score {
+  justify-items: start;
+}
+
+.drill-game-shell .drill-opponent-score {
+  justify-items: end;
+}
+
+.drill-game-shell .drill-game-table {
+  position: relative;
+  isolation: isolate;
+}
+
+.drill-game-shell .drill-hand {
+  flex-wrap: nowrap;
+  justify-content: center;
+  min-height: calc(var(--game-card-height) + 14px);
+}
+
+.drill-game-shell .played > [data-drill-played] {
+  grid-column: 1;
+  justify-content: center;
+  gap: 7px;
+  min-height: var(--game-played-card-height);
+  overflow: hidden;
+}
+
+.drill-game-shell .drill-instruction {
+  position: static;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid rgba(251, 248, 240, 0.18);
+  border-radius: 8px;
+  background: rgba(7, 31, 56, 0.38);
+  color: var(--game-cream);
+  font-weight: 800;
+  text-align: center;
+}
+
+.drill-game-shell .drill-discard-space {
+  display: none;
+}
+
+.drill-game-shell .drill-crib-tray {
+  position: static;
+  justify-self: center;
+  margin: 0;
+}
+
+.drill-game-shell .drill-dealt-card.drill-answer {
+  outline-color: #74d39d;
+  box-shadow: 0 0 0 4px rgba(116, 211, 157, 0.28), 0 12px 22px rgba(0, 0, 0, 0.28);
+}
+
+.drill-feedback {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  background: rgba(7, 31, 56, 0.2);
+  pointer-events: none;
+}
+
+.drill-feedback-mark {
+  display: grid;
+  place-items: center;
+  width: clamp(92px, 22vw, 132px);
+  aspect-ratio: 1;
+  border: 6px solid currentColor;
+  border-radius: 50%;
+  background: rgba(7, 31, 56, 0.9);
+  color: #74d39d;
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.32);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(62px, 16vw, 92px);
+  font-weight: 900;
+  line-height: 1;
+  animation: drill-feedback-mark 1.15s cubic-bezier(0.18, 0.8, 0.2, 1) both;
+}
+
+.drill-feedback[data-state="failure"] .drill-feedback-mark {
+  color: #ff777d;
+  animation-name: drill-feedback-failure;
+  animation-duration: 0.8s;
+}
+
+.drill-feedback strong {
+  padding: 5px 12px 6px;
+  border-radius: 999px;
+  background: var(--game-navy);
+  color: var(--game-cream);
+  font-size: 16px;
+}
+
+@keyframes drill-feedback-mark {
+  0% { opacity: 0; transform: scale(0.48) rotate(-12deg); }
+  18% { opacity: 1; transform: scale(1.08) rotate(2deg); }
+  30%, 72% { opacity: 1; transform: scale(1) rotate(0); }
+  100% { opacity: 0; transform: scale(0.9) translateY(-18px); }
+}
+
+@keyframes drill-feedback-failure {
+  0% { opacity: 0; transform: scale(0.52); }
+  22% { opacity: 1; transform: scale(1.06) rotate(-4deg); }
+  34% { transform: scale(1) rotate(4deg); }
+  46%, 72% { opacity: 1; transform: scale(1) rotate(0); }
+  100% { opacity: 0; transform: scale(0.9); }
+}
+
+@media (max-width: 640px) {
+  .pathway-drill-view {
+    padding-inline: 0;
+  }
+
+  .pathway-drill-view .pathway-subhead {
+    padding-inline: 16px;
+  }
+
+  .drill-game-shell.app > .scoreboard,
+  .drill-game-shell.app > .table {
+    padding-inline: 16px;
+  }
+
+  .drill-game-shell[data-phase="discard"] .drill-hand {
+    gap: 0;
+  }
+
+  .drill-game-shell[data-phase="discard"] .drill-dealt-card + .drill-dealt-card {
+    margin-left: clamp(-39px, calc((100vw - 520px) / 5), -14px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drill-feedback-mark {
+    animation-name: game-notification-fade !important;
+  }
+}
+
 /* Clubhouse presence, public profiles, and human tables. These surfaces use
    the same felt, navy, ivory, and brass materials as the game without
    competing with the playing cards for attention. */

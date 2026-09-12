@@ -74,7 +74,7 @@ import { shouldRestoreSavedGameSurface } from "./resume-surface";
 import { isCoherentSavedGameState } from "./saved-game-state";
 import { scoringTitle } from "./scoring-title";
 import { analyticsForStatsOpponent, statsOpponentForModel } from "./stats-opponent";
-import { BEGINNER_DRILLS, type BeginnerDrill } from "./training-drills";
+import { DrillProgression, type BeginnerDrill, type BeginnerDrillId } from "./training-drills";
 import {
   handScoreNoticeParts,
   peggingScoreNoticeParts,
@@ -5070,11 +5070,25 @@ function cardElement(card: GameState["humanHand"][number], options: { clickable?
 const DRILL_DEAL_CARD_INTERVAL_MS = 115;
 const DRILL_DEAL_CARD_DURATION_MS = 560;
 let drillDealGeneration = 0;
+let drillFeedbackTimer: number | null = null;
+const drillProgression = new DrillProgression(window.localStorage);
+const activeDrills = new Map<BeginnerDrillId, BeginnerDrill>();
+const drillAttempts = new Map<string, number>();
+
+function beginnerDrillKind(view: PathwayRoute): BeginnerDrillId | null {
+  if (view === "drill-scoring-play") return "find-scoring-play";
+  if (view === "drill-discard") return "discard";
+  return null;
+}
 
 function beginnerDrillForView(view: PathwayView): BeginnerDrill | null {
-  if (view === "drill-scoring-play") return BEGINNER_DRILLS["find-scoring-play"];
-  if (view === "drill-discard") return BEGINNER_DRILLS.discard;
-  return null;
+  const kind = beginnerDrillKind(view);
+  if (!kind) return null;
+  const current = activeDrills.get(kind);
+  if (current) return current;
+  const selected = drillProgression.next(kind);
+  activeDrills.set(kind, selected);
+  return selected;
 }
 
 function drillSelectionStatus(drill: BeginnerDrill, selected: number): string {
@@ -5090,6 +5104,7 @@ function drillCardElement(card: SerializedCard, drill: BeginnerDrill, surface: H
   button.setAttribute("aria-label", `${card.rank} of ${card.suit}`);
   button.setAttribute("aria-pressed", "false");
   button.dataset.id = String(card.id);
+  button.dataset.card = `${card.rank}${card.suit[0]}`;
   button.innerHTML = `
     <span class="corner">
       <span>${card.rank}</span>
@@ -5099,7 +5114,7 @@ function drillCardElement(card: SerializedCard, drill: BeginnerDrill, surface: H
     <span class="suit">${card.symbol}</span>
   `;
   button.addEventListener("click", () => {
-    if (surface.dataset.dealing === "true") return;
+    if (surface.dataset.dealing === "true" || surface.dataset.answering === "true") return;
     const selected = button.getAttribute("aria-pressed") === "true";
     const selectedCards = [...surface.querySelectorAll<HTMLButtonElement>(".drill-dealt-card[aria-pressed='true']")];
     if (!selected && drill.requiredSelections === 1) {
@@ -5115,16 +5130,18 @@ function drillCardElement(card: SerializedCard, drill: BeginnerDrill, surface: H
     const selectionCount = surface.querySelectorAll(".drill-dealt-card[aria-pressed='true']").length;
     const status = surface.querySelector<HTMLElement>("[data-drill-selection-status]");
     if (status) status.textContent = drillSelectionStatus(drill, selectionCount);
+    const submit = surface.querySelector<HTMLButtonElement>("[data-drill-submit]");
+    if (submit) submit.disabled = selectionCount !== drill.requiredSelections;
   });
   return button;
 }
 
 function prepareDrillDeal(surface: HTMLElement): void {
-  const deck = surface.querySelector<HTMLElement>("[data-drill-deck]");
-  if (!deck) return;
-  const deckRect = deck.getBoundingClientRect();
-  const deckX = deckRect.left + (deckRect.width / 2);
-  const deckY = deckRect.top + (deckRect.height / 2);
+  const table = surface.querySelector<HTMLElement>(".drill-game-table");
+  if (!table) return;
+  const tableRect = table.getBoundingClientRect();
+  const deckX = tableRect.left + (tableRect.width / 2);
+  const deckY = tableRect.top + 72;
   for (const [index, card] of [...surface.querySelectorAll<HTMLElement>(".drill-dealt-card")].entries()) {
     const cardRect = card.getBoundingClientRect();
     card.style.setProperty("--drill-deal-from-x", `${deckX - (cardRect.left + (cardRect.width / 2))}px`);
@@ -5134,23 +5151,171 @@ function prepareDrillDeal(surface: HTMLElement): void {
   }
 }
 
+function clearDrillSelection(surface: HTMLElement, drill: BeginnerDrill, message: string): void {
+  for (const button of surface.querySelectorAll<HTMLButtonElement>(".drill-dealt-card")) {
+    button.classList.remove("selected");
+    button.setAttribute("aria-pressed", "false");
+  }
+  const submit = surface.querySelector<HTMLButtonElement>("[data-drill-submit]");
+  if (submit) submit.disabled = true;
+  const status = surface.querySelector<HTMLElement>("[data-drill-selection-status]");
+  if (status) status.textContent = message || drillSelectionStatus(drill, 0);
+}
+
+function showDrillFeedback(surface: HTMLElement, state: "success" | "failure", copy: string): void {
+  const feedback = surface.querySelector<HTMLElement>("[data-drill-feedback]");
+  const mark = surface.querySelector<HTMLElement>("[data-drill-feedback-mark]");
+  const message = surface.querySelector<HTMLElement>("[data-drill-feedback-copy]");
+  if (!feedback || !mark || !message) return;
+  feedback.hidden = false;
+  feedback.dataset.state = state;
+  mark.textContent = state === "success" ? "✓" : "×";
+  message.textContent = copy;
+}
+
+function hideDrillFeedback(surface: HTMLElement): void {
+  const feedback = surface.querySelector<HTMLElement>("[data-drill-feedback]");
+  if (!feedback) return;
+  feedback.hidden = true;
+  delete feedback.dataset.state;
+}
+
+function chosenDrillCards(surface: HTMLElement): string[] {
+  return [...surface.querySelectorAll<HTMLButtonElement>(".drill-dealt-card[aria-pressed='true']")]
+    .map((button) => button.dataset.card || "")
+    .filter(Boolean)
+    .sort();
+}
+
+function correctDrillChoice(drill: BeginnerDrill, chosen: string[]): boolean {
+  return JSON.stringify(chosen) === JSON.stringify([...drill.answer].sort());
+}
+
+function advanceTrainingDrill(surface: HTMLElement, drill: BeginnerDrill, delay: number): void {
+  if (drillFeedbackTimer !== null) window.clearTimeout(drillFeedbackTimer);
+  drillFeedbackTimer = window.setTimeout(() => {
+    drillFeedbackTimer = null;
+    if (beginnerDrillKind(pathwayRouteFromLocation()) !== drill.kind) return;
+    activeDrills.set(drill.kind, drillProgression.next(drill.kind, drill.id));
+    renderTrainingDrill(drill.kind === "discard" ? "drill-discard" : "drill-scoring-play");
+  }, delay);
+}
+
+function submitTrainingDrill(surface: HTMLElement, drill: BeginnerDrill): void {
+  if (surface.dataset.answering === "true") return;
+  const chosen = chosenDrillCards(surface);
+  if (chosen.length !== drill.requiredSelections) return;
+  surface.dataset.answering = "true";
+  const status = surface.querySelector<HTMLElement>("[data-drill-selection-status]");
+
+  if (correctDrillChoice(drill, chosen)) {
+    drillAttempts.delete(drill.id);
+    const { cycleCompleted } = drillProgression.markSolved(drill.kind, drill.id);
+    cardSounds.play("success");
+    showDrillFeedback(surface, "success", cycleCompleted ? "Set complete!" : "Correct");
+    if (status) status.textContent = cycleCompleted ? "You completed every drill in this set." : "Correct. Next situation…";
+    advanceTrainingDrill(surface, drill, 1_250);
+    return;
+  }
+
+  cardSounds.play("failure");
+  if (drill.kind === "find-scoring-play") {
+    const instruction = `Look for ${drill.opportunity || "a scoring"} opportunity.`;
+    showDrillFeedback(surface, "failure", "Try again");
+    window.setTimeout(() => {
+      hideDrillFeedback(surface);
+      surface.dataset.answering = "false";
+      clearDrillSelection(surface, drill, instruction);
+    }, 850);
+    return;
+  }
+
+  const attempts = (drillAttempts.get(drill.id) || 0) + 1;
+  drillAttempts.set(drill.id, attempts);
+  if (attempts < 3) {
+    const remaining = 3 - attempts;
+    showDrillFeedback(surface, "failure", "Try again");
+    window.setTimeout(() => {
+      hideDrillFeedback(surface);
+      surface.dataset.answering = "false";
+      clearDrillSelection(surface, drill, `${remaining} ${remaining === 1 ? "try" : "tries"} left.`);
+    }, 850);
+    return;
+  }
+
+  drillAttempts.delete(drill.id);
+  const answer = new Set(drill.answer);
+  for (const button of surface.querySelectorAll<HTMLButtonElement>(".drill-dealt-card")) {
+    button.classList.toggle("drill-answer", answer.has(button.dataset.card || ""));
+  }
+  showDrillFeedback(surface, "failure", "Next situation");
+  const answerLabels = drill.hand
+    .filter((card) => drill.answer.includes(`${card.rank}${card.suit[0]}`))
+    .map((card) => card.label);
+  if (status) status.textContent = `The discard was ${answerLabels.join(" and ")}.`;
+  advanceTrainingDrill(surface, drill, 1_700);
+}
+
 function renderTrainingDrill(view: PathwayView): void {
   const drill = beginnerDrillForView(view);
   if (!drill) return;
-  const surface = document.querySelector<HTMLElement>(`[data-drill-surface="${drill.id}"]`);
+  const surface = document.querySelector<HTMLElement>(`[data-drill-surface="${drill.kind}"]`);
   if (!surface) return;
   const hand = surface.querySelector<HTMLElement>("[data-drill-hand]");
   const played = surface.querySelector<HTMLElement>("[data-drill-played]");
   const status = surface.querySelector<HTMLElement>("[data-drill-selection-status]");
+  const submit = surface.querySelector<HTMLButtonElement>("[data-drill-submit]");
   if (!hand || !status) return;
 
+  if (drillFeedbackTimer !== null) {
+    window.clearTimeout(drillFeedbackTimer);
+    drillFeedbackTimer = null;
+  }
   const generation = String(++drillDealGeneration);
   surface.dataset.dealGeneration = generation;
   surface.dataset.dealing = "true";
+  surface.dataset.answering = "false";
   surface.classList.remove("drill-deal-ready", "drill-deal-complete");
+  hideDrillFeedback(surface);
   hand.replaceChildren(...drill.hand.map((card) => drillCardElement(card, drill, surface)));
   if (played) played.replaceChildren(...drill.played.map((card) => cardElement(card)));
+  const cut = surface.querySelector<HTMLElement>("[data-drill-cut]");
+  if (cut) cut.replaceChildren(...(drill.cutCard ? [cardElement(drill.cutCard)] : []));
   status.textContent = drillSelectionStatus(drill, 0);
+  if (submit) {
+    submit.disabled = true;
+    submit.textContent = drill.kind === "discard" ? "Discard selected" : "Play selected";
+    submit.onclick = () => submitTrainingDrill(surface, drill);
+  }
+  const prompt = surface.closest<HTMLElement>(".pathway-drill-view")?.querySelector<HTMLElement>("[data-drill-prompt]");
+  if (prompt) prompt.textContent = drill.kind === "discard"
+    ? `Choose two cards to send to ${drill.cribOwner === "User" ? "your" : "your opponent's"} crib.`
+    : `The count is ${drill.countBefore}. Choose the card that scores now.`;
+  const count = surface.querySelector<HTMLElement>("[data-drill-count]");
+  if (count) count.textContent = String(drill.countBefore);
+  const playerCrib = surface.querySelector<HTMLElement>("[data-drill-player-crib]");
+  const opponentCrib = surface.querySelector<HTMLElement>("[data-drill-opponent-crib]");
+  if (playerCrib) playerCrib.hidden = drill.cribOwner !== "User";
+  if (opponentCrib) opponentCrib.hidden = drill.cribOwner !== "Opponent";
+  const dealer = surface.querySelector<HTMLElement>("[data-drill-dealer]");
+  if (dealer) dealer.textContent = drill.cribOwner === "User" ? "Player" : "Practice";
+  const board = surface.querySelector<HTMLElement>("[data-drill-board]");
+  if (board) {
+    if (!board.hasChildNodes()) board.append(createCircularBoard());
+    const eyebrow = board.querySelector<HTMLElement>(".circular-board-eyebrow");
+    const value = board.querySelector<HTMLElement>(".circular-board-value");
+    const detail = board.querySelector<HTMLElement>(".circular-board-detail");
+    if (eyebrow) eyebrow.textContent = drill.kind === "discard" ? "Discard" : "Count";
+    if (value) value.textContent = drill.kind === "discard" ? "2" : String(drill.countBefore);
+    if (detail) detail.textContent = drill.kind === "discard"
+      ? `${drill.cribOwner === "User" ? "Your" : "Opponent"} crib`
+      : "Your turn";
+  }
+  const opponentHand = surface.querySelector<HTMLElement>("[data-drill-opponent-hand]");
+  if (opponentHand) {
+    const cardCount = drill.kind === "discard" ? 6 : Math.max(2, drill.hand.length);
+    opponentHand.replaceChildren(...Array.from({ length: cardCount }, () => cardBack()));
+  }
 
   window.requestAnimationFrame(() => {
     if (surface.dataset.dealGeneration !== generation) return;

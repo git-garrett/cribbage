@@ -7,7 +7,7 @@ export const CARD_SOUND_FILES = {
 } as const;
 
 type RecordedCardSound = keyof typeof CARD_SOUND_FILES;
-type SynthesizedUiSound = "tick" | "chime";
+type SynthesizedUiSound = "tick" | "chime" | "success" | "failure";
 export type CardSound = RecordedCardSound | SynthesizedUiSound;
 const SCORE_CHIME_LEVEL = 0.7;
 
@@ -16,7 +16,7 @@ function isRecordedCardSound(sound: CardSound): sound is RecordedCardSound {
 }
 
 function synthesizedSoundBuffer(context: AudioContext, sound: SynthesizedUiSound): AudioBuffer {
-  const duration = sound === "tick" ? 0.035 : 0.22;
+  const duration = sound === "tick" ? 0.035 : sound === "chime" ? 0.22 : sound === "success" ? 0.46 : 0.3;
   const length = Math.ceil(context.sampleRate * duration);
   const buffer = context.createBuffer(1, length, context.sampleRate);
   const samples = buffer.getChannelData(0);
@@ -28,12 +28,28 @@ function synthesizedSoundBuffer(context: AudioContext, sound: SynthesizedUiSound
         (Math.sin(2 * Math.PI * 1_650 * time) * 0.16) +
         (Math.sin(2 * Math.PI * 2_450 * time) * 0.07)
       );
-    } else {
+    } else if (sound === "chime") {
       const attack = Math.min(1, time / 0.008);
       const envelope = attack * Math.exp(-time * 14);
       samples[index] = SCORE_CHIME_LEVEL * envelope * (
         (Math.sin(2 * Math.PI * 880 * time) * 0.19) +
         (Math.sin(2 * Math.PI * 1_320 * time) * 0.055)
+      );
+    } else if (sound === "success") {
+      const secondNote = time >= 0.14;
+      const noteTime = secondNote ? time - 0.14 : time;
+      const frequency = secondNote ? 880 : 660;
+      const envelope = Math.min(1, noteTime / 0.008) * Math.exp(-noteTime * 7.5);
+      samples[index] = envelope * (
+        (Math.sin(2 * Math.PI * frequency * noteTime) * 0.2) +
+        (Math.sin(2 * Math.PI * frequency * 1.5 * noteTime) * 0.045)
+      );
+    } else {
+      const frequency = 230 - (80 * (time / duration));
+      const envelope = Math.min(1, time / 0.006) * Math.exp(-time * 10);
+      samples[index] = envelope * (
+        (Math.sin(2 * Math.PI * frequency * time) * 0.18) +
+        (Math.sin(2 * Math.PI * frequency * 0.5 * time) * 0.06)
       );
     }
   }
@@ -83,6 +99,8 @@ export class CardSounds {
         this.gain.connect(this.context.destination);
         this.buffers.set("tick", synthesizedSoundBuffer(this.context, "tick"));
         this.buffers.set("chime", synthesizedSoundBuffer(this.context, "chime"));
+        this.buffers.set("success", synthesizedSoundBuffer(this.context, "success"));
+        this.buffers.set("failure", synthesizedSoundBuffer(this.context, "failure"));
       }
       void this.resumeContext();
       for (const sound of Object.keys(CARD_SOUND_FILES) as RecordedCardSound[]) {

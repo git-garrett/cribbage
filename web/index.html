@@ -294,7 +294,7 @@
               </button>
               <p class="pathway-eyebrow">Beginner drills</p>
               <h2 id="pathway-beginner-drills-title">Start with one decision.</h2>
-              <p>Choose a drill. Each situation is fixed so you can focus on the pattern.</p>
+              <p>Choose a drill. Correctly solved situations stay out of rotation until you complete the set.</p>
             </header>
             <div class="pathway-choice-grid pathway-choice-grid-beginner-drills">
               <button class="pathway-choice pathway-choice-featured" type="button" data-pathway-destination="drill-scoring-play">
@@ -317,25 +317,44 @@
               </button>
               <p class="pathway-eyebrow">Beginner · Pegging</p>
               <h2 id="drill-scoring-title">Find the scoring play.</h2>
-              <p>The count is 6. Choose the card that scores now.</p>
+              <p data-drill-prompt>Choose the card that scores now.</p>
             </header>
-            <div class="drill-table" data-drill-surface="find-scoring-play">
-              <div class="drill-table-context" aria-label="Current pegging count: 6">
-                <span>Count</span>
-                <strong>6</strong>
-              </div>
-              <div class="drill-table-center">
-                <div class="drill-played-zone">
-                  <span>Played</span>
-                  <div class="cards small" data-drill-played></div>
+            <div class="drill-game-shell app" data-view="game" data-phase="pegging" data-drill-surface="find-scoring-play">
+              <section class="scoreboard">
+                <div class="score drill-player-score">
+                  <span class="score-label">Player</span><strong>0</strong>
                 </div>
-                <div class="card back drill-deck" data-drill-deck role="img" aria-label="Deck"></div>
-              </div>
-              <div class="drill-player-zone">
-                <span>Your cards</span>
-                <div class="cards drill-hand" data-drill-hand aria-label="Your cards"></div>
-                <p data-drill-selection-status aria-live="polite">Choose one card.</p>
-              </div>
+                <div class="score ai drill-opponent-score">
+                  <span class="score-label">Practice</span><strong>0</strong>
+                </div>
+                <div class="board" data-drill-board aria-label="Cribbage board"></div>
+              </section>
+              <section class="table drill-game-table">
+                <div class="ai-strip">
+                  <h2>Opponent hand</h2>
+                  <div class="cards small" data-drill-opponent-hand aria-hidden="true"></div>
+                </div>
+                <div class="status">
+                  <span>Dealer: <strong>Practice</strong></span>
+                  <span class="status-count">Count: <strong data-drill-count>0</strong></span>
+                  <span>Turn: <strong>You</strong></span>
+                </div>
+                <div class="played">
+                  <h2>Current count</h2>
+                  <div class="cards played-active pegging-row" data-drill-played></div>
+                  <div class="score-cut"><span>Cut</span><span class="cut-card" data-drill-cut></span></div>
+                </div>
+                <div class="game-notifications drill-instruction" data-drill-selection-status role="status" aria-live="polite">Choose one card.</div>
+                <div class="user-panel">
+                  <div class="user-panel-header"><h2>Player hand</h2><span class="user-hand-meta">Pegging drill</span></div>
+                  <div class="user-hand-layout"><div class="cards drill-hand" data-drill-hand aria-label="Your cards"></div></div>
+                  <div class="actions"><button type="button" data-drill-submit disabled>Play selected</button></div>
+                </div>
+                <div class="drill-feedback" data-drill-feedback role="status" aria-live="assertive" hidden>
+                  <span class="drill-feedback-mark" data-drill-feedback-mark aria-hidden="true"></span>
+                  <strong data-drill-feedback-copy></strong>
+                </div>
+              </section>
             </div>
           </section>
 
@@ -346,22 +365,43 @@
               </button>
               <p class="pathway-eyebrow">Beginner · Discarding</p>
               <h2 id="drill-discard-title">Choose your discards.</h2>
-              <p>You dealt. Choose two cards to send to your crib.</p>
+              <p data-drill-prompt>Choose two cards for the crib.</p>
             </header>
-            <div class="drill-table" data-drill-surface="discard">
-              <div class="drill-table-context drill-crib-owner" aria-label="The crib belongs to you">
-                <span>Crib</span>
-                <strong>Yours</strong>
-              </div>
-              <div class="drill-table-center drill-table-center-discard">
-                <div class="drill-crib-slot" aria-hidden="true"><i></i><i></i></div>
-                <div class="card back drill-deck" data-drill-deck role="img" aria-label="Deck"></div>
-              </div>
-              <div class="drill-player-zone">
-                <span>Your cards</span>
-                <div class="cards drill-hand" data-drill-hand aria-label="Your six-card hand"></div>
-                <p data-drill-selection-status aria-live="polite">Choose two cards.</p>
-              </div>
+            <div class="drill-game-shell app" data-view="game" data-phase="discard" data-drill-surface="discard">
+              <section class="scoreboard">
+                <div class="score drill-player-score">
+                  <span class="score-label">Player</span><span class="dealer-button" data-drill-player-crib hidden>Crib</span><strong>0</strong>
+                </div>
+                <div class="score ai drill-opponent-score">
+                  <span class="score-label">Practice</span><span class="dealer-button" data-drill-opponent-crib hidden>Crib</span><strong>0</strong>
+                </div>
+                <div class="board" data-drill-board aria-label="Cribbage board"></div>
+              </section>
+              <section class="table drill-game-table">
+                <div class="crib-tray drill-crib-tray">
+                  <span class="crib-tray-label">Crib</span><span class="crib-tray-stack" aria-hidden="true"></span>
+                </div>
+                <div class="ai-strip">
+                  <h2>Opponent hand</h2>
+                  <div class="cards small" data-drill-opponent-hand aria-hidden="true"></div>
+                </div>
+                <div class="status">
+                  <span>Dealer: <strong data-drill-dealer>Player</strong></span>
+                  <span class="status-count">Count: <strong>0</strong></span>
+                  <span>Turn: <strong>You</strong></span>
+                </div>
+                <div class="played drill-discard-space" aria-hidden="true"></div>
+                <div class="game-notifications drill-instruction" data-drill-selection-status role="status" aria-live="polite">Choose two cards.</div>
+                <div class="user-panel">
+                  <div class="user-panel-header"><h2>Player hand</h2><span class="user-hand-meta">Discard drill</span></div>
+                  <div class="user-hand-layout"><div class="cards drill-hand" data-drill-hand aria-label="Your six-card hand"></div></div>
+                  <div class="actions"><button type="button" data-drill-submit disabled>Discard selected</button></div>
+                </div>
+                <div class="drill-feedback" data-drill-feedback role="status" aria-live="assertive" hidden>
+                  <span class="drill-feedback-mark" data-drill-feedback-mark aria-hidden="true"></span>
+                  <strong data-drill-feedback-copy></strong>
+                </div>
+              </section>
             </div>
           </section>
 

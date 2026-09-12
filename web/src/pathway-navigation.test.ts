@@ -103,16 +103,19 @@ describe("local pathway navigation", () => {
     expect(grandmaster).toBeGreaterThan(dynamic);
   });
 
-  it("opens beginner drills from a fourth Training card and prepares both dummy tables", () => {
+  it("opens beginner drills on the standard game table", () => {
     expect(html).toMatch(/data-pathway-destination="tutorial-expert"[\s\S]*data-pathway-destination="drills"/);
     expect(html).toMatch(/data-pathway-view="drills"[\s\S]*data-pathway-destination="drills-beginner"/);
     expect(html).toMatch(/data-pathway-view="drills-beginner"[\s\S]*Find the Scoring Play[\s\S]*Discard Drills/);
     expect(html).toContain('data-drill-surface="find-scoring-play"');
-    expect(html).toContain('aria-label="Current pegging count: 6"');
     expect(html).toContain('data-drill-surface="discard"');
-    expect(html).toContain('aria-label="The crib belongs to you"');
+    expect(html).toMatch(/data-drill-surface="find-scoring-play"[\s\S]*class="scoreboard"[\s\S]*class="table drill-game-table"/);
+    expect(html).toMatch(/data-drill-surface="discard"[\s\S]*data-drill-submit disabled>Discard selected/);
+    expect(html).toContain("data-drill-feedback");
     expect(source).toMatch(/trainingPathwayDestination[\s\S]*navigatePathway\(trainingRoute\)/);
     expect(source).toMatch(/renderTrainingDrill[\s\S]*cardSounds\.play\("deal"\)/);
+    expect(source).toMatch(/markSolved[\s\S]*cardSounds\.play\("success"\)/);
+    expect(source).toMatch(/cardSounds\.play\("failure"\)[\s\S]*Look for \$\{drill\.opportunity/s);
     expect(css).toContain("@keyframes drill-card-travel");
     expect(css).toMatch(/\.pathway-choice-grid-tutorial > \.pathway-choice-drills\s*{[^}]*grid-column:\s*3 \/ span 2/s);
     expect(css).toMatch(/\.pathway-choice-grid\.pathway-choice-grid-tutorial > \.pathway-choice\.pathway-choice-drills\s*{[^}]*--pathway-rest-y:\s*0px[^}]*--pathway-rest-rotate:\s*0deg/s);
