@@ -8278,6 +8278,99 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   padding: 0;
 }
 
+.training-intro-copy {
+  display: grid;
+  gap: 24px;
+}
+
+.training-intro-prose {
+  display: grid;
+  gap: 22px;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: clamp(22px, 5vw, 38px);
+  border: 1px solid var(--entry-border);
+  border-radius: 22px;
+  background: var(--entry-panel-soft);
+  box-shadow: var(--entry-card-shadow);
+}
+
+.training-intro-prose p,
+.training-intro-dialog-copy {
+  margin: 0;
+  font-size: max(17px, var(--access-body));
+  line-height: 1.58;
+}
+
+.training-intro-dialog {
+  max-width: 560px;
+}
+
+.training-intro-dialog .size-dialog-shell {
+  gap: 20px;
+}
+
+.pathway-page[data-intro-mode="example"] {
+  background: var(--app-bg);
+}
+
+.pathway-page[data-intro-mode="example"] .pathway-shell {
+  display: block;
+  width: 100%;
+  max-width: none;
+  min-height: 100svh;
+  padding: 0;
+}
+
+.pathway-page[data-intro-mode="example"] :is(.pathway-brandbar, .pathway-rail) {
+  display: none;
+}
+
+.pathway-page[data-intro-mode="example"] .pathway-stage {
+  display: block;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.pathway-page[data-intro-mode="example"] .pathway-training-intro {
+  width: 100%;
+  padding: 0;
+}
+
+.training-intro-game .app-back,
+.drill-game-shell .app-back {
+  margin-bottom: 0;
+  color: var(--game-cream);
+}
+
+.training-intro-game .training-intro-table {
+  position: relative;
+  isolation: isolate;
+}
+
+.training-intro-game .training-intro-hand {
+  flex-wrap: nowrap;
+  justify-content: center;
+  min-height: calc(var(--game-card-height) + 14px);
+}
+
+.training-intro-game .played > [data-training-intro-played] {
+  grid-column: 1;
+  justify-content: center;
+  gap: 7px;
+  min-height: var(--game-played-card-height);
+  overflow: visible;
+}
+
+.training-intro-game .drill-crib-tray {
+  position: static;
+  justify-self: center;
+  margin: 0;
+}
+
 .drill-game-shell .drill-player-score {
   justify-items: start;
 }
@@ -8286,12 +8379,8 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   justify-items: end;
 }
 
-.drill-game-shell .app-back {
-  margin-bottom: 0;
-  color: var(--game-cream);
-}
-
 @media (hover: hover) {
+  .training-intro-game .app-back:hover,
   .drill-game-shell .app-back:hover {
     color: var(--game-gold);
   }
@@ -8419,6 +8508,18 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 @media (max-width: 640px) {
   .pathway-page:is([data-view="drill-scoring-play"], [data-view="drill-discard"]) {
     background: var(--game-green, #0b5b43);
+  }
+
+  .pathway-page[data-intro-mode="example"] {
+    background: var(--game-green, #0b5b43);
+  }
+
+  .training-intro-game[data-phase="discard"] .training-intro-hand {
+    gap: 0;
+  }
+
+  .training-intro-game[data-phase="discard"] .training-intro-hand .card + .card {
+    margin-left: clamp(-39px, calc((100vw - 520px) / 5), -14px);
   }
 
   .drill-game-shell[data-phase="discard"] .drill-hand {

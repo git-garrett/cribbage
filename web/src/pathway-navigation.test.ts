@@ -55,6 +55,8 @@ describe("local pathway navigation", () => {
       "tutorial-intermediate",
       "tutorial-expert",
       "drills-beginner",
+      "intro-pegging",
+      "intro-discard",
       "drill-scoring-play",
       "drill-discard",
       "size",
@@ -120,6 +122,13 @@ describe("local pathway navigation", () => {
     expect(css).not.toContain("pathway-choice-drills");
     expect(css).toMatch(/data-view="drill-scoring-play"[\s\S]*\.pathway-stage\s*{[^}]*border:\s*0[^}]*background:\s*transparent[^}]*box-shadow:\s*none/s);
     expect(source).toMatch(/activeGameplayTopbar[\s\S]*pathwayView === "drill-scoring-play"[\s\S]*mobile-game-header-hidden/s);
+  });
+
+  it("places guided intros before their corresponding drills", () => {
+    expect(html).toMatch(/data-pathway-destination="intro-pegging"[\s\S]*data-pathway-destination="drill-scoring-play"[\s\S]*data-pathway-destination="intro-discard"[\s\S]*data-pathway-destination="drill-discard"/);
+    expect(html).toContain('data-pathway-view="training-intro"');
+    expect(html).toContain("data-training-intro-dialog");
+    expect(source).toMatch(/showTrainingIntroStep[\s\S]*dialog\.onclose = completeTrainingIntroExample[\s\S]*dialog\.showModal\(\)/s);
   });
 
   it("uses the pathway entry across web and mobile and connects Statistics to My Stats", () => {
@@ -201,7 +210,7 @@ describe("local pathway navigation", () => {
     ]) {
       expect(html).toMatch(new RegExp(`data-pathway-destination="${destination}" disabled[\\s\\S]*?Coming soon`));
     }
-    for (const destination of ["easy", "tough", "master", "dynamic", "human", "drills-beginner", "drill-scoring-play", "drill-discard", "size", "gameplay", "sounds"]) {
+    for (const destination of ["easy", "tough", "master", "dynamic", "human", "drills-beginner", "intro-pegging", "intro-discard", "drill-scoring-play", "drill-discard", "size", "gameplay", "sounds"]) {
       expect(html).not.toMatch(new RegExp(`data-pathway-destination="${destination}" disabled`));
     }
     expect(css).toMatch(/\.pathway-choice:disabled\s*{[\s\S]*background: color-mix[\s\S]*cursor: not-allowed/);

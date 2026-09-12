@@ -75,6 +75,7 @@ import { isCoherentSavedGameState } from "./saved-game-state";
 import { scoringTitle } from "./scoring-title";
 import { analyticsForStatsOpponent, statsOpponentForModel } from "./stats-opponent";
 import type { BeginnerDrill, BeginnerDrillId, DrillProgression } from "./training-drills";
+import type { TrainingIntro, TrainingIntroKind, TrainingIntroStep } from "./training-intros";
 import {
   handScoreNoticeParts,
   peggingScoreNoticeParts,
@@ -251,6 +252,8 @@ type PathwayView =
   | "human"
   | "tutorial"
   | "drills-beginner"
+  | "intro-pegging"
+  | "intro-discard"
   | "drill-scoring-play"
   | "drill-discard"
   | "settings"
@@ -3424,16 +3427,19 @@ function showPathwayView(view: PathwayView): void {
   if (els.pathwayPage.hidden && isActiveGame(state.game)) suspendActiveGameForPathway();
   els.pathwayPage.hidden = false;
   els.pathwayPage.dataset.view = view;
+  if (view !== "intro-pegging" && view !== "intro-discard") delete els.pathwayPage.dataset.introMode;
   const parent = pathwayParentRoute(view);
   els.pathwayHeaderHome.hidden = parent === null;
   if (parent) els.pathwayHeaderParentLabel.textContent = pathwayRouteLabel(parent);
   syncMobileGameplayHeaderPlacement();
   syncPathwayResumePresentation();
+  const visibleView = view === "intro-pegging" || view === "intro-discard" ? "training-intro" : view;
   for (const pathwayView of els.pathwayViews) {
-    pathwayView.hidden = pathwayView.dataset.pathwayView !== view;
+    pathwayView.hidden = pathwayView.dataset.pathwayView !== visibleView;
   }
   els.pathwayPage.scrollTo({ top: 0, left: 0 });
   void renderTrainingDrill(view);
+  void renderTrainingIntro(view);
   if (view === "human") renderPeopleDirectory();
   if (authenticatedUser) void refreshPeople({ heartbeat: true });
   if (view === "play") void refreshPathwayResumeSessions();
@@ -3623,7 +3629,7 @@ async function forfeitSavedMasterGame(): Promise<void> {
 function pathwayRouteFromLocation(): PathwayRoute {
   const route = new URL(window.location.href).searchParams.get(PATHWAY_VIEW_PARAM);
   if (route === "drills") return "drills-beginner";
-  if (route === "play" || route === "human" || route === "tutorial" || route === "drills-beginner" || route === "drill-scoring-play" || route === "drill-discard" || route === "settings" || route === "gameplay" || route === "sounds" || route === "statistics" || route === "leaderboard") return route;
+  if (route === "play" || route === "human" || route === "tutorial" || route === "drills-beginner" || route === "intro-pegging" || route === "intro-discard" || route === "drill-scoring-play" || route === "drill-discard" || route === "settings" || route === "gameplay" || route === "sounds" || route === "statistics" || route === "leaderboard") return route;
   return "home";
 }
 
@@ -3631,6 +3637,7 @@ function pathwayParentRoute(route: PathwayRoute): PathwayRoute | null {
   if (route === "home") return null;
   if (route === "human") return "play";
   if (route === "drills-beginner") return "tutorial";
+  if (route === "intro-pegging" || route === "intro-discard") return "drills-beginner";
   if (route === "drill-scoring-play" || route === "drill-discard") return "drills-beginner";
   if (route === "gameplay" || route === "sounds") return "settings";
   return "home";
@@ -3648,6 +3655,8 @@ function pathwayRouteLabel(route: PathwayRoute): string {
   if (route === "settings") return "Settings";
   if (route === "tutorial") return "Training";
   if (route === "drills-beginner") return "Training";
+  if (route === "intro-pegging") return "Pegging Intro";
+  if (route === "intro-discard") return "Discard Intro";
   if (route === "drill-scoring-play") return "Find the Scoring Play";
   if (route === "drill-discard") return "Discard Drills";
   if (route === "statistics") return "Statistics";
@@ -3659,7 +3668,7 @@ function pathwayRouteLabel(route: PathwayRoute): string {
 }
 
 function trainingPathwayDestination(destination: string | undefined): PathwayView | null {
-  if (destination === "drills-beginner" || destination === "drill-scoring-play" || destination === "drill-discard") {
+  if (destination === "drills-beginner" || destination === "intro-pegging" || destination === "intro-discard" || destination === "drill-scoring-play" || destination === "drill-discard") {
     return destination;
   }
   return null;
@@ -5065,6 +5074,183 @@ function cardElement(card: GameState["humanHand"][number], options: { clickable?
   return button;
 }
 
+let activeTrainingIntro: TrainingIntro | null = null;
+let activeTrainingIntroStep = -1;
+
+function trainingIntroKind(view: PathwayRoute): TrainingIntroKind | null {
+  if (view === "intro-pegging") return "pegging";
+  if (view === "intro-discard") return "discard";
+  return null;
+}
+
+function trainingIntroCard(label: string, id: number): SerializedCard {
+  const match = /^(A|[2-9]|10|J|Q|K)([cdhs])$/.exec(label);
+  if (!match) throw new Error(`Invalid intro card: ${label}`);
+  const suits = {
+    c: { suit: "clubs", symbol: "♣" },
+    d: { suit: "diamonds", symbol: "♦" },
+    h: { suit: "hearts", symbol: "♥" },
+    s: { suit: "spades", symbol: "♠" },
+  } as const;
+  const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+  const [, rank, suitCode] = match;
+  const suit = suits[suitCode as keyof typeof suits];
+  return { id, index: null, rank, suit: suit.suit, symbol: suit.symbol, value: Math.min(ranks.indexOf(rank) + 1, 10), label: `${rank}${suit.symbol}`, owner: "User" };
+}
+
+function introElement<T extends HTMLElement>(selector: string): T | null {
+  return document.querySelector<T>(`[data-pathway-view="training-intro"] ${selector}`);
+}
+
+function showTrainingIntroLanding(intro: TrainingIntro, completed = false): void {
+  activeTrainingIntroStep = completed ? intro.steps.length : -1;
+  els.pathwayPage.dataset.introMode = "copy";
+  const copy = introElement<HTMLElement>("[data-training-intro-copy]");
+  const game = introElement<HTMLElement>("[data-training-intro-game]");
+  const eyebrow = introElement<HTMLElement>("[data-training-intro-eyebrow]");
+  const title = introElement<HTMLElement>("[data-training-intro-title]");
+  const body = introElement<HTMLElement>("[data-training-intro-body]");
+  const next = introElement<HTMLButtonElement>("[data-training-intro-next]");
+  if (!copy || !game || !eyebrow || !title || !body || !next) return;
+  copy.hidden = false;
+  game.hidden = true;
+  eyebrow.textContent = intro.eyebrow;
+  title.textContent = completed ? intro.completionTitle : intro.title;
+  body.textContent = completed ? intro.completion : intro.introduction;
+  next.textContent = completed ? "Proceed to drills" : "Next: Pair";
+  next.onclick = () => completed ? navigatePathway(intro.drillRoute) : showTrainingIntroStep(0);
+  syncMobileGameplayHeaderPlacement();
+}
+
+function trainingIntroScoreNotice(step: TrainingIntroStep): HTMLElement {
+  const notice = document.createElement("div");
+  notice.className = "game-notification game-notification-score";
+  notice.innerHTML = `<span class="game-notification-label">${step.title}</span><strong class="game-notification-points">${step.points}</strong><span class="game-notification-player">points</span>`;
+  return notice;
+}
+
+function completeTrainingIntroExample(): void {
+  const intro = activeTrainingIntro;
+  const step = intro?.steps[activeTrainingIntroStep];
+  if (!intro || !step) return;
+  const button = introElement<HTMLButtonElement>("[data-training-intro-continue]");
+  const notices = introElement<HTMLElement>("[data-training-intro-notices]");
+  if (!button || !notices) return;
+  if (intro.kind === "discard") {
+    button.hidden = false;
+    return;
+  }
+  const hand = introElement<HTMLElement>("[data-training-intro-hand]");
+  const played = introElement<HTMLElement>("[data-training-intro-played]");
+  const moving = hand?.querySelector<HTMLElement>(`[data-training-card="${step.playedCard}"]`);
+  if (!hand || !played || !moving || !step.playedCard) return;
+  const from = moving.getBoundingClientRect();
+  const to = played.getBoundingClientRect();
+  const x = to.left + (to.width / 2) - (from.left + (from.width / 2));
+  const y = to.top + (to.height / 2) - (from.top + (from.height / 2));
+  const finish = () => {
+    moving.remove();
+    const scoringCard = trainingIntroCard(step.playedCard!, 92_000 + activeTrainingIntroStep);
+    played.append(cardElement(scoringCard));
+    notices.replaceChildren(trainingIntroScoreNotice(step));
+    const nextCount = step.countBefore + scoringCard.value;
+    const count = introElement<HTMLElement>("[data-training-intro-count]");
+    const playerScore = introElement<HTMLElement>("[data-training-intro-player-score]");
+    const boardValue = introElement<HTMLElement>("[data-training-intro-board] .circular-board-value");
+    if (count) count.textContent = String(nextCount);
+    if (playerScore) playerScore.textContent = String(step.points);
+    if (boardValue) boardValue.textContent = String(nextCount);
+    cardSounds.playScore(step.points);
+    button.hidden = false;
+  };
+  if (tableMotionDisabled()) {
+    finish();
+    return;
+  }
+  moving.style.zIndex = "20";
+  cardSounds.play("play", 0.42);
+  const animation = moving.animate([
+    { transform: "translate(0, 0) rotate(0deg)" },
+    { transform: `translate(${x}px, ${y}px) rotate(-2deg)` },
+  ], { duration: 560, easing: "cubic-bezier(0.22, 0.72, 0.24, 1)", fill: "forwards" });
+  void animation.finished.then(finish).catch(() => { button.hidden = false; });
+}
+
+function showTrainingIntroStep(index: number): void {
+  const intro = activeTrainingIntro;
+  if (!intro) return;
+  if (index >= intro.steps.length) {
+    showTrainingIntroLanding(intro, true);
+    return;
+  }
+  const step = intro.steps[index];
+  activeTrainingIntroStep = index;
+  els.pathwayPage.dataset.introMode = "example";
+  const copy = introElement<HTMLElement>("[data-training-intro-copy]");
+  const game = introElement<HTMLElement>("[data-training-intro-game]");
+  const hand = introElement<HTMLElement>("[data-training-intro-hand]");
+  const played = introElement<HTMLElement>("[data-training-intro-played]");
+  const cut = introElement<HTMLElement>("[data-training-intro-cut]");
+  const opponent = introElement<HTMLElement>("[data-training-intro-opponent]");
+  const count = introElement<HTMLElement>("[data-training-intro-count]");
+  const meta = introElement<HTMLElement>("[data-training-intro-meta]");
+  const crib = introElement<HTMLElement>("[data-training-intro-crib]");
+  const button = introElement<HTMLButtonElement>("[data-training-intro-continue]");
+  const notices = introElement<HTMLElement>("[data-training-intro-notices]");
+  const dialog = introElement<HTMLDialogElement>("[data-training-intro-dialog]");
+  if (!copy || !game || !hand || !played || !cut || !opponent || !count || !meta || !crib || !button || !notices || !dialog) return;
+  copy.hidden = true;
+  game.hidden = false;
+  game.dataset.phase = intro.kind === "pegging" ? "pegging" : "discard";
+  hand.replaceChildren(...step.hand.map((label, cardIndex) => {
+    const element = cardElement(trainingIntroCard(label, 90_000 + (index * 20) + cardIndex));
+    element.dataset.trainingCard = label;
+    element.classList.toggle("selected", step.selected.includes(label));
+    return element;
+  }));
+  played.replaceChildren(...step.played.map((label, cardIndex) => cardElement(trainingIntroCard(label, 91_000 + (index * 20) + cardIndex))));
+  cut.replaceChildren(...(step.cutCard ? [cardElement(trainingIntroCard(step.cutCard, 93_000 + index))] : []));
+  opponent.replaceChildren(...Array.from({ length: intro.kind === "discard" ? 6 : 4 }, () => cardBack()));
+  count.textContent = String(step.countBefore);
+  const playerScore = introElement<HTMLElement>("[data-training-intro-player-score]");
+  if (playerScore) playerScore.textContent = "0";
+  meta.textContent = `${index + 1} of ${intro.steps.length} · ${step.title}`;
+  crib.hidden = intro.kind !== "discard";
+  notices.replaceChildren();
+  button.hidden = true;
+  button.textContent = index + 1 < intro.steps.length ? `Next: ${intro.steps[index + 1].title}` : "Finish intro";
+  button.onclick = () => showTrainingIntroStep(index + 1);
+  const board = introElement<HTMLElement>("[data-training-intro-board]");
+  if (board) {
+    if (!board.hasChildNodes()) board.append(createCircularBoard());
+    const eyebrow = board.querySelector<HTMLElement>(".circular-board-eyebrow");
+    const value = board.querySelector<HTMLElement>(".circular-board-value");
+    const detail = board.querySelector<HTMLElement>(".circular-board-detail");
+    if (eyebrow) eyebrow.textContent = intro.kind === "pegging" ? "Count" : "Lesson";
+    if (value) value.textContent = intro.kind === "pegging" ? String(step.countBefore) : String(index + 1);
+    if (detail) detail.textContent = step.title;
+  }
+  const dialogEyebrow = introElement<HTMLElement>("[data-training-intro-dialog-eyebrow]");
+  const dialogTitle = introElement<HTMLElement>("[data-training-intro-dialog-title]");
+  const dialogCopy = introElement<HTMLElement>("[data-training-intro-dialog-copy]");
+  if (dialogEyebrow) dialogEyebrow.textContent = intro.eyebrow;
+  if (dialogTitle) dialogTitle.textContent = step.title;
+  if (dialogCopy) dialogCopy.textContent = step.explanation;
+  dialog.onclose = completeTrainingIntroExample;
+  syncMobileGameplayHeaderPlacement();
+  cardSounds.play("deal");
+  dialog.showModal();
+}
+
+async function renderTrainingIntro(view: PathwayView): Promise<void> {
+  const kind = trainingIntroKind(view);
+  if (!kind) return;
+  const { TRAINING_INTROS } = await import("./training-intros");
+  if (trainingIntroKind(pathwayRouteFromLocation()) !== kind) return;
+  activeTrainingIntro = TRAINING_INTROS[kind];
+  showTrainingIntroLanding(activeTrainingIntro);
+}
+
 const DRILL_DEAL_CARD_INTERVAL_MS = 115;
 const DRILL_DEAL_CARD_DURATION_MS = 560;
 let drillDealGeneration = 0;
@@ -5974,6 +6160,9 @@ function usesMobileGameplayLayout(): boolean {
 
 function activeGameplayTopbar(): HTMLElement {
   const pathwayView = els.pathwayPage.dataset.view;
+  if (!els.pathwayPage.hidden && (pathwayView === "intro-pegging" || pathwayView === "intro-discard") && els.pathwayPage.dataset.introMode === "example") {
+    return els.pathwayPage.querySelector<HTMLElement>("[data-pathway-view='training-intro'] .topbar") ?? els.topbar;
+  }
   if (!els.pathwayPage.hidden && (pathwayView === "drill-scoring-play" || pathwayView === "drill-discard")) {
     return els.pathwayPage.querySelector<HTMLElement>(`[data-pathway-view="${pathwayView}"] .topbar`) ?? els.topbar;
   }
@@ -5983,6 +6172,7 @@ function activeGameplayTopbar(): HTMLElement {
 function mobileGameplayHeaderActive(): boolean {
   if (!usesMobileGameplayLayout()) return false;
   const pathwayView = els.pathwayPage.dataset.view;
+  if (!els.pathwayPage.hidden && (pathwayView === "intro-pegging" || pathwayView === "intro-discard") && els.pathwayPage.dataset.introMode === "example") return true;
   if (!els.pathwayPage.hidden && (pathwayView === "drill-scoring-play" || pathwayView === "drill-discard")) return true;
   return els.app.dataset.view === "game" &&
     els.pathwayPage.hidden &&

@@ -5,6 +5,8 @@ export type RestoredPathwayRoute =
   | "tutorial"
   | "drills"
   | "drills-beginner"
+  | "intro-pegging"
+  | "intro-discard"
   | "drill-scoring-play"
   | "drill-discard"
   | "settings"

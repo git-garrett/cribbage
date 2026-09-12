@@ -264,10 +264,20 @@
               <p>Choose a drill. Correctly solved situations stay out of rotation until you complete the set.</p>
             </header>
             <div class="pathway-choice-grid pathway-choice-grid-beginner-drills">
+              <button class="pathway-choice pathway-choice-featured" type="button" data-pathway-destination="intro-pegging">
+                <span>Learn the basics</span>
+                <strong>Pegging Intro</strong>
+                <small>See how pairs, fifteens, and runs score.</small>
+              </button>
               <button class="pathway-choice pathway-choice-featured" type="button" data-pathway-destination="drill-scoring-play">
                 <span>Pegging</span>
                 <strong>Find the Scoring Play</strong>
                 <small>Choose the card that scores immediately.</small>
+              </button>
+              <button class="pathway-choice" type="button" data-pathway-destination="intro-discard">
+                <span>Learn the basics</span>
+                <strong>Discard Intro</strong>
+                <small>Build hands with pairs, runs, fifteens, and flushes.</small>
               </button>
               <button class="pathway-choice" type="button" data-pathway-destination="drill-discard">
                 <span>Your crib</span>
@@ -275,6 +285,51 @@
                 <small>Choose two cards to send to your crib.</small>
               </button>
             </div>
+          </section>
+
+          <section class="pathway-view pathway-subview pathway-training-intro" data-pathway-view="training-intro" aria-labelledby="training-intro-title" hidden>
+            <div class="training-intro-copy" data-training-intro-copy>
+              <header class="pathway-subhead">
+                <button class="pathway-back" type="button" data-pathway-back="drills-beginner"><span aria-hidden="true">←</span> Beginner</button>
+                <p class="pathway-eyebrow" data-training-intro-eyebrow>Beginner</p>
+                <h2 id="training-intro-title" data-training-intro-title>Introduction</h2>
+              </header>
+              <article class="training-intro-prose">
+                <p data-training-intro-body></p>
+                <button class="people-primary-action" type="button" data-training-intro-next>Start with a pair</button>
+              </article>
+            </div>
+            <div class="training-intro-game app" data-view="game" data-phase="pegging" data-training-intro-game hidden>
+              <section class="topbar">
+                <button class="mobile-header-reveal" type="button" aria-label="Show navigation"><span aria-hidden="true"></span></button>
+                <a class="app-brand" href="/" aria-label="Strong Cribbage home"><img class="app-brand-logo" src="/brand/strong-cribbage-lockup-dark.svg" alt=""></a>
+                <button class="pathway-back app-back" type="button" data-pathway-back="drills-beginner"><span aria-hidden="true">←</span> Beginner</button>
+              </section>
+              <section class="scoreboard">
+                <div class="score drill-player-score"><span class="score-label">Player</span><strong data-training-intro-player-score>0</strong></div>
+                <div class="score ai drill-opponent-score"><span class="score-label">Practice</span><strong>0</strong></div>
+                <div class="board" data-training-intro-board aria-label="Cribbage board"></div>
+              </section>
+              <section class="table training-intro-table">
+                <div class="crib-tray drill-crib-tray" data-training-intro-crib hidden><span class="crib-tray-label">Your crib</span><span class="crib-tray-stack" aria-hidden="true"></span></div>
+                <div class="ai-strip"><h2>Opponent hand</h2><div class="cards small" data-training-intro-opponent aria-hidden="true"></div></div>
+                <div class="status"><span>Dealer: <strong>Practice</strong></span><span>Count: <strong data-training-intro-count>0</strong></span><span>Turn: <strong>You</strong></span></div>
+                <div class="played"><h2>Current count</h2><div class="cards played-active pegging-row" data-training-intro-played></div><div class="score-cut"><span>Cut</span><span class="cut-card" data-training-intro-cut></span></div></div>
+                <div class="user-panel">
+                  <div class="user-panel-header"><h2>Player hand</h2><span class="user-hand-meta" data-training-intro-meta></span></div>
+                  <div class="user-hand-layout"><div class="cards training-intro-hand" data-training-intro-hand></div></div>
+                  <div class="actions"><button type="button" data-training-intro-continue>Next example</button></div>
+                </div>
+                <div class="game-notifications" data-training-intro-notices></div>
+              </section>
+            </div>
+            <dialog class="size-dialog training-intro-dialog" data-training-intro-dialog aria-labelledby="training-intro-dialog-title">
+              <form method="dialog" class="size-dialog-shell">
+                <header><div><p class="people-eyebrow" data-training-intro-dialog-eyebrow>Beginner</p><h2 id="training-intro-dialog-title" data-training-intro-dialog-title></h2></div></header>
+                <p class="training-intro-dialog-copy" data-training-intro-dialog-copy></p>
+                <button class="people-primary-action" value="close" type="submit">See the example</button>
+              </form>
+            </dialog>
           </section>
 
           <section class="pathway-view pathway-subview pathway-drill-view" data-pathway-view="drill-scoring-play" aria-labelledby="drill-scoring-title" hidden>
