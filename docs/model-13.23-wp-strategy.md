@@ -89,3 +89,32 @@ of the regenerated outcomes; it does not reconstruct distributions from means.
 - Existing 13.22 and 13.215 behavior remains frozen for controlled comparisons.
 
 The old 13.22 asset, baseline, and Model 13.215 remain unchanged.
+
+## Correction build execution
+
+The correction builder supports opt-in `--joint-distributions`; its default
+13.22 format and points policy remain unchanged. `M1323C01` retains the old
+128-byte header and fixed moment/mask prefix, then appends one sorted sparse
+joint histogram per dealer row followed by each pone row. Each histogram has a
+u32 bin count followed by `(u16 score pair, u128 weight)` bins. The score-pair
+high byte is own points and the low byte is opponent points. Every read and
+merge validates the histogram's exact weight and both first moments.
+
+Frozen builder revision: `920ab3c`. Runtime and inputs:
+`/private/tmp/cribbage-model1323-correction-20260913-v2/runtime`.
+`scripts/model1323-correction.py` provides freeze, smoke, core probe, full shard
+run, and independent verification. Existing output is bound to the frozen
+runtime manifest and exact shard ranges. JSON-only zero-progress interruption
+and binary-authoritative resume are both exercised by the smoke test.
+
+The pilot reproduced all retained 13.22 moments/masks on a 12-pair sample and
+verified restart. The representative core test selected six workers: 4/6/8/10
+workers delivered 8.69/12.36/10.00/1.92 compatible pairs per second respectively.
+These are microbenchmark measurements, not a full-build ETA. The policy caches
+retain the established 250,000 action, 300,000 evidence-outcome, and 3,000,000
+continuation-entry limits. Forty fixed contiguous dealer shards cover all
+3,274,375 compatible keep pairs. No foundational asset is regenerated.
+
+This builder change does not yet register a Model 13.23 playing engine. Runtime
+WP integration and playing-strength benchmarking remain separate work; a
+completed correction asset must not be reported as a completed playing engine.

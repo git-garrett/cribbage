@@ -126,4 +126,36 @@ mod tests {
         assert!(JointScores::read(&mut &bytes[..bytes.len() - 1]).is_err());
         assert!(JointScores::read(&mut u32::MAX.to_le_bytes().as_slice()).is_err());
     }
+
+    #[test]
+    fn model13215_board_matrix_distinguishes_equal_mean_distributions() {
+        use crate::board_matrix::{BoardMatrixSeam, BoardWinMatrix};
+        let board = BoardWinMatrix::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/board-win-matrix.bin"),
+        )
+        .unwrap();
+        let mut correlated = JointScores::default();
+        correlated.add(0, 0, 1).unwrap();
+        correlated.add(4, 4, 1).unwrap();
+        let mut anticorrelated = JointScores::default();
+        anticorrelated.add(0, 4, 1).unwrap();
+        anticorrelated.add(4, 0, 1).unwrap();
+        let wp = |distribution: &JointScores| {
+            let total = distribution.moments().unwrap()[2] as f64;
+            distribution
+                .bins()
+                .map(|(own, opponent, weight)| {
+                    board.dealer_win_probability(
+                        BoardMatrixSeam::AfterPegging,
+                        100 + own,
+                        111 + opponent,
+                    ) * weight as f64
+                        / total
+                })
+                .sum::<f64>()
+        };
+        assert_eq!(correlated.moments(), anticorrelated.moments());
+        assert!((wp(&correlated) - 0.17044501324344652).abs() < 1e-12);
+        assert!((wp(&anticorrelated) - 0.21785388603677494).abs() < 1e-12);
+    }
 }
