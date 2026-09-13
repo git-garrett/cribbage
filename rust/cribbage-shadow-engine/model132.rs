@@ -860,6 +860,10 @@ impl Model911Policy {
         self.lock_inner().stats()
     }
 
+    pub(crate) fn use_compact_continuations(&self) {
+        self.lock_inner().use_compact_continuations();
+    }
+
     pub fn clear_hand_cache(&self) {
         self.lock_inner().clear_future_cache();
     }

@@ -87,7 +87,17 @@ impl PolicyAssets {
             300_000,
             1_000_000,
         )?;
-        let worlds = self.worlds(observation, &policy)?;
+        policy.use_compact_continuations();
+        self.forecast_using(observation, world_budget, &policy)
+    }
+
+    fn forecast_using(
+        &self,
+        observation: &Model132Observation,
+        world_budget: usize,
+        policy: &Model911Policy,
+    ) -> Result<Vec<PegCandidateForecast>, String> {
+        let worlds = self.worlds(observation, policy)?;
         // Late continuations are cheap enough to enumerate without sampling.
         let remaining = rank_count_total(&observation.own_remaining) + 4
             - rank_count_total(&observation.opponent_played);
@@ -98,7 +108,7 @@ impl PolicyAssets {
         };
         let count = worlds.len();
         let worlds = sample_worlds(worlds, budget, observation_seed(observation))?;
-        forecast_worlds(observation, &policy, &worlds, count)
+        forecast_worlds(observation, policy, &worlds, count)
     }
 
     fn worlds(
@@ -446,6 +456,149 @@ fn forecast_worlds(
 mod tests {
     use super::*;
     use crate::model132::rollout_model132_world;
+
+    fn assert_identical_forecasts(
+        actual: &[PegCandidateForecast],
+        expected: &[PegCandidateForecast],
+    ) {
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert_eq!(actual.action, expected.action);
+            assert_eq!(actual.posterior_worlds, expected.posterior_worlds);
+            assert_eq!(actual.evaluated_worlds, expected.evaluated_worlds);
+            let bits = |forecast: &PegCandidateForecast| {
+                forecast
+                    .outcomes
+                    .iter()
+                    .map(|(own, opponent, weight)| (*own, *opponent, weight.to_bits()))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(bits(actual), bits(expected));
+        }
+    }
+
+    #[test]
+    fn compact_live_forecasts_preserve_every_joint_bin_and_weight() {
+        let assets =
+            PolicyAssets::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let (observation, world) = opening();
+        let mut state = world_state(&observation, &world).unwrap();
+        for _ in 0..4 {
+            state.apply(state.legal_actions()[0]).unwrap();
+        }
+        let observation = Model132Observation::from_state(&state, state.current).unwrap();
+        let policy = Model911Policy::new_with_evidence_cache(
+            Some(assets.beliefs.clone()),
+            assets.factors,
+            100_000,
+            300_000,
+            1_000_000,
+        )
+        .unwrap();
+        let expected = assets
+            .forecast_using(&observation, LIVE_WORLD_BUDGET, &policy)
+            .unwrap();
+        let actual = assets.forecast(&observation, LIVE_WORLD_BUDGET).unwrap();
+        assert_identical_forecasts(&actual, &expected);
+    }
+
+    #[test]
+    #[ignore = "full-budget release-mode differential and timing probe"]
+    fn compact_full_budget_reference_equivalence() {
+        let assets =
+            PolicyAssets::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let (opening, world) = opening();
+        let mut state = world_state(&opening, &world).unwrap();
+        let mut cases = vec![("opening", opening.clone())];
+        state.apply(state.legal_actions()[0]).unwrap();
+        cases.push((
+            "dealer-first-reply",
+            Model132Observation::from_state(&state, state.current).unwrap(),
+        ));
+        for _ in 0..3 {
+            state.apply(state.legal_actions()[0]).unwrap();
+        }
+        cases.push((
+            "two-versus-two",
+            Model132Observation::from_state(&state, state.current).unwrap(),
+        ));
+        let mut endgame = opening;
+        endgame.my_score = 119;
+        endgame.opponent_score = 120;
+        endgame.current_series = vec![12];
+        endgame.count = 10;
+        endgame.opponent_played[12] = 1;
+        endgame.last_player = Some(InfoActor::Opponent);
+        endgame.public_history = vec![PublicPegEvent::OpponentPlay(12)];
+        cases.push(("count-out", endgame));
+        for (label, ranks, discards, cut) in [
+            ("opening-fives", [4, 4, 5, 9], [6, 12], 10),
+            ("opening-low-run", [0, 1, 2, 3], [9, 12], 8),
+            ("opening-high-cards", [8, 9, 10, 11], [4, 12], 0),
+            ("opening-sparse-prior", [0, 1, 1, 1], [1, 4], 10),
+        ] {
+            let (mut observation, _) = self::opening();
+            observation.own_remaining = hand(&ranks);
+            observation.own_discards = hand(&discards);
+            observation.turn_rank = cut;
+            cases.push((label, observation));
+        }
+        let (mut close_race, _) = self::opening();
+        close_race.my_score = 116;
+        close_race.opponent_score = 118;
+        cases.push(("close-race", close_race));
+        let mut report = Vec::new();
+        for (label, observation) in cases {
+            let policy = Model911Policy::new_with_evidence_cache(
+                Some(assets.beliefs.clone()),
+                assets.factors,
+                100_000,
+                300_000,
+                1_000_000,
+            )
+            .unwrap();
+            let start = std::time::Instant::now();
+            let expected = assets
+                .forecast_using(&observation, LIVE_WORLD_BUDGET, &policy)
+                .unwrap();
+            let reference_seconds = start.elapsed().as_secs_f64();
+            let reference_stats = policy.stats();
+            drop(policy);
+            let policy = Model911Policy::new_with_evidence_cache(
+                Some(assets.beliefs.clone()),
+                assets.factors,
+                100_000,
+                300_000,
+                1_000_000,
+            )
+            .unwrap();
+            policy.use_compact_continuations();
+            let start = std::time::Instant::now();
+            let actual = assets
+                .forecast_using(&observation, LIVE_WORLD_BUDGET, &policy)
+                .unwrap();
+            let compact_seconds = start.elapsed().as_secs_f64();
+            let compact_stats = policy.stats();
+            assert_identical_forecasts(&actual, &expected);
+            report.push(
+                serde_json::json!({"fixture":label,"referenceSeconds":reference_seconds,
+                "compactSeconds":compact_seconds,"speedup":reference_seconds/compact_seconds,
+                "referenceFutureStates":reference_stats.random_future_states,
+                "compactFutureStates":compact_stats.random_future_states,
+                "referenceCacheClears":reference_stats.future_cache_capacity_clears,
+                "compactCacheClears":compact_stats.future_cache_capacity_clears,
+                "referenceEvaluatedDecisions":reference_stats.evaluated_decisions,
+                "compactEvaluatedDecisions":compact_stats.evaluated_decisions,
+                "budget":LIVE_WORLD_BUDGET,"posteriorWorlds":actual[0].posterior_worlds,
+                "evaluatedWorlds":actual[0].evaluated_worlds,"bitExact":true}),
+            );
+            fs::write(
+                std::env::temp_dir().join("model1323-compact-equivalence.json"),
+                serde_json::to_vec_pretty(&report).unwrap(),
+            )
+            .unwrap();
+        }
+    }
 
     fn hand(ranks: &[usize]) -> [u8; 13] {
         let mut result = [0; 13];

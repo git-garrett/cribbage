@@ -20,6 +20,9 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
+#[path = "model91_compact.rs"]
+mod compact;
+
 const RANKS: usize = 13;
 const MAX_SERIES: usize = 8;
 const BELIEF_MAGIC: &[u8; 8] = b"M91BL001";
@@ -527,7 +530,7 @@ pub struct Model91Policy {
     empirical: Option<Model91EmpiricalBeliefs>,
     decision_cache: HashMap<Model91DecisionKey, Model91Choice>,
     cache_limit: usize,
-    future_cache: HashMap<AverageState, WeightedPoints>,
+    future_cache: ContinuationMemo,
     future_cache_limit: usize,
     evidence_cache: HashMap<Model91Observation, Arc<Model91ActionEvidence>>,
     evidence_cache_outcome_limit: usize,
@@ -536,12 +539,17 @@ pub struct Model91Policy {
 }
 
 impl Model91Policy {
+    /// Representation-only opt-in; historical models retain the reference path.
+    pub(crate) fn use_compact_continuations(&mut self) {
+        self.future_cache = ContinuationMemo::Compact(compact::Memo::default());
+    }
+
     pub fn new(empirical: Option<Model91EmpiricalBeliefs>, cache_limit: usize) -> Self {
         Model91Policy {
             empirical,
             decision_cache: HashMap::new(),
             cache_limit,
-            future_cache: HashMap::new(),
+            future_cache: ContinuationMemo::default(),
             future_cache_limit: 0,
             evidence_cache: HashMap::new(),
             evidence_cache_outcome_limit: 0,
@@ -838,7 +846,7 @@ impl Model91Policy {
             .into_iter()
             .map(|(ranks, base_weight)| Model91EvidenceHand { ranks, base_weight })
             .collect::<Vec<_>>();
-        let mut local_memo = HashMap::new();
+        let mut local_memo = ContinuationMemo::default();
         let memo = if self.future_cache_limit == 0 {
             &mut local_memo
         } else {
@@ -857,7 +865,7 @@ impl Model91Policy {
                     relative_index(observation.go_player),
                     relative_index(observation.last_player),
                 )?;
-                outcomes.push(average_forced_play(&state, rank, memo, &mut cache_hits)?);
+                outcomes.push(memo.forced_play(&state, rank, &mut cache_hits)?);
             }
         }
         let entries_after = memo.len();
@@ -920,7 +928,7 @@ impl Model91Policy {
         legal: &[u8],
         opponent_hands: &[([u8; RANKS], f64)],
     ) -> Result<(u8, f64), String> {
-        let mut local_memo = HashMap::new();
+        let mut local_memo = ContinuationMemo::default();
         let memo = if self.future_cache_limit == 0 {
             &mut local_memo
         } else {
@@ -1194,11 +1202,48 @@ struct WeightedPoints {
     weight: f64,
 }
 
+enum ContinuationMemo {
+    Reference(HashMap<AverageState, WeightedPoints>),
+    Compact(compact::Memo),
+}
+
+impl Default for ContinuationMemo {
+    fn default() -> Self {
+        Self::Reference(HashMap::new())
+    }
+}
+
+impl ContinuationMemo {
+    fn len(&self) -> usize {
+        match self {
+            Self::Reference(memo) => memo.len(),
+            Self::Compact(memo) => memo.len(),
+        }
+    }
+    fn clear(&mut self) {
+        match self {
+            Self::Reference(memo) => memo.clear(),
+            Self::Compact(memo) => memo.clear(),
+        }
+    }
+    fn forced_play(
+        &mut self,
+        state: &AverageState,
+        rank: u8,
+        hits: &mut u64,
+    ) -> Result<WeightedPoints, String> {
+        match self {
+            Self::Reference(memo) => average_forced_play(state, rank, memo, hits),
+            Self::Compact(memo) => memo.forced_play(state, rank, hits),
+        }
+    }
+}
+
 fn candidate_net_ev(
     observation: &Model91Observation,
     rank: u8,
     opponent_hands: &[([u8; RANKS], f64)],
-    memo: &mut HashMap<AverageState, WeightedPoints>,
+    memo: &mut ContinuationMemo,
     cache_hits: &mut u64,
 ) -> Result<(f64, u8), String> {
     let immediate = score_count_for_ranks(
@@ -1224,7 +1269,7 @@ fn candidate_net_ev(
             relative_index(observation.go_player),
             relative_index(observation.last_player),
         )?;
-        let result = average_forced_play(&state, rank, memo, cache_hits)?;
+        let result = memo.forced_play(&state, rank, cache_hits)?;
         own_weighted += result.points[0] * *opponent_weight;
         opponent_weighted += result.points[1] * *opponent_weight;
         total_weight += result.weight * *opponent_weight;

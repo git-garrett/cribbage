@@ -184,6 +184,65 @@ completed.
   not establish WP-choice convergence or playing strength. The experimental
   default remains 512; a timed paired benchmark is required before promotion.
 
+### Exact runtime optimization
+
+The requested optimization must preserve the existing playing policy, root
+posterior, 512-sample budget, deterministic sample identities and weights,
+full late-state enumeration, scoring order, tie breaks, and WP evaluator. It
+must not reduce search depth, prune low-probability alternatives, substitute a
+heuristic policy, or introduce persistent observation/action storage.
+
+An opt-in compact continuation evaluator replaces only the internal reference
+average-continuation calculation for 13.23. The historical models and the
+running frozen correction builder keep the reference implementation. Both
+implementations remain executable so tests can compare complete weighted
+results rather than just selected cards.
+
+The compact evaluator uses a complete 124-bit semantic state as its cache key.
+All active hands, sequence ranks/length, count, current player, go, and last
+player are retained. Inactive bytes beyond the current sequence length are
+discarded; they cannot affect the reference calculation. Hash collisions still
+require full-key equality. Recursive rank traversal and floating-point operation
+order are unchanged. Rank scoring and move enumeration avoid per-node heap
+allocations. The continuation cache remains bounded and decision-local.
+
+The full-budget differential matches every joint bin and weight bit-for-bit in
+nine fixtures: opening, dealer reply, two-versus-two, count-out, paired fives,
+low run, high cards, sparse discard-prior support, and a close endgame race.
+Sample identities, population sizes, and evaluated policy-decision counts are
+unchanged. In the opening, both implementations evaluate 5,549 policy decisions;
+canonicalization and cache reuse reduce counted continuation-state evaluations
+from 84,740,411 to 35,626,941. No branch is pruned.
+
+The exact continuation tests also compare both weighted point totals and total
+weight bit-for-bit through 64 complete physical deals, including every candidate
+at each visited state. Scoring is checked against the existing card scorer for
+all legal rank sequences through length five and targeted length-seven/eight
+cases. Key tests cover every active field and inactive-tail canonicalization.
+All 320 Rust tests pass. Standards and spec review have no findings.
+
+Native comparisons against the saved pre-optimization `38c0aab` executable:
+
+| Fixture | Before | Optimized | Speedup |
+| --- | ---: | ---: | ---: |
+| Opening | 22.373 s | 1.733 s | 12.91× |
+| Dealer reply | 3.311 s | 0.356 s | 9.31× |
+| Two-versus-two | 0.089 s | 0.082 s | 1.09× |
+| Count-out | 2.076 s | 0.254 s | 8.19× |
+
+Every native decision/EV matches. In a separate run of the original regression,
+13.215 takes 1.014 s and optimized 13.23 takes 1.782 s. These are diagnostic
+positions under concurrent build load, not representative paired-game timing
+or a new playing-strength claim. Release engine and runner builds pass.
+
+Reproduce the full-outcome check with `cargo test --release --offline -j 2
+--manifest-path rust/Cargo.toml -p cribbage-shadow-engine
+compact_full_budget_reference_equivalence -- --ignored`, wrapped through
+`scripts/run-quiet.sh --show-warnings` as required by the compact-output guide.
+The test writes `model1323-compact-equivalence.json` in the OS temporary directory.
+The frozen correction job and its binary are unchanged; this runtime optimization
+does not silently replace an active builder.
+
 ### Provisional correction ETA, 2026-09-13 20:48 UTC
 
 Six workers have checkpointed 42,693 of 3,274,375 compatible pairs (1.30%), or
