@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::artifacts::{
     CribRankDiscardTables, CribTripolicyTable, EmpiricalDiscardKeepTable, EmpiricalEntry,
-    EmpiricalRoleTable, Model131DiscardHistogramTable, Model13HoldTable, Model91DiscardEvTable,
-    PairwiseTable, TripolicyPolicy,
+    EmpiricalRoleTable, Model131DiscardHistogramTable, Model1322CorrectionTable, Model13HoldTable,
+    Model91DiscardEvTable, PairwiseTable, TripolicyPolicy,
 };
 use crate::board::{
     next_perspective_role, next_score_phase, score_phase_average,
@@ -33,9 +33,9 @@ use crate::model90::Model90DiscardTable;
 use crate::model91::{Model91Actor, Model91EmpiricalBeliefs, Model91Observation, Model91Policy};
 use crate::model91_discard::model91_schell_crib_ev;
 use crate::model_id::{
-    MODEL_13_0, MODEL_13_1, MODEL_13_2, MODEL_13_21, MODEL_13_215, MODEL_14_3, MODEL_14_8,
-    MODEL_14_8_1, MODEL_15_0, MODEL_15_1, MODEL_15_2, MODEL_16_0, MODEL_16_1, MODEL_16_3,
-    MODEL_9_0, MODEL_9_1, MODEL_9_11, MYRMIDON_5,
+    MODEL_13_0, MODEL_13_1, MODEL_13_2, MODEL_13_21, MODEL_13_215, MODEL_13_22, MODEL_14_3,
+    MODEL_14_8, MODEL_14_8_1, MODEL_15_0, MODEL_15_1, MODEL_15_2, MODEL_16_0, MODEL_16_1,
+    MODEL_16_3, MODEL_9_0, MODEL_9_1, MODEL_9_11, MYRMIDON_5,
 };
 use crate::policy::PolicyArtifact;
 
@@ -230,6 +230,7 @@ struct RuntimeTables {
     discard911: OnceLock<Model91DiscardEvTable>,
     discard_hist131: OnceLock<Model131DiscardHistogramTable>,
     discard_pairs132: OnceLock<Model132KeepPairTable>,
+    corrections1322: OnceLock<Model1322CorrectionTable>,
     beliefs91: OnceLock<Model91EmpiricalBeliefs>,
     decline_factors1322: OnceLock<Model1322DeclineFactors>,
     empirical: OnceLock<EmpiricalDiscardKeepTable>,
@@ -692,6 +693,7 @@ fn is_supported_rust_model(model: &str) -> bool {
         || model == MODEL_13_2
         || model == MODEL_13_21
         || model == MODEL_13_215
+        || model == MODEL_13_22
         || model == MODEL_14_3
         || model == MODEL_14_8
         || model == MODEL_14_8_1
@@ -817,6 +819,9 @@ fn recommend_discard(input: &DecisionInput, root: &str) -> Result<Decision, Stri
     }
     if input.model == MODEL_13_215 {
         return recommend_discard_model13215(input, root);
+    }
+    if input.model == MODEL_13_22 {
+        return recommend_discard_model1322(input, root);
     }
     if input.model == MODEL_9_0 {
         return recommend_discard_model90(input, root);
@@ -969,6 +974,9 @@ fn recommend_peg(
     }
     if input.model == MODEL_9_11 {
         return recommend_peg_model911(input, &legal, tables, model911_cache);
+    }
+    if input.model == MODEL_13_22 {
+        return recommend_peg_model1322(input, &legal, tables, model911_cache);
     }
     if input.model == MYRMIDON_5 {
         let card_id = crate::myrmidon::recommend_peg(&input.ai_hand, &input.plays, input.count)?;
@@ -1596,6 +1604,58 @@ fn recommend_discard_model911(input: &DecisionInput, root: &str) -> Result<Decis
     recommend_discard_model9_ev(input, table, "Model 9.11")
 }
 
+fn recommend_discard_model1322(input: &DecisionInput, root: &str) -> Result<Decision, String> {
+    let table = runtime_tables(root)?.corrections1322()?;
+    let six = rank_counts(&input.ai_hand);
+    let mut deck = full_deck();
+    deck.retain(|card| !input.ai_hand.iter().any(|held| held.id == card.id));
+    let mut recommended: Option<(Vec<Card>, f64)> = None;
+    for discard_indices in crate::cards::combinations_indices(input.ai_hand.len(), 2) {
+        let discard = discard_indices
+            .iter()
+            .map(|index| input.ai_hand[*index])
+            .collect::<Vec<_>>();
+        let keep = input
+            .ai_hand
+            .iter()
+            .enumerate()
+            .filter_map(|(index, card)| (!discard_indices.contains(&index)).then_some(*card))
+            .collect::<Vec<_>>();
+        let hand_ev = deck
+            .iter()
+            .map(|cut| f64::from(score_hand(&keep, *cut, false)))
+            .sum::<f64>()
+            / deck.len() as f64;
+        let crib_ev = model91_schell_crib_ev(&input.ai_hand, &discard, input.role)?;
+        let pegging = table
+            .record_for(&six, &rank_counts(&discard), input.role)
+            .ok_or_else(|| "Model 13.22 correction row is missing".to_string())?;
+        let net_pegging = (pegging.my_weighted_points as f64
+            - pegging.opponent_weighted_points as f64)
+            / pegging.total_weight as f64;
+        let total_ev = hand_ev
+            + match input.role {
+                Role::Dealer => crib_ev,
+                Role::Pone => -crib_ev,
+            }
+            + net_pegging;
+        if recommended
+            .as_ref()
+            .is_none_or(|(_, current_ev)| total_ev > *current_ev)
+        {
+            recommended = Some((discard, total_ev));
+        }
+    }
+    let (discard, total_ev) =
+        recommended.ok_or_else(|| "no Model 13.22 discard candidate evaluated".to_string())?;
+    Ok(Decision::Discard {
+        card_ids: discard.iter().map(|card| card.id).collect(),
+        best_lead: None,
+        ev: Some(total_ev),
+        win_probability: None,
+    })
+}
+
 fn recommend_discard_model9_ev(
     input: &DecisionInput,
     table: &Model91DiscardEvTable,
@@ -1750,6 +1810,50 @@ fn recommend_peg_model911(
         win_probability: None,
         model16_policy: None,
     })
+}
+
+fn recommend_peg_model1322(
+    input: &DecisionInput,
+    legal: &[Card],
+    tables: &RuntimeTables,
+    hand_cache: Option<&Model911HandCache>,
+) -> Result<Decision, String> {
+    let is_opening_lead = input.role == Role::Pone
+        && input.ai_table.is_empty()
+        && input.human_table.is_empty()
+        && input.plays.is_empty();
+    if is_opening_lead {
+        let mut six = rank_counts(&input.ai_hand);
+        let discard = rank_counts(&input.own_discards);
+        for rank in 0..13 {
+            six[rank] = six[rank]
+                .checked_add(discard[rank])
+                .ok_or_else(|| "Model 13.22 opening hand rank count overflow".to_string())?;
+        }
+        if rank_count_total(&six) != 6 || rank_count_total(&discard) != 2 {
+            return Err(
+                "Model 13.22 opening lead requires four kept cards and two own discards"
+                    .to_string(),
+            );
+        }
+        let rank = tables
+            .corrections1322()?
+            .pone_lead_for(&six, &discard, input.turn_card.rank)
+            .ok_or_else(|| "Model 13.22 opening lead row is missing".to_string())?;
+        let card = legal
+            .iter()
+            .copied()
+            .find(|card| card.rank == rank)
+            .ok_or_else(|| "Model 13.22 opening lead selected an unavailable rank".to_string())?;
+        return Ok(Decision::Peg {
+            action: "play".to_string(),
+            card_id: Some(card.id),
+            ev: None,
+            win_probability: None,
+            model16_policy: None,
+        });
+    }
+    recommend_peg_model911(input, legal, tables, hand_cache)
 }
 
 #[derive(Clone)]
@@ -5755,6 +5859,7 @@ impl RuntimeTables {
             discard911: OnceLock::new(),
             discard_hist131: OnceLock::new(),
             discard_pairs132: OnceLock::new(),
+            corrections1322: OnceLock::new(),
             beliefs91: OnceLock::new(),
             decline_factors1322: OnceLock::new(),
             empirical: OnceLock::new(),
@@ -5796,6 +5901,12 @@ impl RuntimeTables {
     fn discard_pairs132(&self) -> Result<&Model132KeepPairTable, String> {
         load_cached(&self.discard_pairs132, "discard_pairs132", || {
             Model132KeepPairTable::load(self.asset_path("model132-keep-pairs.bin"))
+        })
+    }
+
+    fn corrections1322(&self) -> Result<&Model1322CorrectionTable, String> {
+        load_cached(&self.corrections1322, "corrections1322", || {
+            Model1322CorrectionTable::load(self.asset_path("model1322-corrections.bin"))
         })
     }
 
