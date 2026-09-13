@@ -26,6 +26,10 @@ pub const MODEL_13_21: &str = "schell_table-peg_table-13.21";
 /// board recursion with empirical phase-seam board matrices. Known and
 /// predicted current-hand scores are applied before the continuation lookup.
 pub const MODEL_13_215: &str = "schell_table-peg_table-13.215";
+/// Model 13.22 uses the completed six-card/discard sparse-correction asset for
+/// discard forecasts and opening leads, then continues with the same
+/// legal-information executable pegging policy used to build that asset.
+pub const MODEL_13_22: &str = "schell_table-peg_table-13.22";
 /// Current production Ace model. Keep the versioned model ID available so
 /// existing games can retain the exact engine they started with.
 pub const ACE_MODEL: &str = MODEL_13_215;
@@ -59,6 +63,7 @@ pub enum ModelId {
     Schell132,
     Schell1321,
     Schell13215,
+    Schell1322,
     Schell143,
     Schell148,
     Schell1481,
@@ -85,6 +90,7 @@ impl ModelId {
             ModelId::Schell132 => MODEL_13_2,
             ModelId::Schell1321 => MODEL_13_21,
             ModelId::Schell13215 => MODEL_13_215,
+            ModelId::Schell1322 => MODEL_13_22,
             ModelId::Schell143 => MODEL_14_3,
             ModelId::Schell148 => MODEL_14_8,
             ModelId::Schell1481 => MODEL_14_8_1,
@@ -109,6 +115,7 @@ impl ModelId {
             ModelId::Schell132 => "Schell Table + Peg Table 13.2",
             ModelId::Schell1321 => "Schell Table + Peg Table 13.21",
             ModelId::Schell13215 => "Schell Table + Peg Table 13.215",
+            ModelId::Schell1322 => "Schell Table + Peg Table 13.22",
             ModelId::Schell143 => "Schell Table + Peg Table 14.3",
             ModelId::Schell148 => "Schell Table + Peg Table 14.8",
             ModelId::Schell1481 => "Schell Table + Peg Table 14.8.1",
@@ -134,6 +141,7 @@ impl ModelId {
                 | ModelId::Schell132
                 | ModelId::Schell1321
                 | ModelId::Schell13215
+                | ModelId::Schell1322
                 | ModelId::Schell143
                 | ModelId::Schell148
                 | ModelId::Schell1481
@@ -183,6 +191,7 @@ impl FromStr for ModelId {
             MODEL_13_2 => Ok(ModelId::Schell132),
             MODEL_13_21 => Ok(ModelId::Schell1321),
             MODEL_13_215 => Ok(ModelId::Schell13215),
+            MODEL_13_22 => Ok(ModelId::Schell1322),
             MODEL_14_3 => Ok(ModelId::Schell143),
             MODEL_14_8 => Ok(ModelId::Schell148),
             MODEL_14_8_1 => Ok(ModelId::Schell1481),
@@ -229,6 +238,9 @@ mod tests {
         );
         assert!(ModelId::Schell13215.has_native_rust_decisions());
         assert!(!ModelId::Schell13215.is_strength_model());
+        assert_eq!(MODEL_13_22.parse::<ModelId>().unwrap(), ModelId::Schell1322);
+        assert!(ModelId::Schell1322.has_native_rust_decisions());
+        assert!(!ModelId::Schell1322.is_strength_model());
         assert_eq!(ACE_MODEL_ID.as_str(), ACE_MODEL);
         assert!(ACE_MODEL_ID.is_ace());
         assert!(ModelId::Schell13.is_ace());

@@ -98,7 +98,7 @@ def main() -> int:
                 if union & mask:
                     raise ValueError(f"row {row} has overlapping pone lead masks")
                 union |= mask
-            if union.bit_count() not in (12, 13):
+            if bin(union).count("1") not in (12, 13):
                 raise ValueError(f"row {row} has incomplete pone lead cut coverage")
 
     checksum = fnv1a64(args.asset)

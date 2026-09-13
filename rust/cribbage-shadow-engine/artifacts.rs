@@ -25,6 +25,11 @@ const MODEL131_HISTOGRAM_WEIGHT_BITS: u32 = 17;
 const MODEL131_HISTOGRAM_PAIR_BITS: u32 = 10;
 const MODEL91_INVALID_PAIR: u16 = u16::MAX;
 const MODEL91_DISCARD_ROWS: usize = 330_590;
+const MODEL1322_MAGIC: &[u8; 8] = b"M1322C01";
+const MODEL1322_HEADER_BYTES: usize = 128;
+const MODEL1322_ACCUMULATOR_BYTES: usize = 48;
+const MODEL1322_ROLE_ROWS: usize = 165_295;
+const MODEL1322_KEEP_COUNT: u32 = 1_820;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Model91PairOutcome {
@@ -65,6 +70,20 @@ pub struct Model91DiscardEvRecord {
 
 pub struct Model91DiscardEvTable {
     records: Vec<Model91DiscardEvRecord>,
+    six_row_starts: HashMap<[u8; 13], usize>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Model1322CorrectionRecord {
+    pub my_weighted_points: u128,
+    pub opponent_weighted_points: u128,
+    pub total_weight: u128,
+}
+
+/// Model 13.22's finite discard forecast and cut-dependent pone opening lead.
+/// It contains no observation-to-action table for live pegging decisions.
+pub struct Model1322CorrectionTable {
+    bytes: Vec<u8>,
     six_row_starts: HashMap<[u8; 13], usize>,
 }
 
@@ -232,6 +251,15 @@ fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, String> {
         .get(offset..offset + 4)
         .ok_or_else(|| format!("u32 out of range at {}", offset))?;
     Ok(u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]))
+}
+
+fn read_u128_le(bytes: &[u8], offset: usize) -> Result<u128, String> {
+    let slice = bytes
+        .get(offset..offset + 16)
+        .ok_or_else(|| format!("u128 out of range at {}", offset))?;
+    Ok(u128::from_le_bytes(
+        slice.try_into().expect("validated sixteen-byte integer"),
+    ))
 }
 
 fn read_f32_le(bytes: &[u8], offset: usize) -> Result<f32, String> {
@@ -587,6 +615,125 @@ impl Model91DiscardEvTable {
     }
 }
 
+impl Model1322CorrectionTable {
+    pub fn load(path: impl AsRef<Path>) -> Result<Model1322CorrectionTable, String> {
+        let path = path.as_ref();
+        let bytes = fs::read(path).map_err(|error| {
+            format!(
+                "read Model 13.22 correction table {} failed: {}",
+                path.display(),
+                error
+            )
+        })?;
+        let lead_bytes = MODEL1322_ROLE_ROWS
+            .checked_mul(13)
+            .and_then(|value| value.checked_mul(2))
+            .ok_or_else(|| "Model 13.22 correction size overflow".to_string())?;
+        let expected = MODEL1322_HEADER_BYTES
+            + 2 * MODEL1322_ROLE_ROWS * MODEL1322_ACCUMULATOR_BYTES
+            + lead_bytes;
+        if bytes.len() != expected || &bytes[..8] != MODEL1322_MAGIC {
+            return Err(format!(
+                "invalid Model 13.22 correction asset length or magic: {} bytes",
+                bytes.len()
+            ));
+        }
+        if read_u32_le(&bytes, 8)? != 1
+            || read_u32_le(&bytes, 12)? as usize != MODEL1322_ROLE_ROWS
+            || read_u32_le(&bytes, 16)? != 0
+            || read_u32_le(&bytes, 20)? != MODEL1322_KEEP_COUNT
+            || read_u32_le(&bytes, 24)? != 0
+            || read_u32_le(&bytes, 28)? != MODEL1322_KEEP_COUNT
+            || read_u32_le(&bytes, 32)? != MODEL1322_KEEP_COUNT
+        {
+            return Err("incomplete or unsupported Model 13.22 correction header".to_string());
+        }
+        for role in 0..2 {
+            for row in 0..MODEL1322_ROLE_ROWS {
+                let offset = MODEL1322_HEADER_BYTES
+                    + (role * MODEL1322_ROLE_ROWS + row) * MODEL1322_ACCUMULATOR_BYTES;
+                let own = read_u128_le(&bytes, offset)?;
+                let opponent = read_u128_le(&bytes, offset + 16)?;
+                let weight = read_u128_le(&bytes, offset + 32)?;
+                if weight == 0
+                    || own > weight.saturating_mul(u128::from(u8::MAX))
+                    || opponent > weight.saturating_mul(u128::from(u8::MAX))
+                {
+                    return Err(format!(
+                        "Model 13.22 correction row {role}/{row} is invalid"
+                    ));
+                }
+            }
+        }
+        let leads_start =
+            MODEL1322_HEADER_BYTES + 2 * MODEL1322_ROLE_ROWS * MODEL1322_ACCUMULATOR_BYTES;
+        for row in 0..MODEL1322_ROLE_ROWS {
+            let mut covered = 0_u16;
+            for rank in 0..13 {
+                let mask = read_u16_le(&bytes, leads_start + (row * 13 + rank) * 2)?;
+                if mask & !0x1fff != 0 || covered & mask != 0 {
+                    return Err(format!("Model 13.22 correction lead row {row} is invalid"));
+                }
+                covered |= mask;
+            }
+            if covered.count_ones() < 12 {
+                return Err(format!(
+                    "Model 13.22 correction lead row {row} is incomplete"
+                ));
+            }
+        }
+        Ok(Model1322CorrectionTable {
+            bytes,
+            six_row_starts: model1322_six_row_starts()?,
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        MODEL1322_ROLE_ROWS
+    }
+
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+
+    pub fn record_for(
+        &self,
+        six: &[u8; 13],
+        discard: &[u8; 13],
+        role: Role,
+    ) -> Option<Model1322CorrectionRecord> {
+        let row = model1322_discard_row(&self.six_row_starts, six, discard)?;
+        let role_index = match role {
+            Role::Dealer => 0,
+            Role::Pone => 1,
+        };
+        let offset = MODEL1322_HEADER_BYTES
+            + (role_index * MODEL1322_ROLE_ROWS + row) * MODEL1322_ACCUMULATOR_BYTES;
+        Some(Model1322CorrectionRecord {
+            my_weighted_points: read_u128_le(&self.bytes, offset).ok()?,
+            opponent_weighted_points: read_u128_le(&self.bytes, offset + 16).ok()?,
+            total_weight: read_u128_le(&self.bytes, offset + 32).ok()?,
+        })
+    }
+
+    pub fn pone_lead_for(&self, six: &[u8; 13], discard: &[u8; 13], cut_rank: u8) -> Option<u8> {
+        if cut_rank >= 13 {
+            return None;
+        }
+        let row = model1322_discard_row(&self.six_row_starts, six, discard)?;
+        let leads_start =
+            MODEL1322_HEADER_BYTES + 2 * MODEL1322_ROLE_ROWS * MODEL1322_ACCUMULATOR_BYTES;
+        let bit = 1_u16 << cut_rank;
+        (0..13_u8).find(|rank| {
+            read_u16_le(
+                &self.bytes,
+                leads_start + (row * 13 + usize::from(*rank)) * 2,
+            )
+            .is_ok_and(|mask| mask & bit != 0)
+        })
+    }
+}
+
 impl Model91DiscardHistogramTable {
     pub fn load(path: impl AsRef<Path>) -> Result<Model91DiscardHistogramTable, String> {
         let path = path.as_ref();
@@ -875,6 +1022,32 @@ fn model91_six_row_starts() -> Result<HashMap<[u8; 13], usize>, String> {
         return Err("Model 9.1 canonical discard index has invalid dimensions".to_string());
     }
     Ok(starts)
+}
+
+fn model1322_six_row_starts() -> Result<HashMap<[u8; 13], usize>, String> {
+    let mut starts = HashMap::with_capacity(18_395);
+    let mut row = 0_usize;
+    for key in enumerate_rank_count_keys(6) {
+        let six = rank_counts_from_key(&key)?;
+        starts.insert(six, row);
+        row += model91_discards_from_six(&six).len();
+    }
+    if starts.len() != 18_395 || row != MODEL1322_ROLE_ROWS {
+        return Err("Model 13.22 canonical discard index has invalid dimensions".to_string());
+    }
+    Ok(starts)
+}
+
+fn model1322_discard_row(
+    starts: &HashMap<[u8; 13], usize>,
+    six: &[u8; 13],
+    discard: &[u8; 13],
+) -> Option<usize> {
+    let base = *starts.get(six)?;
+    let discard_index = model91_discards_from_six(six)
+        .iter()
+        .position(|candidate| candidate == discard)?;
+    Some(base + discard_index)
 }
 
 fn model91_discard_row(
@@ -2114,6 +2287,68 @@ mod model91_tests {
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn model1322_correction_reader_preserves_role_rows_and_cut_leads() {
+        let root = model91_temp_dir("model1322-corrections");
+        let path = root.join("model1322-corrections.bin");
+        let expected = MODEL1322_HEADER_BYTES
+            + 2 * MODEL1322_ROLE_ROWS * MODEL1322_ACCUMULATOR_BYTES
+            + MODEL1322_ROLE_ROWS * 13 * 2;
+        let mut bytes = vec![0_u8; expected];
+        bytes[..8].copy_from_slice(MODEL1322_MAGIC);
+        for (offset, value) in [
+            (8, 1_u32),
+            (12, MODEL1322_ROLE_ROWS as u32),
+            (16, 0),
+            (20, MODEL1322_KEEP_COUNT),
+            (24, 0),
+            (28, MODEL1322_KEEP_COUNT),
+            (32, MODEL1322_KEEP_COUNT),
+        ] {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        for role in 0..2 {
+            for row in 0..MODEL1322_ROLE_ROWS {
+                let offset = MODEL1322_HEADER_BYTES
+                    + (role * MODEL1322_ROLE_ROWS + row) * MODEL1322_ACCUMULATOR_BYTES;
+                bytes[offset..offset + 16].copy_from_slice(&(3_u128 + role as u128).to_le_bytes());
+                bytes[offset + 16..offset + 32]
+                    .copy_from_slice(&(2_u128 + role as u128).to_le_bytes());
+                bytes[offset + 32..offset + 48].copy_from_slice(&1_u128.to_le_bytes());
+            }
+        }
+        let leads_start =
+            MODEL1322_HEADER_BYTES + 2 * MODEL1322_ROLE_ROWS * MODEL1322_ACCUMULATOR_BYTES;
+        for row in 0..MODEL1322_ROLE_ROWS {
+            bytes[leads_start + row * 26..leads_start + row * 26 + 2]
+                .copy_from_slice(&0x1fff_u16.to_le_bytes());
+        }
+        fs::write(&path, bytes).unwrap();
+
+        let table = Model1322CorrectionTable::load(&path).unwrap();
+        let six = rank_counts_from_key(&enumerate_rank_count_keys(6)[0]).unwrap();
+        let discard = model91_discards_from_six(&six)[0];
+        assert_eq!(table.len(), MODEL1322_ROLE_ROWS);
+        assert_eq!(
+            table.record_for(&six, &discard, Role::Dealer).unwrap(),
+            Model1322CorrectionRecord {
+                my_weighted_points: 3,
+                opponent_weighted_points: 2,
+                total_weight: 1,
+            }
+        );
+        assert_eq!(
+            table.record_for(&six, &discard, Role::Pone).unwrap(),
+            Model1322CorrectionRecord {
+                my_weighted_points: 4,
+                opponent_weighted_points: 3,
+                total_weight: 1,
+            }
+        );
+        assert_eq!(table.pone_lead_for(&six, &discard, 12), Some(0));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

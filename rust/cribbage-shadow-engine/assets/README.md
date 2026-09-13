@@ -131,6 +131,13 @@ reuse the 9.11 terminal cell, and only the suffix after the first changed
 action is replayed. Action traces and evidence caches are builder-local and
 are not runtime assets. See `docs/model-9.11-13.22-sparse-build.md`.
 
+`model1322-corrections.bin` (`M1322C01`) is the resulting finite runtime asset.
+It stores one weighted terminal pegging summary for each canonical six-card
+hand, candidate discard, and role, plus cut-indexed pone opening-lead masks.
+After the opening lead, live pegging continues through the same executable
+legal-information policy used by the builder; the asset contains no later
+observation-to-action table or pegging-path graph.
+
 The selectable Model 9.11 runtime uses `model911-discard-ev.bin`, an exact
 six-card aggregation of that completed keep-pair matrix. Live pegging executes
 the same legal-information policy with the actor's own discards, cut, public
