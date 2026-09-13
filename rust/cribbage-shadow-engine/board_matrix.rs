@@ -1,5 +1,9 @@
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
+
+pub const MODEL13215_BOARD_SHA256: &str =
+    "099715bc3aed5b296c39fb3edfd8fa30e0dad13239dede1c8963e344dfe8d679";
 
 pub const BOARD_MATRIX_SCORE_COUNT: usize = 121;
 const BOARD_MATRIX_MAGIC: &[u8; 4] = b"BWM2";
@@ -27,6 +31,17 @@ pub struct BoardWinMatrix {
 }
 
 impl BoardWinMatrix {
+    /// The 13.23 contract pins the actual 13.215 asset, not merely its format.
+    /// Leave the historical loader unchanged for frozen model comparisons.
+    pub fn load_verified_model13215(path: impl AsRef<Path>) -> Result<Self, String> {
+        let bytes = fs::read(path.as_ref())
+            .map_err(|error| format!("read {} failed: {error}", path.as_ref().display()))?;
+        if format!("{:x}", Sha256::digest(&bytes)) != MODEL13215_BOARD_SHA256 {
+            return Err("Model 13.23 requires the verified Model 13.215 BWM2 asset".into());
+        }
+        Self::decode(&bytes)
+    }
+
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
         let path = path.as_ref();
         let bytes =
@@ -154,5 +169,19 @@ mod tests {
         let mut bytes = encoded_matrix(0.5);
         bytes[HEADER_BYTES..HEADER_BYTES + 8].copy_from_slice(&f64::NAN.to_le_bytes());
         assert!(BoardWinMatrix::decode(&bytes).is_err());
+    }
+
+    #[test]
+    fn model1323_rejects_a_valid_but_different_board_asset() {
+        let path =
+            std::env::temp_dir().join(format!("model1323-wrong-board-{}.bin", std::process::id()));
+        fs::write(&path, encoded_matrix(0.5)).unwrap();
+        assert!(BoardWinMatrix::load(&path).is_ok());
+        assert!(BoardWinMatrix::load_verified_model13215(&path).is_err());
+        fs::remove_file(path).unwrap();
+        assert!(BoardWinMatrix::load_verified_model13215(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/board-win-matrix.bin"),
+        )
+        .is_ok());
     }
 }

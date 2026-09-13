@@ -296,7 +296,7 @@ fn read_u64_slice(bytes: &[u8], offset: usize, count: usize) -> Result<Vec<u64>,
         .collect()
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Model132Observation {
     pub role: Role,
     pub my_score: i32,
@@ -382,7 +382,7 @@ impl Model132Observation {
         }
     }
 
-    fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         if !(0..=121).contains(&self.my_score) || !(0..=121).contains(&self.opponent_score) {
             return Err("Model 13.2 score is outside 0..=121".to_string());
         }
@@ -910,10 +910,10 @@ impl Model911Policy {
             self.include_owned_dead_cards,
         )?;
         self.lock_inner().choose_action_for_weighted_opponent_hands(
-                &model91_observation,
-                opponent_hands,
-                &likelihoods,
-            )
+            &model91_observation,
+            opponent_hands,
+            &likelihoods,
+        )
     }
 
     pub fn choose_action_with_net_ev(
@@ -928,6 +928,23 @@ impl Model911Policy {
         )?;
         self.lock_inner()
             .choose_action_with_opponent_likelihood_and_net_ev(&model91_observation, &likelihoods)
+    }
+
+    /// The same legal-information posterior used by the builder's chooser.
+    /// This never accepts an actual opponent hand or opponent private discards.
+    pub fn opponent_hands(
+        &self,
+        observation: &Model132Observation,
+    ) -> Result<Vec<([u8; RANKS], f64)>, String> {
+        observation.validate()?;
+        let model91_observation = self.model91_observation(observation)?;
+        let likelihoods = model1322_opponent_rank_likelihoods_with_known_cut(
+            observation,
+            self.factors,
+            self.include_owned_dead_cards,
+        )?;
+        self.lock_inner()
+            .opponent_hands(&model91_observation, &likelihoods)
     }
 }
 

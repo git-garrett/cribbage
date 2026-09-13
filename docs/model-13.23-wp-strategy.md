@@ -1,6 +1,7 @@
 # Model 13.23 playing-strategy correction
 
-Status: correction-only distribution rebuild and WP runtime implementation in progress.
+Status: correction-only distribution rebuild running; experimental WP runtime
+built and contract-tested. Full-asset and playing-strength tests are pending.
 
 ## Required board evaluator
 
@@ -74,6 +75,11 @@ hidden opponent hand. Live root selection uses WP; the offline continuation
 policy uses points. These different objectives are intentional. No fixed-board
 or WP-aware offline rebuild is required.
 
+Live inputs already contain only legal information. The policy boundary above
+is about future-action forecasts inside hypothetical worlds, not an additional
+filter on the real player's inputs. A forecast must not choose different future
+actions merely because its simulator knows different hidden cards.
+
 The full new distribution's weight and both first moments must exactly match
 every retained 13.22 row. This uses the faulty build as an independent checksum
 of the regenerated outcomes; it does not reconstruct distributions from means.
@@ -115,6 +121,86 @@ retain the established 250,000 action, 300,000 evidence-outcome, and 3,000,000
 continuation-entry limits. Forty fixed contiguous dealer shards cover all
 3,274,375 compatible keep pairs. No foundational asset is regenerated.
 
-This builder change does not yet register a Model 13.23 playing engine. Runtime
-WP integration and playing-strength benchmarking remain separate work; a
-completed correction asset must not be reported as a completed playing engine.
+## Playing engine
+
+The native experimental model ID is `schell_table-peg_table-13.23`. Ace remains
+13.215. No production promotion or deployment is part of this correction.
+
+Discard selection reads `model1323-corrections.bin`. The reader rejects partial,
+means-only, malformed, or mismatched-input assets and validates all joint rows
+against their exact u128 moments. All stored joint bins enter the same ordered
+current-hand WP evaluator as 13.215. Means are used only for diagnostic EV and a
+WP tie break. Diagnostic opening-lead masks are never executed.
+
+Live pegging evaluates each legal candidate through `model1323::PolicyAssets`.
+Future choices use the unchanged builder chooser, including its empirical
+beliefs, go/scoring-decline evidence, and actor-owned discards. The runtime pins
+those input files to the builder's SHA-256 identities. It draws opponent keeps
+from the chooser's legal posterior and conditions opponent-private discards on
+the frozen discard prior, the visible six cards, and known cut. Private cards
+are used for simulation; only the acting player's observation reaches a chooser.
+The live candidate with highest WP wins, even when another has higher net EV.
+Before any opponent play, the chooser's root posterior uses physical card
+weights, whereas the builder's outer aggregation uses calibrated keep priors.
+This retains the chooser's established posterior; it is not an assertion that
+the live outer population and offline aggregation have identical weights.
+
+Large populations use 512 common deterministic stratified world samples across
+all candidates. Four or fewer remaining cards use the full population. This is
+a sampling approximation, not exhaustive live analysis or proof of playing
+strength. All continuation/action/evidence memoization is decision-local. No
+persistent observation-to-action table or exhaustive path graph is introduced.
+
+As in 13.215, the discard evaluator combines terminal pegging totals with
+separately forecast hand/crib outcomes; the asset does not retain cut/outcome
+correlation or within-pegging scoring order. If both discard pegging totals cross
+121, 13.215's neutral ambiguity rule is retained. Live simulations do resolve
+pegging points in sequence and stop at the first winner. These inherited discard
+approximations are not repaired by merely retaining a joint terminal histogram.
+Live WP likewise inherits 13.215's separate hold-table hand and rank-cut crib
+forecasts; it does not preserve their correlation with each simulated pegging
+world or replace them with the chooser's posterior.
+
+The engine can be compiled and contract-tested before the full asset exists.
+A full-asset integration test and 13.23-versus-13.215 playing-strength benchmark
+must follow successful asset verification; they must not be reported as already
+completed.
+
+### Engine validation, 2026-09-13
+
+- Release engine and native runner compile successfully; 316 Rust tests pass.
+- Contract coverage includes exact u128 joint rows, rejection of partial and
+  means-only assets, exact BWM identity, WP-over-net selection, builder/runtime
+  continuation agreement, invisible-card invariance, count-out termination,
+  sparse-prior zero-support conditioning, and full late-state enumeration.
+- Standards and spec review have no remaining findings. Review found and fixed
+  the sparse-prior edge case before release verification.
+- In one native opening fixture under concurrent correction-build load, 13.215
+  took 0.99 s and 13.23 took 22.62 s. A two-versus-two exact forecast took 0.087 s;
+  an immediate count-out fixture took 2.18 s. These are diagnostic probes, not a
+  representative game-speed benchmark. Opening latency is not production-ready.
+- The opening policy-only probe took 5.99/21.43/37.72 s at 128/512/1024 samples.
+  The top net-points rank was stable across those three samples, but this does
+  not establish WP-choice convergence or playing strength. The experimental
+  default remains 512; a timed paired benchmark is required before promotion.
+
+### Provisional correction ETA, 2026-09-13 20:48 UTC
+
+Six workers have checkpointed 42,693 of 3,274,375 compatible pairs (1.30%), or
+24 of 1,820 dealer keeps, after about 75 minutes. Raw pair-count extrapolation
+suggests about four days remaining, but the initial shards are cheaper than
+later shards in the completed 13.22 run.
+
+Weighting current progress by each matching historical shard's cost, then
+scaling the old total worker time by the observed speed ratio, gives 5.38 days
+using pairs, 5.42 using actor screens, 6.44 using suffix rollouts, and 6.55 using
+joint-world visits. Therefore the working estimate is **5–7 days remaining**
+(September 18–20), not a completion guarantee. This assumes comparable work
+mix within each shard and continued six-worker throughput; re-estimate after
+more completed rows/shards. The micro core probe is not used as the full ETA.
+
+The external export stages remain subject to the previously observed launchd
+volume-permission failure. Internal computation and verification can finish;
+the final durable copy still needs foreground completion if permissions remain
+unchanged. Only a fully verified output may be installed as
+`assets/model1323-corrections.bin`; preserve the old 13.22 asset separately.

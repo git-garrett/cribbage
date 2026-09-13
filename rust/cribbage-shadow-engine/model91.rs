@@ -948,7 +948,7 @@ impl Model91Policy {
         Ok((best, best_net))
     }
 
-    fn opponent_hands(
+    pub(crate) fn opponent_hands(
         &mut self,
         observation: &Model91Observation,
         opponent_rank_likelihood_ppm: &[u32; RANKS],

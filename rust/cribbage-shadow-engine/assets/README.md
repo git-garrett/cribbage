@@ -138,6 +138,17 @@ After the opening lead, live pegging continues through the same executable
 legal-information policy used by the builder; the asset contains no later
 observation-to-action table or pegging-path graph.
 
+Model 13.23 requires the separately verified `model1323-corrections.bin`
+(`M1323C01`) correction-only rebuild. It retains exact joint own/opponent
+terminal pegging histograms, not just means. The native engine integrates these
+distributions through the exact BWM2 asset used by 13.215 and selects by live
+board WP. It does not execute the inherited diagnostic lead masks. Live candidate
+forecasts use the unchanged correction-builder continuation chooser, with
+decision-local memoization and common deterministic world samples where full
+enumeration is expensive. The full correction asset is not yet packaged here;
+there is no means-only or Model 13.0 board fallback. See
+`docs/model-13.23-wp-strategy.md` for required identities and approximation limits.
+
 The selectable Model 9.11 runtime uses `model911-discard-ev.bin`, an exact
 six-card aggregation of that completed keep-pair matrix. Live pegging executes
 the same legal-information policy with the actor's own discards, cut, public
