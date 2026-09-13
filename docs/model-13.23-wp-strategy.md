@@ -243,6 +243,63 @@ The test writes `model1323-compact-equivalence.json` in the OS temporary directo
 The frozen correction job and its binary are unchanged; this runtime optimization
 does not silently replace an active builder.
 
+### Hand-scoped card-population reuse
+
+13.23 now accepts the same per-player hand-cache ownership used by 13.215 in
+native playout. The live API also supplies this cache for 13.23 only; historical
+models retain their existing routing. Caches are cleared when pegging ends and
+are not serialized with saved games. A changed role, own keep/discards or cut
+invalidates the 13.23 population even if a caller omitted an explicit clear.
+
+The cache stores unweighted physical opponent-hand support and the conditioned
+opponent-discard alternatives for finite initial keeps. Newly public cards prune
+physical support; physical combination weights, empirical prefix support and
+decline likelihoods are evaluated from the current observation on every turn.
+In particular, later sparse empirical prefixes may admit hands absent from an
+earlier prefix; those are never lost by filtering an old weighted posterior.
+Conditioned discard alternatives depend only on fixed hand facts and are reused
+without changing their ordering, raw weights or normalization arithmetic.
+
+The cache stores no selected moves, pegging paths, WP values or sampled worlds.
+All action/evidence/continuation memoization remains decision-local. The same
+512-sample budget, current-observation seed, full late-state enumeration and
+13.215 board matrix remain in effect. Both cached and fresh execution remain
+available for differential tests. The active correction builder is unchanged.
+
+Validation covers physical support across plays and rewinds, changing hand
+identities, sparse empirical support changes, all world weights and sample order
+through four hand traces, and bit-exact late forecasts. Release-mode tests
+`hand_cache_full_budget_equivalence_and_timing` and
+`model1323_hand_cache_native_speed_comparison` compare complete forecasts and
+same-position native decisions respectively. Timing reports are diagnostic
+traces, not paired-game playing-strength benchmarks.
+
+Final warm-native timings (median of five repetitions; each trace sums six
+non-forced decisions across both players, with identical positions fed to all
+three evaluators):
+
+| Hand trace | 13.215, hand cache | 13.23, fresh each turn | 13.23, hand cache |
+| --- | ---: | ---: | ---: |
+| Opening fixture | 0.590 s | 2.050 s | 2.045 s |
+| Paired fives | 0.238 s | 0.623 s | 0.620 s |
+
+The observed total reduction is only about 0.2–0.5%, small enough to be affected
+by ordinary timing variation. This is not a substantial additional whole-engine
+speedup. On the opening fixture's second turn, isolated population preparation
+drops from 0.264 ms to 0.080 ms. The opening decision itself remains approximately
+1.71 s: there is no earlier turn to reuse. Unlike the older 13.215 enumeration,
+13.23 already uses a shared rank-hand index, and continuation evaluation still
+dominates its runtime. These warm measurements exclude initial asset loading
+and must not be directly compared with the earlier cold-process single-request
+timings. The separate six-worker correction job was not changed.
+
+All 325 Rust tests pass, including cross-request-thread cache ownership and
+clearing. Ten full-budget forecast states are bit-identical and all 60 native
+cached/fresh decision comparisons agree. Standards and spec review have no
+findings; release engine, runner and API builds pass. Stateless sidecar requests
+remain fresh; hand-owned native/API callers opt into reuse through the existing
+hand-cache interface.
+
 ### Provisional correction ETA, 2026-09-13 20:48 UTC
 
 Six workers have checkpointed 42,693 of 3,274,375 compatible pairs (1.30%), or

@@ -14,13 +14,14 @@ use crate::model132::{
     choose_for_state, Model1322DeclineFactors, Model132Observation, Model132PeggingPolicy,
     Model911Policy,
 };
-use crate::model91::Model91EmpiricalBeliefs;
+use crate::model91::{Model91EmpiricalBeliefs, OpponentHandCache};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 /// Identities recorded by the running correction builder, in header order:
 /// beliefs, decline factors, keep prior, discard prior, baseline keep pairs.
@@ -32,6 +33,85 @@ pub const CORRECTION_INPUT_CHECKSUMS: [u64; 5] = [
     0x1457241478e3d307,
 ];
 pub const LIVE_WORLD_BUDGET: usize = 512;
+
+/// One actor's current-hand card population. Only card support is retained;
+/// all history-dependent weights, sampling and policy solves remain fresh.
+#[derive(Clone, Default)]
+pub(crate) struct HandCache(Arc<Mutex<Option<HandPopulation>>>);
+
+impl std::fmt::Debug for HandCache {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let population = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        formatter
+            .debug_struct("Model1323HandCache")
+            .field(
+                "conditioned_keeps",
+                &population.as_ref().map_or(0, |p| p.discards.len()),
+            )
+            .finish()
+    }
+}
+
+impl HandCache {
+    pub(crate) fn clear(&self) {
+        *self.0.lock().unwrap_or_else(|error| error.into_inner()) = None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_populated(&self) -> bool {
+        self.0.lock().unwrap().is_some()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct HandIdentity {
+    role: Role,
+    own_keep: [u8; 13],
+    own_discards: [u8; 13],
+    turn_rank: u8,
+}
+
+impl HandIdentity {
+    fn from_observation(observation: &Model132Observation) -> Self {
+        Self {
+            role: observation.role,
+            own_keep: std::array::from_fn(|rank| {
+                observation.own_remaining[rank] + observation.own_played[rank]
+            }),
+            own_discards: observation.own_discards,
+            turn_rank: observation.turn_rank,
+        }
+    }
+}
+
+struct DiscardSupport {
+    variants: Vec<([u8; 13], f64)>,
+    total: f64,
+}
+
+struct HandPopulation {
+    identity: HandIdentity,
+    opponent_hands: OpponentHandCache,
+    discards: HashMap<[u8; 13], DiscardSupport>,
+    #[cfg(test)]
+    conditioning_calls: usize,
+    #[cfg(test)]
+    conditioning_hits: usize,
+}
+
+impl HandPopulation {
+    fn new(identity: HandIdentity) -> Self {
+        Self {
+            identity,
+            opponent_hands: OpponentHandCache::default(),
+            discards: HashMap::new(),
+            #[cfg(test)]
+            conditioning_calls: 0,
+            #[cfg(test)]
+            conditioning_hits: 0,
+        }
+    }
+}
 
 pub struct PolicyAssets {
     beliefs: Model91EmpiricalBeliefs,
@@ -79,6 +159,15 @@ impl PolicyAssets {
         observation: &Model132Observation,
         world_budget: usize,
     ) -> Result<Vec<PegCandidateForecast>, String> {
+        self.forecast_with_hand_cache(observation, world_budget, None)
+    }
+
+    pub(crate) fn forecast_with_hand_cache(
+        &self,
+        observation: &Model132Observation,
+        world_budget: usize,
+        cache: Option<&HandCache>,
+    ) -> Result<Vec<PegCandidateForecast>, String> {
         // All action/evidence/continuation memoization is decision-local.
         let policy = Model911Policy::new_with_evidence_cache(
             Some(self.beliefs.clone()),
@@ -88,9 +177,31 @@ impl PolicyAssets {
             1_000_000,
         )?;
         policy.use_compact_continuations();
-        self.forecast_using(observation, world_budget, &policy)
+        let worlds = self.worlds_for_hand(observation, &policy, cache)?;
+        self.forecast_population(observation, world_budget, &policy, worlds)
     }
 
+    fn worlds_for_hand(
+        &self,
+        observation: &Model132Observation,
+        policy: &Model911Policy,
+        cache: Option<&HandCache>,
+    ) -> Result<Vec<World>, String> {
+        if let Some(cache) = cache {
+            // Release the hand cache before the expensive decision-local solve.
+            let mut population = cache.0.lock().unwrap_or_else(|error| error.into_inner());
+            observation.validate()?;
+            let identity = HandIdentity::from_observation(observation);
+            if population.as_ref().is_none_or(|p| p.identity != identity) {
+                *population = Some(HandPopulation::new(identity));
+            }
+            self.worlds_with_cache(observation, policy, population.as_mut())
+        } else {
+            self.worlds(observation, policy)
+        }
+    }
+
+    #[cfg(test)]
     fn forecast_using(
         &self,
         observation: &Model132Observation,
@@ -98,6 +209,16 @@ impl PolicyAssets {
         policy: &Model911Policy,
     ) -> Result<Vec<PegCandidateForecast>, String> {
         let worlds = self.worlds(observation, policy)?;
+        self.forecast_population(observation, world_budget, policy, worlds)
+    }
+
+    fn forecast_population(
+        &self,
+        observation: &Model132Observation,
+        world_budget: usize,
+        policy: &Model911Policy,
+        worlds: Vec<World>,
+    ) -> Result<Vec<PegCandidateForecast>, String> {
         // Late continuations are cheap enough to enumerate without sampling.
         let remaining = rank_count_total(&observation.own_remaining) + 4
             - rank_count_total(&observation.opponent_played);
@@ -116,6 +237,15 @@ impl PolicyAssets {
         observation: &Model132Observation,
         policy: &Model911Policy,
     ) -> Result<Vec<World>, String> {
+        self.worlds_with_cache(observation, policy, None)
+    }
+
+    fn worlds_with_cache(
+        &self,
+        observation: &Model132Observation,
+        policy: &Model911Policy,
+        mut population: Option<&mut HandPopulation>,
+    ) -> Result<Vec<World>, String> {
         observation.validate()?;
         if rank_count_total(&observation.own_discards) != 2 {
             return Err("13.23 requires the actor's two known crib discards".into());
@@ -131,16 +261,51 @@ impl PolicyAssets {
             Role::Dealer
         };
         let mut worlds = Vec::new();
-        for (remaining, hand_weight) in policy.opponent_hands(observation)? {
+        // Keep the finite initial-keep conditioning results until hand end.
+        // Current posterior support below filters newly impossible worlds;
+        // rescanning the whole conditioning cache would add work each turn.
+        let hands = policy.opponent_hands_with_cache(
+            observation,
+            population.as_deref_mut().map(|p| &mut p.opponent_hands),
+        )?;
+        for (remaining, hand_weight) in hands {
             let initial =
                 std::array::from_fn(|rank| remaining[rank] + observation.opponent_played[rank]);
-            let variants = self.discards.conditioned(
-                opponent_role,
-                &initial,
-                &own_six,
-                observation.turn_rank,
-            )?;
-            let total: f64 = variants.iter().map(|(_, weight)| weight).sum();
+            let condition = || -> Result<DiscardSupport, String> {
+                let variants = self.discards.conditioned(
+                    opponent_role,
+                    &initial,
+                    &own_six,
+                    observation.turn_rank,
+                )?;
+                let total = variants.iter().map(|(_, weight)| weight).sum();
+                Ok(DiscardSupport { variants, total })
+            };
+            let fresh;
+            let support = if let Some(population) = &mut population {
+                use std::collections::hash_map::Entry;
+                match population.discards.entry(initial) {
+                    Entry::Occupied(entry) => {
+                        #[cfg(test)]
+                        {
+                            population.conditioning_hits += 1;
+                        }
+                        entry.into_mut()
+                    }
+                    Entry::Vacant(entry) => {
+                        #[cfg(test)]
+                        {
+                            population.conditioning_calls += 1;
+                        }
+                        entry.insert(condition()?)
+                    }
+                }
+            } else {
+                fresh = condition()?;
+                &fresh
+            };
+            let total = support.total;
+            let variants = &support.variants;
             if !total.is_finite() {
                 return Err("13.23 posterior hand has invalid opponent-discard support".into());
             }
@@ -160,9 +325,9 @@ impl PolicyAssets {
                     weight: hand_weight,
                 });
             } else {
-                worlds.extend(variants.into_iter().map(|(discards, weight)| World {
+                worlds.extend(variants.iter().map(|(discards, weight)| World {
                     remaining,
-                    discards,
+                    discards: *discards,
                     weight: hand_weight * weight / total,
                 }));
             }
@@ -475,6 +640,164 @@ mod tests {
             };
             assert_eq!(bits(actual), bits(expected));
         }
+    }
+
+    #[test]
+    fn hand_cache_preserves_world_order_weights_and_samples_through_complete_hands() {
+        let assets =
+            PolicyAssets::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let policy =
+            Model911Policy::new(Some(assets.beliefs.clone()), assets.factors, 0, 0).unwrap();
+        let caches = [HandCache::default(), HandCache::default()];
+        for (ranks, discards, cut) in [
+            ([0, 3, 4, 9], [1, 6], 10),
+            ([4, 4, 5, 9], [6, 12], 10),
+            ([0, 1, 2, 3], [9, 12], 8),
+            ([0, 1, 1, 1], [1, 4], 10),
+        ] {
+            let (mut observation, world) = opening();
+            observation.own_remaining = hand(&ranks);
+            observation.own_discards = hand(&discards);
+            observation.turn_rank = cut;
+            let mut state = world_state(&observation, &world).unwrap();
+            let mut observations = Vec::new();
+            while !state.complete {
+                let observation = Model132Observation::from_state(&state, state.current).unwrap();
+                observations.push((state.current.index(), observation));
+                state.apply(state.legal_actions()[0]).unwrap();
+            }
+            // Rewinds and alternating identities must also yield fresh-equivalent results.
+            for (actor, observation) in observations.iter().chain(observations.iter().rev()) {
+                let expected = assets.worlds(observation, &policy);
+                let actual = assets.worlds_for_hand(observation, &policy, Some(&caches[*actor]));
+                let expected = match expected {
+                    Ok(worlds) => worlds,
+                    Err(error) => {
+                        // Preserve the frozen policy's empty-support failure too.
+                        assert_eq!(actual.unwrap_err(), error);
+                        continue;
+                    }
+                };
+                let actual = actual.unwrap();
+                assert_eq!(actual.len(), expected.len());
+                for (a, b) in actual.iter().zip(&expected) {
+                    assert_eq!(
+                        (a.remaining, a.discards, a.weight.to_bits()),
+                        (b.remaining, b.discards, b.weight.to_bits())
+                    );
+                }
+                assert_eq!(
+                    sample_worlds(actual, LIVE_WORLD_BUDGET, observation_seed(observation))
+                        .unwrap(),
+                    sample_worlds(expected, LIVE_WORLD_BUDGET, observation_seed(observation))
+                        .unwrap()
+                );
+            }
+            assert!(caches.iter().any(|cache| cache
+                .0
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .conditioning_hits
+                > 0));
+        }
+        for cache in caches {
+            cache.clear();
+            assert!(cache.0.lock().unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn hand_cache_reuses_conditioning_but_recomputes_late_forecasts_exactly() {
+        let assets =
+            PolicyAssets::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let policy =
+            Model911Policy::new(Some(assets.beliefs.clone()), assets.factors, 0, 0).unwrap();
+        let caches = [HandCache::default(), HandCache::default()];
+        let (observation, world) = opening();
+        let mut state = world_state(&observation, &world).unwrap();
+        while !state.complete {
+            let observation = Model132Observation::from_state(&state, state.current).unwrap();
+            let cache = &caches[state.current.index()];
+            assets
+                .worlds_for_hand(&observation, &policy, Some(cache))
+                .unwrap();
+            if state.hands.iter().map(rank_count_total).sum::<u8>() <= 4 {
+                let expected = assets.forecast(&observation, LIVE_WORLD_BUDGET).unwrap();
+                let actual = assets
+                    .forecast_with_hand_cache(&observation, LIVE_WORLD_BUDGET, Some(cache))
+                    .unwrap();
+                assert_identical_forecasts(&actual, &expected);
+            }
+            state.apply(state.legal_actions()[0]).unwrap();
+        }
+        assert!(caches.iter().all(|cache| cache
+            .0
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .conditioning_hits
+            > 0));
+    }
+
+    #[test]
+    #[ignore = "full-budget multi-turn exact forecast and population timing probe"]
+    fn hand_cache_full_budget_equivalence_and_timing() {
+        let assets =
+            PolicyAssets::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let policy =
+            Model911Policy::new(Some(assets.beliefs.clone()), assets.factors, 0, 0).unwrap();
+        let caches = [HandCache::default(), HandCache::default()];
+        let (observation, world) = opening();
+        let mut state = world_state(&observation, &world).unwrap();
+        let mut report = Vec::new();
+        let mut turns = [0, 0];
+        let population_caches = [HandCache::default(), HandCache::default()];
+        while !state.complete {
+            let actor = state.current.index();
+            let observation = Model132Observation::from_state(&state, state.current).unwrap();
+            let mut population_seconds = [0.0, 0.0];
+            // Repeated fresh timing isolates the small card-population cost.
+            // The cached population is evaluated once per actual turn; the
+            // separate forecast cache has not been warmed on the current turn.
+            let mut fresh = Vec::new();
+            let start = std::time::Instant::now();
+            for _ in 0..100 {
+                fresh = assets.worlds(&observation, &policy).unwrap();
+            }
+            population_seconds[0] = start.elapsed().as_secs_f64() / 100.0;
+            let start = std::time::Instant::now();
+            let actual = assets
+                .worlds_for_hand(&observation, &policy, Some(&population_caches[actor]))
+                .unwrap();
+            population_seconds[1] = start.elapsed().as_secs_f64();
+            assert_eq!(actual, fresh);
+            let start = std::time::Instant::now();
+            let expected = assets.forecast(&observation, LIVE_WORLD_BUDGET).unwrap();
+            let uncached_seconds = start.elapsed().as_secs_f64();
+            let start = std::time::Instant::now();
+            let actual = assets
+                .forecast_with_hand_cache(&observation, LIVE_WORLD_BUDGET, Some(&caches[actor]))
+                .unwrap();
+            let cached_seconds = start.elapsed().as_secs_f64();
+            assert_identical_forecasts(&actual, &expected);
+            let cache = caches[actor].0.lock().unwrap();
+            let cache = cache.as_ref().unwrap();
+            report.push(serde_json::json!({"actor":actor,"actorTurn":turns[actor],
+                "populationSeconds":population_seconds,"uncachedSeconds":uncached_seconds,
+                "cachedSeconds":cached_seconds,"bitExact":true,"budget":LIVE_WORLD_BUDGET,
+                "conditionedKeeps":cache.discards.len(),"conditioningCalls":cache.conditioning_calls,
+                "conditioningHits":cache.conditioning_hits}));
+            turns[actor] += 1;
+            state.apply(state.legal_actions()[0]).unwrap();
+        }
+        fs::write(
+            std::env::temp_dir().join("model1323-hand-cache-equivalence.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .unwrap();
     }
 
     #[test]

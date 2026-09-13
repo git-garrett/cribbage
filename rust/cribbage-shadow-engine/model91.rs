@@ -491,6 +491,59 @@ struct Model91DecisionKey {
 
 type WeightedOpponentHands = Vec<([u8; RANKS], f64)>;
 
+/// Card-compatible support only. No posterior weights or actions survive a turn.
+/// Empirical prefix support is deliberately read afresh: a later prefix can
+/// admit a hand absent from an earlier sparse empirical row.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct OpponentHandCache {
+    physical: Option<(Model91Observation, Vec<[u8; RANKS]>)>,
+}
+
+impl OpponentHandCache {
+    fn physical_hands(
+        &mut self,
+        observation: &Model91Observation,
+        available: &[u8; RANKS],
+        size: u8,
+    ) -> Result<WeightedOpponentHands, String> {
+        let pruned = self.physical.as_ref().and_then(|(previous, hands)| {
+            if previous.role != observation.role
+                || previous.own_initial_keep() != observation.own_initial_keep()
+                || previous.own_discards != observation.own_discards
+                || previous.turn_rank != observation.turn_rank
+            {
+                return None;
+            }
+            let mut revealed = [0; RANKS];
+            for (rank, copies) in revealed.iter_mut().enumerate() {
+                *copies = observation.opponent_played[rank]
+                    .checked_sub(previous.opponent_played[rank])?;
+            }
+            Some(
+                hands
+                    .iter()
+                    .filter_map(|hand| {
+                        let mut remaining = *hand;
+                        for rank in 0..RANKS {
+                            remaining[rank] = remaining[rank].checked_sub(revealed[rank])?;
+                        }
+                        (rank_count_total(&remaining) == size)
+                            .then_some((remaining, rank_combination_count(&remaining, available)))
+                    })
+                    .collect::<WeightedOpponentHands>(),
+            )
+        });
+        // Subtracting the same public rank vector preserves enumeration order,
+        // including the floating-point accumulation and deterministic samples.
+        let hands = match pruned {
+            Some(hands) => hands,
+            None => RankHandIndex::shared().compatible_hands(available, size)?,
+        };
+        self.physical = Some((*observation, hands.iter().map(|(hand, _)| *hand).collect()));
+        Ok(hands)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Model91EvidenceWeightMode {
     Physical,
@@ -961,6 +1014,15 @@ impl Model91Policy {
         observation: &Model91Observation,
         opponent_rank_likelihood_ppm: &[u32; RANKS],
     ) -> Result<WeightedOpponentHands, String> {
+        self.opponent_hands_with_cache(observation, opponent_rank_likelihood_ppm, None)
+    }
+
+    pub(crate) fn opponent_hands_with_cache(
+        &mut self,
+        observation: &Model91Observation,
+        opponent_rank_likelihood_ppm: &[u32; RANKS],
+        cache: Option<&mut OpponentHandCache>,
+    ) -> Result<WeightedOpponentHands, String> {
         let available = opponent_available(observation)?;
         let size = observation.opponent_remaining_count()?;
         let opponent_role = match observation.role {
@@ -968,16 +1030,17 @@ impl Model91Policy {
             Role::Pone => Role::Dealer,
         };
         self.stats.posterior_requests = self.stats.posterior_requests.saturating_add(1);
-        let base = if rank_count_total(&observation.opponent_played) > 0 {
-            self.empirical
-                .as_ref()
-                .and_then(|beliefs| {
-                    beliefs.hands(opponent_role, observation.opponent_played, &available, size)
-                })
-                .map(Ok)
-                .unwrap_or_else(|| RankHandIndex::shared().compatible_hands(&available, size))?
+        let empirical = if rank_count_total(&observation.opponent_played) > 0 {
+            self.empirical.as_ref().and_then(|beliefs| {
+                beliefs.hands(opponent_role, observation.opponent_played, &available, size)
+            })
         } else {
-            RankHandIndex::shared().compatible_hands(&available, size)?
+            None
+        };
+        let base = match (empirical, cache) {
+            (Some(hands), _) => hands,
+            (None, Some(cache)) => cache.physical_hands(observation, &available, size)?,
+            (None, None) => RankHandIndex::shared().compatible_hands(&available, size)?,
         };
         let hands = reweight_opponent_hands(base, opponent_rank_likelihood_ppm);
         self.stats.posterior_hands_generated = self
@@ -1446,6 +1509,82 @@ mod tests {
             history: Vec::new(),
             winner: None,
             complete: false,
+        }
+    }
+
+    #[test]
+    fn physical_hand_cache_preserves_all_weights_through_public_plays_and_rewinds() {
+        let mut policy = Model91Policy::new(None, 0);
+        let neutral = [1_000_000; RANKS];
+        let mut caches = [OpponentHandCache::default(), OpponentHandCache::default()];
+        for offset in 0..13 {
+            let mut state = state(hand(&[(2, 1), (3, 1), (7, 1), (11, 1)]));
+            // Distinct hand identities exercise invalidation without relying on clear().
+            state.turn_rank = offset;
+            let first = Model91Observation::from_state(&state, state.current).unwrap();
+            while !state.complete {
+                let observation = Model91Observation::from_state(&state, state.current).unwrap();
+                let expected = policy.opponent_hands(&observation, &neutral).unwrap();
+                let actual = policy
+                    .opponent_hands_with_cache(
+                        &observation,
+                        &neutral,
+                        Some(&mut caches[state.current.index()]),
+                    )
+                    .unwrap();
+                assert_eq!(actual, expected);
+                state.apply(state.legal_actions()[0]).unwrap();
+            }
+            assert_eq!(
+                policy
+                    .opponent_hands_with_cache(&first, &neutral, Some(&mut caches[0]))
+                    .unwrap(),
+                policy.opponent_hands(&first, &neutral).unwrap(),
+            );
+        }
+    }
+
+    #[test]
+    fn hand_cache_does_not_freeze_sparse_empirical_support_or_history_weights() {
+        let mut beliefs = Model91EmpiricalBeliefs::default();
+        let first_prefix = hand(&[(2, 1)]);
+        let second_prefix = hand(&[(2, 1), (3, 1)]);
+        beliefs
+            .insert(
+                Role::Dealer,
+                first_prefix,
+                vec![(hand(&[(6, 1), (8, 1), (9, 1)]), 17)],
+            )
+            .unwrap();
+        let newly_admitted = hand(&[(7, 1), (11, 1)]);
+        beliefs
+            .insert(Role::Dealer, second_prefix, vec![(newly_admitted, 23)])
+            .unwrap();
+        let mut policy = Model91Policy::new(Some(beliefs), 0);
+        let mut cache = OpponentHandCache::default();
+        let mut observation = Model91Observation::from_state(
+            &state(hand(&[(2, 1), (3, 1), (7, 1), (11, 1)])),
+            PegSeat::Zero,
+        )
+        .unwrap();
+        let mut likelihoods = [1_000_000; RANKS];
+        for prefix in [
+            [0; RANKS],
+            first_prefix,
+            second_prefix,
+            hand(&[(2, 1), (3, 1), (7, 1)]),
+        ] {
+            observation.opponent_played = prefix;
+            likelihoods[11] /= 2;
+            let expected = policy.opponent_hands(&observation, &likelihoods).unwrap();
+            let actual = policy
+                .opponent_hands_with_cache(&observation, &likelihoods, Some(&mut cache))
+                .unwrap();
+            assert_eq!(actual, expected);
+            if prefix == second_prefix {
+                assert_eq!(actual.len(), 1);
+                assert_eq!(actual[0].0, newly_admitted);
+            }
         }
     }
 

@@ -336,6 +336,7 @@ impl Model911HandCache {
 #[derive(Clone, Default)]
 pub struct Model13HandCache {
     opponent_worlds: Arc<Mutex<Option<Model13OpponentWorlds>>>,
+    model1323: crate::model1323::HandCache,
 }
 
 impl std::fmt::Debug for Model13HandCache {
@@ -348,6 +349,7 @@ impl std::fmt::Debug for Model13HandCache {
         formatter
             .debug_struct("Model13HandCache")
             .field("opponent_worlds", &worlds)
+            .field("model1323", &self.model1323)
             .finish()
     }
 }
@@ -358,6 +360,7 @@ impl Model13HandCache {
     }
 
     pub fn clear(&self) {
+        self.model1323.clear();
         *self
             .opponent_worlds
             .lock()
@@ -990,7 +993,7 @@ fn recommend_peg(
         return recommend_peg_model1322(input, &legal, tables, model911_cache);
     }
     if input.model == MODEL_13_23 {
-        return recommend_peg_model1323(input, &legal, tables);
+        return recommend_peg_model1323(input, &legal, tables, model13_cache);
     }
     if input.model == MYRMIDON_5 {
         let card_id = crate::myrmidon::recommend_peg(&input.ai_hand, &input.plays, input.count)?;
@@ -1993,6 +1996,7 @@ fn recommend_peg_model1323(
     input: &DecisionInput,
     legal: &[Card],
     tables: &RuntimeTables,
+    hand_cache: Option<&Model13HandCache>,
 ) -> Result<Decision, String> {
     let relative = |player| {
         if player == PlayerKey::Ai {
@@ -2022,9 +2026,11 @@ fn recommend_peg_model1323(
         BoardModel::from_board_matrix(Arc::clone(tables.verified_board1323()?)),
         Some(tables.crib_rank()?),
     );
-    let forecasts = tables
-        .policy_assets1323()?
-        .forecast(&observation, LIVE_WORLD_BUDGET)?;
+    let forecasts = tables.policy_assets1323()?.forecast_with_hand_cache(
+        &observation,
+        LIVE_WORLD_BUDGET,
+        hand_cache.map(|cache| &cache.model1323),
+    )?;
     select_peg_model1323(input, legal, &forecasts, &mut evaluator)
 }
 
@@ -7560,6 +7566,54 @@ mod tests {
         assert_eq!(pruned[0][1], 1);
         assert_eq!(pruned[0][5], 0);
         assert_eq!(pruned[0][10], 1);
+    }
+
+    #[test]
+    fn model1323_hand_cache_survives_request_threads_and_clears_at_hand_end() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let mut input = model16_peg_input();
+        input.model = MODEL_13_23.to_string();
+        input.ai_score = 20;
+        input.human_score = 18;
+        input.ai_hand = cards_from_ids(&[4, 9]).unwrap();
+        input.ai_table = cards_from_ids(&[0, 3]).unwrap();
+        input.human_table = cards_from_ids(&[2, 5]).unwrap();
+        input.human_hand_count = 2;
+        input.own_discards = cards_from_ids(&[1, 6]).unwrap();
+        input.turn_card = Card::new(10).unwrap();
+        input.count = 14;
+        input.plays = cards_from_ids(&[0, 2, 3, 5]).unwrap();
+        input.public_history = vec![
+            PublicPegEvent::SelfPlay(0),
+            PublicPegEvent::OpponentPlay(2),
+            PublicPegEvent::SelfPlay(3),
+            PublicPegEvent::OpponentPlay(5),
+        ];
+        let cache = Model13HandCache::new();
+        for _ in 0..2 {
+            let input = input.clone();
+            let cache = cache.clone();
+            let root = root.clone();
+            std::thread::spawn(move || {
+                let expected = evaluate_decision(&input, &root).unwrap();
+                let actual =
+                    evaluate_decision_with_caches(&input, &root, None, Some(&cache)).unwrap();
+                assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+                assert!(cache.model1323.is_populated());
+            })
+            .join()
+            .unwrap();
+        }
+        assert!(cache.model1323.is_populated());
+        cache.clear();
+        assert!(!cache.model1323.is_populated());
     }
 
     #[test]

@@ -14,7 +14,7 @@ use crate::information_set::{
 };
 use crate::model91::{
     Model91Actor, Model91Choice, Model91EmpiricalBeliefs, Model91Observation, Model91Policy,
-    Model91PolicyStats,
+    Model91PolicyStats, OpponentHandCache,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
@@ -940,6 +940,14 @@ impl Model911Policy {
         &self,
         observation: &Model132Observation,
     ) -> Result<Vec<([u8; RANKS], f64)>, String> {
+        self.opponent_hands_with_cache(observation, None)
+    }
+
+    pub(crate) fn opponent_hands_with_cache(
+        &self,
+        observation: &Model132Observation,
+        cache: Option<&mut OpponentHandCache>,
+    ) -> Result<Vec<([u8; RANKS], f64)>, String> {
         observation.validate()?;
         let model91_observation = self.model91_observation(observation)?;
         let likelihoods = model1322_opponent_rank_likelihoods_with_known_cut(
@@ -948,7 +956,7 @@ impl Model911Policy {
             self.include_owned_dead_cards,
         )?;
         self.lock_inner()
-            .opponent_hands(&model91_observation, &likelihoods)
+            .opponent_hands_with_cache(&model91_observation, &likelihoods, cache)
     }
 }
 
