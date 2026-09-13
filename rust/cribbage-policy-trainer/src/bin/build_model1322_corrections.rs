@@ -9,6 +9,7 @@ use cribbage_shadow_engine::cards::{
     rank_counts_from_key,
 };
 use cribbage_shadow_engine::information_set::{PegSeat, RankPegAction};
+use cribbage_shadow_engine::joint_scores::JointScores;
 use cribbage_shadow_engine::model132::{
     adjusted_keep_weight, model911_initial_pone_lead, rollout_model1322_from_actor_screens,
     rollout_model132_world, screen_model1322_actor_context, trace_model911_pair,
@@ -29,6 +30,7 @@ const RANKS: usize = 13;
 const KEEP_COUNT: usize = 1_820;
 const ROLE_ROW_COUNT: usize = 165_295;
 const MAGIC: &[u8; 8] = b"M1322C01";
+const JOINT_MAGIC: &[u8; 8] = b"M1323C01";
 const VERSION: u32 = 1;
 const HEADER_BYTES: usize = 128;
 const ACCUMULATOR_BYTES: usize = 48;
@@ -64,6 +66,7 @@ struct BuildConfig {
     evidence_cache_outcome_limit: usize,
     future_cache_limit: usize,
     verify_first_worlds: usize,
+    joint_distributions: bool,
 }
 
 #[derive(Debug)]
@@ -72,14 +75,22 @@ struct MergeConfig {
     output: PathBuf,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct WeightedAccumulator {
     own_points_x_weight: u128,
     opponent_points_x_weight: u128,
     weight: u128,
+    joint: Option<JointScores>,
 }
 
 impl WeightedAccumulator {
+    fn new(joint: bool) -> Self {
+        Self {
+            joint: joint.then(JointScores::default),
+            ..Self::default()
+        }
+    }
+
     fn add(&mut self, own: u8, opponent: u8, weight: u128) -> Result<(), String> {
         self.own_points_x_weight = self
             .own_points_x_weight
@@ -93,10 +104,13 @@ impl WeightedAccumulator {
             .weight
             .checked_add(weight)
             .ok_or_else(|| "Model 13.22 total weight overflow".to_string())?;
+        if let Some(joint) = &mut self.joint {
+            joint.add(own, opponent, weight)?;
+        }
         Ok(())
     }
 
-    fn merge(&mut self, other: Self) -> Result<(), String> {
+    fn merge(&mut self, other: &Self) -> Result<(), String> {
         self.own_points_x_weight = self
             .own_points_x_weight
             .checked_add(other.own_points_x_weight)
@@ -109,6 +123,26 @@ impl WeightedAccumulator {
             .weight
             .checked_add(other.weight)
             .ok_or_else(|| "Model 13.22 merged weight overflow".to_string())?;
+        match (&mut self.joint, &other.joint) {
+            (Some(target), Some(source)) => target.merge(source)?,
+            (None, None) => (),
+            _ => return Err("cannot mix means-only and joint-distribution shards".into()),
+        }
+        Ok(())
+    }
+
+    fn validate_joint(&self) -> Result<(), String> {
+        if let Some(joint) = &self.joint {
+            if joint.moments()?
+                != [
+                    self.own_points_x_weight,
+                    self.opponent_points_x_weight,
+                    self.weight,
+                ]
+            {
+                return Err("joint score distribution differs from retained first moments".into());
+            }
+        }
         Ok(())
     }
 }
@@ -238,7 +272,7 @@ fn parse_command() -> Result<Command, String> {
                  --keep-prior FILE --discard-histograms FILE --baseline-pairs FILE \
                  --dealer-start N --dealer-count N [--pone-start N --pone-count N] [--resume] \
                  [--action-cache-limit N] [--evidence-cache-outcome-limit N] \
-                 [--future-cache-limit N] [--verify-first-worlds N]\n\
+                 [--future-cache-limit N] [--verify-first-worlds N] [--joint-distributions]\n\
                  build_model1322_corrections merge --shards DIR --output DIR"
             );
             process::exit(0);
@@ -263,6 +297,7 @@ fn parse_build(args: &[String]) -> Result<BuildConfig, String> {
     let mut evidence_cache_outcome_limit = 500_000_usize;
     let mut future_cache_limit = 3_000_000_usize;
     let mut verify_first_worlds = 0_usize;
+    let mut joint_distributions = false;
     let mut index = 0_usize;
     while index < args.len() {
         let flag = &args[index];
@@ -295,6 +330,7 @@ fn parse_build(args: &[String]) -> Result<BuildConfig, String> {
                 verify_first_worlds = parse_usize(&value(&mut index)?, flag)?
             }
             "--resume" => resume = true,
+            "--joint-distributions" => joint_distributions = true,
             other => return Err(format!("unknown Model 13.22 build argument {other}")),
         }
     }
@@ -316,6 +352,7 @@ fn parse_build(args: &[String]) -> Result<BuildConfig, String> {
         evidence_cache_outcome_limit,
         future_cache_limit,
         verify_first_worlds,
+        joint_distributions,
     };
     validate_range("dealer", config.dealer_start, config.dealer_count)?;
     validate_range("pone", config.pone_start, config.pone_count)?;
@@ -414,8 +451,8 @@ fn build(config: &BuildConfig) -> Result<(), String> {
         }
         PartialAsset {
             state: expected_state,
-            dealer: vec![WeightedAccumulator::default(); ROLE_ROW_COUNT],
-            pone: vec![WeightedAccumulator::default(); ROLE_ROW_COUNT],
+            dealer: vec![WeightedAccumulator::new(config.joint_distributions); ROLE_ROW_COUNT],
+            pone: vec![WeightedAccumulator::new(config.joint_distributions); ROLE_ROW_COUNT],
             pone_lead_masks: vec![0_u16; ROLE_ROW_COUNT * RANKS],
         }
     };
@@ -478,10 +515,12 @@ fn build(config: &BuildConfig) -> Result<(), String> {
         &config.output.join(MANIFEST_FILE),
         &json!({
             "schemaVersion": 1,
-            "modelVersion": "13.22",
+            "modelVersion": partial.state.model_version,
             "status": "complete",
             "architecture": "pair-oriented Model 9.11 trace plus factorized actor dead-card screens and changed-suffix replay",
-            "durableOutput": "weighted terminal six-card/discard summaries and pone lead cut masks only",
+            "durableOutput": if config.joint_distributions { "exact joint own/opponent terminal pegging distributions, first moments, and diagnostic pone lead masks" } else { "weighted terminal six-card/discard summaries and pone lead cut masks only" },
+            "offlineObjective": "net pegging points; executable Model911Policy with legal-information dead-card and decline inference",
+            "boardConditioning": false,
             "dealerRange": {"start": config.dealer_start, "count": config.dealer_count},
             "poneRange": {"start": config.pone_start, "count": config.pone_count},
             "roleRows": ROLE_ROW_COUNT,
@@ -978,7 +1017,12 @@ fn baseline_outcome(values: &[u16], dealer_id: usize, pone_id: usize) -> Result<
 fn new_state(config: &BuildConfig, checksums: &[String; 5]) -> BuildState {
     BuildState {
         schema_version: 1,
-        model_version: "13.22".to_string(),
+        model_version: if config.joint_distributions {
+            "13.23"
+        } else {
+            "13.22"
+        }
+        .to_string(),
         state: "running".to_string(),
         dealer_start: config.dealer_start,
         dealer_count: config.dealer_count,
@@ -1049,7 +1093,7 @@ fn write_checkpoint(
         &config.output.join(STATUS_FILE),
         &json!({
             "schemaVersion": 1,
-            "modelVersion": "13.22",
+            "modelVersion": state.model_version,
             "status": state.state,
             "dealerStart": state.dealer_start,
             "dealerCount": state.dealer_count,
@@ -1113,6 +1157,16 @@ fn write_partial(path: &Path, partial: &PartialAsset) -> Result<(), String> {
             .write_all(&mask.to_le_bytes())
             .map_err(|error| format!("write {} failed: {error}", temporary.display()))?;
     }
+    if partial.state.model_version == "13.23" {
+        for value in partial.dealer.iter().chain(&partial.pone) {
+            value.validate_joint()?;
+            value
+                .joint
+                .as_ref()
+                .ok_or("13.23 row is missing its joint distribution")?
+                .write(&mut writer)?;
+        }
+    }
     writer
         .flush()
         .map_err(|error| format!("flush {} failed: {error}", temporary.display()))?;
@@ -1129,13 +1183,17 @@ fn read_partial(path: &Path) -> Result<PartialAsset, String> {
         HEADER_BYTES + ROLE_ROW_COUNT * 2 * ACCUMULATOR_BYTES + ROLE_ROW_COUNT * RANKS * 2;
     let mut bytes =
         fs::read(path).map_err(|error| format!("read {} failed: {error}", path.display()))?;
-    if bytes.len() != expected {
+    if bytes.len() < HEADER_BYTES {
+        return Err("truncated correction header".into());
+    }
+    let state = read_header(&bytes[..HEADER_BYTES])?;
+    let has_joint = state.model_version == "13.23";
+    if bytes.len() < expected || (!has_joint && bytes.len() != expected) {
         return Err(format!(
             "Model 13.22 partial has {} bytes; expected {expected}",
             bytes.len()
         ));
     }
-    let state = read_header(&bytes[..HEADER_BYTES])?;
     let mut offset = HEADER_BYTES;
     let mut read_accumulators = || -> Vec<WeightedAccumulator> {
         (0..ROLE_ROW_COUNT)
@@ -1150,16 +1208,27 @@ fn read_partial(path: &Path) -> Result<PartialAsset, String> {
                     own_points_x_weight: own,
                     opponent_points_x_weight: opponent,
                     weight,
+                    joint: None,
                 }
             })
             .collect()
     };
-    let dealer = read_accumulators();
-    let pone = read_accumulators();
-    let pone_lead_masks = bytes[offset..]
+    let mut dealer = read_accumulators();
+    let mut pone = read_accumulators();
+    let pone_lead_masks = bytes[offset..expected]
         .chunks_exact(2)
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
         .collect();
+    if has_joint {
+        let mut reader = &bytes[expected..];
+        for value in dealer.iter_mut().chain(&mut pone) {
+            value.joint = Some(JointScores::read(&mut reader)?);
+            value.validate_joint()?;
+        }
+        if !reader.is_empty() {
+            return Err("trailing bytes in 13.23 joint distributions".into());
+        }
+    }
     bytes.clear();
     Ok(PartialAsset {
         state,
@@ -1178,7 +1247,11 @@ fn write_header(writer: &mut impl Write, state: &BuildState) -> Result<(), Strin
         parse_checksum(&state.baseline_checksum)?,
     ];
     writer
-        .write_all(MAGIC)
+        .write_all(if state.model_version == "13.23" {
+            JOINT_MAGIC
+        } else {
+            MAGIC
+        })
         .and_then(|_| writer.write_all(&VERSION.to_le_bytes()))
         .and_then(|_| writer.write_all(&(ROLE_ROW_COUNT as u32).to_le_bytes()))
         .and_then(|_| writer.write_all(&(state.dealer_start as u32).to_le_bytes()))
@@ -1210,7 +1283,10 @@ fn write_header(writer: &mut impl Write, state: &BuildState) -> Result<(), Strin
 }
 
 fn read_header(bytes: &[u8]) -> Result<BuildState, String> {
-    if bytes.len() != HEADER_BYTES || &bytes[..8] != MAGIC || read_u32(bytes, 8)? != VERSION {
+    if bytes.len() != HEADER_BYTES
+        || (&bytes[..8] != MAGIC && &bytes[..8] != JOINT_MAGIC)
+        || read_u32(bytes, 8)? != VERSION
+    {
         return Err("invalid Model 13.22 correction header".to_string());
     }
     if read_u32(bytes, 12)? as usize != ROLE_ROW_COUNT {
@@ -1219,7 +1295,12 @@ fn read_header(bytes: &[u8]) -> Result<BuildState, String> {
     let checksum = |offset| checksum_string(read_u64(bytes, offset).unwrap());
     Ok(BuildState {
         schema_version: 1,
-        model_version: "13.22".to_string(),
+        model_version: if &bytes[..8] == JOINT_MAGIC {
+            "13.23"
+        } else {
+            "13.22"
+        }
+        .to_string(),
         state: if read_u32(bytes, 32)? == read_u32(bytes, 20)? {
             "complete".to_string()
         } else {
@@ -1253,13 +1334,19 @@ fn merge(config: &MergeConfig) -> Result<(), String> {
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.is_dir() && path.join(PARTIAL_FILE).is_file())
-        .map(|path| read_partial(&path.join(PARTIAL_FILE)))
+        .map(|path| -> Result<_, String> {
+            let mut header = [0_u8; HEADER_BYTES];
+            File::open(path.join(PARTIAL_FILE))
+                .and_then(|mut f| f.read_exact(&mut header))
+                .map_err(|e| e.to_string())?;
+            Ok((path, read_header(&header)?))
+        })
         .collect::<Result<Vec<_>, _>>()?;
-    shards.sort_by_key(|partial| partial.state.dealer_start);
+    shards.sort_by_key(|(_, state)| state.dealer_start);
     if shards.is_empty() {
         return Err("no Model 13.22 correction shards found".to_string());
     }
-    let first = shards[0].state.clone();
+    let first = shards[0].1.clone();
     let mut next = 0_usize;
     let mut merged = PartialAsset {
         state: BuildState {
@@ -1271,8 +1358,8 @@ fn merge(config: &MergeConfig) -> Result<(), String> {
             state: "complete".to_string(),
             ..first.clone()
         },
-        dealer: vec![WeightedAccumulator::default(); ROLE_ROW_COUNT],
-        pone: vec![WeightedAccumulator::default(); ROLE_ROW_COUNT],
+        dealer: vec![WeightedAccumulator::new(first.model_version == "13.23"); ROLE_ROW_COUNT],
+        pone: vec![WeightedAccumulator::new(first.model_version == "13.23"); ROLE_ROW_COUNT],
         pone_lead_masks: vec![0_u16; ROLE_ROW_COUNT * RANKS],
     };
     merged.state.compatible_pairs = 0;
@@ -1282,7 +1369,8 @@ fn merge(config: &MergeConfig) -> Result<(), String> {
     merged.state.exact_joint_worlds = 0;
     merged.state.verified_worlds = 0;
     merged.state.elapsed_seconds = 0.0;
-    for shard in &shards {
+    for (path, _) in &shards {
+        let shard = read_partial(&path.join(PARTIAL_FILE))?;
         validate_merge_shard(&shard.state, &first, next)?;
         next += shard.state.dealer_count;
         merged.state.compatible_pairs += shard.state.compatible_pairs;
@@ -1295,8 +1383,8 @@ fn merge(config: &MergeConfig) -> Result<(), String> {
             .elapsed_seconds
             .max(shard.state.elapsed_seconds);
         for index in 0..ROLE_ROW_COUNT {
-            merged.dealer[index].merge(shard.dealer[index])?;
-            merged.pone[index].merge(shard.pone[index])?;
+            merged.dealer[index].merge(&shard.dealer[index])?;
+            merged.pone[index].merge(&shard.pone[index])?;
         }
         merge_lead_masks(&mut merged.pone_lead_masks, &shard.pone_lead_masks)?;
     }
@@ -1306,13 +1394,17 @@ fn merge(config: &MergeConfig) -> Result<(), String> {
         ));
     }
     validate_merged_rows(&merged)?;
-    let output_path = config.output.join(MERGED_FILE);
+    let output_path = config.output.join(if first.model_version == "13.23" {
+        "model1323-corrections.bin"
+    } else {
+        MERGED_FILE
+    });
     write_partial(&output_path, &merged)?;
     atomic_json(
         &config.output.join(MANIFEST_FILE),
         &json!({
             "schemaVersion": 1,
-            "modelVersion": "13.22",
+            "modelVersion": merged.state.model_version,
             "status": "complete",
             "shards": shards.len(),
             "dealerKeeps": KEEP_COUNT,
@@ -1329,6 +1421,8 @@ fn merge(config: &MergeConfig) -> Result<(), String> {
             "rowOrder": "canonical six-card rank hand, canonical contained two-card discard; dealer and pone arrays use the same 165,295 row order",
             "poneLeadMasks": "thirteen u16 masks per pone row; bit c marks cut rank c",
             "durableObservationActionTable": false,
+            "jointDistributions": first.model_version == "13.23",
+            "offlineObjective": "net pegging points; unchanged Model911Policy legal-information continuation",
         }),
     )?;
     Ok(())
@@ -1340,6 +1434,7 @@ fn validate_merge_shard(
     expected_start: usize,
 ) -> Result<(), String> {
     if actual.state != "complete"
+        || actual.model_version != first.model_version
         || actual.completed_dealer_keeps != actual.dealer_count
         || actual.dealer_start != expected_start
         || actual.pone_start != 0
@@ -1591,5 +1686,57 @@ mod tests {
         assert_eq!(value.weight, 16);
         assert_eq!(value.own_points_x_weight, 82);
         assert_eq!(value.opponent_points_x_weight, 78);
+    }
+
+    #[test]
+    fn joint_mode_retains_legacy_moments_and_merges_exactly() {
+        let mut old = WeightedAccumulator::default();
+        let mut joint = WeightedAccumulator::new(true);
+        for (own, opponent, weight) in [(0, 4, 17), (4, 0, 17), (7, 3, 91)] {
+            old.add(own, opponent, weight).unwrap();
+            joint.add(own, opponent, weight).unwrap();
+        }
+        joint.validate_joint().unwrap();
+        assert_eq!(joint.joint.as_ref().unwrap().bins().count(), 3);
+        assert_eq!(joint.weight, old.weight);
+        assert_eq!(joint.own_points_x_weight, old.own_points_x_weight);
+        assert_eq!(joint.opponent_points_x_weight, old.opponent_points_x_weight);
+        let mut merged = WeightedAccumulator::new(true);
+        merged.merge(&joint).unwrap();
+        merged.merge(&joint).unwrap();
+        merged.validate_joint().unwrap();
+        assert_eq!(merged.weight, old.weight * 2);
+        assert!(merged.merge(&old).is_err());
+    }
+
+    #[test]
+    fn joint_checkpoint_roundtrip_and_resume_format_guard() {
+        let mut header = [0_u8; HEADER_BYTES];
+        header[..8].copy_from_slice(JOINT_MAGIC);
+        header[8..12].copy_from_slice(&VERSION.to_le_bytes());
+        header[12..16].copy_from_slice(&(ROLE_ROW_COUNT as u32).to_le_bytes());
+        header[20..24].copy_from_slice(&1_u32.to_le_bytes());
+        header[28..32].copy_from_slice(&1_u32.to_le_bytes());
+        header[32..36].copy_from_slice(&1_u32.to_le_bytes());
+        let state = read_header(&header).unwrap();
+        let mut asset = PartialAsset {
+            state,
+            dealer: vec![WeightedAccumulator::new(true); ROLE_ROW_COUNT],
+            pone: vec![WeightedAccumulator::new(true); ROLE_ROW_COUNT],
+            pone_lead_masks: vec![0; ROLE_ROW_COUNT * RANKS],
+        };
+        asset.dealer[17].add(0, 4, 17).unwrap();
+        asset.dealer[17].add(4, 0, 17).unwrap();
+        asset.pone[92].add(7, 8, 49).unwrap();
+        let path = env::temp_dir().join(format!("model1323-checkpoint-test-{}.bin", process::id()));
+        write_partial(&path, &asset).unwrap();
+        let restored = read_partial(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+        assert_eq!(restored.dealer, asset.dealer);
+        assert_eq!(restored.pone, asset.pone);
+        validate_state(&restored.state, &asset.state).unwrap();
+        let mut wrong_format = asset.state.clone();
+        wrong_format.model_version = "13.22".into();
+        assert!(validate_state(&restored.state, &wrong_format).is_err());
     }
 }
