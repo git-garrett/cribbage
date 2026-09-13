@@ -444,10 +444,19 @@ fn build(config: &BuildConfig) -> Result<(), String> {
         partial
     } else {
         if partial_path.exists() || checkpoint_path.exists() {
-            return Err(format!(
-                "{} contains a correction build; use --resume or a new directory",
-                config.output.display()
-            ));
+            if !config.resume || partial_path.exists() {
+                return Err(format!(
+                    "{} contains a correction build; use --resume or a new directory",
+                    config.output.display()
+                ));
+            }
+            // Before the first dealer row completes only the initial JSON
+            // exists. It contains no committed outcomes, but its provenance
+            // must match before restarting that row. Never discard progress.
+            let initial: BuildState =
+                serde_json::from_slice(&fs::read(&checkpoint_path).map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?;
+            validate_initial_checkpoint(&initial, &expected_state)?;
         }
         PartialAsset {
             state: expected_state,
@@ -1061,6 +1070,17 @@ fn validate_state(actual: &BuildState, expected: &BuildState) -> Result<(), Stri
         return Err(
             "Model 13.22 resume configuration does not match its partial asset".to_string(),
         );
+    }
+    Ok(())
+}
+
+fn validate_initial_checkpoint(actual: &BuildState, expected: &BuildState) -> Result<(), String> {
+    validate_state(actual, expected)?;
+    if actual.completed_dealer_keeps != 0
+        || actual.compatible_pairs != 0
+        || actual.state != "running"
+    {
+        return Err("binary checkpoint missing for committed correction progress".into());
     }
     Ok(())
 }
@@ -1738,5 +1758,11 @@ mod tests {
         let mut wrong_format = asset.state.clone();
         wrong_format.model_version = "13.22".into();
         assert!(validate_state(&restored.state, &wrong_format).is_err());
+        assert!(validate_initial_checkpoint(&restored.state, &asset.state).is_err());
+        let mut initial = asset.state.clone();
+        initial.state = "running".into();
+        initial.completed_dealer_keeps = 0;
+        validate_initial_checkpoint(&initial, &initial).unwrap();
+        assert!(validate_initial_checkpoint(&initial, &wrong_format).is_err());
     }
 }

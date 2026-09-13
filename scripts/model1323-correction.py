@@ -97,6 +97,33 @@ def freeze(args):
         "sourceArchiveSha256": digest(args.output / "source.tar")})
 
 
+def validate_runtime(runtime):
+    manifest = json.loads((runtime / "runtime-manifest.json").read_text())
+    if manifest.get("modelVersion") != "13.23":
+        raise ValueError("invalid frozen runtime manifest")
+    for name, expected in manifest["files"].items():
+        if digest(runtime / name) != expected:
+            raise ValueError(f"frozen runtime file changed: {name}")
+    # The old asset independently records the exact five policy/input checksums.
+    with (runtime / "assets/model1322-reference-means.bin").open("rb") as source:
+        header = source.read(128)
+    return {field: f"{value:016x}" for field, value in zip(CHECKSUMS, struct.unpack_from("<5Q", header, 40))}
+
+
+def bind_output(runtime, output, tasks):
+    output.mkdir(parents=True, exist_ok=True)
+    path = output / "producer.json"
+    expected = {"runtimeManifestSha256": digest(runtime / "runtime-manifest.json"),
+                "tasks": [[name, list(bounds)] for name, bounds in tasks]}
+    if path.exists():
+        if json.loads(path.read_text()) != expected:
+            raise ValueError("output producer/runtime or task ranges changed; refusing mixed-build resume")
+    else:
+        if any((output / name / "checkpoint.json").exists() or (output / name / "partial.bin").exists() for name, _ in tasks):
+            raise ValueError("existing correction output has no producer identity")
+        atomic_json(path, expected)
+
+
 def command(runtime, output, bounds, joint=True):
     result = [str(runtime / "bin/build_model1322_corrections"), "build", "--output", str(output)]
     for flag, name in INPUTS.items():
@@ -107,12 +134,12 @@ def command(runtime, output, bounds, joint=True):
                "--future-cache-limit", "3000000", "--verify-first-worlds", "32"]
     if joint:
         result += ["--joint-distributions"]
-    if (output / "partial.bin").exists():
+    if (output / "partial.bin").exists() or (output / "checkpoint.json").exists():
         result += ["--resume"]
     return result
 
 
-def checkpoint(directory, bounds):
+def checkpoint(directory, bounds, expected_checksums):
     path = directory / "checkpoint.json"
     if not path.exists():
         return None
@@ -120,16 +147,42 @@ def checkpoint(directory, bounds):
     actual = tuple(value.get(key) for key in ["dealerStart", "dealerCount", "poneStart", "poneCount"])
     if value.get("modelVersion") != "13.23" or actual != bounds:
         raise ValueError(f"incompatible checkpoint: {directory}")
+    if any(value.get(field) != expected for field, expected in expected_checksums.items()):
+        raise ValueError(f"checkpoint input provenance changed: {directory}")
+    partial = directory / "partial.bin"
+    if partial.exists():
+        if partial.stat().st_size < PREFIX_BYTES + 2 * ROWS * 4:
+            raise ValueError(f"truncated binary checkpoint: {directory}")
+        with partial.open("rb") as source:
+            header = source.read(128)
+        if len(header) != 128 or header[:8] != b"M1323C01":
+            raise ValueError(f"invalid binary checkpoint: {directory}")
+        version, rows, start, count, pone, pone_count, done = struct.unpack_from("<7I", header, 8)
+        if (version, rows) != (1, ROWS) or (start, count, pone, pone_count) != bounds or done > count:
+            raise ValueError(f"binary checkpoint range differs: {directory}")
+        checksums = {field: f"{number:016x}" for field, number in zip(CHECKSUMS, struct.unpack_from("<5Q", header, 40))}
+        if checksums != expected_checksums:
+            raise ValueError(f"binary checkpoint provenance differs: {directory}")
+        # Binary snapshot is authoritative if interruption preceded JSON update.
+        value["completedDealerKeeps"] = done
+        value["state"] = "complete" if done == count else "running"
+        for field, number in zip(COUNTERS[:5], struct.unpack_from("<5Q", header, 80)):
+            value[field] = number
+        value["elapsedSeconds"], = struct.unpack_from("<d", header, 120)
+    elif value.get("completedDealerKeeps") != 0 or value.get("state") == "complete":
+        raise ValueError(f"missing binary checkpoint for committed work: {directory}")
     return value
 
 
 def run_pool(runtime, output, workers, tasks):
     if not 1 <= workers <= 12:
         raise ValueError("workers must be between 1 and 12")
+    expected_checksums = validate_runtime(runtime)
+    bind_output(runtime, output, tasks)
     output.mkdir(parents=True, exist_ok=True)
     pending = []
     for name, bounds in tasks:
-        value = checkpoint(output / name, bounds)
+        value = checkpoint(output / name, bounds, expected_checksums)
         if not value or value["state"] != "complete" or value["completedDealerKeeps"] != bounds[1]:
             pending.append((name, bounds))
     running = {}
@@ -146,7 +199,7 @@ def run_pool(runtime, output, workers, tasks):
                 process.terminate()
 
     def summary(complete=False):
-        states = [checkpoint(output / name, bounds) for name, bounds in tasks]
+        states = [checkpoint(output / name, bounds, expected_checksums) for name, bounds in tasks]
         states = [value for value in states if value]
         for field in CHECKSUMS:
             if len({value[field] for value in states}) > 1:
@@ -210,10 +263,12 @@ def run_pool(runtime, output, workers, tasks):
 
 
 def probe(args):
-    # Identical mixed-rank work at every concurrency. No random seeds or changing workloads.
-    tasks = [(f"sample-{i:02}", (45 + i * 150, 1, (317 + i * 127) % 1780, 12)) for i in range(12)]
+    # One identical tile per worker: every measurement has one saturated wave,
+    # the same work per process and the same cache warmup. A fixed task count
+    # would unfairly penalize core counts with an underfilled final wave.
     results = []
     for workers in [4, 8, 6, 10]:
+        tasks = [(f"sample-{i:02}", (840, 1, 770, 36)) for i in range(workers)]
         directory = args.output / f"workers-{workers}"
         if directory.exists():
             raise ValueError("core measurements require fresh output, not resumed timing")
@@ -236,6 +291,26 @@ def probe(args):
 
 def smoke(args):
     bounds = (840, 1, 790, 12)
+    args.output.mkdir(parents=True, exist_ok=True)
+    validate_runtime(args.runtime)
+    bind_output(args.runtime, args.output, [("joint", bounds)])
+    joint_output = args.output / "joint"
+    # Reproduce an interruption after the initial JSON but before any binary
+    # checkpoint. Restart must neither reject it nor invent completed work.
+    if not (joint_output / "checkpoint.json").exists():
+        with (args.output / "interruption.log").open("ab") as log:
+            process = subprocess.Popen(command(args.runtime, joint_output, bounds), stdout=log, stderr=subprocess.STDOUT)
+            deadline = time.monotonic() + 30
+            try:
+                while not (joint_output / "checkpoint.json").exists():
+                    if process.poll() is not None or time.monotonic() > deadline:
+                        raise RuntimeError("smoke did not reach its initial checkpoint")
+                    time.sleep(0.01)
+            finally:
+                process.terminate()
+                process.wait(timeout=5)
+        if (joint_output / "partial.bin").exists():
+            raise RuntimeError("smoke interruption occurred too late to test initial restart")
     run_pool(args.runtime, args.output, 1, [("joint", bounds)])
     old_output = args.output / "legacy"
     argv = command(args.runtime, old_output, bounds, joint=False)
