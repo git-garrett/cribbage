@@ -1,7 +1,7 @@
 # Model 13.23 playing-strategy correction
 
-Status: correction-only distribution rebuild running; experimental WP runtime
-built and contract-tested. Full-asset and playing-strength tests are pending.
+Status: exhaustive experimental WP runtime; the separately supervised
+correction build is unchanged. Full-asset and playing-strength tests are pending.
 
 ## Required board evaluator
 
@@ -91,6 +91,9 @@ of the regenerated outcomes; it does not reconstruct distributions from means.
 - WP, not net points, determines contested choices, including endgame fixtures.
 - Board evaluation matches Model 13.215 for the same ordered outcome inputs.
 - Probability calculation integrates joint outcomes, not just their means.
+- Production pegging never samples hidden worlds. A candidate may stop only
+  when a conservative WP upper bound proves it inferior to a fully evaluated
+  candidate. Ties retain the existing immediate-points/rank tie break.
 - No persistent observation-to-action table or exhaustive pegging-path graph.
 - Existing 13.22 and 13.215 behavior remains frozen for controlled comparisons.
 
@@ -145,11 +148,16 @@ weights, whereas the builder's outer aggregation uses calibrated keep priors.
 This retains the chooser's established posterior; it is not an assertion that
 the live outer population and offline aggregation have identical weights.
 
-Large populations use 512 common deterministic stratified world samples across
-all candidates. Four or fewer remaining cards use the full population. This is
-a sampling approximation, not exhaustive live analysis or proof of playing
-strength. All continuation/action/evidence memoization is decision-local. No
-persistent observation-to-action table or exhaustive path graph is introduced.
+Production now uses the complete weighted hidden-hand/discard population at
+every decision. The former 512-world cap is removed. Finite budgets remain only
+on the explicit diagnostic forecast interface, not the production choice path.
+The first candidate is fully evaluated. Later candidates may stop only when
+their accumulated weighted WP plus all remaining probability mass, with a
+conservative floating-point allowance, is strictly below a completed candidate.
+Every retained candidate has its complete histogram in the original accumulation
+order; the selected move, its WP, EV, and tie breaks match unpruned enumeration.
+All continuation/action/evidence memoization remains decision-local. No persistent
+observation-to-action table or exhaustive path graph is introduced.
 
 As in 13.215, the discard evaluator combines terminal pegging totals with
 separately forecast hand/crib outcomes; the asset does not retain cut/outcome
@@ -165,6 +173,71 @@ The engine can be compiled and contract-tested before the full asset exists.
 A full-asset integration test and 13.23-versus-13.215 playing-strength benchmark
 must follow successful asset verification; they must not be reported as already
 completed.
+
+### Exhaustive execution revision, 2026-09-14
+
+The implementation constraint is the existing builder policy and verified
+13.215 board matrix, with no new learned evaluator, strategy change, sampled
+population, time-triggered approximation, or hidden-information minimax. The
+wall-clock target is roughly 10 times 13.215's opening-lead time on matched
+hardware/workloads, not a strict per-move ratio. Fractional-second differences
+on subsequent moves are acceptable; report their absolute costs separately. Playing
+strength at least matching 13.215 is a release gate, not a consequence of exact
+enumeration. Production remains 13.215 pending full-asset paired validation.
+
+Exact execution improvements:
+
+- Share one posterior-weight calculation across all candidate cards inside a
+  policy choice. Iterate only ranks present in each evidence hand while keeping
+  the original multiplication/division order and bit-identical weights.
+- Compute terminal average-continuation values directly instead of hashing and
+  storing them. Retain the existing bounded action/evidence/continuation caches;
+  larger caches and bypassing one-card memo entries were measured and rejected.
+- Discard only provably inferior candidate forecasts using the WP bound above.
+  It does not return a partial winner or omit unresolved probability mass.
+
+The existing hand-owned card-population caches remain separate for the two
+benchmark players. No evaluated continuation or chosen-action table is retained
+across decisions. The builder executable, frozen inputs, and running job are
+not changed by this revision.
+
+Reproducible foreground release probes (run through `scripts/run-quiet.sh`):
+
+- `model1323::tests::exhaustive_opening_cost_probe`: unpruned full-population
+  policy cost and cache counters. `MODEL1323_PROBE_CACHES` optionally supplies
+  three diagnostic cache limits; production limits are not configurable here.
+- `model::tests::model1323_exhaustive_native_reference_equivalence`: full
+  histogram versus production bound, comparing move/WP/EV bits at identical
+  opening, reply, late, immediate-count-out, and close-race observations.
+- `decision::tests::model1323_exhaustive_engine_played_hand_cost`: 13.23 actually
+  plays both sides through the hand; both engines are timed at those identical
+  positions with independent per-player caches. `MODEL1323_COST_FIXTURE` accepts
+  `opening`, `paired-fives`, `low-run`, `high-cards`, or `close-race`;
+  `MODEL1323_COST_REPEATS` defaults to three. Assets are warmed outside timing,
+  caches are fresh at hand start, and evaluator timing order alternates.
+
+These are cost/equivalence probes, not playing-strength benchmarks or a measured
+production p95. Local macOS ARM64 ratios must be checked on the production Linux
+x86-64 host before promotion. The earlier 2026-09-13 sampled timings below are
+historical and do not describe this exhaustive execution path.
+
+Warm native opening-lead medians, three repetitions per fixture, final sparse
+weighting implementation; both engines receive identical game positions:
+
+| Fixture | 13.215 | Exhaustive 13.23 | Ratio |
+| --- | ---: | ---: | ---: |
+| Opening | 0.562 s | 5.613 s | 9.99x |
+| Paired fives | 0.225 s | 1.925 s | 8.57x |
+| Low run | 1.111 s | 9.714 s | 8.75x |
+| High cards | 0.294 s | 4.257 s | 14.49x |
+| Close race | 0.487 s | 5.029 s | 10.32x |
+
+The high-card case is above 10x and must not be hidden by an aggregate average.
+This is approximately the requested opening-lead cost envelope, not a hard
+10x guarantee. Later decisions in these five fixtures were at most 0.520 s;
+some have larger ratios because 13.215 takes only milliseconds there. Complete
+two-sided pegging-decision totals had fixture medians of 2.086--10.401 s. These
+are not whole-game times and do not include discard evaluation or asset startup.
 
 ### Engine validation, 2026-09-13
 

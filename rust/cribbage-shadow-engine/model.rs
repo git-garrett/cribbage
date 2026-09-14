@@ -29,9 +29,7 @@ use crate::information_set::{
 use crate::model132::{
     Model1322DeclineFactors, Model132KeepPairTable, Model132Observation, Model911Policy,
 };
-use crate::model1323::{
-    PolicyAssets as Model1323PolicyAssets, CORRECTION_INPUT_CHECKSUMS, LIVE_WORLD_BUDGET,
-};
+use crate::model1323::{PolicyAssets as Model1323PolicyAssets, CORRECTION_INPUT_CHECKSUMS};
 use crate::model162::Model162ActionScorer;
 use crate::model90::Model90DiscardTable;
 use crate::model91::{Model91Actor, Model91EmpiricalBeliefs, Model91Observation, Model91Policy};
@@ -1992,12 +1990,7 @@ fn recommend_discard_model1323_with_assets(
     })
 }
 
-fn recommend_peg_model1323(
-    input: &DecisionInput,
-    legal: &[Card],
-    tables: &RuntimeTables,
-    hand_cache: Option<&Model13HandCache>,
-) -> Result<Decision, String> {
+fn model1323_observation(input: &DecisionInput) -> Model132Observation {
     let relative = |player| {
         if player == PlayerKey::Ai {
             InfoActor::SelfPlayer
@@ -2005,7 +1998,7 @@ fn recommend_peg_model1323(
             InfoActor::Opponent
         }
     };
-    let observation = Model132Observation {
+    Model132Observation {
         role: input.role,
         my_score: input.ai_score,
         opponent_score: input.human_score,
@@ -2019,17 +2012,31 @@ fn recommend_peg_model1323(
         go_player: input.go_player.map(relative),
         last_player: input.last_player.map(relative),
         public_history: input.public_history.clone(),
-    };
+    }
+}
+
+fn recommend_peg_model1323(
+    input: &DecisionInput,
+    legal: &[Card],
+    tables: &RuntimeTables,
+    hand_cache: Option<&Model13HandCache>,
+) -> Result<Decision, String> {
+    let observation = model1323_observation(input);
     let mut evaluator = known_card_pegging_win_evaluator_with_board(
         input,
         tables.hold()?,
         BoardModel::from_board_matrix(Arc::clone(tables.verified_board1323()?)),
         Some(tables.crib_rank()?),
     );
-    let forecasts = tables.policy_assets1323()?.forecast_with_hand_cache(
+    let forecasts = tables.policy_assets1323()?.forecast_for_choice(
         &observation,
-        LIVE_WORLD_BUDGET,
         hand_cache.map(|cache| &cache.model1323),
+        &mut |own, opponent| {
+            evaluator.win_probability(
+                input.ai_score + i32::from(own),
+                input.human_score + i32::from(opponent),
+            )
+        },
     )?;
     select_peg_model1323(input, legal, &forecasts, &mut evaluator)
 }
@@ -6468,6 +6475,55 @@ mod tests {
     use crate::model162::Model162ActionAdvantageEntry;
     use crate::policy::{PolicyArtifactMetadata, QuantizedPolicyEntry, POLICY_WEIGHT_TOTAL};
     use std::path::Path;
+
+    #[test]
+    #[ignore = "release-mode exhaustive native WP/pruning equivalence"]
+    fn model1323_exhaustive_native_reference_equivalence() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let tables = runtime_tables(root.to_str().unwrap()).unwrap();
+        let mut report = Vec::new();
+        for (fixture, fields) in [
+            ("opening", "role=pone;ownDiscards=1,6;aiHand=0,3,4,9;humanHandCount=4;aiScore=0;humanScore=0"),
+            ("dealer-reply", "role=dealer;ownDiscards=7,11;aiHand=2,5,8,12;humanTable=0;humanHandCount=3;aiScore=0;humanScore=0;plays=0;count=1;last=human;pegHistory=o0"),
+            ("late", "role=pone;ownDiscards=1,6;aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore=0;humanScore=0;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"),
+            ("count-out", "role=pone;ownDiscards=1,6;aiHand=0,3,4,9;humanTable=12;humanHandCount=3;aiScore=119;humanScore=120;plays=12;count=10;last=human;pegHistory=o12"),
+            ("close-race", "role=pone;ownDiscards=1,6;aiHand=0,3,4,9;humanHandCount=4;aiScore=116;humanScore=118"),
+        ] {
+            let input = parse_decision_input(&format!("kind=peg;model={MODEL_13_23};turnCard=10;{fields}")).unwrap();
+            let observation = model1323_observation(&input);
+            let mut evaluator = known_card_pegging_win_evaluator_with_board(
+                &input, tables.hold().unwrap(),
+                BoardModel::from_board_matrix(Arc::clone(tables.verified_board1323().unwrap())),
+                Some(tables.crib_rank().unwrap()),
+            );
+            let start = std::time::Instant::now();
+            let full = tables.policy_assets1323().unwrap().forecast(&observation, usize::MAX).unwrap();
+            assert!(full.iter().all(|f| f.evaluated_worlds == f.posterior_worlds));
+            let expected = select_peg_model1323(&input, &input.ai_hand, &full, &mut evaluator).unwrap();
+            let full_seconds = start.elapsed().as_secs_f64();
+            let start = std::time::Instant::now();
+            let actual = evaluate_decision(&input, root.to_str().unwrap()).unwrap();
+            let bounded_seconds = start.elapsed().as_secs_f64();
+            let bits = |decision: &Decision| match decision {
+                Decision::Peg {action, card_id, ev, win_probability, ..} =>
+                    (action.clone(), *card_id, ev.map(f64::to_bits), win_probability.map(f64::to_bits)),
+                _ => panic!("expected pegging decision"),
+            };
+            assert_eq!(bits(&actual), bits(&expected), "{fixture}");
+            report.push(serde_json::json!({"fixture":fixture, "fullSeconds":full_seconds,
+                "boundedSeconds":bounded_seconds,"posteriorWorlds":full[0].posterior_worlds,
+                "bitExactDecision":true}));
+        }
+        fs::write(
+            std::env::temp_dir().join("model1323-exhaustive-native-equivalence.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .unwrap();
+    }
 
     #[test]
     fn model1323_peg_selects_wp_even_when_net_points_prefer_another_play() {

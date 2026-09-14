@@ -32,7 +32,9 @@ pub const CORRECTION_INPUT_CHECKSUMS: [u64; 5] = [
     0x6f52321c1516e5c0,
     0x1457241478e3d307,
 ];
-pub const LIVE_WORLD_BUDGET: usize = 512;
+/// Production never samples. Finite budgets are retained only for diagnostic
+/// comparisons through the explicit forecast interface.
+pub const LIVE_WORLD_BUDGET: usize = usize::MAX;
 
 /// One actor's current-hand card population. Only card support is retained;
 /// all history-dependent weights, sampling and policy solves remain fresh.
@@ -168,6 +170,28 @@ impl PolicyAssets {
         world_budget: usize,
         cache: Option<&HandCache>,
     ) -> Result<Vec<PegCandidateForecast>, String> {
+        let policy = self.decision_policy()?;
+        let worlds = self.worlds_for_hand(observation, &policy, cache)?;
+        self.forecast_population(observation, world_budget, &policy, worlds)
+    }
+
+    /// Exhaustive production choice. Only provably inferior candidates may
+    /// stop early; every returned candidate has its full, unmodified histogram.
+    /// `win_probability` must return a finite probability in [0, 1].
+    pub(crate) fn forecast_for_choice(
+        &self,
+        observation: &Model132Observation,
+        cache: Option<&HandCache>,
+        win_probability: &mut impl FnMut(u8, u8) -> f64,
+    ) -> Result<Vec<PegCandidateForecast>, String> {
+        let policy = self.decision_policy()?;
+        let worlds = self.worlds_for_hand(observation, &policy, cache)?;
+        let count = worlds.len();
+        let worlds = sample_worlds(worlds, LIVE_WORLD_BUDGET, observation_seed(observation))?;
+        forecast_worlds_for_choice(observation, &policy, &worlds, count, win_probability)
+    }
+
+    fn decision_policy(&self) -> Result<Model911Policy, String> {
         // All action/evidence/continuation memoization is decision-local.
         let policy = Model911Policy::new_with_evidence_cache(
             Some(self.beliefs.clone()),
@@ -177,8 +201,7 @@ impl PolicyAssets {
             1_000_000,
         )?;
         policy.use_compact_continuations();
-        let worlds = self.worlds_for_hand(observation, &policy, cache)?;
-        self.forecast_population(observation, world_budget, &policy, worlds)
+        Ok(policy)
     }
 
     fn worlds_for_hand(
@@ -216,7 +239,7 @@ impl PolicyAssets {
         &self,
         observation: &Model132Observation,
         world_budget: usize,
-        policy: &Model911Policy,
+        policy: &impl Model132PeggingPolicy,
         worlds: Vec<World>,
     ) -> Result<Vec<PegCandidateForecast>, String> {
         // Late continuations are cheap enough to enumerate without sampling.
@@ -582,26 +605,7 @@ fn forecast_worlds(
     for action in observation.legal_actions() {
         let mut outcomes = BTreeMap::new();
         for world in worlds {
-            let mut state = world_state(observation, world)?;
-            state.apply(action)?;
-            let mut steps = 0;
-            while !state.complete && state.winner.is_none() {
-                let legal = state.legal_actions();
-                let next = match legal.as_slice() {
-                    [] => return Err("13.23 forecast has no action before completion".into()),
-                    [forced] => *forced,
-                    _ => choose_for_state(policy, &state, state.current)?,
-                };
-                state.apply(next)?;
-                steps += 1;
-                if steps > 32 {
-                    return Err("13.23 forecast failed to finish pegging".into());
-                }
-            }
-            let own =
-                u8::try_from(state.scores[0] - observation.my_score).map_err(|e| e.to_string())?;
-            let opponent = u8::try_from(state.scores[1] - observation.opponent_score)
-                .map_err(|e| e.to_string())?;
+            let (own, opponent) = rollout_candidate(observation, policy, world, action)?;
             *outcomes.entry((own, opponent)).or_insert(0.0) += world.weight;
         }
         forecasts.push(PegCandidateForecast {
@@ -615,6 +619,100 @@ fn forecast_worlds(
         });
     }
     Ok(forecasts)
+}
+
+/// A challenger can be discarded only when its accumulated WP plus *all*
+/// unevaluated probability mass is below a completely evaluated incumbent.
+/// Histograms and final WP sums retain the reference's canonical order.
+fn forecast_worlds_for_choice(
+    observation: &Model132Observation,
+    policy: &impl Model132PeggingPolicy,
+    worlds: &[World],
+    posterior_worlds: usize,
+    win_probability: &mut impl FnMut(u8, u8) -> f64,
+) -> Result<Vec<PegCandidateForecast>, String> {
+    let mut remaining = vec![0.0; worlds.len() + 1];
+    for index in (0..worlds.len()).rev() {
+        remaining[index] = remaining[index + 1] + worlds[index].weight;
+    }
+    // All summands are nonnegative and utility is <= 1. This allowance
+    // conservatively covers the world-order sums, reverse mass sum, and both
+    // histogram-order weighted sums (standard gamma_n floating-point bounds).
+    // Disallow pruning altogether when n*epsilon is outside that small-error
+    // regime. Exact ties and near ties must always complete.
+    let roundoff = (worlds.len() as f64 + 1.0) * f64::EPSILON;
+    let allowance = if roundoff < 1.0 / 16.0 {
+        64.0 * roundoff * remaining[0].max(1.0)
+    } else {
+        f64::INFINITY
+    };
+    let mut incumbent = f64::NEG_INFINITY;
+    let mut forecasts = Vec::new();
+    let mut utilities = BTreeMap::new();
+    for action in observation.legal_actions() {
+        let mut outcomes = BTreeMap::new();
+        let mut partial_wp = 0.0;
+        let mut inferior = false;
+        for (index, world) in worlds.iter().enumerate() {
+            let score = rollout_candidate(observation, policy, world, action)?;
+            *outcomes.entry(score).or_insert(0.0) += world.weight;
+            let utility = *utilities
+                .entry(score)
+                .or_insert_with(|| win_probability(score.0, score.1));
+            if !utility.is_finite() || !(0.0..=1.0).contains(&utility) {
+                return Err("13.23 choice bound requires a finite WP in [0, 1]".into());
+            }
+            partial_wp += world.weight * utility;
+            if index + 1 < worlds.len() && partial_wp + remaining[index + 1] + allowance < incumbent
+            {
+                inferior = true;
+                break;
+            }
+        }
+        if inferior {
+            continue;
+        }
+        let wp: f64 = outcomes
+            .iter()
+            .map(|(score, weight)| weight * utilities[score])
+            .sum();
+        incumbent = incumbent.max(wp);
+        forecasts.push(PegCandidateForecast {
+            action,
+            outcomes: outcomes.into_iter().map(|((a, b), w)| (a, b, w)).collect(),
+            posterior_worlds,
+            evaluated_worlds: worlds.len(),
+        });
+    }
+    Ok(forecasts)
+}
+
+fn rollout_candidate(
+    observation: &Model132Observation,
+    policy: &impl Model132PeggingPolicy,
+    world: &World,
+    action: RankPegAction,
+) -> Result<(u8, u8), String> {
+    let mut state = world_state(observation, world)?;
+    state.apply(action)?;
+    let mut steps = 0;
+    while !state.complete && state.winner.is_none() {
+        let legal = state.legal_actions();
+        let next = match legal.as_slice() {
+            [] => return Err("13.23 forecast has no action before completion".into()),
+            [forced] => *forced,
+            _ => choose_for_state(policy, &state, state.current)?,
+        };
+        state.apply(next)?;
+        steps += 1;
+        if steps > 32 {
+            return Err("13.23 forecast failed to finish pegging".into());
+        }
+    }
+    Ok((
+        u8::try_from(state.scores[0] - observation.my_score).map_err(|e| e.to_string())?,
+        u8::try_from(state.scores[1] - observation.opponent_score).map_err(|e| e.to_string())?,
+    ))
 }
 
 #[cfg(test)]
@@ -964,6 +1062,177 @@ mod tests {
         ) -> Result<RankPegAction, String> {
             Ok(observation.legal_actions()[0])
         }
+    }
+
+    #[test]
+    fn production_forecast_does_not_sample_hidden_worlds() {
+        let assets =
+            PolicyAssets::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let (observation, world) = opening();
+        let forecasts = assets
+            .forecast_population(
+                &observation,
+                LIVE_WORLD_BUDGET,
+                &FirstLegal,
+                vec![world; 513],
+            )
+            .unwrap();
+        assert!(forecasts
+            .iter()
+            .all(|f| f.evaluated_worlds == f.posterior_worlds));
+    }
+
+    #[test]
+    fn choice_bound_preserves_full_histograms_and_never_eliminates_ties() {
+        let (observation, world) = opening();
+        let worlds = sample_worlds(vec![world; 513], usize::MAX, 0).unwrap();
+        let full = forecast_worlds(&observation, &FirstLegal, &worlds, worlds.len()).unwrap();
+        let target = (full[0].outcomes[0].0, full[0].outcomes[0].1);
+        assert!(full
+            .iter()
+            .any(|f| (f.outcomes[0].0, f.outcomes[0].1) != target));
+        for difference in [0.0, f64::EPSILON, 0.25] {
+            let utility = |a, b| 0.5 + if (a, b) == target { difference } else { 0.0 };
+            let bounded = forecast_worlds_for_choice(
+                &observation,
+                &FirstLegal,
+                &worlds,
+                worlds.len(),
+                &mut |a, b| utility(a, b),
+            )
+            .unwrap();
+            let score = |f: &PegCandidateForecast| {
+                f.outcomes
+                    .iter()
+                    .map(|(a, b, w)| w * utility(*a, *b))
+                    .sum::<f64>()
+            };
+            let best = full.iter().map(score).fold(f64::NEG_INFINITY, f64::max);
+            // Preserve *every* tied winner so the production tie break is unchanged.
+            for expected in full.iter().filter(|f| score(f) == best) {
+                let actual = bounded
+                    .iter()
+                    .find(|f| f.action == expected.action)
+                    .unwrap();
+                assert_identical_forecasts(
+                    std::slice::from_ref(actual),
+                    std::slice::from_ref(expected),
+                );
+            }
+            for actual in &bounded {
+                let expected = full.iter().find(|f| f.action == actual.action).unwrap();
+                assert_identical_forecasts(
+                    std::slice::from_ref(actual),
+                    std::slice::from_ref(expected),
+                );
+            }
+            if difference <= f64::EPSILON {
+                assert_eq!(bounded.len(), full.len());
+            } else {
+                assert!(
+                    bounded.len() < full.len(),
+                    "fixture must exercise actual early termination"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn choice_bound_matches_full_evaluation_with_unequal_world_weights() {
+        let assets =
+            PolicyAssets::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let (observation, _) = opening();
+        let policy = assets.decision_policy().unwrap();
+        let worlds: Vec<_> = assets
+            .worlds(&observation, &policy)
+            .unwrap()
+            .into_iter()
+            .step_by(97)
+            .take(64)
+            .enumerate()
+            .map(|(index, mut world)| {
+                world.weight *= if index % 3 == 0 {
+                    1e-12
+                } else {
+                    (index + 1) as f64
+                };
+                world
+            })
+            .collect();
+        let worlds = sample_worlds(worlds, usize::MAX, 0).unwrap();
+        let full = forecast_worlds(&observation, &FirstLegal, &worlds, worlds.len()).unwrap();
+        for seed in 0..32_u32 {
+            let utility = |a: u8, b: u8| {
+                let hash =
+                    (u32::from(a) * 65537 + u32::from(b) * 257 + seed).wrapping_mul(2654435761);
+                f64::from(hash % 1025) / 1024.0
+            };
+            let actual = forecast_worlds_for_choice(
+                &observation,
+                &FirstLegal,
+                &worlds,
+                worlds.len(),
+                &mut |a, b| utility(a, b),
+            )
+            .unwrap();
+            let score = |f: &PegCandidateForecast| {
+                f.outcomes
+                    .iter()
+                    .map(|(a, b, w)| w * utility(*a, *b))
+                    .sum::<f64>()
+            };
+            let best = full.iter().map(score).fold(f64::NEG_INFINITY, f64::max);
+            for winner in full.iter().filter(|f| score(f) == best) {
+                assert!(actual.iter().any(|f| f.action == winner.action));
+            }
+            for candidate in actual {
+                let expected = full.iter().find(|f| f.action == candidate.action).unwrap();
+                assert_identical_forecasts(
+                    std::slice::from_ref(&candidate),
+                    std::slice::from_ref(expected),
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "release-mode exhaustive opening cost and cache probe"]
+    fn exhaustive_opening_cost_probe() {
+        let assets =
+            PolicyAssets::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let (observation, _) = opening();
+        let limits: Vec<usize> = std::env::var("MODEL1323_PROBE_CACHES")
+            .unwrap_or_else(|_| "100000,300000,1000000".into())
+            .split(',')
+            .map(|value| value.parse().unwrap())
+            .collect();
+        assert_eq!(limits.len(), 3);
+        let policy = Model911Policy::new_with_evidence_cache(
+            Some(assets.beliefs.clone()),
+            assets.factors,
+            limits[0],
+            limits[1],
+            limits[2],
+        )
+        .unwrap();
+        policy.use_compact_continuations();
+        let start = std::time::Instant::now();
+        let forecasts = assets
+            .forecast_using(&observation, usize::MAX, &policy)
+            .unwrap();
+        let report = serde_json::json!({
+            "seconds": start.elapsed().as_secs_f64(),
+            "cacheLimits": limits,
+            "worlds": forecasts[0].posterior_worlds,
+            "evaluatedWorlds": forecasts[0].evaluated_worlds,
+            "stats": format!("{:?}", policy.stats()),
+        });
+        fs::write(
+            std::env::temp_dir().join("model1323-exhaustive-opening.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(forecasts[0].evaluated_worlds, forecasts[0].posterior_worlds);
     }
 
     #[test]

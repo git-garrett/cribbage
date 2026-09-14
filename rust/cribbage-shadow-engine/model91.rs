@@ -11,8 +11,8 @@
 
 use crate::board::Role;
 use crate::cards::{
-    enumerate_rank_hands, peg_card_for_rank, rank_combination_count, rank_count_total, score_count,
-    VALUES,
+    choose, enumerate_rank_hands, peg_card_for_rank, rank_combination_count, rank_count_total,
+    score_count, VALUES,
 };
 use crate::information_set::{PegSeat, RankPegAction, RankPegEvent, RankPegState};
 use std::collections::HashMap;
@@ -553,7 +553,21 @@ enum Model91EvidenceWeightMode {
 #[derive(Clone, Copy, Debug)]
 struct Model91EvidenceHand {
     ranks: [u8; RANKS],
+    rank_mask: u16,
     base_weight: f64,
+}
+
+impl Model91EvidenceHand {
+    fn new(ranks: [u8; RANKS], base_weight: f64) -> Self {
+        let rank_mask = ranks.iter().enumerate().fold(0, |mask, (rank, copies)| {
+            mask | if *copies > 0 { 1 << rank } else { 0 }
+        });
+        Self {
+            ranks,
+            rank_mask,
+            base_weight,
+        }
+    }
 }
 
 /// Builder-local response surface for one legal observation after removing
@@ -811,6 +825,21 @@ impl Model91Policy {
             return Err("Model 9.11 evidence cache legal actions are inconsistent".to_string());
         }
         let available = opponent_available(observation)?;
+        // The posterior is the same for every candidate card in this choice.
+        // Compute each weight once, retaining the original hand and arithmetic
+        // order when accumulating each candidate's evidence.
+        let weights: Vec<f64> = evidence
+            .hands
+            .iter()
+            .map(|hand| {
+                evidence_hand_weight(
+                    hand,
+                    evidence.weight_mode,
+                    &available,
+                    opponent_rank_likelihood_ppm,
+                )
+            })
+            .collect();
         let mut best = legal[0];
         let mut best_net = f64::NEG_INFINITY;
         let mut best_immediate = 0_u8;
@@ -827,13 +856,7 @@ impl Model91Policy {
             let mut own_weighted = 0.0;
             let mut opponent_weighted = 0.0;
             let mut total_weight = 0.0;
-            for (hand_index, hand) in evidence.hands.iter().enumerate() {
-                let weight = evidence_hand_weight(
-                    hand,
-                    evidence.weight_mode,
-                    &available,
-                    opponent_rank_likelihood_ppm,
-                );
+            for (hand_index, weight) in weights.iter().copied().enumerate() {
                 if weight <= 0.0 {
                     continue;
                 }
@@ -897,7 +920,7 @@ impl Model91Policy {
         };
         let hands = hands
             .into_iter()
-            .map(|(ranks, base_weight)| Model91EvidenceHand { ranks, base_weight })
+            .map(|(ranks, base_weight)| Model91EvidenceHand::new(ranks, base_weight))
             .collect::<Vec<_>>();
         let mut local_memo = ContinuationMemo::default();
         let memo = if self.future_cache_limit == 0 {
@@ -1072,25 +1095,32 @@ fn evidence_hand_weight(
     available: &[u8; RANKS],
     rank_likelihood_ppm: &[u32; RANKS],
 ) -> f64 {
-    if hand
-        .ranks
-        .iter()
-        .zip(available)
-        .any(|(needed, remaining)| needed > remaining)
-    {
-        return 0.0;
-    }
-    let base = match weight_mode {
-        Model91EvidenceWeightMode::Physical => rank_combination_count(&hand.ranks, available),
+    let mut weight = match weight_mode {
+        Model91EvidenceWeightMode::Physical => 1.0,
         Model91EvidenceWeightMode::Empirical => hand.base_weight,
     };
-    hand.ranks
-        .iter()
-        .enumerate()
-        .filter(|(_, copies)| **copies > 0)
-        .fold(base, |current, (rank, _)| {
-            current * f64::from(rank_likelihood_ppm[rank]) / 1_000_000.0
-        })
+    // At most four ranks occur in a hand. Omitted ranks only contributed a
+    // compatibility check of 0 <= available and multiplication by exactly 1.
+    let mut mask = hand.rank_mask;
+    while mask != 0 {
+        let rank = mask.trailing_zeros() as usize;
+        mask &= mask - 1;
+        if hand.ranks[rank] > available[rank] {
+            return 0.0;
+        }
+        if matches!(weight_mode, Model91EvidenceWeightMode::Physical) {
+            weight *= choose(available[rank], hand.ranks[rank]);
+        }
+    }
+    let mut mask = hand.rank_mask;
+    while mask != 0 {
+        let rank = mask.trailing_zeros() as usize;
+        mask &= mask - 1;
+        // Preserve multiply-then-divide, including neutral factors: replacing
+        // it with a predivided factor can change floating-point ties.
+        weight = weight * f64::from(rank_likelihood_ppm[rank]) / 1_000_000.0;
+    }
+    weight
 }
 
 fn reweight_opponent_hands(
@@ -1705,6 +1735,47 @@ mod tests {
         assert_eq!(cached.stats().evidence_cache_requests, 2);
         assert_eq!(cached.stats().evidence_cache_hits, 1);
         assert!(cached.stats().evidence_cache_outcomes > 0);
+    }
+
+    #[test]
+    fn sparse_evidence_weights_match_original_formula_bit_for_bit() {
+        let likelihoods = [
+            0, 250_000, 1_000_000, 333_333, 876_543, 1_000_000, 123_456, 999_999, 100_000, 500_000,
+            1_000_000, 10_001, 765_432,
+        ];
+        for size in 0..=4 {
+            for (ranks, _) in enumerate_rank_hands(&[4; RANKS], size) {
+                let hand = Model91EvidenceHand::new(ranks, 12345.67);
+                for available in [[4; RANKS], [0, 1, 2, 3, 4, 3, 2, 1, 0, 4, 3, 2, 1]] {
+                    for mode in [
+                        Model91EvidenceWeightMode::Physical,
+                        Model91EvidenceWeightMode::Empirical,
+                    ] {
+                        let expected = if ranks.iter().zip(available).any(|(n, a)| *n > a) {
+                            0.0
+                        } else {
+                            let base = match mode {
+                                Model91EvidenceWeightMode::Physical => {
+                                    rank_combination_count(&ranks, &available)
+                                }
+                                Model91EvidenceWeightMode::Empirical => hand.base_weight,
+                            };
+                            ranks
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, n)| **n > 0)
+                                .fold(base, |w, (r, _)| {
+                                    w * f64::from(likelihoods[r]) / 1_000_000.0
+                                })
+                        };
+                        assert_eq!(
+                            evidence_hand_weight(&hand, mode, &available, &likelihoods).to_bits(),
+                            expected.to_bits()
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

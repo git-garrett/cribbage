@@ -156,21 +156,24 @@ impl Memo {
         self.play(State::from_reference(state), rank, hits)
     }
     fn future(&mut self, state: State, hits: &mut u64) -> Result<WeightedPoints, String> {
-        if let Some(outcome) = self.outcomes.get(&state).copied() {
-            *hits = hits.saturating_add(1);
-            return Ok(outcome);
-        }
-        let result = if state.0 & HAND_MASK == 0 {
+        // A finished continuation is cheaper to compute than to hash/store.
+        // Keep the identical terminal value and arithmetic; omit only memo work.
+        if state.0 & HAND_MASK == 0 {
             let mut result = WeightedPoints {
                 points: [0.0; 2],
                 weight: 1.0,
             };
             let last = state.field(LAST, 3);
             if state.count() != 0 && last != 0 {
-                result.points[(last - 1) as usize] = 1.0;
+                result.points[usize::from(last - 1)] = 1.0;
             }
-            result
-        } else {
+            return Ok(result);
+        }
+        if let Some(outcome) = self.outcomes.get(&state).copied() {
+            *hits = hits.saturating_add(1);
+            return Ok(outcome);
+        }
+        let result = {
             let mut found = false;
             let mut total = WeightedPoints::default();
             // Identical ascending rank and multiplicity order to the oracle.

@@ -328,6 +328,112 @@ mod tests {
     use crate::model_id::ModelId;
 
     #[test]
+    #[ignore = "bounded release-mode engine-played hand cost comparison"]
+    fn model1323_exhaustive_engine_played_hand_cost() {
+        use crate::cards::cards_from_ids;
+        use crate::game::Phase;
+        use std::time::Instant;
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let fixture = std::env::var("MODEL1323_COST_FIXTURE").unwrap_or_else(|_| "opening".into());
+        let repeats: usize = std::env::var("MODEL1323_COST_REPEATS")
+            .unwrap_or_else(|_| "3".into())
+            .parse()
+            .unwrap();
+        assert!(repeats > 0);
+        let (own, opponent, cut, scores) = match fixture.as_str() {
+            "opening" => ([0, 3, 4, 9, 1, 6], [2, 5, 8, 12, 7, 11], 10, [0, 0]),
+            "paired-fives" => ([4, 17, 5, 9, 6, 12], [0, 2, 8, 11, 1, 7], 10, [0, 0]),
+            "low-run" => ([0, 1, 2, 3, 9, 12], [4, 5, 6, 7, 10, 11], 8, [0, 0]),
+            "high-cards" => ([8, 9, 10, 11, 4, 12], [1, 2, 3, 5, 6, 7], 0, [0, 0]),
+            "close-race" => ([0, 3, 4, 9, 1, 6], [2, 5, 8, 12, 7, 11], 10, [116, 118]),
+            _ => panic!("unknown timing fixture"),
+        };
+        let mut initial = CribbageGame::new_with_seed(1323, Side::Right);
+        initial.player_mut(Side::Left).hand = cards_from_ids(&own).unwrap();
+        initial.player_mut(Side::Right).hand = cards_from_ids(&opponent).unwrap();
+        initial.turn_card = crate::cards::Card::new(cut).unwrap();
+        initial.discard(Side::Left, [own[4], own[5]]).unwrap();
+        initial
+            .discard(Side::Right, [opponent[4], opponent[5]])
+            .unwrap();
+        initial.player_mut(Side::Left).score = scores[0];
+        initial.player_mut(Side::Right).score = scores[1];
+        // Warm immutable assets; each timed hand still starts with fresh caches.
+        for model in [ModelId::Schell13215, ModelId::Schell1323] {
+            recommend_peg_for_side(&initial, Side::Left, model, None, root).unwrap();
+        }
+        let mut report = Vec::new();
+        for repeat in 0..repeats {
+            let mut game = initial.clone();
+            let caches13215 = [Model13HandCache::new(), Model13HandCache::new()];
+            let caches1323 = [Model13HandCache::new(), Model13HandCache::new()];
+            let mut turns = [0, 0];
+            while game.phase == Phase::Pegging {
+                if game.pegging_reset_pending {
+                    game.acknowledge_pegging_reset();
+                    continue;
+                }
+                let actor = game.current_player();
+                let legal = game.legal_cards(actor);
+                let chosen = if legal.len() > 1 {
+                    let mut times = [0.0; 2];
+                    let mut decisions = [None, None];
+                    for offset in 0..2 {
+                        let mode = (offset + repeat + turns[actor.index()]) % 2;
+                        let (model, cache) = if mode == 0 {
+                            (ModelId::Schell13215, &caches13215[actor.index()])
+                        } else {
+                            (ModelId::Schell1323, &caches1323[actor.index()])
+                        };
+                        let start = Instant::now();
+                        decisions[mode] = Some(
+                            recommend_peg_for_side_with_caches(
+                                &game,
+                                actor,
+                                model,
+                                None,
+                                root,
+                                None,
+                                Some(cache),
+                            )
+                            .unwrap(),
+                        );
+                        times[mode] = start.elapsed().as_secs_f64();
+                    }
+                    report.push(serde_json::json!({"fixture":fixture,"repeat":repeat,
+                        "actor":actor.index(),"actorTurn":turns[actor.index()],
+                        "count":game.count,"legalActions":legal.len(),
+                        "seconds13215":times[0],"seconds1323":times[1]}));
+                    turns[actor.index()] += 1;
+                    match decisions[1].as_ref().unwrap() {
+                        PegDecision::Play { card_id, .. } => Some(*card_id),
+                        PegDecision::Go => panic!("go with legal cards"),
+                    }
+                } else {
+                    legal.first().map(|card| card.id)
+                };
+                // Actual 13.23 choices advance the hand, not a scripted trace.
+                if let Some(card) = chosen {
+                    game.play_card(actor, card).unwrap();
+                } else {
+                    game.say_go(actor).unwrap();
+                }
+            }
+            std::fs::write(
+                std::env::temp_dir().join(format!("model1323-exhaustive-native-{fixture}.json")),
+                serde_json::to_vec_pretty(&report).unwrap(),
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
     #[ignore = "bounded release-mode multi-turn native speed comparison"]
     fn model1323_hand_cache_native_speed_comparison() {
         use crate::cards::cards_from_ids;
