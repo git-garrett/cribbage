@@ -800,6 +800,7 @@ const els = {
   scoreSummaryEyebrow: document.querySelector("#score-summary-eyebrow") as HTMLElement,
   scoreSummaryTitle: document.querySelector("#score-summary-title") as HTMLElement,
   scoreSummaryItems: document.querySelector("#score-summary-items") as HTMLElement,
+  humanWaitingNotice: document.querySelector("#human-waiting-notice") as HTMLDivElement,
   skipCounting: document.querySelector("#skip-counting") as HTMLButtonElement,
   continueScoring: document.querySelector("#continue-scoring") as HTMLButtonElement,
   acknowledgePeggingReset: document.querySelector("#acknowledge-pegging-reset") as HTMLButtonElement,
@@ -1200,6 +1201,7 @@ interface HumanGameResponse extends ServerGameActionResponse {
   tableId: string;
   revision: number;
   canContinueScoring: boolean;
+  waitingForReview?: boolean;
   canAcknowledgePeggingReset: boolean;
   players: Record<PlayerKey, string>;
   acknowledgment?: {
@@ -1267,6 +1269,7 @@ let humanGameRevision = -1;
 let pendingHumanGameCommand: PendingHumanGameCommand | null = null;
 let humanGameRefreshPromise: Promise<void> | null = null;
 let humanGameCanContinueScoring = false;
+let humanGameWaitingForReview = false;
 let humanGameCanAcknowledgePeggingReset = false;
 let humanDecisionReviewPlayer: PlayerKey = "human";
 let peopleIdleTimer: number | null = null;
@@ -2626,6 +2629,7 @@ function applyHumanGameResponse(response: HumanGameResponse): GameState {
   }
   humanGameRevision = response.revision;
   humanGameCanContinueScoring = response.canContinueScoring;
+  humanGameWaitingForReview = Boolean(response.waitingForReview);
   humanGameCanAcknowledgePeggingReset = response.canAcknowledgePeggingReset;
   if (activeHumanTable && response.state.phase === "game_over") {
     activeHumanTable.phase = "complete";
@@ -2793,6 +2797,7 @@ function hideHumanTable(): void {
   humanGameRevision = -1;
   pendingHumanGameCommand = null;
   humanGameCanContinueScoring = false;
+  humanGameWaitingForReview = false;
   humanGameCanAcknowledgePeggingReset = false;
   humanDecisionReviewPlayer = "human";
 }
@@ -4496,6 +4501,9 @@ async function submitHumanGameAction(
   payload: Record<string, unknown>,
 ): Promise<GameState> {
   if (!activeHumanTable) throw new Error("That player table is no longer open.");
+  if (action === "continue-scoring" && state.game) {
+    payload = { ...payload, handNumber: state.game.handNumber, phase: state.game.phase };
+  }
   const command = humanGameCommand(activeHumanTable.id, action, payload);
   const response = await authJson<HumanGameResponse>("/api/people/table/game/action", {
     tableId: command.tableId,
@@ -5901,6 +5909,18 @@ function scoringBreakdownText(scoring: NonNullable<GameState["scoring"]>): strin
 }
 
 function renderResult(game: GameState): void {
+  const waiting = activeHumanTable
+    ? humanGameWaitingForReview ? "review" : game.phase === "ai_discarding" ? "discard" : null
+    : null;
+  els.humanWaitingNotice.hidden = !waiting;
+  els.humanWaitingNotice.textContent = waiting ? `Waiting for ${playerName("ai")} to ${waiting}` : "";
+  if (waiting) {
+    clearNoticeQueue();
+    state.scoreSummaryQueue = [];
+    state.activeScoreSummary = null;
+    els.resultInline.innerHTML = "";
+    return;
+  }
   if (game.phase === "game_over") {
     state.noticeResultLines = [];
     clearNoticeQueue();
@@ -5925,6 +5945,7 @@ function renderResult(game: GameState): void {
 function scoreSummaryNextLabel(game: GameState): string {
   const scoring = game.scoring;
   if (!scoring) return "Next";
+  if (activeHumanTable) return "Next";
   if (scoring.nextLabel === "View game result") return "View Game Result";
   const dealer = game.dealer === "User" ? "human" : "ai";
   if (scoring.stage === "pone") return `${playerPossessive(dealer)} Hand Next`;
@@ -5949,7 +5970,7 @@ function scoreSummaryForEvent(event: ScoreEvent, game: GameState): ScoreSummary 
 }
 
 function ensureCurrentScoreSummary(game: GameState): void {
-  if (!game.scoring || state.pending) return;
+  if (!game.scoring || state.pending || (activeHumanTable && humanGameWaitingForReview)) return;
   const event = currentScoringScoreEvent(scoreNoticeGameId(game), game);
   if (!event) return;
   if (state.activeScoreSummary?.key === event.id) return;
@@ -6125,7 +6146,7 @@ function renderScoreSummaryDialog(): void {
     els.scoreSummaryItems.append(row);
   }
   els.continueScoring.textContent = summary.nextLabel;
-  els.continueScoring.disabled = state.pending;
+  els.continueScoring.disabled = state.pending || Boolean(activeHumanTable && !humanGameCanContinueScoring);
 }
 
 function maybeOpenScoreSummary(): void {
@@ -8727,7 +8748,7 @@ function render(game: GameState | null): void {
   const humanScoringWait = Boolean(activeHumanTable && !humanGameCanContinueScoring);
   els.continueScoring.hidden = game.phase === "game_over" || humanScoringWait;
   els.continueScoring.disabled = game.phase === "game_over" || !game.scoring || humanScoringWait;
-  els.skipCounting.hidden = !game.scoring || Boolean(state.activeScoreSummary);
+  els.skipCounting.hidden = !game.scoring || Boolean(state.activeScoreSummary) || humanScoringWait;
   els.skipCounting.disabled = state.pending;
   els.acknowledgePeggingReset.hidden = !game.peggingResetPending || Boolean(activeHumanTable && !humanGameCanAcknowledgePeggingReset);
   els.continuePegging.hidden = game.peggingResetPending || game.phase !== "pegging_complete" || humanScoringWait;
