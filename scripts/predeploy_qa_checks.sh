@@ -19,4 +19,5 @@ npm run --silent test:web
 npm test --silent
 npm run --silent build:deploy
 scripts/run-quiet.sh "Browser regressions" node scripts/test-browser-regressions.cjs
+scripts/run-quiet.sh "PvP browser regressions" node scripts/test-pvp-browser.cjs
 npm run --silent package:server

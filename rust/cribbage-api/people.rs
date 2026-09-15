@@ -281,6 +281,11 @@ struct HumanGameRecord {
     decision_reviews: Vec<HumanDecisionReview>,
     #[serde(default)]
     next_review_id: u32,
+    // Steps beyond the common counting position, persisted independently per seat.
+    #[serde(default)]
+    counting_ahead: [u8; 2],
+    #[serde(default)]
+    counting_finished: [bool; 2],
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -1230,6 +1235,8 @@ fn ensure_human_game(
         score_events: Vec::new(),
         decision_reviews: Vec::new(),
         next_review_id: 0,
+        counting_ahead: [0; 2],
+        counting_finished: [false; 2],
     };
     let game_json = serde_json::to_string(&record)
         .map_err(|error| PeopleError::internal("serialize player game", error))?;
@@ -1499,7 +1506,22 @@ fn human_game_action(
     // Both players can choose their private discards from the same revision.
     // The choices touch disjoint hands, so merge the second valid discard into
     // the latest authoritative game instead of forcing a needless refresh.
-    if revision != input.revision && input.action != "discard" {
+    // A count click identifies the viewer's position, allowing the other seat
+    // to advance concurrently without accepting a stale click from this seat.
+    let counting_position_matches = if input.action == "continue-scoring" {
+        let view = human_counting_view(&record, viewer);
+        input.payload["handNumber"].as_u64() == Some(u64::from(view.game.hand_number))
+            && input.payload["phase"].as_str() == Some(human_public_phase(&view, viewer))
+    } else {
+        false
+    };
+    if input.action == "continue-scoring"
+        && (input.payload.get("handNumber").is_some() || input.payload.get("phase").is_some())
+        && !counting_position_matches
+    {
+        return Err(PeopleError::conflict("That review has already advanced. Refresh the table."));
+    }
+    if revision != input.revision && input.action != "discard" && !counting_position_matches {
         return Err(PeopleError::conflict(
             "The other player moved first. Refreshing the table will show the latest play.",
         ));
@@ -1559,67 +1581,7 @@ fn human_game_action(
             }
             record.game.acknowledge_pegging_reset();
         }
-        "continue-scoring" => {
-            if human_scoring_controller(&record) != Some(viewer) {
-                return Err(PeopleError::conflict(
-                    "The player whose cards are being counted advances the shared review.",
-                ));
-            }
-            if record.pending_final_scoring.is_some() {
-                record.pending_final_scoring = None;
-            } else {
-                let hand_number = record.game.hand_number;
-                let before = human_score_snapshot(&record.game);
-                let score_stage = match record.game.phase {
-                    Phase::PeggingComplete => Some((
-                        HumanScoreCategory::Hand,
-                        record.game.pone,
-                        record.game.player(record.game.pone).table.clone(),
-                        HumanFinalScoringStage::Pone,
-                    )),
-                    Phase::ScorePone => Some((
-                        HumanScoreCategory::Hand,
-                        record.game.dealer,
-                        record.game.player(record.game.dealer).table.clone(),
-                        HumanFinalScoringStage::Dealer,
-                    )),
-                    Phase::ScoreDealer => Some((
-                        HumanScoreCategory::Crib,
-                        record.game.dealer,
-                        record.game.player(record.game.dealer).crib.clone(),
-                        HumanFinalScoringStage::Crib,
-                    )),
-                    _ => None,
-                };
-                if record.game.phase == Phase::PeggingComplete {
-                    record
-                        .game
-                        .start_scoring()
-                        .map_err(PeopleError::bad_request)?;
-                } else {
-                    record
-                        .game
-                        .continue_scoring()
-                        .map_err(PeopleError::bad_request)?;
-                }
-                if let Some((category, player, cards, final_stage)) = score_stage {
-                    record_human_score_event(
-                        &mut record,
-                        hand_number,
-                        before,
-                        category,
-                        player,
-                        cards,
-                    );
-                    if record.game.phase == Phase::GameOver {
-                        record.pending_final_scoring = Some(final_stage);
-                    }
-                }
-            }
-            if record.game.phase == Phase::Discard {
-                record.turn_card_revealed = false;
-            }
-        }
+        "continue-scoring" => continue_human_counting(&mut record, viewer)?,
         _ => {
             return Err(PeopleError::bad_request(
                 "That player game action is not available.",
@@ -2286,19 +2248,109 @@ fn human_scoring_value(record: &HumanGameRecord, viewer: Side) -> Value {
     })
 }
 
-fn human_scoring_controller(record: &HumanGameRecord) -> Option<Side> {
-    let game = &record.game;
-    if let Some(stage) = record.pending_final_scoring {
-        return Some(match stage {
-            HumanFinalScoringStage::Pone => game.pone,
-            HumanFinalScoringStage::Dealer | HumanFinalScoringStage::Crib => game.dealer,
-        });
+// Advance the common scoring position exactly once. Private views replay at
+// most three of these deterministic counting steps; they never deal new cards.
+fn advance_human_scoring(record: &mut HumanGameRecord) -> Result<(), PeopleError> {
+    if record.pending_final_scoring.is_some() {
+        record.pending_final_scoring = None;
+    } else {
+        let hand_number = record.game.hand_number;
+        let before = human_score_snapshot(&record.game);
+        let score_stage = match record.game.phase {
+            Phase::PeggingComplete => Some((
+                HumanScoreCategory::Hand,
+                record.game.pone,
+                record.game.player(record.game.pone).table.clone(),
+                HumanFinalScoringStage::Pone,
+            )),
+            Phase::ScorePone => Some((
+                HumanScoreCategory::Hand,
+                record.game.dealer,
+                record.game.player(record.game.dealer).table.clone(),
+                HumanFinalScoringStage::Dealer,
+            )),
+            Phase::ScoreDealer => Some((
+                HumanScoreCategory::Crib,
+                record.game.dealer,
+                record.game.player(record.game.dealer).crib.clone(),
+                HumanFinalScoringStage::Crib,
+            )),
+            _ => None,
+        };
+        if record.game.phase == Phase::PeggingComplete {
+            record
+                .game
+                .start_scoring()
+                .map_err(PeopleError::bad_request)?;
+        } else {
+            record
+                .game
+                .continue_scoring()
+                .map_err(PeopleError::bad_request)?;
+        }
+        if let Some((category, player, cards, final_stage)) = score_stage {
+            record_human_score_event(record, hand_number, before, category, player, cards);
+            if record.game.phase == Phase::GameOver {
+                record.pending_final_scoring = Some(final_stage);
+            }
+        }
     }
-    match game.phase {
-        Phase::PeggingComplete => Some(game.pone),
-        Phase::ScorePone | Phase::ScoreDealer | Phase::ScoreCrib => Some(game.dealer),
-        _ => None,
+    if record.game.phase == Phase::Discard {
+        record.turn_card_revealed = false;
     }
+    Ok(())
+}
+
+fn human_seat_index(side: Side) -> usize {
+    if side == Side::Left {
+        0
+    } else {
+        1
+    }
+}
+
+fn human_counting_view(record: &HumanGameRecord, viewer: Side) -> HumanGameRecord {
+    let mut view = record.clone();
+    for _ in 0..record.counting_ahead[human_seat_index(viewer)] {
+        advance_human_scoring(&mut view)
+            .expect("persisted counting steps stay within the current hand");
+    }
+    view
+}
+
+fn human_can_continue_scoring(record: &HumanGameRecord, viewer: Side) -> bool {
+    !record.counting_finished[human_seat_index(viewer)]
+        && (record.pending_final_scoring.is_some()
+            || matches!(
+                record.game.phase,
+                Phase::PeggingComplete | Phase::ScorePone | Phase::ScoreDealer | Phase::ScoreCrib
+            ))
+}
+
+fn continue_human_counting(record: &mut HumanGameRecord, viewer: Side) -> Result<(), PeopleError> {
+    if !human_can_continue_scoring(record, viewer) {
+        return Err(PeopleError::conflict(
+            "Waiting for the other player to finish reviewing.",
+        ));
+    }
+    let view = human_counting_view(record, viewer);
+    let seat = human_seat_index(viewer);
+    if view.pending_final_scoring.is_some() || view.game.phase == Phase::ScoreCrib {
+        record.counting_finished[seat] = true;
+    } else {
+        record.counting_ahead[seat] += 1;
+    }
+    while record.counting_ahead.iter().all(|steps| *steps > 0) {
+        advance_human_scoring(record)?;
+        for steps in &mut record.counting_ahead {
+            *steps -= 1;
+        }
+    }
+    if record.counting_finished.iter().all(|finished| *finished) {
+        advance_human_scoring(record)?;
+        record.counting_finished = [false; 2];
+    }
+    Ok(())
 }
 
 fn human_game_message(record: &HumanGameRecord, viewer: Side) -> String {
@@ -2377,6 +2429,37 @@ fn human_game_analytics(record: &HumanGameRecord, row: &TableRow, viewer: Side) 
         })
     }));
     if record.game.phase == Phase::GameOver && record.pending_final_scoring.is_none() {
+        // Saved pre-decision states preserve hand boundaries even for games
+        // completed before PvP reports included pegging. Subtract counted hand
+        // and crib awards from each score interval; the remainder is pegging
+        // (including heels), with a zero-point opportunity for either seat.
+        let mut hands = std::collections::BTreeMap::new();
+        for review in &record.decision_reviews {
+            hands.entry(review.game.hand_number).or_insert(&review.game);
+        }
+        let hands = hands.into_iter().collect::<Vec<_>>();
+        for (index, (hand_number, start)) in hands.iter().enumerate() {
+            let end = hands.get(index + 1).map(|(_, game)| *game).unwrap_or(&record.game);
+            for side in [Side::Left, Side::Right] {
+                let counted: i32 = record.score_events.iter()
+                    .filter(|event| event.hand_number == *hand_number && event.player == side)
+                    .map(|event| event.points).sum();
+                let points = end.player(side).score - start.player(side).score - counted;
+                events.push(json!({
+                    "id": format!("{}-pegging-{}-{}", record.game_id, hand_number, human_seat_index(side)),
+                    "at": timestamp(record.completed_at.unwrap_or(record.created_at)),
+                    "type": "score",
+                    "gameId": record.game_id,
+                    "handNumber": hand_number,
+                    "player": view_key(side, viewer),
+                    "role": if side == start.dealer { "dealer" } else { "pone" },
+                    "category": "pegging",
+                    "points": points,
+                    "reason": "Pegging",
+                    "totalScore": start.player(side).score + points,
+                }));
+            }
+        }
         events.extend(record.decision_reviews.iter().map(|review| {
             human_decision_review_value(record, review, viewer, timestamp(review.at))
         }));
@@ -2549,6 +2632,10 @@ fn human_game_response(
     revision: i64,
     viewer: Side,
 ) -> Value {
+    let can_continue_scoring = human_can_continue_scoring(record, viewer);
+    let waiting_for_review = record.counting_finished[human_seat_index(viewer)];
+    let view = human_counting_view(record, viewer);
+    let record = &view;
     let game = &record.game;
     let opponent = viewer.other();
     let phase = human_public_phase(record, viewer);
@@ -2676,7 +2763,8 @@ fn human_game_response(
     json!({
         "tableId": table_id,
         "revision": revision,
-        "canContinueScoring": human_scoring_controller(record) == Some(viewer),
+        "canContinueScoring": can_continue_scoring,
+        "waitingForReview": waiting_for_review,
         "canAcknowledgePeggingReset": game.pegging_reset_pending && game.current_player() == viewer,
         "players": {
             "human": if viewer == Side::Left { row.challenger_display_name.clone() } else { row.challenged_display_name.clone() },
@@ -3338,7 +3426,7 @@ mod tests {
     }
 
     #[test]
-    fn each_hand_owner_advances_scoring_while_both_players_see_the_count() {
+    fn players_review_independently_and_only_wait_at_the_next_deal() {
         let server = test_server("shared-human-scoring");
         let garrett = user(&server, "Garrett");
         let kurt = user(&server, "Kurt");
@@ -3354,8 +3442,35 @@ mod tests {
             .unwrap();
         ensure_human_game(&connection, "t", garrett.id, garrett.id).unwrap();
         let (mut record, _) = load_human_game(&connection, "t").unwrap();
-        record.game.phase = Phase::PeggingComplete;
+        record.game = CribbageGame::new_with_seed(123, Side::Left);
+        let row = table_row(&connection, "t").unwrap();
+        let discard_initial = human_game_response("t", &row, &record, 0, Side::Left);
+        let ids = record.game.player(Side::Left).hand[..2]
+            .iter()
+            .map(|card| card.id)
+            .collect::<Vec<_>>();
+        record.game.discard(Side::Left, [ids[0], ids[1]]).unwrap();
+        let discard_wait = human_game_response("t", &row, &record, 1, Side::Left);
+        let ids = record.game.player(Side::Right).hand[..2]
+            .iter()
+            .map(|card| card.id)
+            .collect::<Vec<_>>();
+        record.game.discard(Side::Right, [ids[0], ids[1]]).unwrap();
         record.turn_card_revealed = true;
+        let discard_done = human_game_response("t", &row, &record, 2, Side::Left);
+        while record.game.phase == Phase::Pegging {
+            if record.game.pegging_reset_pending {
+                record.game.acknowledge_pegging_reset();
+                continue;
+            }
+            let side = record.game.current_player();
+            if let Some(card) = record.game.legal_cards(side).first() {
+                record.game.play_card(side, card.id).unwrap();
+            } else {
+                record.game.say_go(side).unwrap();
+            }
+        }
+        assert_eq!(record.game.phase, Phase::PeggingComplete);
         connection
             .execute(
                 "UPDATE people_games SET game_json = ?2 WHERE table_id = ?1",
@@ -3364,76 +3479,152 @@ mod tests {
             .unwrap();
         drop(connection);
 
-        let pone_before = human_game_status(
-            &server,
-            &request("/api/people/table/game", json!({"tableId": "t"})),
-            Some(&kurt),
-        )
-        .unwrap();
-        let dealer_before = human_game_status(
-            &server,
-            &request("/api/people/table/game", json!({"tableId": "t"})),
-            Some(&garrett),
-        )
-        .unwrap();
-        assert_eq!(pone_before["canContinueScoring"], true);
-        assert_eq!(dealer_before["canContinueScoring"], false);
-
-        human_game_action(
-            &server,
-            &request(
-                "/api/people/table/game/action",
-                json!({
-                    "tableId": "t",
-                    "action": "continue-scoring",
-                    "actionId": "shared-score-pone",
-                    "revision": pone_before["revision"],
-                    "payload": {},
-                }),
-            ),
-            Some(&kurt),
-        )
-        .unwrap();
-        let pone_after = human_game_status(
-            &server,
-            &request("/api/people/table/game", json!({"tableId": "t"})),
-            Some(&kurt),
-        )
-        .unwrap();
-        let dealer_after = human_game_status(
-            &server,
-            &request("/api/people/table/game", json!({"tableId": "t"})),
-            Some(&garrett),
-        )
-        .unwrap();
-        assert_eq!(pone_after["revision"], dealer_after["revision"]);
-        assert_eq!(pone_after["state"]["scoring"]["stage"], "pone");
-        assert_eq!(dealer_after["state"]["scoring"]["stage"], "pone");
+        let read = |account: &AuthUser| {
+            human_game_status(
+                &server,
+                &request("/api/people/table/game", json!({"tableId": "t"})),
+                Some(account),
+            )
+            .unwrap()
+        };
+        let advance = |account: &AuthUser, view: &Value, id: &str| {
+            human_game_action(
+                &server,
+                &request(
+                    "/api/people/table/game/action",
+                    json!({
+                        "tableId": "t", "action": "continue-scoring", "actionId": id,
+                        "revision": view["revision"],
+                        "payload": {"handNumber": view["state"]["handNumber"], "phase": view["state"]["phase"]},
+                    }),
+                ),
+                Some(account),
+            )
+        };
+        let initial = read(&garrett);
+        assert_eq!(initial["canContinueScoring"], true);
+        assert_eq!(read(&kurt)["canContinueScoring"], true);
+        let other_initial = read(&kurt);
+        let mut fast_views = Vec::new();
+        let mut slow_views = Vec::new();
+        let first = advance(&garrett, &initial, "dealer-pone").unwrap();
+        assert_eq!(first["state"]["phase"], "score_pone");
+        assert_eq!(read(&kurt)["state"]["phase"], "pegging_complete");
+        // Another tab's stale click cannot skip this player's next review.
         assert_eq!(
-            pone_after["state"]["scoring"]["points"],
-            dealer_after["state"]["scoring"]["points"]
+            advance(&garrett, &initial, "stale-own-click")
+                .unwrap_err()
+                .status,
+            409
         );
-        let pone_event = pone_after["state"]["analyticsEvents"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|event| event["type"] == "score")
-            .unwrap();
-        let dealer_event = dealer_after["state"]["analyticsEvents"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|event| event["type"] == "score")
-            .unwrap();
-        assert_eq!(pone_event["player"], "human");
-        assert_eq!(dealer_event["player"], "ai");
-        for key in ["category", "points", "cards", "turnCard", "scoreComponents"] {
-            assert_eq!(pone_event[key], dealer_event[key]);
+        fast_views.push(first.clone());
+        let mut fast = first;
+        for (id, phase) in [
+            ("dealer-hand", "score_dealer"),
+            ("dealer-crib", "score_crib"),
+            ("dealer-done", "score_crib"),
+        ] {
+            fast = advance(&garrett, &fast, id).unwrap();
+            assert_eq!(fast["state"]["phase"], phase);
+            fast_views.push(fast.clone());
         }
-        assert_eq!(pone_after["canContinueScoring"], false);
-        assert_eq!(dealer_after["canContinueScoring"], true);
-
+        assert_eq!(fast["waitingForReview"], true);
+        assert_eq!(fast["canContinueScoring"], false);
+        assert_eq!(fast["state"]["handNumber"], initial["state"]["handNumber"]);
+        // Reload preserves the waiting seat; no next-deal cards are exposed.
+        assert_eq!(read(&garrett)["waitingForReview"], true);
+        assert_eq!(read(&kurt)["state"]["phase"], "pegging_complete");
+        assert_eq!(
+            advance(&garrett, &fast, "extra-done").unwrap_err().status,
+            409
+        );
+        // The other player's original revision is safe because their position is unchanged.
+        let mut slow = advance(&kurt, &initial, "pone-pone").unwrap();
+        assert_eq!(slow["state"]["phase"], "score_pone");
+        slow_views.push(slow.clone());
+        for (id, phase) in [
+            ("pone-dealer", "score_dealer"),
+            ("pone-crib", "score_crib"),
+            ("pone-done", "discard"),
+        ] {
+            slow = advance(&kurt, &slow, id).unwrap();
+            assert_eq!(slow["state"]["phase"], phase);
+            slow_views.push(slow.clone());
+        }
+        assert_eq!(slow["waitingForReview"], false);
+        let next = read(&garrett);
+        assert_eq!(next["state"]["phase"], "discard");
+        assert_eq!(
+            next["state"]["handNumber"].as_u64().unwrap(),
+            initial["state"]["handNumber"].as_u64().unwrap() + 1
+        );
+        assert_eq!(next["state"]["humanHand"].as_array().unwrap().len(), 6);
+        assert_eq!(
+            next["state"]["analyticsEvents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|event| event["type"] == "score")
+                .count(),
+            3
+        );
+        if let Ok(dir) = std::env::var("CRIBBAGE_PVP_BROWSER_FIXTURES") {
+            std::fs::write(std::path::Path::new(&dir).join("counting.json"), serde_json::to_vec(&json!({
+                "initial": initial, "otherInitial": other_initial, "fast": fast_views, "slow": slow_views, "next": next,
+                "discard": [discard_initial, discard_wait, discard_done],
+            })).unwrap()).unwrap();
+        }
         std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn either_seat_can_finish_first_including_legacy_counting_positions() {
+        for first in [Side::Left, Side::Right] {
+            for phase in [
+                Phase::PeggingComplete,
+                Phase::ScorePone,
+                Phase::ScoreDealer,
+                Phase::ScoreCrib,
+            ] {
+                let mut game = CribbageGame::new_with_seed(123, Side::Left);
+                game.phase = phase;
+                let record = HumanGameRecord {
+                    version: 1,
+                    game_id: "counting-test".to_string(),
+                    game,
+                    turn_card_revealed: true,
+                    created_at: 0,
+                    completed_at: None,
+                    pending_final_scoring: None,
+                    score_events: Vec::new(),
+                    decision_reviews: Vec::new(),
+                    next_review_id: 0,
+                    counting_ahead: [0; 2],
+                    counting_finished: [false; 2],
+                };
+                // Existing saved games have no independent-count fields.
+                let mut legacy = serde_json::to_value(&record).unwrap();
+                legacy.as_object_mut().unwrap().remove("counting_ahead");
+                legacy.as_object_mut().unwrap().remove("counting_finished");
+                let mut record: HumanGameRecord = serde_json::from_value(legacy).unwrap();
+                while human_can_continue_scoring(&record, first) {
+                    continue_human_counting(&mut record, first).unwrap();
+                }
+                assert_eq!(record.game.phase, phase);
+                assert_eq!(
+                    human_counting_view(&record, first).game.phase,
+                    Phase::ScoreCrib
+                );
+                assert_eq!(record.game.hand_number, 1);
+                while human_can_continue_scoring(&record, first.other()) {
+                    continue_human_counting(&mut record, first.other()).unwrap();
+                }
+                assert_eq!(record.game.phase, Phase::Discard);
+                assert_eq!(record.game.hand_number, 2);
+                assert_eq!(record.counting_ahead, [0; 2]);
+                assert_eq!(record.counting_finished, [false; 2]);
+            }
+        }
     }
 
     #[test]
@@ -3544,7 +3735,7 @@ mod tests {
     }
 
     #[test]
-    fn winning_human_count_stays_visible_until_its_owner_opens_the_result() {
+    fn winning_human_count_waits_for_both_reviews_before_opening_the_result() {
         let server = test_server("shared-human-final-count");
         let garrett = user(&server, "Garrett");
         let kurt = user(&server, "Kurt");
@@ -3613,6 +3804,30 @@ mod tests {
                     "payload": {},
                 }),
             ),
+            Some(&kurt),
+        )
+        .unwrap();
+        assert_eq!(completed["state"]["phase"], "score_pone");
+        assert_eq!(completed["waitingForReview"], true);
+        assert_eq!(
+            table_value(&server, "t", kurt.id).unwrap()["table"]["phase"],
+            "playing"
+        );
+        for step in 0..2 {
+            let view = human_game_status(
+                &server,
+                &request("/api/people/table/game", json!({"tableId": "t"})),
+                Some(&garrett),
+            )
+            .unwrap();
+            human_game_action(&server, &request("/api/people/table/game/action", json!({
+                "tableId": "t", "action": "continue-scoring", "actionId": format!("other-final-{step}"),
+                "revision": view["revision"], "payload": {},
+            })), Some(&garrett)).unwrap();
+        }
+        let completed = human_game_status(
+            &server,
+            &request("/api/people/table/game", json!({"tableId": "t"})),
             Some(&kurt),
         )
         .unwrap();
@@ -4023,6 +4238,12 @@ mod tests {
                     "complete"
                 );
                 let row = table_row(&connection, "t").unwrap();
+                if let Ok(dir) = std::env::var("CRIBBAGE_PVP_BROWSER_FIXTURES") {
+                    std::fs::write(std::path::Path::new(&dir).join("report.json"), serde_json::to_vec(&json!([
+                        human_game_response("t", &row, &record, 9999, Side::Left),
+                        human_game_response("t", &row, &record, 9999, Side::Right),
+                    ])).unwrap()).unwrap();
+                }
                 let mut reviewed = record.clone();
                 for saved in &mut reviewed.decision_reviews {
                     saved.completed = Some(HumanCompletedDecisionReview {
@@ -4037,6 +4258,15 @@ mod tests {
                 }
                 for viewer in [Side::Left, Side::Right] {
                     let analytics = human_game_analytics(&reviewed, &row, viewer);
+                    let score_events = analytics.as_array().unwrap().iter().filter(|event| event["type"] == "score").collect::<Vec<_>>();
+                    for side in [viewer, viewer.other()] {
+                        let key = view_key(side, viewer);
+                        let total: i64 = score_events.iter().filter(|event| event["player"] == key).map(|event| event["points"].as_i64().unwrap()).sum();
+                        assert_eq!(total, i64::from(reviewed.game.player(side).score));
+                        for role in ["dealer", "pone"] {
+                            assert!(score_events.iter().any(|event| event["player"] == key && event["category"] == "pegging" && event["role"] == role));
+                        }
+                    }
                     let reviewed_players = analytics
                         .as_array()
                         .unwrap()
@@ -4084,7 +4314,7 @@ mod tests {
 
             let (side, action, payload) = if record.pending_final_scoring.is_some() {
                 (
-                    human_scoring_controller(&record).unwrap(),
+                    if !record.counting_finished[0] { Side::Left } else { Side::Right },
                     "continue-scoring",
                     json!({}),
                 )
@@ -4120,7 +4350,7 @@ mod tests {
                     | Phase::ScorePone
                     | Phase::ScoreDealer
                     | Phase::ScoreCrib => (
-                        human_scoring_controller(&record).unwrap(),
+                        if !record.counting_finished[0] { Side::Left } else { Side::Right },
                         "continue-scoring",
                         json!({}),
                     ),

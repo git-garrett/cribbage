@@ -12209,3 +12209,20 @@ body:has(.app[data-view="engagement"]) .bug-report-dock {
     gap: 0.15rem;
   }
 }
+
+/* Persistent peer waits share the table's score-bubble treatment. */
+.game-notification-waiting {
+  z-index: 12;
+  width: clamp(160px, 45%, 240px);
+  padding: 22px;
+  font-size: max(16px, var(--notice-font));
+  font-weight: 750;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  transform: translate(-50%, -50%);
+  animation: none;
+}
+
+.game-notification-waiting[hidden] {
+  display: none;
+}
