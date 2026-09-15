@@ -8503,7 +8503,8 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   place-content: center;
   justify-items: center;
   gap: 8px;
-  background: rgba(7, 31, 56, 0.2);
+  /* Only the mark and label cover the felt; a table-wide tint flashes on mobile. */
+  background: transparent;
   pointer-events: none;
 }
 

@@ -616,6 +616,52 @@ async function testEngagementDashboard(browser, baseUrl) {
   return { lineChart: true, oldestPartialBucket: true, legendToggle: true, keyboardTabs: true, people: true, experience: true, states: true, serverFilter: true };
 }
 
+async function testTrainingFeedbackBackground(browser, baseUrl) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await installStaticBuild(page);
+  await installPathwayFixture(page);
+  await page.goto(`${baseUrl}/?pathwayView=intro-pegging`, { waitUntil: "networkidle" });
+  await page.locator("[data-training-intro-next]").click();
+  await page.locator("[data-training-intro-dialog] button[type='submit']").click();
+  const action = page.locator("[data-training-intro-continue]");
+  await action.filter({ hasText: "Try it yourself" }).click();
+  await page.locator('[data-training-intro-game][data-dealing="false"]').waitFor();
+
+  // Hold the feedback's dismissal timer so each screenshot samples the visible
+  // animation, even on slower machines. Exercise real incorrect/correct answers.
+  await page.clock.install();
+  await page.clock.pauseAt(Date.now() + 100);
+  const feedback = page.locator("[data-training-intro-feedback]");
+  for (const [state, card, mark] of [["failure", "9c", "×"], ["success", "6d", "✓"]]) {
+    await page.locator(`[data-training-intro-hand] [data-training-card="${card}"]`).click();
+    await action.click();
+    if (!await feedback.isVisible() || await feedback.getAttribute("data-state") !== state
+      || await feedback.locator(".drill-feedback-mark").textContent() !== mark) {
+      throw new Error(`Missing ${state} training feedback.`);
+    }
+    await feedback.locator(".drill-feedback-mark").evaluate((element) => {
+      for (const animation of element.getAnimations()) {
+        animation.pause();
+        animation.currentTime = 350;
+      }
+    });
+    const box = await feedback.boundingBox();
+    // The edge of the lower table is felt, clear of the centered mark and label.
+    const clip = { x: Math.ceil(box.x + 5), y: Math.ceil(box.y + box.height * 0.8), width: 2, height: 2 };
+    const during = await page.screenshot({ clip });
+    // Compare with the same layout beneath the overlay, keeping card moves and
+    // score updates identical so this catches a background flash specifically.
+    await feedback.evaluate((element) => { element.hidden = true; });
+    const uncovered = await page.screenshot({ clip });
+    await feedback.evaluate((element) => { element.hidden = false; });
+    if (!during.equals(uncovered)) throw new Error(`${state} feedback changes the table background.`);
+    await page.clock.runFor(1200);
+    if (await feedback.isVisible()) throw new Error(`${state} feedback did not dismiss.`);
+  }
+  await page.close();
+  return { success: true, failure: true, backgroundStable: true };
+}
+
 async function main() {
   if (!fs.existsSync(path.join(root, "index.html"))) {
     throw new Error("Missing dist/index.html; run npm run build first.");
@@ -673,13 +719,14 @@ async function main() {
       throw new Error(`Authentication recovery regression: ${JSON.stringify(state)}`);
     }
     await page.close();
+    const trainingFeedback = await testTrainingFeedbackBackground(browser, baseUrl);
     const pathwayNavigation = await testPathwayParentNavigation(browser, baseUrl);
     const leaderboardInfo = await testLeaderboardTourneyInfoTap(browser, baseUrl);
     const leaderboardBackfill = await testIndexedDbLeaderboardBackfill(browser, baseUrl);
     const blockedIndexedDb = await testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl);
     const people = await testPeopleInteractions(browser, baseUrl);
     const engagement = await testEngagementDashboard(browser, baseUrl);
-    console.log(JSON.stringify({ authenticationRecovery: state, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
+    console.log(JSON.stringify({ authenticationRecovery: state, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
   } finally {
     await browser.close();
   }
