@@ -23,9 +23,9 @@ export const PUTTING_IT_TOGETHER: PuttingTogetherLesson = {
   steps: [
     { action: "cut", title: "Cut for the deal", explanation: "Each player cuts a card. The lower card deals first. Tap Cut the deck to reveal your card.", actionLabel: "Cut the deck" },
     { action: "deal", title: "Deal six cards", explanation: "The dealer gives six cards to each player, one at a time. Tap Deal the cards to see your starting hand arrive.", actionLabel: "Deal the cards" },
-    { action: "discard", title: "Discard two", explanation: "Each player sends two cards to the crib. Keep the useful 5, 5, 6, and 9 together here; select the queen and king as the obvious throwaways.", actionLabel: "Discard selected" },
-    { action: "peg", title: "Peg one card", explanation: "Players alternate cards without taking the count past 31. A 6 is on the table and the count is 6. Select your 9 to make 15 and score 2 points.", actionLabel: "Play selected" },
-    { action: "count", title: "Count the hand", explanation: "After pegging, each player counts the combinations in their four-card hand with the turn card. This simple hand contains one pair of 4s for 2 points.", actionLabel: "Count this hand" },
+    { action: "discard", title: "Discard two", explanation: "Each player sends two cards to the dealer’s crib. You are the dealer here: select the 6 and 9 for your own crib, keeping 5, 5, queen, and king in your hand.", actionLabel: "Discard selected" },
+    { action: "peg", title: "Peg one card", explanation: "Players alternate cards without taking the count past 31. A queen is on the table and the count is 10. Select either of your 5s to make 15 and score 2 points.", actionLabel: "Play selected" },
+    { action: "count", title: "Count the hand", explanation: "After pegging, each player counts the combinations in their four-card hand with the turn card. With a 2 as the turn card, your 5, 5, queen, and king score 10 points: four fifteens for 8, plus the pair of 5s for 2.", actionLabel: "Count this hand" },
     { action: "alternate", title: "Pass the crib", explanation: "The dealer counts the crib after both hands. On the next hand, the other player deals and owns the crib. Tap Start next hand to pass the crib marker.", actionLabel: "Start next hand" },
     { action: "win", title: "Reach 121", explanation: "Every score moves your peg forward. The first player to reach the finish hole at 121 wins. You are on 120—tap Peg to 121 to finish the game.", actionLabel: "Peg to 121" },
   ] satisfies PuttingTogetherStep[],

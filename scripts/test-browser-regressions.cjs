@@ -710,6 +710,55 @@ async function testDiscardIntroDemonstration(browser, baseUrl) {
   return { selectionPause: true, discardFlight: true, fourKeptCards: true, reducedMotion: true, practiceReset: true };
 }
 
+async function testPuttingTogetherDiscards(browser, baseUrl) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: "reduce" });
+  await installStaticBuild(page);
+  await installPathwayFixture(page);
+  await page.goto(`${baseUrl}/?pathwayView=intro-complete`, { waitUntil: "networkidle" });
+  const action = page.locator("[data-training-intro-continue]");
+  const closeExplanation = () => page.locator("[data-training-intro-dialog] button[type='submit']").click();
+  await page.locator("[data-training-intro-next]").click();
+  await closeExplanation();
+  await action.click();
+  await action.filter({ hasText: "Next: Deal six cards" }).click();
+  await closeExplanation();
+  await action.click();
+  await action.filter({ hasText: "Next: Discard two" }).click();
+  await closeExplanation();
+  const hand = page.locator("[data-training-intro-hand]");
+  if (!await page.locator("[data-training-intro-player-crib]").isVisible()
+    || await page.locator("[data-training-intro-opponent-crib]").isVisible()) {
+    throw new Error("The example must send discards to the player's own crib.");
+  }
+  const options = await hand.locator('[role="button"]').evaluateAll((cards) => cards.map((card) => card.dataset.trainingCard).sort());
+  if (JSON.stringify(options) !== JSON.stringify(["6s", "9h"])) throw new Error(`Wrong discard choices: ${options}`);
+  for (const card of options) await hand.locator(`[data-training-card="${card}"]`).click();
+  await action.click();
+  const labels = () => hand.locator(".card").evaluateAll((cards) => cards.map((card) => card.dataset.trainingCard).sort());
+  const expected = ["5c", "5d", "Kd", "Qc"];
+  if (JSON.stringify(await labels()) !== JSON.stringify(expected)) throw new Error("Discard must keep 5, 5, king, queen.");
+  await action.filter({ hasText: "Next: Peg one card" }).click();
+  await closeExplanation();
+  if (JSON.stringify(await labels()) !== JSON.stringify(expected)) throw new Error("Pegging must use the kept hand.");
+  await hand.locator('[data-training-card="5d"]').click();
+  await action.click();
+  await action.filter({ hasText: "Next: Count the hand" }).waitFor();
+  if (await page.locator("[data-training-intro-count]").textContent() !== "15"
+    || await page.locator("[data-training-intro-player-score]").textContent() !== "2") {
+    throw new Error("The retained 5 must make fifteen for two points.");
+  }
+  await action.click();
+  await closeExplanation();
+  if (JSON.stringify(await labels()) !== JSON.stringify(expected)) throw new Error("Counting must restore the same four-card hand.");
+  await action.click();
+  if (await page.locator("[data-training-intro-player-score]").textContent() !== "12"
+    || await page.locator("[data-training-intro-notices] .game-notification-points").textContent() !== "10") {
+    throw new Error("Counting must add four fifteens and a pair to the two pegging points.");
+  }
+  await page.close();
+  return { ownCrib: true, discardSixNine: true, keepFiveFiveKingQueen: true, peggingAndCounting: true };
+}
+
 async function main() {
   if (!fs.existsSync(path.join(root, "index.html"))) {
     throw new Error("Missing dist/index.html; run npm run build first.");
@@ -767,6 +816,7 @@ async function main() {
       throw new Error(`Authentication recovery regression: ${JSON.stringify(state)}`);
     }
     await page.close();
+    const puttingTogether = await testPuttingTogetherDiscards(browser, baseUrl);
     const discardIntro = await testDiscardIntroDemonstration(browser, baseUrl);
     const trainingFeedback = await testTrainingFeedbackBackground(browser, baseUrl);
     const pathwayNavigation = await testPathwayParentNavigation(browser, baseUrl);
@@ -775,7 +825,7 @@ async function main() {
     const blockedIndexedDb = await testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl);
     const people = await testPeopleInteractions(browser, baseUrl);
     const engagement = await testEngagementDashboard(browser, baseUrl);
-    console.log(JSON.stringify({ authenticationRecovery: state, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
+    console.log(JSON.stringify({ authenticationRecovery: state, puttingTogether, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
   } finally {
     await browser.close();
   }
