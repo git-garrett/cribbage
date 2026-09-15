@@ -662,6 +662,54 @@ async function testTrainingFeedbackBackground(browser, baseUrl) {
   return { success: true, failure: true, backgroundStable: true };
 }
 
+async function testDiscardIntroDemonstration(browser, baseUrl) {
+  for (const reducedMotion of ["no-preference", "reduce"]) {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion });
+    await installStaticBuild(page);
+    await installPathwayFixture(page);
+    await page.goto(`${baseUrl}/?pathwayView=intro-discard`, { waitUntil: "networkidle" });
+    await page.locator("[data-training-intro-next]").click();
+    await page.locator("[data-training-intro-dialog] button[type='submit']").click();
+    await page.locator('[data-training-intro-game][data-dealing="false"]').waitFor();
+    const hand = page.locator("[data-training-intro-hand]");
+    const action = page.locator("[data-training-intro-continue]");
+    const selected = await hand.locator(".card.selected").evaluateAll((cards) => cards.map((card) => card.dataset.trainingCard).sort());
+    if (JSON.stringify(selected) !== JSON.stringify(["Kd", "Qc"]) || await hand.locator(".card").count() !== 6) {
+      throw new Error("Discard example must first show all six cards with the queen and king selected.");
+    }
+    await page.waitForTimeout(200);
+    if (await action.isVisible() || await hand.locator(".card").count() !== 6) {
+      throw new Error("Discard example must pause on the selection before removing the cards.");
+    }
+    if (reducedMotion === "no-preference") {
+      const flight = page.locator(".discard-flight-layer");
+      await flight.waitFor();
+      const discards = await flight.locator(".card").evaluateAll((cards) => cards.map((card) => card.dataset.trainingCard).sort());
+      if (JSON.stringify(discards) !== JSON.stringify(selected)) throw new Error("The two selected cards must fly to the crib.");
+    }
+    await action.filter({ hasText: "Try it yourself" }).waitFor();
+    const kept = await hand.locator(".card").evaluateAll((cards) => cards.map((card) => card.dataset.trainingCard).sort());
+    if (JSON.stringify(kept) !== JSON.stringify(["4c", "4d", "6s", "9h"])) {
+      throw new Error(`Discard demonstration left the wrong hand: ${kept}`);
+    }
+    for (const card of await hand.locator(".card").all()) {
+      if (!await card.isVisible()) throw new Error("Each kept card must remain visible.");
+    }
+    if (await page.locator(".discard-flight-layer").count() !== 0
+      || await page.locator("[data-training-intro-crib]").getAttribute("data-fill") !== "partial") {
+      throw new Error("Discard demonstration must clean up the flight and fill the crib.");
+    }
+    await action.click();
+    await page.locator('[data-training-intro-game][data-dealing="false"]').waitFor();
+    if (await hand.locator("button.card").count() !== 6
+      || await page.locator("[data-training-intro-crib]").getAttribute("data-fill") !== "empty") {
+      throw new Error("Practice must restore six selectable cards and an empty crib.");
+    }
+    await page.close();
+  }
+  return { selectionPause: true, discardFlight: true, fourKeptCards: true, reducedMotion: true, practiceReset: true };
+}
+
 async function main() {
   if (!fs.existsSync(path.join(root, "index.html"))) {
     throw new Error("Missing dist/index.html; run npm run build first.");
@@ -719,6 +767,7 @@ async function main() {
       throw new Error(`Authentication recovery regression: ${JSON.stringify(state)}`);
     }
     await page.close();
+    const discardIntro = await testDiscardIntroDemonstration(browser, baseUrl);
     const trainingFeedback = await testTrainingFeedbackBackground(browser, baseUrl);
     const pathwayNavigation = await testPathwayParentNavigation(browser, baseUrl);
     const leaderboardInfo = await testLeaderboardTourneyInfoTap(browser, baseUrl);
@@ -726,7 +775,7 @@ async function main() {
     const blockedIndexedDb = await testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl);
     const people = await testPeopleInteractions(browser, baseUrl);
     const engagement = await testEngagementDashboard(browser, baseUrl);
-    console.log(JSON.stringify({ authenticationRecovery: state, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
+    console.log(JSON.stringify({ authenticationRecovery: state, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
   } finally {
     await browser.close();
   }

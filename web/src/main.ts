@@ -5173,10 +5173,7 @@ function completeTrainingIntroExample(): void {
   const notices = introElement<HTMLElement>("[data-training-intro-notices]");
   if (!button || !notices) return;
   if (intro.kind === "discard") {
-    button.hidden = false;
-    button.disabled = false;
-    button.textContent = "Try it yourself";
-    button.onclick = showTrainingIntroPractice;
+    void playTrainingIntroDiscardExample();
     return;
   }
   const hand = introElement<HTMLElement>("[data-training-intro-hand]");
@@ -5216,6 +5213,44 @@ function completeTrainingIntroExample(): void {
     { transform: `translate(${x}px, ${y}px) rotate(-2deg)` },
   ], { duration: 560, easing: "cubic-bezier(0.22, 0.72, 0.24, 1)", fill: "forwards" });
   void animation.finished.then(finish, finish);
+}
+
+async function playTrainingIntroDiscardExample(): Promise<void> {
+  const game = introElement<HTMLElement>("[data-training-intro-game]");
+  const hand = introElement<HTMLElement>("[data-training-intro-hand]");
+  const crib = introElement<HTMLElement>("[data-training-intro-crib]");
+  const button = introElement<HTMLButtonElement>("[data-training-intro-continue]");
+  if (!game || !hand || !crib || !button) return;
+  const generation = game.dataset.dealGeneration;
+  const selected = [...hand.querySelectorAll<HTMLElement>(".card.selected")];
+  const isCurrent = () => pathwayRouteFromLocation() === "intro-discard"
+    && activeTrainingIntroMode === "example" && !game.hidden
+    && game.dataset.dealGeneration === generation
+    && selected.every((card) => card.parentElement === hand);
+  if (selected.length !== 2) return;
+
+  // Let the player see the chosen pair before it travels to the crib.
+  await waitMs(700);
+  if (!isCurrent()) return;
+  if (!tableMotionDisabled()) {
+    const target = crib.querySelector<HTMLElement>(".crib-tray-stack")!.getBoundingClientRect();
+    const sources = selected.map((element) => ({
+      element, rect: element.getBoundingClientRect(), card: discardFlightCard(element),
+    }));
+    await animateDiscardFlights(sources, {
+      x: target.left + target.width / 2,
+      y: target.top + target.height / 2,
+    }, "human");
+  } else {
+    cardSounds.play("discard");
+  }
+  if (!isCurrent()) return;
+  selected.forEach((card) => card.remove());
+  crib.dataset.fill = "partial";
+  button.hidden = false;
+  button.disabled = false;
+  button.textContent = "Try it yourself";
+  button.onclick = showTrainingIntroPractice;
 }
 
 function trainingIntroSelectionStatus(kind: TrainingIntroKind, selected: number, step?: TrainingIntroStep): string {
@@ -5417,6 +5452,8 @@ function showTrainingIntroDecision(mode: "practice" | "challenge"): void {
   if (count) count.textContent = String(situation.countBefore);
   if (playerScore) playerScore.textContent = "0";
   if (boardValue) boardValue.textContent = intro.kind === "pegging" ? String(situation.countBefore) : String(activeTrainingIntroStep + 1);
+  const crib = introElement<HTMLElement>("[data-training-intro-crib]");
+  if (crib) crib.dataset.fill = "empty";
   playTrainingDealAnimation(game);
 }
 
@@ -5477,6 +5514,7 @@ function showTrainingIntroStep(index: number): void {
   if (playerScore) playerScore.textContent = "0";
   meta.textContent = `${index + 1} of ${intro.steps.length} · ${step.title}`;
   crib.hidden = intro.kind !== "discard";
+  crib.dataset.fill = "empty";
   notices.replaceChildren();
   instruction.hidden = true;
   setTrainingIntroFeedback(null);
@@ -6803,12 +6841,21 @@ async function playDiscardToCribAnimation(
     return;
   }
 
-  const destination = cribFlightDestination();
+  els.cribTray.classList.add("crib-tray-receiving");
+  await animateDiscardFlights(sources, cribFlightDestination(), player);
+  els.cribTray.dataset.fill = player === "ai" ? "full" : "partial";
+  els.cribTray.classList.remove("crib-tray-receiving");
+}
+
+async function animateDiscardFlights(
+  sources: DiscardFlightSource[],
+  destination: { x: number; y: number },
+  player: PlayerKey,
+): Promise<void> {
   const layer = document.createElement("div");
   layer.className = "discard-flight-layer";
   layer.dataset.player = player;
   layer.setAttribute("aria-hidden", "true");
-  els.cribTray.classList.add("crib-tray-receiving");
 
   for (const source of sources) {
     source.element?.classList.add("discard-card-departing");
@@ -6842,8 +6889,6 @@ async function playDiscardToCribAnimation(
 
   await Promise.all(flights);
   await waitMs(100);
-  els.cribTray.dataset.fill = player === "ai" ? "full" : "partial";
-  els.cribTray.classList.remove("crib-tray-receiving");
   layer.remove();
   for (const source of sources) source.element?.classList.remove("discard-card-departing");
 }
