@@ -61,7 +61,7 @@ describe("branded utility pages", () => {
   it("uses the same complete header on statistics and other utility pages", () => {
     expect(css).toMatch(/\.mobile-header-reveal\s*\{[^}]*display:\s*none/s);
     expect(source).toContain("const utilityHeaderActive =");
-    expect(source).toMatch(/active \|\| utilityHeaderActive[\s\S]*els\.topbar\.append\(els\.peoplePresence\)/);
+    expect(source).toMatch(/active \|\| utilityHeaderActive[\s\S]*topbar\.append\(els\.peoplePresence\)/);
     expect(css).toMatch(/\.app\[data-view="analytics"\] > \.topbar[\s\S]*grid-template-columns:\s*minmax\(58px, 1fr\) minmax\(0, auto\) minmax\(70px, 1fr\)/s);
   });
 });
