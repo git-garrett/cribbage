@@ -4,6 +4,7 @@ export interface TrainingIntroSituation {
   hand: string[];
   selected: string[];
   requiredKeepCards?: string[];
+  discardSameSuit?: boolean;
   played: string[];
   playedCard: string | null;
   cutCard: string | null;
@@ -63,6 +64,12 @@ export function randomizedTrainingHand(
 }
 
 export function correctTrainingIntroChoice(situation: TrainingIntroSituation, kind: TrainingIntroKind, chosen: string[]): boolean {
+  if (kind === "discard" && situation.discardSameSuit) {
+    return chosen.length === 2
+      && new Set(chosen).size === 2
+      && chosen.every((card) => situation.hand.includes(card))
+      && chosen[0].slice(-1) === chosen[1].slice(-1);
+  }
   if (kind === "discard" && situation.requiredKeepCards) {
     const uniqueChosen = new Set(chosen);
     return chosen.length === 2
@@ -102,7 +109,7 @@ export const TRAINING_INTROS: Record<TrainingIntroKind, TrainingIntro> = {
       { id: "run-four", title: "Run of four", explanation: "Four consecutive ranks score 4 points. Discard the queen and king to keep 3–4–5–6 intact.", hand: ["3c", "4d", "5s", "6h", "Qc", "Kd"], selected: ["Qc", "Kd"], requiredKeepCards: ["3c", "4d", "5s", "6h"], played: [], playedCard: null, cutCard: "9h", countBefore: 0, points: 4, challenge: { hand: ["6c", "7d", "8s", "9h", "Jc", "Kd"], selected: ["Jc", "Kd"], requiredKeepCards: ["6c", "7d", "8s", "9h"], played: [], playedCard: null, cutCard: "2h", countBefore: 0 } },
       { id: "double-run", title: "Double run", explanation: "A repeated rank can make the same run twice. Keeping 3, 3, 4, 5 creates two runs of three plus a pair, for 8 points before the turn card.", hand: ["3c", "3d", "4s", "5h", "Qc", "Kd"], selected: ["Qc", "Kd"], requiredKeepCards: ["3c", "3d", "4s", "5h"], played: [], playedCard: null, cutCard: "9c", countBefore: 0, points: 8, challenge: { hand: ["6c", "6d", "7s", "8h", "Jc", "Kd"], selected: ["Jc", "Kd"], requiredKeepCards: ["6c", "6d", "7s", "8h"], played: [], playedCard: null, cutCard: "2c", countBefore: 0 } },
       { id: "flush", title: "Flush", explanation: "Four cards of one suit in your hand score 4 points. A turn card of that suit would make it 5. Discard the off-suit 3 and queen here.", hand: ["2h", "5h", "9h", "Kh", "3c", "Qd"], selected: ["3c", "Qd"], requiredKeepCards: ["2h", "5h", "9h", "Kh"], played: [], playedCard: null, cutCard: "7s", countBefore: 0, points: 4, challenge: { hand: ["Ac", "4c", "8c", "Kc", "3h", "Qd"], selected: ["3h", "Qd"], requiredKeepCards: ["Ac", "4c", "8c", "Kc"], played: [], playedCard: null, cutCard: "7s", countBefore: 0 } },
-      { id: "crib-flush", title: "Flush in the crib", explanation: "A crib flush is stricter: all four crib cards and the turn card must share a suit. Sending two hearts to your crib creates the possibility, but the other cards and turn must also be hearts. Crib details will return later in training.", hand: ["Ah", "4h", "6c", "8d", "Qs", "Kc"], selected: ["Ah", "4h"], played: [], playedCard: null, cutCard: "9h", countBefore: 0, points: 0, challenge: { hand: ["2s", "7s", "4c", "8d", "Qh", "Kc"], selected: ["2s", "7s"], played: [], playedCard: null, cutCard: "10s", countBefore: 0 } },
+      { id: "crib-flush", title: "Flush in the crib", explanation: "A crib flush is stricter: all four crib cards and the turn card must share a suit. Sending two cards of one suit to your crib creates the possibility, but the other cards and turn must also match. Either same-suit pair in your hand is a valid choice. Crib details will return later in training.", hand: ["Ah", "4h", "6c", "8d", "Qs", "Kc"], selected: ["Ah", "4h"], discardSameSuit: true, played: [], playedCard: null, cutCard: "9h", countBefore: 0, points: 0, challenge: { hand: ["2s", "7s", "4c", "8d", "Qh", "Kc"], selected: ["2s", "7s"], discardSameSuit: true, played: [], playedCard: null, cutCard: "10s", countBefore: 0 } },
     ],
     completionTitle: "You understand beginner discarding.",
     completion: "You can now preserve pairs, fifteens, runs, and flushes, and recognize double runs. The drills will let you practice choosing the two cards to send away.",

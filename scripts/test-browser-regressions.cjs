@@ -710,8 +710,47 @@ async function testDiscardIntroDemonstration(browser, baseUrl) {
   return { selectionPause: true, discardFlight: true, fourKeptCards: true, reducedMotion: true, practiceReset: true };
 }
 
-async function testPuttingTogetherDiscards(browser, baseUrl) {
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: "reduce" });
+async function testTrainingPeggingAnimations(browser, baseUrl) {
+  const page = await browser.newPage({ viewport: { width: 1024, height: 900 }, reducedMotion: "no-preference" });
+  await installStaticBuild(page);
+  await installPathwayFixture(page);
+  const flight = page.locator(".pegging-play-flight-layer .pegging-flying-card");
+  const assertFlight = async () => {
+    await flight.waitFor();
+    const timing = await flight.evaluate((card) => card.getAnimations()[0].effect.getTiming());
+    if (timing.duration !== 480 || timing.easing !== "cubic-bezier(0.22, 0.72, 0.24, 1)") throw new Error("Training must use live pegging flight timing.");
+    await flight.waitFor({ state: "detached" });
+  };
+  await page.goto(`${baseUrl}/?pathwayView=intro-pegging`, { waitUntil: "networkidle" });
+  await page.locator("[data-training-intro-next]").click();
+  await page.locator("[data-training-intro-dialog] button[type='submit']").click();
+  await assertFlight();
+  const action = page.locator("[data-training-intro-continue]");
+  await action.filter({ hasText: "Try it yourself" }).click();
+  await page.locator('[data-training-intro-game][data-dealing="false"]').waitFor();
+  await page.locator('[data-training-card="6d"]').click();
+  await action.click();
+  await assertFlight();
+  await action.filter({ hasText: "Find another pair" }).click();
+  await page.locator('[data-training-intro-game][data-dealing="false"]').waitFor();
+  await page.locator('[data-training-card="8d"]').click();
+  await action.click();
+  await assertFlight();
+  await page.addInitScript(() => { Math.random = () => 0; });
+  await page.goto(`${baseUrl}/?pathwayView=drill-scoring-play`, { waitUntil: "networkidle" });
+  const surface = page.locator('[data-drill-surface="find-scoring-play"]');
+  await surface.locator('[data-drill-hand] .card').first().waitFor();
+  await page.locator('[data-drill-surface="find-scoring-play"][data-dealing="false"]').waitFor();
+  const drill = JSON.parse(fs.readFileSync(path.join(__dirname, "../resources/training/easy-drills.json"), "utf8")).scoringPlayDrills[0];
+  await surface.locator(`[data-card="${drill.answer}"]`).click();
+  await surface.locator("[data-drill-submit]").click();
+  await assertFlight();
+  await page.close();
+  return { example: true, practice: true, challenge: true, scoringDrill: true };
+}
+
+async function testPuttingTogetherDiscards(browser, baseUrl, pegCard = "5d", reducedMotion = "no-preference") {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion });
   await installStaticBuild(page);
   await installPathwayFixture(page);
   await page.goto(`${baseUrl}/?pathwayView=intro-discard`, { waitUntil: "networkidle" });
@@ -726,12 +765,22 @@ async function testPuttingTogetherDiscards(browser, baseUrl) {
   await page.locator('[data-pathway-destination="intro-complete"]').click();
   await page.locator("[data-training-intro-next]").click();
   await closeExplanation();
-  if (!await page.getByRole("button", { name: "Deck ready to cut" }).isVisible()
+  if (await page.locator("[data-training-intro-played] .deal-cut-choice").count() !== 52
     || await page.locator("[data-training-intro-instruction]").isVisible()) {
     throw new Error("The complete lesson must restore the deck and clear prior practice instructions.");
   }
+  await page.getByRole("button", { name: "Cut at card 13 of 52", exact: true }).click();
+  if (reducedMotion === "no-preference") {
+    await page.locator("[data-training-intro-played] .deal-cut-card-lift").waitFor();
+  }
+  await action.filter({ hasText: "Next: Deal six cards" }).waitFor();
+  if (await page.locator("[data-training-intro-played] .deal-cut-reveal").count() !== 2) throw new Error("Both cut cards must be revealed.");
+  const cutFits = await page.locator("[data-training-intro-played] .deal-cut-card").evaluateAll((cards) => cards.every((card) => {
+    const rect = card.getBoundingClientRect();
+    return rect.left >= 0 && rect.right <= innerWidth;
+  }));
+  if (!cutFits) throw new Error("The cut spread must fit the viewport.");
   await action.click();
-  await action.filter({ hasText: "Next: Deal six cards" }).click();
   await closeExplanation();
   await action.click();
   await action.filter({ hasText: "Next: Discard two" }).click();
@@ -754,13 +803,27 @@ async function testPuttingTogetherDiscards(browser, baseUrl) {
     throw new Error("The pegging card must remain visible after visiting Discard Intro.");
   }
   if (JSON.stringify(await labels()) !== JSON.stringify(expected)) throw new Error("Pegging must use the kept hand.");
-  await hand.locator('[data-training-card="5d"]').click();
+  const pegOptions = await hand.locator('[role="button"]').evaluateAll((cards) => cards.map((card) => card.dataset.trainingCard).sort());
+  if (JSON.stringify(pegOptions) !== JSON.stringify(expected)) throw new Error("Every kept card must be playable.");
+  await hand.locator('[data-training-card="5c"]').click();
+  await hand.locator(`[data-training-card="${pegCard}"]`).click();
+  if (pegCard === "5c") await hand.locator('[data-training-card="5c"]').click();
+  if (await hand.locator(".selected").count() !== 1) throw new Error("Pegging must select only one card.");
   await action.click();
-  await action.filter({ hasText: "Next: Count the hand" }).waitFor();
-  if (await page.locator("[data-training-intro-count]").textContent() !== "15"
-    || await page.locator("[data-training-intro-player-score]").textContent() !== "2") {
-    throw new Error("The retained 5 must make fifteen for two points.");
+  if (reducedMotion === "no-preference") {
+    const flying = page.locator(".pegging-play-flight-layer .pegging-flying-card");
+    await flying.waitFor();
+    const duration = await flying.evaluate((card) => card.getAnimations()[0].effect.getTiming().duration);
+    if (duration !== 480) throw new Error(`Training flight differs from live human pegging: ${duration}`);
   }
+  await action.filter({ hasText: "Next: Count the hand" }).waitFor();
+  const expectedCount = pegCard.startsWith("5") ? "15" : "20";
+  const expectedPoints = pegCard === "Kd" ? 0 : 2;
+  if (await page.locator("[data-training-intro-count]").textContent() !== expectedCount
+    || await page.locator("[data-training-intro-player-score]").textContent() !== String(expectedPoints)) {
+    throw new Error(`Wrong count or score for ${pegCard}.`);
+  }
+  if (pegCard !== "5d") { await page.close(); return { pegCard, expectedCount, expectedPoints }; }
   await action.click();
   await closeExplanation();
   if (JSON.stringify(await labels()) !== JSON.stringify(expected)) throw new Error("Counting must restore the same four-card hand.");
@@ -769,11 +832,44 @@ async function testPuttingTogetherDiscards(browser, baseUrl) {
     throw new Error("The counting turn card must remain visible after visiting Discard Intro.");
   }
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator("[data-training-intro-game] > .scoreboard [data-training-intro-cut] .card").waitFor();
+  await page.evaluate(() => {
+    window.trainingCounts = [];
+    const notices = document.querySelector("[data-training-intro-notices]");
+    new MutationObserver(() => {
+      const bubble = notices.querySelector(".game-notification");
+      if (!bubble) return;
+      const lifted = [...document.querySelectorAll("[data-training-intro-hand] .score-card-lift")];
+      window.trainingCounts.push({
+        label: bubble.querySelector(".game-notification-label").textContent,
+        points: bubble.querySelector(".game-notification-points").textContent,
+        emphasized: lifted.map((card) => card.dataset.id),
+        animation: lifted[0] && getComputedStyle(lifted[0]).animationName,
+        bubbleAnimation: getComputedStyle(bubble).animationName,
+      });
+    }).observe(notices, { childList: true });
+  });
   await action.click();
-  if (await page.locator("[data-training-intro-player-score]").textContent() !== "12"
-    || await page.locator("[data-training-intro-notices] .game-notification-points").textContent() !== "10") {
-    throw new Error("Counting must add four fifteens and a pair to the two pegging points.");
+  await action.filter({ hasText: "Next: Pass the crib" }).waitFor({ timeout: 20000 });
+  const counts = await page.evaluate(() => window.trainingCounts);
+  if (JSON.stringify(counts.map((part) => part.label)) !== JSON.stringify(["Fifteen", "Fifteen", "Fifteen", "Fifteen", "Pair"])
+    || counts.some((part) => part.points !== "+2" || part.emphasized.length !== 2)
+    || new Set(counts.map((part) => [...part.emphasized].sort().join(","))).size !== 5) {
+    throw new Error(`Counting did not present each distinct combination: ${JSON.stringify(counts)}`);
   }
+  if (reducedMotion === "no-preference" && counts.some((part) => part.animation !== "score-card-lift-cycle" || part.bubbleAnimation !== "game-score-notification-after-lift")) {
+    throw new Error(`Counting animations differ from live play: ${JSON.stringify(counts)}`);
+  }
+  if (await page.locator("[data-training-intro-player-score]").textContent() !== "12") throw new Error("Counting must add ten to pegging points.");
+  await action.click();
+  await closeExplanation();
+  await action.click();
+  await action.filter({ hasText: "Next: How the game ends" }).click();
+  if (!await page.locator("[data-training-intro-copy]").isVisible()
+    || await page.locator("[data-training-intro-game]").isVisible()
+    || !(await page.locator("[data-training-intro-body]").textContent()).includes("wins immediately")) throw new Error("Ending must be descriptive.");
+  await page.getByRole("button", { name: "Finish beginner training", exact: true }).click();
+  await page.getByRole("button", { name: "Play a real game against Easy" }).waitFor();
   await page.close();
   return { ownCrib: true, discardSixNine: true, keepFiveFiveKingQueen: true, peggingAndCounting: true };
 }
@@ -835,7 +931,9 @@ async function main() {
       throw new Error(`Authentication recovery regression: ${JSON.stringify(state)}`);
     }
     await page.close();
-    const puttingTogether = await testPuttingTogetherDiscards(browser, baseUrl);
+    const puttingTogether = [await testPuttingTogetherDiscards(browser, baseUrl)];
+    for (const card of ["5c", "Qc", "Kd"]) puttingTogether.push(await testPuttingTogetherDiscards(browser, baseUrl, card, "reduce"));
+    const peggingAnimations = await testTrainingPeggingAnimations(browser, baseUrl);
     const discardIntro = await testDiscardIntroDemonstration(browser, baseUrl);
     const trainingFeedback = await testTrainingFeedbackBackground(browser, baseUrl);
     const pathwayNavigation = await testPathwayParentNavigation(browser, baseUrl);
@@ -844,7 +942,7 @@ async function main() {
     const blockedIndexedDb = await testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl);
     const people = await testPeopleInteractions(browser, baseUrl);
     const engagement = await testEngagementDashboard(browser, baseUrl);
-    console.log(JSON.stringify({ authenticationRecovery: state, puttingTogether, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
+    console.log(JSON.stringify({ authenticationRecovery: state, puttingTogether, peggingAnimations, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
   } finally {
     await browser.close();
   }

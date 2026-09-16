@@ -6794,7 +6794,9 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 }
 
 .app[data-view="game"] #scoring-cards .card.score-card-lift,
-.app[data-view="game"] #turn-card .card.score-card-lift {
+.app[data-view="game"] #turn-card .card.score-card-lift,
+.app[data-view="game"] [data-training-intro-hand] .card.score-card-lift,
+.app[data-view="game"] [data-training-intro-cut] .card.score-card-lift {
   z-index: 8;
   animation: score-card-lift-cycle 2.2s linear both;
   filter: drop-shadow(0 8px 8px rgba(2, 28, 21, 0.28));
@@ -6993,12 +6995,16 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   .app[data-view="game"] .deal-cut-choice .deal-cut-card-lift,
   .app[data-view="game"] .deal-cut-reveal .card,
   .app[data-view="game"] #scoring-cards .card.score-card-lift,
-  .app[data-view="game"] #turn-card .card.score-card-lift {
+  .app[data-view="game"] #turn-card .card.score-card-lift,
+.app[data-view="game"] [data-training-intro-hand] .card.score-card-lift,
+.app[data-view="game"] [data-training-intro-cut] .card.score-card-lift {
     animation: none !important;
   }
 
   .app[data-view="game"] #scoring-cards .card.score-card-lift,
-  .app[data-view="game"] #turn-card .card.score-card-lift {
+  .app[data-view="game"] #turn-card .card.score-card-lift,
+.app[data-view="game"] [data-training-intro-hand] .card.score-card-lift,
+.app[data-view="game"] [data-training-intro-cut] .card.score-card-lift {
     outline: 3px solid var(--game-gold);
     outline-offset: 3px;
   }
@@ -7864,6 +7870,7 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   .pathway-primary-grid {
     align-self: center;
     width: min(100%, 900px);
+    margin-inline: auto;
     gap: 8px;
     padding: 20px 30px 8px;
   }
@@ -8379,24 +8386,9 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   margin: 0;
 }
 
-.putting-cut-deck {
-  cursor: default;
-  transform-origin: center;
-}
-
-.putting-cut-deck.putting-cutting {
-  animation: putting-cut 500ms cubic-bezier(0.22, 0.72, 0.24, 1) both;
-}
-
 .putting-crib-filled .crib-tray-stack::before,
 .putting-crib-filled .crib-tray-stack::after {
   opacity: 1;
-}
-
-@keyframes putting-cut {
-  0% { transform: translate(0, 0) rotate(0); }
-  45% { transform: translate(-34%, -18%) rotate(-5deg); }
-  100% { opacity: 0; transform: translate(-48%, -28%) rotate(-7deg); }
 }
 
 .drill-game-shell .drill-player-score {
@@ -12886,5 +12878,23 @@ body:has(.app[data-view="engagement"]) .bug-report-dock {
     --pathway-rest-y: 0px;
     --pathway-rest-rotate: 0deg;
     --pathway-hover-rotate: 1.15deg;
+  }
+}
+
+.app[data-view="game"] .training-cut-active {
+  display: block;
+  width: 100%;
+  max-width: none;
+  overflow: visible;
+  padding: 0;
+}
+
+.app[data-view="game"] .training-cut-active .deal-cut-choice {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (max-width: 640px) {
+  .training-intro-game > .scoreboard > .score-cut [data-training-intro-cut] {
+    grid-row: 1;
   }
 }
