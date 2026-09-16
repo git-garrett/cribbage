@@ -24,7 +24,7 @@ describe("beginner training intros", () => {
   };
 
   it("teaches pegging scoring in order before the scoring drill", () => {
-    expect(TRAINING_INTROS.pegging.steps.map((step) => step.id)).toEqual(["pair", "fifteen", "run-three", "run-four"]);
+    expect(TRAINING_INTROS.pegging.steps.map((step) => step.id)).toEqual(["pair", "fifteen", "run-three", "run-four", "thirty-one"]);
     expect(TRAINING_INTROS.pegging.steps.every((step) => step.playedCard && step.selected.length === 0)).toBe(true);
     expect(TRAINING_INTROS.pegging.drillRoute).toBe("drill-scoring-play");
   });
@@ -122,6 +122,7 @@ describe("beginner training intros", () => {
         const scoringChoices = situation.hand.filter((card) => {
           if (step.id === "pair") return rank(card) === rank(situation.played.at(-1)!);
           if (step.id === "fifteen") return situation.countBefore + cardValue(card) === 15;
+          if (step.id === "thirty-one") return situation.countBefore + cardValue(card) === 31;
           return isRun([...situation.played, card]);
         });
         expect(scoringChoices).toEqual([situation.playedCard]);

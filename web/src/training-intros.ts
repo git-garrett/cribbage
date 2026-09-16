@@ -84,9 +84,10 @@ export const TRAINING_INTROS: Record<TrainingIntroKind, TrainingIntro> = {
       { id: "fifteen", title: "Fifteen", explanation: "Make the running count exactly 15 to score 2 points. The count is 10, so playing your 5 makes 15.", hand: ["5h", "7c", "9d", "Ks"], selected: [], played: ["10s"], playedCard: "5h", cutCard: "3d", countBefore: 10, points: 2, challenge: { hand: ["8d", "4c", "9h", "Qs"], selected: [], played: ["7c"], playedCard: "8d", cutCard: "Kh", countBefore: 7 } },
       { id: "run-three", title: "Run of three", explanation: "The most recent cards can form a run even when they arrive out of order. Playing 4 after 3 and 5 makes 3–4–5 and scores 3 points.", hand: ["4h", "8c", "9s", "Qd"], selected: [], played: ["3c", "5d"], playedCard: "4h", cutCard: "Jc", countBefore: 8, points: 3, challenge: { hand: ["8h", "2c", "Js", "Qd"], selected: [], played: ["7c", "9d"], playedCard: "8h", cutCard: "5s", countBefore: 16 } },
       { id: "run-four", title: "Run of four", explanation: "Add the next rank to a three-card run to score 4 points. Playing 5 after 2, 4, and 3 makes 2–3–4–5.", hand: ["5s", "7h", "9c", "Kd"], selected: [], played: ["2c", "4d", "3h"], playedCard: "5s", cutCard: "Qc", countBefore: 9, points: 4, challenge: { hand: ["9s", "2h", "Qc", "Kd"], selected: [], played: ["6c", "8d", "7h"], playedCard: "9s", cutCard: "Ac", countBefore: 21 } },
+      { id: "thirty-one", title: "31", explanation: "Make the running count exactly 31 to score 2 points. The count is 24, so playing your 7 makes 31. The count then resets to zero for the next cards.", hand: ["7h", "2c", "4d", "5s"], selected: [], played: ["10c", "5d", "9s"], playedCard: "7h", cutCard: "Ah", countBefore: 24, points: 2, challenge: { hand: ["4h", "Ac", "2d", "3s"], selected: [], played: ["Kh", "8c", "9d"], playedCard: "4h", cutCard: "6c", countBefore: 27 } },
     ],
     completionTitle: "You understand beginner pegging.",
-    completion: "You can now spot pairs, fifteens, and short runs while the count builds. The drills will give you one clear scoring play at a time.",
+    completion: "You can now spot pairs, fifteens, short runs, and 31s while the count builds. The drills will give you one clear scoring play at a time.",
     drillRoute: "drill-scoring-play",
   },
   discard: {

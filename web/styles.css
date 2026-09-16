@@ -12874,3 +12874,17 @@ body:has(.app[data-view="engagement"]) .bug-report-dock {
 .game-notification-waiting[hidden] {
   display: none;
 }
+
+/* The complete-game lesson sits in its own lower hand on desktop. */
+@media (min-width: 850px) {
+  .pathway-choice-grid-beginner-complete {
+    width: min(100%, 420px);
+    margin: 24px auto 0;
+  }
+
+  .pathway-choice-grid-beginner-complete > .pathway-choice:only-child {
+    --pathway-rest-y: 0px;
+    --pathway-rest-rotate: 0deg;
+    --pathway-hover-rotate: 1.15deg;
+  }
+}
