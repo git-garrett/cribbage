@@ -1,4 +1,20 @@
-export type RestoredPathwayRoute = "home" | "play" | "human" | "tutorial" | "settings" | "gameplay" | "sounds" | "statistics" | "leaderboard";
+export type RestoredPathwayRoute =
+  | "home"
+  | "play"
+  | "human"
+  | "tutorial"
+  | "drills"
+  | "drills-beginner"
+  | "intro-pegging"
+  | "intro-discard"
+  | "intro-complete"
+  | "drill-scoring-play"
+  | "drill-discard"
+  | "settings"
+  | "gameplay"
+  | "sounds"
+  | "statistics"
+  | "leaderboard";
 
 export function shouldRestoreSavedGameSurface(options: {
   route: RestoredPathwayRoute | null;

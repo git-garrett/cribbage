@@ -52,9 +52,14 @@ describe("local pathway navigation", () => {
       "master",
       "grandmaster",
       "dynamic",
-      "tutorial-beginner",
       "tutorial-intermediate",
       "tutorial-expert",
+      "drills-beginner",
+      "intro-pegging",
+      "intro-discard",
+      "intro-complete",
+      "drill-scoring-play",
+      "drill-discard",
       "size",
       "gameplay",
       "sounds",
@@ -75,7 +80,7 @@ describe("local pathway navigation", () => {
     expect(html).toContain("Play, learn, review your progress, or adjust settings.");
     expect(html).toContain("<strong>Training</strong>");
     expect(html).toContain("Whether you're a beginner or want strategies for mastering the game.");
-    expect(html).toMatch(/data-pathway-target="tutorial"[\s\S]*?<strong>Training<\/strong>[\s\S]*?<em class="pathway-coming-soon">Coming soon<\/em>/);
+    expect(html).toMatch(/data-pathway-target="tutorial"[\s\S]*?<strong>Training<\/strong>[\s\S]*?<b aria-hidden="true">→<\/b>/);
     expect(html).toContain('<span class="pathway-card-kicker">Track your game</span>');
     expect(html).not.toContain("pathway-pill");
     expect(html).not.toContain('<i class="active"></i>');
@@ -95,6 +100,53 @@ describe("local pathway navigation", () => {
     expect(human).toBeGreaterThan(master);
     expect(dynamic).toBeGreaterThan(human);
     expect(grandmaster).toBeGreaterThan(dynamic);
+  });
+
+  it("opens beginner drills on the standard game table", () => {
+    expect(html).toMatch(/data-pathway-view="tutorial"[\s\S]*data-pathway-destination="drills-beginner"[\s\S]*<strong>Beginner<\/strong>/);
+    expect(html).not.toContain('data-pathway-view="drills"');
+    expect(html).not.toContain('data-pathway-destination="drills"');
+    expect(html).toMatch(/data-pathway-view="drills-beginner"[\s\S]*Find the Scoring Play[\s\S]*Discard Drills/);
+    expect(html).toContain("Learn the basics of play");
+    expect(html).toContain('data-drill-surface="find-scoring-play"');
+    expect(html).toContain('data-drill-surface="discard"');
+    expect(html).toMatch(/data-drill-surface="find-scoring-play"[\s\S]*class="topbar"[\s\S]*class="scoreboard"[\s\S]*class="table drill-game-table"/);
+    expect(html).toMatch(/data-drill-surface="find-scoring-play"[\s\S]*class="mobile-header-reveal"[\s\S]*←<\/span> Drills/);
+    expect(html).not.toMatch(/data-drill-surface="find-scoring-play"[\s\S]*<h2>Current count<\/h2>[\s\S]*data-drill-surface="discard"/);
+    expect(html).toMatch(/data-drill-surface="discard"[\s\S]*data-drill-submit disabled>Discard selected/);
+    expect(html).toContain("data-drill-feedback");
+    expect(source).toMatch(/trainingPathwayDestination[\s\S]*navigatePathway\(trainingRoute\)/);
+    expect(source).toMatch(/renderTrainingDrill[\s\S]*cardSounds\.play\("deal"\)/);
+    expect(source).toMatch(/markSolved[\s\S]*cardSounds\.play\("success"\)/);
+    expect(source).toMatch(/attempts < 3[\s\S]*showDrillHint\(surface, drill\.opportunity[\s\S]*The scoring play was/s);
+    expect(html).toMatch(/data-drill-hint hidden>[\s\S]*Look for[\s\S]*data-drill-hint-opportunity[\s\S]*opportunity/);
+    expect(source).toContain('if (route === "drills") return "drills-beginner";');
+    expect(css).toContain("@keyframes drill-card-travel");
+    expect(css).not.toContain("pathway-choice-drills");
+    expect(css).toMatch(/data-view="drill-scoring-play"[\s\S]*\.pathway-stage\s*{[^}]*border:\s*0[^}]*background:\s*transparent[^}]*box-shadow:\s*none/s);
+    expect(source).toMatch(/activeGameplayTopbar[\s\S]*pathwayView === "drill-scoring-play"[\s\S]*mobile-game-header-hidden/s);
+  });
+
+  it("places guided intros before their corresponding drills", () => {
+    expect(html).toMatch(/data-pathway-destination="intro-pegging"[\s\S]*data-pathway-destination="drill-scoring-play"[\s\S]*data-pathway-destination="intro-discard"[\s\S]*data-pathway-destination="drill-discard"/);
+    expect(html).toContain('data-pathway-view="training-intro"');
+    expect(html).toContain("data-training-intro-dialog");
+    expect(source).toMatch(/showTrainingIntroStep[\s\S]*dialog\.onclose = \(\) => playTrainingDealAnimation\(game, completeTrainingIntroExample\)[\s\S]*dialog\.showModal\(\)/s);
+    expect(source).toContain("function showTrainingIntroPractice");
+    expect(source).toContain("function showTrainingIntroChallenge");
+    expect(source).toContain("Find another ${step.title.toLowerCase()}");
+    expect(source).toContain("function trainingIntroPlayedCards");
+    expect(html).not.toMatch(/data-training-intro-played-wrap><h2>Current count<\/h2>/);
+    expect(source).toContain("function submitTrainingIntroPractice");
+    expect(html).toContain("data-training-intro-instruction");
+  });
+
+  it("ends beginner training with an interactive complete-game lesson", () => {
+    expect(html).toMatch(/data-pathway-destination="drill-discard"[\s\S]*data-pathway-destination="intro-complete"/);
+    expect(html).toContain("Putting It All Together");
+    expect(source).toContain("function showPuttingTogetherStep");
+    expect(source).toContain("async function renderPuttingItTogether");
+    expect(source).toContain("launchPathwayOpponent(PATHWAY_OPPONENTS.easy)");
   });
 
   it("uses the pathway entry across web and mobile and connects Statistics to My Stats", () => {
@@ -171,13 +223,12 @@ describe("local pathway navigation", () => {
   it("leads with playable opponents and marks future modes as unavailable", () => {
     for (const destination of [
       "grandmaster",
-      "tutorial-beginner",
       "tutorial-intermediate",
       "tutorial-expert",
     ]) {
       expect(html).toMatch(new RegExp(`data-pathway-destination="${destination}" disabled[\\s\\S]*?Coming soon`));
     }
-    for (const destination of ["easy", "tough", "master", "dynamic", "human", "size", "gameplay", "sounds"]) {
+    for (const destination of ["easy", "tough", "master", "dynamic", "human", "drills-beginner", "intro-pegging", "intro-discard", "intro-complete", "drill-scoring-play", "drill-discard", "size", "gameplay", "sounds"]) {
       expect(html).not.toMatch(new RegExp(`data-pathway-destination="${destination}" disabled`));
     }
     expect(css).toMatch(/\.pathway-choice:disabled\s*{[\s\S]*background: color-mix[\s\S]*cursor: not-allowed/);
