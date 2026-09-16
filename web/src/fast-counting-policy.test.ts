@@ -32,6 +32,7 @@ describe("fast counting", () => {
     expect(htmlSource).toContain('role="switch"');
     expect(mainSource).toContain("FAST_COUNTING_STORAGE_KEY");
     expect(mainSource).toContain("shouldShowScoreBubble(state.fastCounting, event.category)");
-    expect(mainSource).toContain("if (state.fastCounting) return;");
+    expect(mainSource).toContain("fastCounting = state.fastCounting");
+    expect(mainSource).toContain("if (fastCounting) return;");
   });
 });

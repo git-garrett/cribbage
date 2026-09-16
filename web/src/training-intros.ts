@@ -4,6 +4,7 @@ export interface TrainingIntroSituation {
   hand: string[];
   selected: string[];
   requiredKeepCards?: string[];
+  discardSameSuit?: boolean;
   played: string[];
   playedCard: string | null;
   cutCard: string | null;
@@ -63,6 +64,12 @@ export function randomizedTrainingHand(
 }
 
 export function correctTrainingIntroChoice(situation: TrainingIntroSituation, kind: TrainingIntroKind, chosen: string[]): boolean {
+  if (kind === "discard" && situation.discardSameSuit) {
+    return chosen.length === 2
+      && new Set(chosen).size === 2
+      && chosen.every((card) => situation.hand.includes(card))
+      && chosen[0].slice(-1) === chosen[1].slice(-1);
+  }
   if (kind === "discard" && situation.requiredKeepCards) {
     const uniqueChosen = new Set(chosen);
     return chosen.length === 2
@@ -84,9 +91,10 @@ export const TRAINING_INTROS: Record<TrainingIntroKind, TrainingIntro> = {
       { id: "fifteen", title: "Fifteen", explanation: "Make the running count exactly 15 to score 2 points. The count is 10, so playing your 5 makes 15.", hand: ["5h", "7c", "9d", "Ks"], selected: [], played: ["10s"], playedCard: "5h", cutCard: "3d", countBefore: 10, points: 2, challenge: { hand: ["8d", "4c", "9h", "Qs"], selected: [], played: ["7c"], playedCard: "8d", cutCard: "Kh", countBefore: 7 } },
       { id: "run-three", title: "Run of three", explanation: "The most recent cards can form a run even when they arrive out of order. Playing 4 after 3 and 5 makes 3–4–5 and scores 3 points.", hand: ["4h", "8c", "9s", "Qd"], selected: [], played: ["3c", "5d"], playedCard: "4h", cutCard: "Jc", countBefore: 8, points: 3, challenge: { hand: ["8h", "2c", "Js", "Qd"], selected: [], played: ["7c", "9d"], playedCard: "8h", cutCard: "5s", countBefore: 16 } },
       { id: "run-four", title: "Run of four", explanation: "Add the next rank to a three-card run to score 4 points. Playing 5 after 2, 4, and 3 makes 2–3–4–5.", hand: ["5s", "7h", "9c", "Kd"], selected: [], played: ["2c", "4d", "3h"], playedCard: "5s", cutCard: "Qc", countBefore: 9, points: 4, challenge: { hand: ["9s", "2h", "Qc", "Kd"], selected: [], played: ["6c", "8d", "7h"], playedCard: "9s", cutCard: "Ac", countBefore: 21 } },
+      { id: "thirty-one", title: "31", explanation: "Make the running count exactly 31 to score 2 points. The count is 24, so playing your 7 makes 31. The count then resets to zero for the next cards.", hand: ["7h", "2c", "4d", "5s"], selected: [], played: ["10c", "5d", "9s"], playedCard: "7h", cutCard: "Ah", countBefore: 24, points: 2, challenge: { hand: ["4h", "Ac", "2d", "3s"], selected: [], played: ["Kh", "8c", "9d"], playedCard: "4h", cutCard: "6c", countBefore: 27 } },
     ],
     completionTitle: "You understand beginner pegging.",
-    completion: "You can now spot pairs, fifteens, and short runs while the count builds. The drills will give you one clear scoring play at a time.",
+    completion: "You can now spot pairs, fifteens, short runs, and 31s while the count builds. The drills will give you one clear scoring play at a time.",
     drillRoute: "drill-scoring-play",
   },
   discard: {
@@ -101,7 +109,7 @@ export const TRAINING_INTROS: Record<TrainingIntroKind, TrainingIntro> = {
       { id: "run-four", title: "Run of four", explanation: "Four consecutive ranks score 4 points. Discard the queen and king to keep 3–4–5–6 intact.", hand: ["3c", "4d", "5s", "6h", "Qc", "Kd"], selected: ["Qc", "Kd"], requiredKeepCards: ["3c", "4d", "5s", "6h"], played: [], playedCard: null, cutCard: "9h", countBefore: 0, points: 4, challenge: { hand: ["6c", "7d", "8s", "9h", "Jc", "Kd"], selected: ["Jc", "Kd"], requiredKeepCards: ["6c", "7d", "8s", "9h"], played: [], playedCard: null, cutCard: "2h", countBefore: 0 } },
       { id: "double-run", title: "Double run", explanation: "A repeated rank can make the same run twice. Keeping 3, 3, 4, 5 creates two runs of three plus a pair, for 8 points before the turn card.", hand: ["3c", "3d", "4s", "5h", "Qc", "Kd"], selected: ["Qc", "Kd"], requiredKeepCards: ["3c", "3d", "4s", "5h"], played: [], playedCard: null, cutCard: "9c", countBefore: 0, points: 8, challenge: { hand: ["6c", "6d", "7s", "8h", "Jc", "Kd"], selected: ["Jc", "Kd"], requiredKeepCards: ["6c", "6d", "7s", "8h"], played: [], playedCard: null, cutCard: "2c", countBefore: 0 } },
       { id: "flush", title: "Flush", explanation: "Four cards of one suit in your hand score 4 points. A turn card of that suit would make it 5. Discard the off-suit 3 and queen here.", hand: ["2h", "5h", "9h", "Kh", "3c", "Qd"], selected: ["3c", "Qd"], requiredKeepCards: ["2h", "5h", "9h", "Kh"], played: [], playedCard: null, cutCard: "7s", countBefore: 0, points: 4, challenge: { hand: ["Ac", "4c", "8c", "Kc", "3h", "Qd"], selected: ["3h", "Qd"], requiredKeepCards: ["Ac", "4c", "8c", "Kc"], played: [], playedCard: null, cutCard: "7s", countBefore: 0 } },
-      { id: "crib-flush", title: "Flush in the crib", explanation: "A crib flush is stricter: all four crib cards and the turn card must share a suit. Sending two hearts to your crib creates the possibility, but the other cards and turn must also be hearts. Crib details will return later in training.", hand: ["Ah", "4h", "6c", "8d", "Qs", "Kc"], selected: ["Ah", "4h"], played: [], playedCard: null, cutCard: "9h", countBefore: 0, points: 0, challenge: { hand: ["2s", "7s", "4c", "8d", "Qh", "Kc"], selected: ["2s", "7s"], played: [], playedCard: null, cutCard: "10s", countBefore: 0 } },
+      { id: "crib-flush", title: "Flush in the crib", explanation: "A crib flush is stricter: all four crib cards and the turn card must share a suit. Sending two cards of one suit to your crib creates the possibility, but the other cards and turn must also match. Either same-suit pair in your hand is a valid choice. Crib details will return later in training.", hand: ["Ah", "4h", "6c", "8d", "Qs", "Kc"], selected: ["Ah", "4h"], discardSameSuit: true, played: [], playedCard: null, cutCard: "9h", countBefore: 0, points: 0, challenge: { hand: ["2s", "7s", "4c", "8d", "Qh", "Kc"], selected: ["2s", "7s"], discardSameSuit: true, played: [], playedCard: null, cutCard: "10s", countBefore: 0 } },
     ],
     completionTitle: "You understand beginner discarding.",
     completion: "You can now preserve pairs, fifteens, runs, and flushes, and recognize double runs. The drills will let you practice choosing the two cards to send away.",

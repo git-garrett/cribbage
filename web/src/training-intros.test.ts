@@ -24,7 +24,7 @@ describe("beginner training intros", () => {
   };
 
   it("teaches pegging scoring in order before the scoring drill", () => {
-    expect(TRAINING_INTROS.pegging.steps.map((step) => step.id)).toEqual(["pair", "fifteen", "run-three", "run-four"]);
+    expect(TRAINING_INTROS.pegging.steps.map((step) => step.id)).toEqual(["pair", "fifteen", "run-three", "run-four", "thirty-one"]);
     expect(TRAINING_INTROS.pegging.steps.every((step) => step.playedCard && step.selected.length === 0)).toBe(true);
     expect(TRAINING_INTROS.pegging.drillRoute).toBe("drill-scoring-play");
   });
@@ -61,6 +61,10 @@ describe("beginner training intros", () => {
 
     const cribFlush = TRAINING_INTROS.discard.steps.find((step) => step.id === "crib-flush")!;
     expect(correctTrainingIntroChoice(cribFlush, "discard", ["Ah", "4h"])).toBe(true);
+    expect(correctTrainingIntroChoice(cribFlush, "discard", ["6c", "Kc"])).toBe(true);
+    expect(correctTrainingIntroChoice(cribFlush.challenge, "discard", ["4c", "Kc"])).toBe(true);
+    expect(correctTrainingIntroChoice(cribFlush, "discard", ["6c", "6c"])).toBe(false);
+    expect(correctTrainingIntroChoice(cribFlush, "discard", ["2c", "3c"])).toBe(false);
     expect(correctTrainingIntroChoice(cribFlush, "discard", ["6c", "8d"])).toBe(false);
   });
 
@@ -116,12 +120,13 @@ describe("beginner training intros", () => {
     expect(suit(cribFlush.challenge.selected[0])).not.toBe(suit(cribFlush.selected[0]));
   });
 
-  it("offers only one combination of the score type each situation teaches", () => {
+  it("accepts the combinations of the score type each situation teaches", () => {
     for (const step of TRAINING_INTROS.pegging.steps) {
       for (const situation of [step, step.challenge]) {
         const scoringChoices = situation.hand.filter((card) => {
           if (step.id === "pair") return rank(card) === rank(situation.played.at(-1)!);
           if (step.id === "fifteen") return situation.countBefore + cardValue(card) === 15;
+          if (step.id === "thirty-one") return situation.countBefore + cardValue(card) === 31;
           return isRun([...situation.played, card]);
         });
         expect(scoringChoices).toEqual([situation.playedCard]);
@@ -148,9 +153,12 @@ describe("beginner training intros", () => {
         } else if (step.id === "flush") {
           matches = combinations(situation.hand, 4).filter((cards) => new Set(cards.map(suit)).size === 1);
         } else {
-          matches = [situation.hand.filter((card) => suit(card) === suit(situation.cutCard!))];
+          matches = combinations(situation.hand, 2).filter(([left, right]) => suit(left) === suit(right));
+          expect(matches).toHaveLength(2);
+          for (const pair of matches) expect(correctTrainingIntroChoice(situation, "discard", pair)).toBe(true);
+          continue;
         }
-        const intended = step.id === "crib-flush" ? situation.selected : situation.requiredKeepCards!;
+        const intended = situation.requiredKeepCards!;
         expect(matches).toHaveLength(1);
         expect(sameCards(matches[0], intended)).toBe(true);
       }
