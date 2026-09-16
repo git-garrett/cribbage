@@ -616,6 +616,149 @@ async function testEngagementDashboard(browser, baseUrl) {
   return { lineChart: true, oldestPartialBucket: true, legendToggle: true, keyboardTabs: true, people: true, experience: true, states: true, serverFilter: true };
 }
 
+async function testTrainingFeedbackBackground(browser, baseUrl) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await installStaticBuild(page);
+  await installPathwayFixture(page);
+  await page.goto(`${baseUrl}/?pathwayView=intro-pegging`, { waitUntil: "networkidle" });
+  await page.locator("[data-training-intro-next]").click();
+  await page.locator("[data-training-intro-dialog] button[type='submit']").click();
+  const action = page.locator("[data-training-intro-continue]");
+  await action.filter({ hasText: "Try it yourself" }).click();
+  await page.locator('[data-training-intro-game][data-dealing="false"]').waitFor();
+
+  // Hold the feedback's dismissal timer so each screenshot samples the visible
+  // animation, even on slower machines. Exercise real incorrect/correct answers.
+  await page.clock.install();
+  await page.clock.pauseAt(Date.now() + 100);
+  const feedback = page.locator("[data-training-intro-feedback]");
+  for (const [state, card, mark] of [["failure", "9c", "×"], ["success", "6d", "✓"]]) {
+    await page.locator(`[data-training-intro-hand] [data-training-card="${card}"]`).click();
+    await action.click();
+    if (!await feedback.isVisible() || await feedback.getAttribute("data-state") !== state
+      || await feedback.locator(".drill-feedback-mark").textContent() !== mark) {
+      throw new Error(`Missing ${state} training feedback.`);
+    }
+    await feedback.locator(".drill-feedback-mark").evaluate((element) => {
+      for (const animation of element.getAnimations()) {
+        animation.pause();
+        animation.currentTime = 350;
+      }
+    });
+    const box = await feedback.boundingBox();
+    // The edge of the lower table is felt, clear of the centered mark and label.
+    const clip = { x: Math.ceil(box.x + 5), y: Math.ceil(box.y + box.height * 0.8), width: 2, height: 2 };
+    const during = await page.screenshot({ clip });
+    // Compare with the same layout beneath the overlay, keeping card moves and
+    // score updates identical so this catches a background flash specifically.
+    await feedback.evaluate((element) => { element.hidden = true; });
+    const uncovered = await page.screenshot({ clip });
+    await feedback.evaluate((element) => { element.hidden = false; });
+    if (!during.equals(uncovered)) throw new Error(`${state} feedback changes the table background.`);
+    await page.clock.runFor(1200);
+    if (await feedback.isVisible()) throw new Error(`${state} feedback did not dismiss.`);
+  }
+  await page.close();
+  return { success: true, failure: true, backgroundStable: true };
+}
+
+async function testDiscardIntroDemonstration(browser, baseUrl) {
+  for (const reducedMotion of ["no-preference", "reduce"]) {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion });
+    await installStaticBuild(page);
+    await installPathwayFixture(page);
+    await page.goto(`${baseUrl}/?pathwayView=intro-discard`, { waitUntil: "networkidle" });
+    await page.locator("[data-training-intro-next]").click();
+    await page.locator("[data-training-intro-dialog] button[type='submit']").click();
+    await page.locator('[data-training-intro-game][data-dealing="false"]').waitFor();
+    const hand = page.locator("[data-training-intro-hand]");
+    const action = page.locator("[data-training-intro-continue]");
+    const selected = await hand.locator(".card.selected").evaluateAll((cards) => cards.map((card) => card.dataset.trainingCard).sort());
+    if (JSON.stringify(selected) !== JSON.stringify(["Kd", "Qc"]) || await hand.locator(".card").count() !== 6) {
+      throw new Error("Discard example must first show all six cards with the queen and king selected.");
+    }
+    await page.waitForTimeout(200);
+    if (await action.isVisible() || await hand.locator(".card").count() !== 6) {
+      throw new Error("Discard example must pause on the selection before removing the cards.");
+    }
+    if (reducedMotion === "no-preference") {
+      const flight = page.locator(".discard-flight-layer");
+      await flight.waitFor();
+      const discards = await flight.locator(".card").evaluateAll((cards) => cards.map((card) => card.dataset.trainingCard).sort());
+      if (JSON.stringify(discards) !== JSON.stringify(selected)) throw new Error("The two selected cards must fly to the crib.");
+    }
+    await action.filter({ hasText: "Try it yourself" }).waitFor();
+    const kept = await hand.locator(".card").evaluateAll((cards) => cards.map((card) => card.dataset.trainingCard).sort());
+    if (JSON.stringify(kept) !== JSON.stringify(["4c", "4d", "6s", "9h"])) {
+      throw new Error(`Discard demonstration left the wrong hand: ${kept}`);
+    }
+    for (const card of await hand.locator(".card").all()) {
+      if (!await card.isVisible()) throw new Error("Each kept card must remain visible.");
+    }
+    if (await page.locator(".discard-flight-layer").count() !== 0
+      || await page.locator("[data-training-intro-crib]").getAttribute("data-fill") !== "partial") {
+      throw new Error("Discard demonstration must clean up the flight and fill the crib.");
+    }
+    await action.click();
+    await page.locator('[data-training-intro-game][data-dealing="false"]').waitFor();
+    if (await hand.locator("button.card").count() !== 6
+      || await page.locator("[data-training-intro-crib]").getAttribute("data-fill") !== "empty") {
+      throw new Error("Practice must restore six selectable cards and an empty crib.");
+    }
+    await page.close();
+  }
+  return { selectionPause: true, discardFlight: true, fourKeptCards: true, reducedMotion: true, practiceReset: true };
+}
+
+async function testPuttingTogetherDiscards(browser, baseUrl) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: "reduce" });
+  await installStaticBuild(page);
+  await installPathwayFixture(page);
+  await page.goto(`${baseUrl}/?pathwayView=intro-complete`, { waitUntil: "networkidle" });
+  const action = page.locator("[data-training-intro-continue]");
+  const closeExplanation = () => page.locator("[data-training-intro-dialog] button[type='submit']").click();
+  await page.locator("[data-training-intro-next]").click();
+  await closeExplanation();
+  await action.click();
+  await action.filter({ hasText: "Next: Deal six cards" }).click();
+  await closeExplanation();
+  await action.click();
+  await action.filter({ hasText: "Next: Discard two" }).click();
+  await closeExplanation();
+  const hand = page.locator("[data-training-intro-hand]");
+  if (!await page.locator("[data-training-intro-player-crib]").isVisible()
+    || await page.locator("[data-training-intro-opponent-crib]").isVisible()) {
+    throw new Error("The example must send discards to the player's own crib.");
+  }
+  const options = await hand.locator('[role="button"]').evaluateAll((cards) => cards.map((card) => card.dataset.trainingCard).sort());
+  if (JSON.stringify(options) !== JSON.stringify(["6s", "9h"])) throw new Error(`Wrong discard choices: ${options}`);
+  for (const card of options) await hand.locator(`[data-training-card="${card}"]`).click();
+  await action.click();
+  const labels = () => hand.locator(".card").evaluateAll((cards) => cards.map((card) => card.dataset.trainingCard).sort());
+  const expected = ["5c", "5d", "Kd", "Qc"];
+  if (JSON.stringify(await labels()) !== JSON.stringify(expected)) throw new Error("Discard must keep 5, 5, king, queen.");
+  await action.filter({ hasText: "Next: Peg one card" }).click();
+  await closeExplanation();
+  if (JSON.stringify(await labels()) !== JSON.stringify(expected)) throw new Error("Pegging must use the kept hand.");
+  await hand.locator('[data-training-card="5d"]').click();
+  await action.click();
+  await action.filter({ hasText: "Next: Count the hand" }).waitFor();
+  if (await page.locator("[data-training-intro-count]").textContent() !== "15"
+    || await page.locator("[data-training-intro-player-score]").textContent() !== "2") {
+    throw new Error("The retained 5 must make fifteen for two points.");
+  }
+  await action.click();
+  await closeExplanation();
+  if (JSON.stringify(await labels()) !== JSON.stringify(expected)) throw new Error("Counting must restore the same four-card hand.");
+  await action.click();
+  if (await page.locator("[data-training-intro-player-score]").textContent() !== "12"
+    || await page.locator("[data-training-intro-notices] .game-notification-points").textContent() !== "10") {
+    throw new Error("Counting must add four fifteens and a pair to the two pegging points.");
+  }
+  await page.close();
+  return { ownCrib: true, discardSixNine: true, keepFiveFiveKingQueen: true, peggingAndCounting: true };
+}
+
 async function main() {
   if (!fs.existsSync(path.join(root, "index.html"))) {
     throw new Error("Missing dist/index.html; run npm run build first.");
@@ -673,13 +816,16 @@ async function main() {
       throw new Error(`Authentication recovery regression: ${JSON.stringify(state)}`);
     }
     await page.close();
+    const puttingTogether = await testPuttingTogetherDiscards(browser, baseUrl);
+    const discardIntro = await testDiscardIntroDemonstration(browser, baseUrl);
+    const trainingFeedback = await testTrainingFeedbackBackground(browser, baseUrl);
     const pathwayNavigation = await testPathwayParentNavigation(browser, baseUrl);
     const leaderboardInfo = await testLeaderboardTourneyInfoTap(browser, baseUrl);
     const leaderboardBackfill = await testIndexedDbLeaderboardBackfill(browser, baseUrl);
     const blockedIndexedDb = await testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl);
     const people = await testPeopleInteractions(browser, baseUrl);
     const engagement = await testEngagementDashboard(browser, baseUrl);
-    console.log(JSON.stringify({ authenticationRecovery: state, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
+    console.log(JSON.stringify({ authenticationRecovery: state, puttingTogether, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
   } finally {
     await browser.close();
   }

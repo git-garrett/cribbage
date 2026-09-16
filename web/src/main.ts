@@ -5181,10 +5181,7 @@ function completeTrainingIntroExample(): void {
   const notices = introElement<HTMLElement>("[data-training-intro-notices]");
   if (!button || !notices) return;
   if (intro.kind === "discard") {
-    button.hidden = false;
-    button.disabled = false;
-    button.textContent = "Try it yourself";
-    button.onclick = showTrainingIntroPractice;
+    void playTrainingIntroDiscardExample();
     return;
   }
   const hand = introElement<HTMLElement>("[data-training-intro-hand]");
@@ -5224,6 +5221,44 @@ function completeTrainingIntroExample(): void {
     { transform: `translate(${x}px, ${y}px) rotate(-2deg)` },
   ], { duration: 560, easing: "cubic-bezier(0.22, 0.72, 0.24, 1)", fill: "forwards" });
   void animation.finished.then(finish, finish);
+}
+
+async function playTrainingIntroDiscardExample(): Promise<void> {
+  const game = introElement<HTMLElement>("[data-training-intro-game]");
+  const hand = introElement<HTMLElement>("[data-training-intro-hand]");
+  const crib = introElement<HTMLElement>("[data-training-intro-crib]");
+  const button = introElement<HTMLButtonElement>("[data-training-intro-continue]");
+  if (!game || !hand || !crib || !button) return;
+  const generation = game.dataset.dealGeneration;
+  const selected = [...hand.querySelectorAll<HTMLElement>(".card.selected")];
+  const isCurrent = () => pathwayRouteFromLocation() === "intro-discard"
+    && activeTrainingIntroMode === "example" && !game.hidden
+    && game.dataset.dealGeneration === generation
+    && selected.every((card) => card.parentElement === hand);
+  if (selected.length !== 2) return;
+
+  // Let the player see the chosen pair before it travels to the crib.
+  await waitMs(700);
+  if (!isCurrent()) return;
+  if (!tableMotionDisabled()) {
+    const target = crib.querySelector<HTMLElement>(".crib-tray-stack")!.getBoundingClientRect();
+    const sources = selected.map((element) => ({
+      element, rect: element.getBoundingClientRect(), card: discardFlightCard(element),
+    }));
+    await animateDiscardFlights(sources, {
+      x: target.left + target.width / 2,
+      y: target.top + target.height / 2,
+    }, "human");
+  } else {
+    cardSounds.play("discard");
+  }
+  if (!isCurrent()) return;
+  selected.forEach((card) => card.remove());
+  crib.dataset.fill = "partial";
+  button.hidden = false;
+  button.disabled = false;
+  button.textContent = "Try it yourself";
+  button.onclick = showTrainingIntroPractice;
 }
 
 function trainingIntroSelectionStatus(kind: TrainingIntroKind, selected: number, step?: TrainingIntroStep): string {
@@ -5425,6 +5460,8 @@ function showTrainingIntroDecision(mode: "practice" | "challenge"): void {
   if (count) count.textContent = String(situation.countBefore);
   if (playerScore) playerScore.textContent = "0";
   if (boardValue) boardValue.textContent = intro.kind === "pegging" ? String(situation.countBefore) : String(activeTrainingIntroStep + 1);
+  const crib = introElement<HTMLElement>("[data-training-intro-crib]");
+  if (crib) crib.dataset.fill = "empty";
   playTrainingDealAnimation(game);
 }
 
@@ -5485,6 +5522,7 @@ function showTrainingIntroStep(index: number): void {
   if (playerScore) playerScore.textContent = "0";
   meta.textContent = `${index + 1} of ${intro.steps.length} · ${step.title}`;
   crib.hidden = intro.kind !== "discard";
+  crib.dataset.fill = "empty";
   notices.replaceChildren();
   instruction.hidden = true;
   setTrainingIntroFeedback(null);
@@ -5637,7 +5675,7 @@ function runPuttingTogetherAction(action: PuttingTogetherAction): void {
     if (!card) return;
     const finish = () => {
       card.remove();
-      played.append(cardElement(trainingIntroCard("9h", 97_009)));
+      played.append(cardElement(trainingIntroCard(card.dataset.trainingCard!, 97_009)));
       const count = introElement<HTMLElement>("[data-training-intro-count]");
       if (count) count.textContent = "15";
       boardValue.textContent = "15";
@@ -5658,9 +5696,9 @@ function runPuttingTogetherAction(action: PuttingTogetherAction): void {
     return;
   }
   if (action === "count") {
-    for (const card of hand.querySelectorAll<HTMLElement>('[data-training-card^="4"]')) card.classList.add("score-card-lift");
-    playerScore.textContent = "2";
-    showPuttingScore("Pair", 2);
+    for (const card of hand.querySelectorAll<HTMLElement>(".card")) card.classList.add("score-card-lift");
+    playerScore.textContent = "12";
+    showPuttingScore("Four fifteens and a pair", 10);
     finishPuttingTogetherAction();
     return;
   }
@@ -5669,6 +5707,8 @@ function runPuttingTogetherAction(action: PuttingTogetherAction): void {
     const opponentCrib = introElement<HTMLElement>("[data-training-intro-opponent-crib]");
     if (playerCrib) playerCrib.hidden = true;
     if (opponentCrib) opponentCrib.hidden = false;
+    const dealer = introElement<HTMLElement>("[data-training-intro-dealer]");
+    if (dealer) dealer.textContent = "Practice";
     cardSounds.play("shuffle");
     finishPuttingTogetherAction();
     return;
@@ -5713,17 +5753,20 @@ function showPuttingTogetherStep(index: number): void {
   game.dataset.phase = step.action === "discard" || step.action === "deal" || step.action === "alternate" ? "discard" : "pegging";
   hand.replaceChildren(); played.replaceChildren(); cut.replaceChildren(); notices.replaceChildren();
   opponent.replaceChildren(...Array.from({ length: step.action === "deal" || step.action === "discard" ? 6 : 4 }, () => cardBack()));
-  count.textContent = step.action === "peg" ? "6" : "0";
+  count.textContent = step.action === "peg" ? "10" : "0";
   meta.textContent = `${index + 1} of ${lesson.steps.length} · ${step.title}`;
   crib.hidden = step.action !== "discard";
   crib.classList.remove("putting-crib-filled");
+  crib.dataset.fill = "empty";
   const playerCrib = introElement<HTMLElement>("[data-training-intro-player-crib]");
   const opponentCrib = introElement<HTMLElement>("[data-training-intro-opponent-crib]");
-  if (playerCrib) playerCrib.hidden = step.action !== "alternate";
+  if (playerCrib) playerCrib.hidden = step.action === "cut" || step.action === "win";
+  const dealer = introElement<HTMLElement>("[data-training-intro-dealer]");
+  if (dealer) dealer.textContent = playerDisplayName();
   if (opponentCrib) opponentCrib.hidden = true;
   const playerScore = introElement<HTMLElement>("[data-training-intro-player-score]");
   const opponentScore = introElement<HTMLElement>("[data-training-intro-opponent-score]");
-  if (playerScore) playerScore.textContent = step.action === "win" ? "120" : "0";
+  if (playerScore) playerScore.textContent = step.action === "win" ? "120" : step.action === "count" ? "2" : "0";
   if (opponentScore) opponentScore.textContent = step.action === "win" ? "104" : "0";
   const board = introElement<HTMLElement>("[data-training-intro-board]");
   if (board) {
@@ -5739,13 +5782,13 @@ function showPuttingTogetherStep(index: number): void {
     const deck = document.createElement("button"); deck.type = "button"; deck.className = "card back putting-cut-deck"; deck.setAttribute("aria-label", "Deck ready to cut"); played.append(deck);
   } else if (step.action === "discard") {
     const update = () => { button.disabled = hand.querySelectorAll(".selected").length !== 2; };
-    hand.replaceChildren(...["5c", "5d", "6s", "9h", "Qc", "Kd"].map((label, cardIndex) => puttingCard(label, cardIndex, label === "Qc" || label === "Kd", (element) => { element.classList.toggle("selected"); update(); })));
+    hand.replaceChildren(...["5c", "5d", "6s", "9h", "Qc", "Kd"].map((label, cardIndex) => puttingCard(label, cardIndex, label === "6s" || label === "9h", (element) => { element.classList.toggle("selected"); update(); })));
   } else if (step.action === "peg") {
-    played.append(cardElement(trainingIntroCard("6c", 97_006)));
+    played.append(cardElement(trainingIntroCard("Qh", 97_006)));
     const update = () => { button.disabled = hand.querySelectorAll(".selected").length !== 1; };
-    hand.replaceChildren(...["9h", "7c", "Qd", "Ks"].map((label, cardIndex) => puttingCard(label, cardIndex, label === "9h", (element) => { element.classList.toggle("selected"); update(); })));
+    hand.replaceChildren(...["5c", "5d", "Qc", "Kd"].map((label, cardIndex) => puttingCard(label, cardIndex, label === "5c" || label === "5d", (element) => { element.classList.toggle("selected"); update(); })));
   } else if (step.action === "count") {
-    hand.replaceChildren(...["4c", "4d", "7s", "Kh"].map((label, cardIndex) => puttingCard(label, cardIndex, false)));
+    hand.replaceChildren(...["5c", "5d", "Qc", "Kd"].map((label, cardIndex) => puttingCard(label, cardIndex, false)));
     cut.append(cardElement(trainingIntroCard("2h", 97_002)));
   }
   button.hidden = true;
@@ -6811,12 +6854,21 @@ async function playDiscardToCribAnimation(
     return;
   }
 
-  const destination = cribFlightDestination();
+  els.cribTray.classList.add("crib-tray-receiving");
+  await animateDiscardFlights(sources, cribFlightDestination(), player);
+  els.cribTray.dataset.fill = player === "ai" ? "full" : "partial";
+  els.cribTray.classList.remove("crib-tray-receiving");
+}
+
+async function animateDiscardFlights(
+  sources: DiscardFlightSource[],
+  destination: { x: number; y: number },
+  player: PlayerKey,
+): Promise<void> {
   const layer = document.createElement("div");
   layer.className = "discard-flight-layer";
   layer.dataset.player = player;
   layer.setAttribute("aria-hidden", "true");
-  els.cribTray.classList.add("crib-tray-receiving");
 
   for (const source of sources) {
     source.element?.classList.add("discard-card-departing");
@@ -6850,8 +6902,6 @@ async function playDiscardToCribAnimation(
 
   await Promise.all(flights);
   await waitMs(100);
-  els.cribTray.dataset.fill = player === "ai" ? "full" : "partial";
-  els.cribTray.classList.remove("crib-tray-receiving");
   layer.remove();
   for (const source of sources) source.element?.classList.remove("discard-card-departing");
 }
