@@ -714,11 +714,22 @@ async function testPuttingTogetherDiscards(browser, baseUrl) {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: "reduce" });
   await installStaticBuild(page);
   await installPathwayFixture(page);
-  await page.goto(`${baseUrl}/?pathwayView=intro-complete`, { waitUntil: "networkidle" });
+  await page.goto(`${baseUrl}/?pathwayView=intro-discard`, { waitUntil: "networkidle" });
   const action = page.locator("[data-training-intro-continue]");
   const closeExplanation = () => page.locator("[data-training-intro-dialog] button[type='submit']").click();
   await page.locator("[data-training-intro-next]").click();
   await closeExplanation();
+  await action.filter({ hasText: "Try it yourself" }).click();
+  await page.locator('[data-training-intro-game][data-dealing="false"]').waitFor();
+  await page.locator('.mobile-header-reveal:visible').click();
+  await page.locator('[data-pathway-back="drills-beginner"]:visible').click();
+  await page.locator('[data-pathway-destination="intro-complete"]').click();
+  await page.locator("[data-training-intro-next]").click();
+  await closeExplanation();
+  if (!await page.getByRole("button", { name: "Deck ready to cut" }).isVisible()
+    || await page.locator("[data-training-intro-instruction]").isVisible()) {
+    throw new Error("The complete lesson must restore the deck and clear prior practice instructions.");
+  }
   await action.click();
   await action.filter({ hasText: "Next: Deal six cards" }).click();
   await closeExplanation();
@@ -739,6 +750,9 @@ async function testPuttingTogetherDiscards(browser, baseUrl) {
   if (JSON.stringify(await labels()) !== JSON.stringify(expected)) throw new Error("Discard must keep 5, 5, king, queen.");
   await action.filter({ hasText: "Next: Peg one card" }).click();
   await closeExplanation();
+  if (!await page.locator("[data-training-intro-played] .card").isVisible()) {
+    throw new Error("The pegging card must remain visible after visiting Discard Intro.");
+  }
   if (JSON.stringify(await labels()) !== JSON.stringify(expected)) throw new Error("Pegging must use the kept hand.");
   await hand.locator('[data-training-card="5d"]').click();
   await action.click();
@@ -750,6 +764,11 @@ async function testPuttingTogetherDiscards(browser, baseUrl) {
   await action.click();
   await closeExplanation();
   if (JSON.stringify(await labels()) !== JSON.stringify(expected)) throw new Error("Counting must restore the same four-card hand.");
+  await page.setViewportSize({ width: 1024, height: 844 });
+  if (!await page.locator("[data-training-intro-cut] .card").isVisible()) {
+    throw new Error("The counting turn card must remain visible after visiting Discard Intro.");
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
   await action.click();
   if (await page.locator("[data-training-intro-player-score]").textContent() !== "12"
     || await page.locator("[data-training-intro-notices] .game-notification-points").textContent() !== "10") {

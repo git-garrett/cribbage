@@ -5736,6 +5736,13 @@ function showPuttingTogetherStep(index: number): void {
   puttingTogetherStepIndex = index;
   const step = lesson.steps[index];
   els.pathwayPage.dataset.introMode = "example";
+  const playedWrap = introElement<HTMLElement>("[data-training-intro-played-wrap]");
+  const cutWrap = introElement<HTMLElement>("[data-training-intro-cut-wrap]");
+  const instruction = introElement<HTMLElement>("[data-training-intro-instruction]");
+  if (playedWrap) playedWrap.hidden = false;
+  if (cutWrap) cutWrap.hidden = false;
+  if (instruction) instruction.hidden = true;
+  setTrainingIntroFeedback(null);
   const copy = introElement<HTMLElement>("[data-training-intro-copy]");
   const game = introElement<HTMLElement>("[data-training-intro-game]");
   const hand = introElement<HTMLElement>("[data-training-intro-hand]");
