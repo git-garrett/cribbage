@@ -1,7 +1,8 @@
-export const PRODUCTION_ACE_OPPONENT = "schell_table-peg_table-13.215" as const;
+export const PRODUCTION_ACE_OPPONENT = "schell_table-peg_table-13.23" as const;
 
 export const ACE_OPPONENTS = [
   PRODUCTION_ACE_OPPONENT,
+  "schell_table-peg_table-13.215",
   "schell_table-peg_table-13.0",
 ] as const;
 

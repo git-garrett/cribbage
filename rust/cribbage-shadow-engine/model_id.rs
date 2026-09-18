@@ -35,7 +35,7 @@ pub const MODEL_13_22: &str = "schell_table-peg_table-13.22";
 pub const MODEL_13_23: &str = "schell_table-peg_table-13.23";
 /// Current production Ace model. Keep the versioned model ID available so
 /// existing games can retain the exact engine they started with.
-pub const ACE_MODEL: &str = MODEL_13_215;
+pub const ACE_MODEL: &str = MODEL_13_23;
 pub const MODEL_14_3: &str = "schell_table-peg_table-14.3";
 pub const MODEL_14_8: &str = "schell_table-peg_table-14.8";
 pub const MODEL_14_8_1: &str = "schell_table-peg_table-14.8.1";
@@ -81,7 +81,7 @@ pub enum ModelId {
     Dynamic,
 }
 
-pub const ACE_MODEL_ID: ModelId = ModelId::Schell13215;
+pub const ACE_MODEL_ID: ModelId = ModelId::Schell1323;
 
 impl ModelId {
     pub fn as_str(self) -> &'static str {
@@ -175,7 +175,7 @@ impl ModelId {
     }
 
     pub fn is_ace(self) -> bool {
-        matches!(self, ModelId::Schell13 | ModelId::Schell13215)
+        matches!(self, ModelId::Schell13 | ModelId::Schell13215 | ModelId::Schell1323)
     }
 }
 
@@ -251,7 +251,7 @@ mod tests {
         assert!(!ModelId::Schell1322.is_strength_model());
         assert_eq!(MODEL_13_23.parse::<ModelId>().unwrap(), ModelId::Schell1323);
         assert!(ModelId::Schell1323.has_native_rust_decisions());
-        assert!(!ModelId::Schell1323.is_ace());
+        assert!(ModelId::Schell1323.is_ace());
         assert_eq!(ACE_MODEL_ID.as_str(), ACE_MODEL);
         assert!(ACE_MODEL_ID.is_ace());
         assert!(ModelId::Schell13.is_ace());

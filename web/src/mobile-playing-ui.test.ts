@@ -14,9 +14,9 @@ describe("Concept B mobile playing UI", () => {
     expect(css).toMatch(/\.dynamic-calibration-status span\s*\{[^}]*white-space:\s*nowrap/s);
   });
 
-  it("does not surface an AI-thinking bubble during normal play", () => {
+  it("keeps the thinking overlay limited to loading and the Ace opening lead", () => {
     expect(mainSource).toContain("els.modelThinking.hidden = !showModelLoadingUi");
-    expect(mainSource).toContain("els.thinkingOverlay.hidden = !showModelLoadingUi");
+    expect(mainSource).toContain("els.thinkingOverlay.hidden = !(showModelLoadingUi || waitingForAceLead)");
     expect(mainSource).not.toContain("els.thinkingOverlay.hidden = !state.aiThinking");
   });
 

@@ -8634,8 +8634,13 @@ function render(game: GameState | null): void {
   if (thinkingLabel) {
     thinkingLabel.textContent = "Loading opponent";
   }
-  els.thinkingOverlay.hidden = !showModelLoadingUi;
-  els.thinkingOverlayLabel.textContent = "Loading opponent";
+  const waitingForAceLead = state.aiThinking &&
+    isAceOpponent(currentSnapshot?.opponent) &&
+    shouldAdvancePeggingAi(game) && game.dealer === "User" &&
+    game.plays.length === 0 && game.completedPlays.length === 0 &&
+    !state.turnCutRevealStage && !state.splashOpen;
+  els.thinkingOverlay.hidden = !(showModelLoadingUi || waitingForAceLead);
+  els.thinkingOverlayLabel.textContent = waitingForAceLead ? "Ace is choosing a lead" : "Loading opponent";
   els.modelLoading.hidden = !showModelLoadingUi;
   renderServerBusy();
   renderCutCard(state.turnCutRevealStage || !game.turnCardRevealed ? null : game.turnCard);

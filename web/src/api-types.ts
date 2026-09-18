@@ -11,6 +11,7 @@ export type Opponent =
   | "schell_table-peg_table-9.11"
   | "schell_table-peg_table-13.0"
   | "schell_table-peg_table-13.215"
+  | "schell_table-peg_table-13.23"
   | "schell_table-peg_table-14.3"
   | "schell_table-peg_table-14.8"
   | "schell_table-peg_table-14.8.1"

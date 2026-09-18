@@ -4749,7 +4749,7 @@ mod tests {
         for model in [
             ModelId::Myrmidon5,
             ModelId::Schell91,
-            ModelId::Schell13,
+            ACE_MODEL_ID,
             ModelId::Dynamic,
         ] {
             let mut session = new_session_from_seed(model, None, 0x1234_5678, 1);
