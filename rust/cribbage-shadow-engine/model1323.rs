@@ -287,10 +287,22 @@ impl PolicyAssets {
         // Keep the finite initial-keep conditioning results until hand end.
         // Current posterior support below filters newly impossible worlds;
         // rescanning the whole conditioning cache would add work each turn.
-        let hands = policy.opponent_hands_with_cache(
+        let mut hands = policy.opponent_hands_with_cache(
             observation,
             population.as_deref_mut().map(|p| &mut p.opponent_hands),
         )?;
+        if hands.is_empty() {
+            // A sparse empirical row can contain only hands excluded by the
+            // actor's known cards or public history. Missing empirical support
+            // is not physical impossibility. Reuse the same legal-information
+            // weighting with a physical prior only at these undefined roots;
+            // successful roots and the frozen continuation policy stay exact.
+            let physical = Model911Policy::new(None, self.factors, 0, 0)?;
+            hands = physical.opponent_hands_with_cache(
+                observation,
+                population.as_deref_mut().map(|p| &mut p.opponent_hands),
+            )?;
+        }
         for (remaining, hand_weight) in hands {
             let initial =
                 std::array::from_fn(|rank| remaining[rank] + observation.opponent_played[rank]);
@@ -1316,6 +1328,91 @@ mod tests {
         };
         let variants = prior.conditioned(Role::Dealer, &keep, &own_six, 4).unwrap();
         assert_eq!(variants, vec![(possible, 100.0)]);
+    }
+
+    #[test]
+    fn benchmark_index_22_has_legal_opponent_worlds_after_three_fives() {
+        let assets =
+            PolicyAssets::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let observation = Model132Observation {
+            role: Role::Dealer,
+            my_score: 9,
+            opponent_score: 20,
+            own_remaining: hand(&[2, 2, 3]),
+            own_played: hand(&[4]),
+            opponent_played: hand(&[4, 4]),
+            own_discards: hand(&[5, 12]),
+            turn_rank: 11,
+            current_series: vec![4, 4, 4],
+            count: 15,
+            go_player: None,
+            last_player: Some(InfoActor::Opponent),
+            public_history: vec![
+                PublicPegEvent::OpponentPlay(4),
+                PublicPegEvent::SelfPlay(4),
+                PublicPegEvent::OpponentPlay(4),
+            ],
+        };
+        let policy = assets.decision_policy().unwrap();
+        // The empirical row for two played fives contains only two more
+        // fives, but the actor already held a fifth five in that world.
+        assert!(policy.opponent_hands(&observation).unwrap().is_empty());
+        let worlds = assets.worlds(&observation, &policy).unwrap();
+        assert!(!worlds.is_empty());
+        assert!(worlds.iter().all(|world| (0..13).all(|rank| {
+            observation.own_remaining[rank] + observation.own_played[rank]
+                + observation.own_discards[rank] + observation.opponent_played[rank]
+                + world.remaining[rank] + world.discards[rank]
+                + u8::from(observation.turn_rank as usize == rank) <= 4
+        })));
+        let cache = HandCache::default();
+        assert_eq!(worlds, assets.worlds_for_hand(&observation, &policy, Some(&cache)).unwrap());
+        let forecasts = assets.forecast(&observation, LIVE_WORLD_BUDGET).unwrap();
+        assert_eq!(forecasts.len(), 2);
+        for candidate in forecasts {
+            assert!((candidate.outcomes.iter().map(|(_, _, weight)| weight).sum::<f64>() - 1.0).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn benchmark_index_94_physical_fallback_preserves_opponent_go_evidence() {
+        let assets =
+            PolicyAssets::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let observation = Model132Observation {
+            role: Role::Dealer,
+            my_score: 38,
+            opponent_score: 44,
+            own_remaining: hand(&[7, 8]),
+            own_played: hand(&[9, 10]),
+            opponent_played: hand(&[0, 1, 2]),
+            own_discards: hand(&[0, 12]),
+            turn_rank: 6,
+            current_series: vec![],
+            count: 0,
+            go_player: None,
+            last_player: None,
+            public_history: vec![
+                PublicPegEvent::OpponentPlay(2),
+                PublicPegEvent::SelfPlay(9),
+                PublicPegEvent::OpponentPlay(1),
+                PublicPegEvent::SelfPlay(10),
+                PublicPegEvent::OpponentPlay(0),
+                PublicPegEvent::SelfGo,
+                PublicPegEvent::OpponentGo,
+                PublicPegEvent::Reset,
+            ],
+        };
+        let policy = assets.decision_policy().unwrap();
+        assert!(policy.opponent_hands(&observation).unwrap().is_empty());
+        let worlds = assets.worlds(&observation, &policy).unwrap();
+        assert!(!worlds.is_empty());
+        // The opponent said go at 26, so its last card must exceed five.
+        assert!(worlds.iter().all(|world| world.remaining[..5] == [0; 5]));
+        let cache = HandCache::default();
+        assert_eq!(worlds, assets.worlds_for_hand(&observation, &policy, Some(&cache)).unwrap());
+        let forecasts = assets.forecast(&observation, LIVE_WORLD_BUDGET).unwrap();
+        assert_eq!(forecasts.len(), 2);
+        assert!(forecasts.iter().all(|candidate| candidate.posterior_worlds == candidate.evaluated_worlds));
     }
 
     #[test]
