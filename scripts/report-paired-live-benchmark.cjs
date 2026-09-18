@@ -98,12 +98,12 @@ function summarizeProgress(root, orientations, expectedPerOrientation) {
       current = {};
     }
     const totalGames = expectedPerOrientation > 0 ? expectedPerOrientation : current.totalGames;
-    const complete = Number.isFinite(totalGames) && savedGames >= totalGames;
+    const complete = Number.isFinite(totalGames) && totalGames > 0 && savedGames >= totalGames;
     const rate = Number.isFinite(current.gamesPerSecond) && current.gamesPerSecond > 0 ? current.gamesPerSecond : null;
     const remaining = complete ? 0 : current.status === "running" && rate && totalGames > 0
       ? (totalGames - savedGames) / rate : null;
     return {
-      label, status: complete ? "complete" : current.status || "unknown",
+      label, status: complete ? "complete" : current.status === "complete" ? "snapshot incomplete" : current.status || "unknown",
       updatedAt: current.updatedAt || null, savedGames, totalGames: totalGames || null,
       gamesPerSecond: rate, estimatedRemainingSeconds: remaining,
     };

@@ -77,6 +77,28 @@ test("finished orientation does not block ETA; both finished means complete", (t
   assert.equal(eta.estimatedRemainingSeconds, 0);
 });
 
+test("runner completion cannot override an incomplete database snapshot", (t) => {
+  const { root, orientations } = fixture(t, {
+    "candidate-left": { status: "complete" },
+    "opponent-left": { status: "complete" },
+  });
+  orientations[0].savedGames = 999;
+  orientations[1].savedGames = 1000;
+  const progress = summarizeProgress(root, orientations, 1000);
+  assert.equal(progress.statuses[0].status, "snapshot incomplete");
+  assert.equal(progress.eta.state, "unavailable");
+  assert.equal(progress.eta.estimatedRemainingSeconds, null);
+  assert.match(progress.eta.reason, /candidate-left.*snapshot incomplete/);
+});
+
+test("a zero game target cannot establish benchmark completion", (t) => {
+  const { root, orientations } = fixture(t, {
+    "candidate-left": { status: "complete", totalGames: 0 },
+    "opponent-left": { status: "complete", totalGames: 0 },
+  });
+  assert.equal(summarizeProgress(root, orientations, null).eta.state, "unavailable");
+});
+
 test("markdown includes a prominent Pacific completion time and remaining duration", (t) => {
   const { root, orientations } = fixture(t);
   const progress = { observedGames: 600, expectedGames: 2000, ...summarizeProgress(root, orientations, 1000) };
