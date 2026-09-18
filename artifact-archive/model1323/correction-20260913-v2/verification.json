@@ -1,0 +1,12 @@
+{
+  "assetSha256": "ff0894471867cd80c636a46bb4c8c148b7300090a9b536dd61d991fea6fe293a",
+  "bytes": 522911094,
+  "exactLegacyMomentsMatch": true,
+  "jointBins": 27856812,
+  "modelVersion": "13.23",
+  "nonemptyRows": 330590,
+  "partial": false,
+  "referenceSha256": "43ad61c68603254afd8c2b07bb26499e518e0988a4a3c6a022394f44b797cb69",
+  "rowsVerified": 330590,
+  "status": "complete"
+}

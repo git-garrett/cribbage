@@ -7,8 +7,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::artifacts::{
     CribRankDiscardTables, CribTripolicyTable, EmpiricalDiscardKeepTable, EmpiricalEntry,
-    EmpiricalRoleTable, Model131DiscardHistogramTable, Model13HoldTable, Model91DiscardEvTable,
-    PairwiseTable, TripolicyPolicy,
+    EmpiricalRoleTable, Model131DiscardHistogramTable, Model1322CorrectionTable,
+    Model1323CorrectionTable, Model13HoldTable, Model91DiscardEvTable, PairwiseTable,
+    TripolicyPolicy,
 };
 use crate::board::{
     next_perspective_role, next_score_phase, score_phase_average,
@@ -28,14 +29,15 @@ use crate::information_set::{
 use crate::model132::{
     Model1322DeclineFactors, Model132KeepPairTable, Model132Observation, Model911Policy,
 };
+use crate::model1323::{PolicyAssets as Model1323PolicyAssets, CORRECTION_INPUT_CHECKSUMS};
 use crate::model162::Model162ActionScorer;
 use crate::model90::Model90DiscardTable;
 use crate::model91::{Model91Actor, Model91EmpiricalBeliefs, Model91Observation, Model91Policy};
 use crate::model91_discard::model91_schell_crib_ev;
 use crate::model_id::{
-    MODEL_13_0, MODEL_13_1, MODEL_13_2, MODEL_13_21, MODEL_13_215, MODEL_14_3, MODEL_14_8,
-    MODEL_14_8_1, MODEL_15_0, MODEL_15_1, MODEL_15_2, MODEL_16_0, MODEL_16_1, MODEL_16_3,
-    MODEL_9_0, MODEL_9_1, MODEL_9_11, MYRMIDON_5,
+    MODEL_13_0, MODEL_13_1, MODEL_13_2, MODEL_13_21, MODEL_13_215, MODEL_13_22, MODEL_13_23,
+    MODEL_14_3, MODEL_14_8, MODEL_14_8_1, MODEL_15_0, MODEL_15_1, MODEL_15_2, MODEL_16_0,
+    MODEL_16_1, MODEL_16_3, MODEL_9_0, MODEL_9_1, MODEL_9_11, MYRMIDON_5,
 };
 use crate::policy::PolicyArtifact;
 
@@ -230,6 +232,10 @@ struct RuntimeTables {
     discard911: OnceLock<Model91DiscardEvTable>,
     discard_hist131: OnceLock<Model131DiscardHistogramTable>,
     discard_pairs132: OnceLock<Model132KeepPairTable>,
+    corrections1322: OnceLock<Model1322CorrectionTable>,
+    corrections1323: OnceLock<Model1323CorrectionTable>,
+    policy_assets1323: OnceLock<Model1323PolicyAssets>,
+    verified_board1323: OnceLock<Arc<BoardWinMatrix>>,
     beliefs91: OnceLock<Model91EmpiricalBeliefs>,
     decline_factors1322: OnceLock<Model1322DeclineFactors>,
     empirical: OnceLock<EmpiricalDiscardKeepTable>,
@@ -328,6 +334,7 @@ impl Model911HandCache {
 #[derive(Clone, Default)]
 pub struct Model13HandCache {
     opponent_worlds: Arc<Mutex<Option<Model13OpponentWorlds>>>,
+    model1323: crate::model1323::HandCache,
 }
 
 impl std::fmt::Debug for Model13HandCache {
@@ -340,6 +347,7 @@ impl std::fmt::Debug for Model13HandCache {
         formatter
             .debug_struct("Model13HandCache")
             .field("opponent_worlds", &worlds)
+            .field("model1323", &self.model1323)
             .finish()
     }
 }
@@ -350,6 +358,7 @@ impl Model13HandCache {
     }
 
     pub fn clear(&self) {
+        self.model1323.clear();
         *self
             .opponent_worlds
             .lock()
@@ -692,6 +701,8 @@ fn is_supported_rust_model(model: &str) -> bool {
         || model == MODEL_13_2
         || model == MODEL_13_21
         || model == MODEL_13_215
+        || model == MODEL_13_22
+        || model == MODEL_13_23
         || model == MODEL_14_3
         || model == MODEL_14_8
         || model == MODEL_14_8_1
@@ -817,6 +828,12 @@ fn recommend_discard(input: &DecisionInput, root: &str) -> Result<Decision, Stri
     }
     if input.model == MODEL_13_215 {
         return recommend_discard_model13215(input, root);
+    }
+    if input.model == MODEL_13_22 {
+        return recommend_discard_model1322(input, root);
+    }
+    if input.model == MODEL_13_23 {
+        return recommend_discard_model1323(input, runtime_tables(root)?);
     }
     if input.model == MODEL_9_0 {
         return recommend_discard_model90(input, root);
@@ -969,6 +986,12 @@ fn recommend_peg(
     }
     if input.model == MODEL_9_11 {
         return recommend_peg_model911(input, &legal, tables, model911_cache);
+    }
+    if input.model == MODEL_13_22 {
+        return recommend_peg_model1322(input, &legal, tables, model911_cache);
+    }
+    if input.model == MODEL_13_23 {
+        return recommend_peg_model1323(input, &legal, tables, model13_cache);
     }
     if input.model == MYRMIDON_5 {
         let card_id = crate::myrmidon::recommend_peg(&input.ai_hand, &input.plays, input.count)?;
@@ -1596,6 +1619,58 @@ fn recommend_discard_model911(input: &DecisionInput, root: &str) -> Result<Decis
     recommend_discard_model9_ev(input, table, "Model 9.11")
 }
 
+fn recommend_discard_model1322(input: &DecisionInput, root: &str) -> Result<Decision, String> {
+    let table = runtime_tables(root)?.corrections1322()?;
+    let six = rank_counts(&input.ai_hand);
+    let mut deck = full_deck();
+    deck.retain(|card| !input.ai_hand.iter().any(|held| held.id == card.id));
+    let mut recommended: Option<(Vec<Card>, f64)> = None;
+    for discard_indices in crate::cards::combinations_indices(input.ai_hand.len(), 2) {
+        let discard = discard_indices
+            .iter()
+            .map(|index| input.ai_hand[*index])
+            .collect::<Vec<_>>();
+        let keep = input
+            .ai_hand
+            .iter()
+            .enumerate()
+            .filter_map(|(index, card)| (!discard_indices.contains(&index)).then_some(*card))
+            .collect::<Vec<_>>();
+        let hand_ev = deck
+            .iter()
+            .map(|cut| f64::from(score_hand(&keep, *cut, false)))
+            .sum::<f64>()
+            / deck.len() as f64;
+        let crib_ev = model91_schell_crib_ev(&input.ai_hand, &discard, input.role)?;
+        let pegging = table
+            .record_for(&six, &rank_counts(&discard), input.role)
+            .ok_or_else(|| "Model 13.22 correction row is missing".to_string())?;
+        let net_pegging = (pegging.my_weighted_points as f64
+            - pegging.opponent_weighted_points as f64)
+            / pegging.total_weight as f64;
+        let total_ev = hand_ev
+            + match input.role {
+                Role::Dealer => crib_ev,
+                Role::Pone => -crib_ev,
+            }
+            + net_pegging;
+        if recommended
+            .as_ref()
+            .is_none_or(|(_, current_ev)| total_ev > *current_ev)
+        {
+            recommended = Some((discard, total_ev));
+        }
+    }
+    let (discard, total_ev) =
+        recommended.ok_or_else(|| "no Model 13.22 discard candidate evaluated".to_string())?;
+    Ok(Decision::Discard {
+        card_ids: discard.iter().map(|card| card.id).collect(),
+        best_lead: None,
+        ev: Some(total_ev),
+        win_probability: None,
+    })
+}
+
 fn recommend_discard_model9_ev(
     input: &DecisionInput,
     table: &Model91DiscardEvTable,
@@ -1752,6 +1827,50 @@ fn recommend_peg_model911(
     })
 }
 
+fn recommend_peg_model1322(
+    input: &DecisionInput,
+    legal: &[Card],
+    tables: &RuntimeTables,
+    hand_cache: Option<&Model911HandCache>,
+) -> Result<Decision, String> {
+    let is_opening_lead = input.role == Role::Pone
+        && input.ai_table.is_empty()
+        && input.human_table.is_empty()
+        && input.plays.is_empty();
+    if is_opening_lead {
+        let mut six = rank_counts(&input.ai_hand);
+        let discard = rank_counts(&input.own_discards);
+        for rank in 0..13 {
+            six[rank] = six[rank]
+                .checked_add(discard[rank])
+                .ok_or_else(|| "Model 13.22 opening hand rank count overflow".to_string())?;
+        }
+        if rank_count_total(&six) != 6 || rank_count_total(&discard) != 2 {
+            return Err(
+                "Model 13.22 opening lead requires four kept cards and two own discards"
+                    .to_string(),
+            );
+        }
+        let rank = tables
+            .corrections1322()?
+            .pone_lead_for(&six, &discard, input.turn_card.rank)
+            .ok_or_else(|| "Model 13.22 opening lead row is missing".to_string())?;
+        let card = legal
+            .iter()
+            .copied()
+            .find(|card| card.rank == rank)
+            .ok_or_else(|| "Model 13.22 opening lead selected an unavailable rank".to_string())?;
+        return Ok(Decision::Peg {
+            action: "play".to_string(),
+            card_id: Some(card.id),
+            ev: None,
+            win_probability: None,
+            model16_policy: None,
+        });
+    }
+    recommend_peg_model911(input, legal, tables, hand_cache)
+}
+
 #[derive(Clone)]
 struct Model13PeggingOption {
     my_ev: f64,
@@ -1770,6 +1889,206 @@ fn recommend_discard_model13215(input: &DecisionInput, root: &str) -> Result<Dec
     let tables = runtime_tables(root)?;
     let board = BoardModel::from_board_matrix(Arc::clone(tables.board_matrix13215()?));
     recommend_discard_model13_with_board(input, tables, board, true)
+}
+
+fn recommend_discard_model1323(
+    input: &DecisionInput,
+    tables: &RuntimeTables,
+) -> Result<Decision, String> {
+    let histogram = tables.corrections1323()?;
+    let mut board = BoardModel::from_board_matrix(Arc::clone(tables.verified_board1323()?));
+    let crib_rank = tables.crib_rank()?;
+    recommend_discard_model1323_with_assets(input, histogram, crib_rank, &mut board)
+}
+
+fn recommend_discard_model1323_with_assets(
+    input: &DecisionInput,
+    histogram: &Model1323CorrectionTable,
+    crib_rank: &CribRankDiscardTables,
+    board: &mut BoardModel,
+) -> Result<Decision, String> {
+    let six = rank_counts(&input.ai_hand);
+    let deck: Vec<Card> = full_deck()
+        .into_iter()
+        .filter(|card| !input.ai_hand.contains(card))
+        .collect();
+    let flush_bonuses = crib_flush_bonuses_by_suit(&input.ai_hand);
+    let mut best: Option<(Vec<Card>, CandidateEvaluation)> = None;
+    for indices in crate::cards::combinations_indices(input.ai_hand.len(), 2) {
+        let discard: Vec<Card> = indices.iter().map(|index| input.ai_hand[*index]).collect();
+        let keep: Vec<Card> = input
+            .ai_hand
+            .iter()
+            .enumerate()
+            .filter_map(|(index, card)| (!indices.contains(&index)).then_some(*card))
+            .collect();
+        let row = histogram
+            .row_for(&six, &rank_counts(&discard), input.role)
+            .ok_or("13.23 discard joint-distribution row is missing")?;
+        let total_weight = row.moments.total_weight as f64;
+        let mut hist = WeightedPairI32::default();
+        for (own, opponent, weight) in row.bins() {
+            add_weight_pair_i32(
+                &mut hist,
+                (i32::from(own), i32::from(opponent)),
+                weight as f64 / total_weight,
+            );
+        }
+        let pegging = Model13PeggingOption {
+            my_ev: row.moments.my_weighted_points as f64 / total_weight,
+            opponent_ev: row.moments.opponent_weighted_points as f64 / total_weight,
+            best_lead: -1,
+            hist,
+            total_weight: 1.0,
+        };
+        let (hand, crib) = model13_rank_cut_discard_scores(
+            &keep,
+            &discard,
+            &deck,
+            input.role,
+            &flush_bonuses,
+            crib_rank,
+        );
+        let evaluation = CandidateEvaluation {
+            win_probability: model13_discard_candidate_win_probability(
+                &input.ai_hand,
+                &keep,
+                &discard,
+                &deck,
+                input.role,
+                &pegging,
+                input.ai_score,
+                input.human_score,
+                crib_rank,
+                board,
+                true,
+            ),
+            total_ev: hand
+                + if input.role == Role::Dealer {
+                    crib
+                } else {
+                    -crib
+                }
+                + pegging.my_ev
+                - pegging.opponent_ev,
+            best_lead: -1,
+        };
+        if best.as_ref().is_none_or(|(_, current)| {
+            evaluation.win_probability > current.win_probability
+                || (evaluation.win_probability == current.win_probability
+                    && evaluation.total_ev > current.total_ev)
+        }) {
+            best = Some((discard, evaluation));
+        }
+    }
+    let (discard, evaluation) = best.ok_or("no 13.23 discard candidate evaluated")?;
+    Ok(Decision::Discard {
+        card_ids: discard.iter().map(|card| card.id).collect(),
+        best_lead: None,
+        ev: Some(evaluation.total_ev),
+        win_probability: Some(evaluation.win_probability),
+    })
+}
+
+fn model1323_observation(input: &DecisionInput) -> Model132Observation {
+    let relative = |player| {
+        if player == PlayerKey::Ai {
+            InfoActor::SelfPlayer
+        } else {
+            InfoActor::Opponent
+        }
+    };
+    Model132Observation {
+        role: input.role,
+        my_score: input.ai_score,
+        opponent_score: input.human_score,
+        own_remaining: rank_counts(&input.ai_hand),
+        own_played: rank_counts(&input.ai_table),
+        opponent_played: rank_counts(&input.human_table),
+        own_discards: rank_counts(&input.own_discards),
+        turn_rank: input.turn_card.rank,
+        current_series: input.plays.iter().map(|card| card.rank).collect(),
+        count: input.count,
+        go_player: input.go_player.map(relative),
+        last_player: input.last_player.map(relative),
+        public_history: input.public_history.clone(),
+    }
+}
+
+fn recommend_peg_model1323(
+    input: &DecisionInput,
+    legal: &[Card],
+    tables: &RuntimeTables,
+    hand_cache: Option<&Model13HandCache>,
+) -> Result<Decision, String> {
+    let observation = model1323_observation(input);
+    let mut evaluator = known_card_pegging_win_evaluator_with_board(
+        input,
+        tables.hold()?,
+        BoardModel::from_board_matrix(Arc::clone(tables.verified_board1323()?)),
+        Some(tables.crib_rank()?),
+    );
+    let forecasts = tables.policy_assets1323()?.forecast_for_choice(
+        &observation,
+        hand_cache.map(|cache| &cache.model1323),
+        &mut |own, opponent| {
+            evaluator.win_probability(
+                input.ai_score + i32::from(own),
+                input.human_score + i32::from(opponent),
+            )
+        },
+    )?;
+    select_peg_model1323(input, legal, &forecasts, &mut evaluator)
+}
+
+fn select_peg_model1323(
+    input: &DecisionInput,
+    legal: &[Card],
+    forecasts: &[crate::model1323::PegCandidateForecast],
+    evaluator: &mut PeggingWinEvaluator,
+) -> Result<Decision, String> {
+    let mut best: Option<(Card, f64, f64, f64)> = None;
+    for forecast in forecasts {
+        let RankPegAction::Play(rank) = forecast.action else {
+            continue;
+        };
+        let card = *legal
+            .iter()
+            .find(|card| card.rank == rank)
+            .ok_or("13.23 forecast selected an illegal rank")?;
+        let mut wp = 0.0;
+        let mut ev = 0.0;
+        for (own, opponent, weight) in &forecast.outcomes {
+            wp += weight
+                * evaluator.win_probability(
+                    input.ai_score + i32::from(*own),
+                    input.human_score + i32::from(*opponent),
+                );
+            ev += weight * (f64::from(*own) - f64::from(*opponent));
+        }
+        let mut plays = input.plays.clone();
+        plays.push(card);
+        let immediate = f64::from(score_count(&plays));
+        if best
+            .as_ref()
+            .is_none_or(|(previous, probability, _, points)| {
+                compare_tuple(
+                    &[wp, immediate, f64::from(card.rank)],
+                    &[*probability, *points, f64::from(previous.rank)],
+                ) > 0
+            })
+        {
+            best = Some((card, wp, ev, immediate));
+        }
+    }
+    let (card, wp, ev, _) = best.ok_or("no 13.23 pegging candidate evaluated")?;
+    Ok(Decision::Peg {
+        action: "play".into(),
+        card_id: Some(card.id),
+        ev: Some(ev),
+        win_probability: Some(wp),
+        model16_policy: None,
+    })
 }
 
 fn recommend_discard_model13_with_board(
@@ -5755,6 +6074,10 @@ impl RuntimeTables {
             discard911: OnceLock::new(),
             discard_hist131: OnceLock::new(),
             discard_pairs132: OnceLock::new(),
+            corrections1322: OnceLock::new(),
+            corrections1323: OnceLock::new(),
+            policy_assets1323: OnceLock::new(),
+            verified_board1323: OnceLock::new(),
             beliefs91: OnceLock::new(),
             decline_factors1322: OnceLock::new(),
             empirical: OnceLock::new(),
@@ -5796,6 +6119,38 @@ impl RuntimeTables {
     fn discard_pairs132(&self) -> Result<&Model132KeepPairTable, String> {
         load_cached(&self.discard_pairs132, "discard_pairs132", || {
             Model132KeepPairTable::load(self.asset_path("model132-keep-pairs.bin"))
+        })
+    }
+
+    fn corrections1322(&self) -> Result<&Model1322CorrectionTable, String> {
+        load_cached(&self.corrections1322, "corrections1322", || {
+            Model1322CorrectionTable::load(self.asset_path("model1322-corrections.bin"))
+        })
+    }
+
+    fn corrections1323(&self) -> Result<&Model1323CorrectionTable, String> {
+        load_cached(&self.corrections1323, "corrections1323", || {
+            let table =
+                Model1323CorrectionTable::load(self.asset_path("model1323-corrections.bin"))?;
+            if table.input_checksums() != CORRECTION_INPUT_CHECKSUMS {
+                return Err(
+                    "13.23 correction asset has incompatible policy/input provenance".into(),
+                );
+            }
+            Ok(table)
+        })
+    }
+
+    fn policy_assets1323(&self) -> Result<&Model1323PolicyAssets, String> {
+        load_cached(&self.policy_assets1323, "policy_assets1323", || {
+            Model1323PolicyAssets::load(&self.asset_path(""))
+        })
+    }
+
+    fn verified_board1323(&self) -> Result<&Arc<BoardWinMatrix>, String> {
+        load_cached(&self.verified_board1323, "verified_board1323", || {
+            BoardWinMatrix::load_verified_model13215(self.asset_path("board-win-matrix.bin"))
+                .map(Arc::new)
         })
     }
 
@@ -6119,6 +6474,223 @@ mod tests {
     use crate::model132::Model132PeggingPolicy;
     use crate::model162::Model162ActionAdvantageEntry;
     use crate::policy::{PolicyArtifactMetadata, QuantizedPolicyEntry, POLICY_WEIGHT_TOTAL};
+    use std::path::Path;
+
+    #[test]
+    #[ignore = "release-mode exhaustive native WP/pruning equivalence"]
+    fn model1323_exhaustive_native_reference_equivalence() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let tables = runtime_tables(root.to_str().unwrap()).unwrap();
+        let mut report = Vec::new();
+        for (fixture, fields) in [
+            ("opening", "role=pone;ownDiscards=1,6;aiHand=0,3,4,9;humanHandCount=4;aiScore=0;humanScore=0"),
+            ("dealer-reply", "role=dealer;ownDiscards=7,11;aiHand=2,5,8,12;humanTable=0;humanHandCount=3;aiScore=0;humanScore=0;plays=0;count=1;last=human;pegHistory=o0"),
+            ("late", "role=pone;ownDiscards=1,6;aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore=0;humanScore=0;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"),
+            ("count-out", "role=pone;ownDiscards=1,6;aiHand=0,3,4,9;humanTable=12;humanHandCount=3;aiScore=119;humanScore=120;plays=12;count=10;last=human;pegHistory=o12"),
+            ("close-race", "role=pone;ownDiscards=1,6;aiHand=0,3,4,9;humanHandCount=4;aiScore=116;humanScore=118"),
+        ] {
+            let input = parse_decision_input(&format!("kind=peg;model={MODEL_13_23};turnCard=10;{fields}")).unwrap();
+            let observation = model1323_observation(&input);
+            let mut evaluator = known_card_pegging_win_evaluator_with_board(
+                &input, tables.hold().unwrap(),
+                BoardModel::from_board_matrix(Arc::clone(tables.verified_board1323().unwrap())),
+                Some(tables.crib_rank().unwrap()),
+            );
+            let start = std::time::Instant::now();
+            let full = tables.policy_assets1323().unwrap().forecast(&observation, usize::MAX).unwrap();
+            assert!(full.iter().all(|f| f.evaluated_worlds == f.posterior_worlds));
+            let expected = select_peg_model1323(&input, &input.ai_hand, &full, &mut evaluator).unwrap();
+            let full_seconds = start.elapsed().as_secs_f64();
+            let start = std::time::Instant::now();
+            let actual = evaluate_decision(&input, root.to_str().unwrap()).unwrap();
+            let bounded_seconds = start.elapsed().as_secs_f64();
+            let bits = |decision: &Decision| match decision {
+                Decision::Peg {action, card_id, ev, win_probability, ..} =>
+                    (action.clone(), *card_id, ev.map(f64::to_bits), win_probability.map(f64::to_bits)),
+                _ => panic!("expected pegging decision"),
+            };
+            assert_eq!(bits(&actual), bits(&expected), "{fixture}");
+            report.push(serde_json::json!({"fixture":fixture, "fullSeconds":full_seconds,
+                "boundedSeconds":bounded_seconds,"posteriorWorlds":full[0].posterior_worlds,
+                "bitExactDecision":true}));
+        }
+        fs::write(
+            std::env::temp_dir().join("model1323-exhaustive-native-equivalence.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn model1323_peg_selects_wp_even_when_net_points_prefer_another_play() {
+        let mut input = model16_peg_input();
+        input.model = MODEL_13_23.into();
+        input.ai_score = 119;
+        input.human_score = 120;
+        input.ai_hand = cards_from_ids(&[0, 4]).unwrap();
+        let board = BoardWinMatrix::load_verified_model13215(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/board-win-matrix.bin"),
+        )
+        .unwrap();
+        let mut evaluator = PeggingWinEvaluator {
+            perspective_role: Role::Pone,
+            mode: PeggingWinMode::KnownCards(PostPeggingWinContext {
+                perspective_role: Role::Pone,
+                pone_is_perspective: true,
+                dealer_is_perspective: false,
+                pone_hand: vec![(1, 1.0)],
+                dealer_hand: vec![(1, 1.0)],
+                crib: vec![(0, 1.0)],
+                memo: HashMap::new(),
+                board: BoardModel::from_board_matrix(Arc::new(board)),
+            }),
+        };
+        let forecasts = [
+            crate::model1323::PegCandidateForecast {
+                action: RankPegAction::Play(0),
+                outcomes: vec![(1, 0, 1.0)],
+                posterior_worlds: 4,
+                evaluated_worlds: 4,
+            },
+            crate::model1323::PegCandidateForecast {
+                action: RankPegAction::Play(4),
+                outcomes: vec![(0, 0, 0.25), (2, 0, 0.75)],
+                posterior_worlds: 4,
+                evaluated_worlds: 4,
+            },
+        ];
+        let choice =
+            select_peg_model1323(&input, &input.ai_hand, &forecasts, &mut evaluator).unwrap();
+        let Decision::Peg {
+            card_id,
+            ev,
+            win_probability,
+            ..
+        } = choice
+        else {
+            panic!("expected pegging choice")
+        };
+        assert_eq!(card_id, Some(0));
+        assert_eq!(ev, Some(1.0));
+        assert_eq!(win_probability, Some(1.0));
+    }
+
+    #[test]
+    fn model1323_native_discard_uses_joint_asset_and_has_no_lead_mask_policy() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let tables = RuntimeTables::new(root.to_str().unwrap());
+        let mut input = model16_peg_input();
+        input.kind = DecisionKind::Discard;
+        input.model = MODEL_13_23.into();
+        input.role = Role::Dealer;
+        input.ai_score = 100;
+        input.human_score = 110;
+        input.ai_hand = cards_from_ids(&[0, 4, 8, 12, 16, 20]).unwrap();
+        let discard = &input.ai_hand[..2];
+        let asset = Model1323CorrectionTable::fixture(&[(
+            rank_counts(&input.ai_hand),
+            rank_counts(discard),
+            Role::Dealer,
+            vec![(21, 0, 1)],
+        )]);
+        let mut board =
+            BoardModel::from_board_matrix(Arc::clone(tables.verified_board1323().unwrap()));
+        let choice = recommend_discard_model1323_with_assets(
+            &input,
+            &asset,
+            tables.crib_rank().unwrap(),
+            &mut board,
+        )
+        .unwrap();
+        let Decision::Discard {
+            card_ids,
+            best_lead,
+            win_probability,
+            ..
+        } = choice
+        else {
+            panic!("expected discard choice")
+        };
+        assert_eq!(card_ids, vec![0, 4]);
+        assert_eq!(best_lead, None);
+        assert_eq!(win_probability, Some(1.0));
+    }
+
+    #[test]
+    #[ignore = "requires the separately installed, verified 499 MiB correction asset"]
+    fn model1323_full_asset_native_integration() {
+        use sha2::{Digest, Sha256};
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let bytes =
+            fs::read(root.join("rust/cribbage-shadow-engine/assets/model1323-corrections.bin"))
+                .expect("install the completed correction asset before running this test");
+        assert_eq!(bytes.len(), 522_911_094);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&bytes)),
+            "ff0894471867cd80c636a46bb4c8c148b7300090a9b536dd61d991fea6fe293a"
+        );
+        drop(bytes);
+        // Loading validates every joint row and its exact moments, as well as
+        // the full-build header and frozen builder input identities.
+        let tables = runtime_tables(root.to_str().unwrap()).unwrap();
+        let asset = tables.corrections1323().unwrap();
+        tables.policy_assets1323().unwrap();
+        for ids in [
+            [0, 4, 8, 12, 16, 20],
+            [16, 17, 18, 36, 40, 44],
+            [0, 1, 2, 3, 48, 49],
+        ] {
+            for role in [Role::Dealer, Role::Pone] {
+                let mut input = model16_peg_input();
+                input.kind = DecisionKind::Discard;
+                input.model = MODEL_13_23.into();
+                input.role = role;
+                input.ai_hand = cards_from_ids(&ids).unwrap();
+                for pair in crate::cards::combinations_indices(6, 2) {
+                    let discard = [input.ai_hand[pair[0]], input.ai_hand[pair[1]]];
+                    let row = asset
+                        .row_for(&rank_counts(&input.ai_hand), &rank_counts(&discard), role)
+                        .unwrap();
+                    assert!(row.moments.total_weight > 0);
+                    assert_eq!(
+                        row.bins().map(|(_, _, weight)| weight).sum::<u128>(),
+                        row.moments.total_weight
+                    );
+                }
+                for (own, opponent) in [(0, 0), (95, 105), (118, 117)] {
+                    input.ai_score = own;
+                    input.human_score = opponent;
+                    let Decision::Discard {
+                        card_ids,
+                        best_lead,
+                        ev,
+                        win_probability,
+                    } = evaluate_decision(&input, root.to_str().unwrap()).unwrap()
+                    else {
+                        panic!("expected a native discard decision")
+                    };
+                    assert_eq!(card_ids.len(), 2);
+                    assert_ne!(card_ids[0], card_ids[1]);
+                    assert!(card_ids.iter().all(|id| ids.contains(id)));
+                    assert_eq!(best_lead, None);
+                    assert!(ev.unwrap().is_finite());
+                    assert!((0.0..=1.0).contains(&win_probability.unwrap()));
+                }
+            }
+        }
+    }
 
     fn model16_peg_input() -> DecisionInput {
         DecisionInput {
@@ -7118,6 +7690,54 @@ mod tests {
         assert_eq!(pruned[0][1], 1);
         assert_eq!(pruned[0][5], 0);
         assert_eq!(pruned[0][10], 1);
+    }
+
+    #[test]
+    fn model1323_hand_cache_survives_request_threads_and_clears_at_hand_end() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let mut input = model16_peg_input();
+        input.model = MODEL_13_23.to_string();
+        input.ai_score = 20;
+        input.human_score = 18;
+        input.ai_hand = cards_from_ids(&[4, 9]).unwrap();
+        input.ai_table = cards_from_ids(&[0, 3]).unwrap();
+        input.human_table = cards_from_ids(&[2, 5]).unwrap();
+        input.human_hand_count = 2;
+        input.own_discards = cards_from_ids(&[1, 6]).unwrap();
+        input.turn_card = Card::new(10).unwrap();
+        input.count = 14;
+        input.plays = cards_from_ids(&[0, 2, 3, 5]).unwrap();
+        input.public_history = vec![
+            PublicPegEvent::SelfPlay(0),
+            PublicPegEvent::OpponentPlay(2),
+            PublicPegEvent::SelfPlay(3),
+            PublicPegEvent::OpponentPlay(5),
+        ];
+        let cache = Model13HandCache::new();
+        for _ in 0..2 {
+            let input = input.clone();
+            let cache = cache.clone();
+            let root = root.clone();
+            std::thread::spawn(move || {
+                let expected = evaluate_decision(&input, &root).unwrap();
+                let actual =
+                    evaluate_decision_with_caches(&input, &root, None, Some(&cache)).unwrap();
+                assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+                assert!(cache.model1323.is_populated());
+            })
+            .join()
+            .unwrap();
+        }
+        assert!(cache.model1323.is_populated());
+        cache.clear();
+        assert!(!cache.model1323.is_populated());
     }
 
     #[test]
