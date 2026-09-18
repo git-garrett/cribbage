@@ -87,6 +87,52 @@ function readGames(databasePath) {
   }
 }
 
+function summarizeProgress(root, orientations, expectedPerOrientation) {
+  const statuses = orientations.map(({ label, runId, savedGames }) => {
+    let current = {};
+    try {
+      current = JSON.parse(fs.readFileSync(path.join(root, label, "status.json"), "utf8"));
+      if (current.runId !== runId) current = {};
+    } catch {
+      // Missing or partially written status must not invent an ETA.
+      current = {};
+    }
+    const totalGames = expectedPerOrientation > 0 ? expectedPerOrientation : current.totalGames;
+    const complete = Number.isFinite(totalGames) && savedGames >= totalGames;
+    const rate = Number.isFinite(current.gamesPerSecond) && current.gamesPerSecond > 0 ? current.gamesPerSecond : null;
+    const remaining = complete ? 0 : current.status === "running" && rate && totalGames > 0
+      ? (totalGames - savedGames) / rate : null;
+    return {
+      label, status: complete ? "complete" : current.status || "unknown",
+      updatedAt: current.updatedAt || null, savedGames, totalGames: totalGames || null,
+      gamesPerSecond: rate, estimatedRemainingSeconds: remaining,
+    };
+  });
+  const timestamps = statuses.map((status) => Date.parse(status.updatedAt)).filter(Number.isFinite);
+  const asOfMs = timestamps.length ? Math.max(...timestamps) : null;
+  const eta = {
+    state: "unavailable", asOf: asOfMs === null ? null : new Date(asOfMs).toISOString(),
+    estimatedCompletionAt: null, estimatedRemainingSeconds: null,
+    timeZone: "America/Los_Angeles", reason: null,
+  };
+  const pending = statuses.filter((status) => status.status !== "complete");
+  if (!pending.length) {
+    eta.state = "complete";
+    eta.estimatedRemainingSeconds = 0;
+  } else {
+    const unavailable = pending.find((status) => status.estimatedRemainingSeconds === null || !Number.isFinite(Date.parse(status.updatedAt)));
+    if (unavailable) {
+      eta.reason = `${unavailable.label}: ${unavailable.status}; no reliable rate or update time`;
+    } else {
+      const finishMs = Math.max(...pending.map((status) => Date.parse(status.updatedAt) + status.estimatedRemainingSeconds * 1000));
+      eta.state = "running";
+      eta.estimatedCompletionAt = new Date(finishMs).toISOString();
+      eta.estimatedRemainingSeconds = Math.max(0, (finishMs - asOfMs) / 1000);
+    }
+  }
+  return { statuses, eta };
+}
+
 function mean(values) {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 }
@@ -213,6 +259,15 @@ function buildReport(options) {
     const analyses = [candidateAnalysis, opponentAnalysis];
     const games = summarizeGames(readGames(path.join(snapshotRoot, options.candidateLeft, "games.db")), readGames(path.join(snapshotRoot, options.opponentLeft, "games.db")), options.candidate, options.opponent);
     const manifest = readManifest(options.root);
+    // Resumed databases can retain an old ai_runs.out_dir. Read status from
+    // the explicitly selected run root, and count saved games in the snapshot.
+    const progress = summarizeProgress(options.root, [
+      { label: options.candidateLeft, runId: options.candidateLeftRunId, savedGames: games.orientations[0].games },
+      { label: options.opponentLeft, runId: options.opponentLeftRunId, savedGames: games.orientations[1].games },
+    ], Number(manifest.gamesPerOrientation));
+    analyses.forEach((analysis, index) => {
+      analysis.status = { ...analysis.status, ...progress.statuses[index] };
+    });
     const legacyImmediatePegModels = [...new Set(
       analyses.flatMap((analysis) => analysis.ev.legacyImmediatePegModels || []),
     )].sort();
@@ -231,7 +286,7 @@ function buildReport(options) {
       progress: {
         observedGames: games.observedGames,
         expectedGames: Number(manifest.totalGames) || null,
-        statuses: analyses.map((analysis) => ({ label: analysis.status.left === options.candidate ? options.candidateLeft : options.opponentLeft, status: analysis.status.status, updatedAt: analysis.status.updatedAt, savedGames: analysis.status.savedGames, totalGames: analysis.status.totalGames, gamesPerSecond: analysis.status.gamesPerSecond, estimatedRemainingSeconds: analysis.status.estimatedRemainingSeconds })),
+        ...progress,
       },
       results: games,
       phaseScoring: combineScoring(analyses, (analysis) => analysis.scoring, options.candidate, options.opponent),
@@ -280,6 +335,15 @@ function renderMarkdown(report) {
   const evRows = report.evCalibration.map((row) => [row.kind, row.role, row.model === report.candidate ? candidateShort : opponentShort, row.rows, number(row.avgEv), number(row.avgRealized), number(row.avgError), number(row.meanAbsError)]);
   const probabilityRows = report.winProbabilityCalibration.map((row) => [row.kind, row.role, row.model === report.candidate ? candidateShort : opponentShort, row.rows, number(row.avgPredicted), number(row.actualWinRate), number(row.miss), number(row.brier), number(row.meanAbsError)]);
   const timingRows = report.timing.map((row) => [row.kind, row.role, row.model === report.candidate ? candidateShort : opponentShort, row.rows, `${number(row.avgMs)} ms`, `${number(row.totalSeconds)} s`]);
+  const eta = report.progress.eta;
+  const localTime = (timestamp) => new Intl.DateTimeFormat("en-US", {
+    timeZone: eta.timeZone, weekday: "short", year: "numeric", month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit", timeZoneName: "short",
+  }).format(new Date(timestamp));
+  const etaText = eta.state === "running"
+    ? `**${localTime(eta.estimatedCompletionAt)}** (${duration(eta.estimatedRemainingSeconds)} remaining, as of ${localTime(eta.asOf)}).`
+    : eta.state === "complete" ? "Both game orientations are complete."
+      : `Unavailable — ${eta.reason}.`;
   const lines = [
     `# ${report.candidate} vs ${report.opponent}`,
     "",
@@ -289,6 +353,8 @@ function renderMarkdown(report) {
     "## Progress and result",
     "",
     `- Progress: ${report.progress.observedGames}/${report.progress.expectedGames || "?"}`,
+    `- ETA: ${etaText}`,
+    "- ETA covers both game orientations; final reports, verification, and sync follow.",
     `- ${candidateShort}: ${report.results.candidateWins} wins; ${opponentShort}: ${report.results.opponentWins} wins.`,
     `- ${candidateShort} raw win rate: ${percent(report.results.candidateWinRate)}; Wilson 95% ${percent(report.results.candidateWilson95.lower)} to ${percent(report.results.candidateWilson95.upper)}.`,
     `- ${candidateShort} score advantage: ${number(report.results.candidateMeanMargin)} points/game; normal 95% ${number(report.results.candidateMarginNormal95.lower)} to ${number(report.results.candidateMarginNormal95.upper)}.`,
@@ -356,4 +422,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { buildReport, parseArgs, summarizeGames };
+module.exports = { buildReport, parseArgs, summarizeGames, summarizeProgress, renderMarkdown };
