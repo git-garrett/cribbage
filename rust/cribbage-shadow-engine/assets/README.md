@@ -144,9 +144,12 @@ terminal pegging histograms, not just means. The native engine integrates these
 distributions through the exact BWM2 asset used by 13.215 and selects by live
 board WP. It does not execute the inherited diagnostic lead masks. Live candidate
 forecasts use the unchanged correction-builder continuation chooser, with
-decision-local memoization and common deterministic world samples where full
-enumeration is expensive. The full correction asset is not yet packaged here;
-there is no means-only or Model 13.0 board fallback. See
+decision-local memoization, exhaustive world enumeration, and exact WP pruning.
+The verified 522,911,094-byte asset is installed separately from the ignored
+`benchmarks/model1323/correction-20260913-v2/work/merged/` archive. Its SHA-256 is
+`ff0894471867cd80c636a46bb4c8c148b7300090a9b536dd61d991fea6fe293a`.
+Verification evidence is committed under `artifact-archive/model1323/`.
+There is no means-only or Model 13.0 board fallback. See
 `docs/model-13.23-wp-strategy.md` for required identities and approximation limits.
 
 The selectable Model 9.11 runtime uses `model911-discard-ev.bin`, an exact

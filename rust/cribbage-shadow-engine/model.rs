@@ -6624,6 +6624,74 @@ mod tests {
         assert_eq!(win_probability, Some(1.0));
     }
 
+    #[test]
+    #[ignore = "requires the separately installed, verified 499 MiB correction asset"]
+    fn model1323_full_asset_native_integration() {
+        use sha2::{Digest, Sha256};
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let bytes =
+            fs::read(root.join("rust/cribbage-shadow-engine/assets/model1323-corrections.bin"))
+                .expect("install the completed correction asset before running this test");
+        assert_eq!(bytes.len(), 522_911_094);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&bytes)),
+            "ff0894471867cd80c636a46bb4c8c148b7300090a9b536dd61d991fea6fe293a"
+        );
+        drop(bytes);
+        // Loading validates every joint row and its exact moments, as well as
+        // the full-build header and frozen builder input identities.
+        let tables = runtime_tables(root.to_str().unwrap()).unwrap();
+        let asset = tables.corrections1323().unwrap();
+        tables.policy_assets1323().unwrap();
+        for ids in [
+            [0, 4, 8, 12, 16, 20],
+            [16, 17, 18, 36, 40, 44],
+            [0, 1, 2, 3, 48, 49],
+        ] {
+            for role in [Role::Dealer, Role::Pone] {
+                let mut input = model16_peg_input();
+                input.kind = DecisionKind::Discard;
+                input.model = MODEL_13_23.into();
+                input.role = role;
+                input.ai_hand = cards_from_ids(&ids).unwrap();
+                for pair in crate::cards::combinations_indices(6, 2) {
+                    let discard = [input.ai_hand[pair[0]], input.ai_hand[pair[1]]];
+                    let row = asset
+                        .row_for(&rank_counts(&input.ai_hand), &rank_counts(&discard), role)
+                        .unwrap();
+                    assert!(row.moments.total_weight > 0);
+                    assert_eq!(
+                        row.bins().map(|(_, _, weight)| weight).sum::<u128>(),
+                        row.moments.total_weight
+                    );
+                }
+                for (own, opponent) in [(0, 0), (95, 105), (118, 117)] {
+                    input.ai_score = own;
+                    input.human_score = opponent;
+                    let Decision::Discard {
+                        card_ids,
+                        best_lead,
+                        ev,
+                        win_probability,
+                    } = evaluate_decision(&input, root.to_str().unwrap()).unwrap()
+                    else {
+                        panic!("expected a native discard decision")
+                    };
+                    assert_eq!(card_ids.len(), 2);
+                    assert_ne!(card_ids[0], card_ids[1]);
+                    assert!(card_ids.iter().all(|id| ids.contains(id)));
+                    assert_eq!(best_lead, None);
+                    assert!(ev.unwrap().is_finite());
+                    assert!((0.0..=1.0).contains(&win_probability.unwrap()));
+                }
+            }
+        }
+    }
+
     fn model16_peg_input() -> DecisionInput {
         DecisionInput {
             kind: DecisionKind::Peg,

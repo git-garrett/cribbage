@@ -170,9 +170,10 @@ forecasts; it does not preserve their correlation with each simulated pegging
 world or replace them with the chooser's posterior.
 
 The engine can be compiled and contract-tested before the full asset exists.
-A full-asset integration test and 13.23-versus-13.215 playing-strength benchmark
-must follow successful asset verification; they must not be reported as already
-completed.
+The full-asset integration test passed after successful asset verification on
+September 17 (see completion record below). The 13.23-versus-13.215
+playing-strength benchmark is a separate gate; asset verification does not
+establish playing strength.
 
 ### Exhaustive execution revision, 2026-09-14
 
@@ -393,3 +394,49 @@ volume-permission failure. Internal computation and verification can finish;
 the final durable copy still needs foreground completion if permissions remain
 unchanged. Only a fully verified output may be installed as
 `assets/model1323-corrections.bin`; preserve the old 13.22 asset separately.
+
+
+## Verified asset integration, 2026-09-17
+
+The correction builder completed all 40 shards and 3,274,375 compatible keep
+pairs. All 330,590 rows and 27,856,812 joint bins passed exact-moment verification
+against the frozen 13.22 reference. The foreground supervisor completed the
+previously blocked workspace export and reverified the durable copy; all seven
+builder stages are complete. The report, verification, and producer manifest
+are retained in `artifact-archive/model1323/correction-20260913-v2/`.
+
+The installed asset is 522,911,094 bytes, SHA-256
+`ff0894471867cd80c636a46bb4c8c148b7300090a9b536dd61d991fea6fe293a`.
+It is retained outside Git in the durable workspace archive at
+`benchmarks/model1323/correction-20260913-v2/work/merged/model1323-corrections.bin`.
+Copy that file into `rust/cribbage-shadow-engine/assets/model1323-corrections.bin`
+to run this experimental model. The binary is ignored; the committed evidence
+pins its exact identity. The previous model assets remain separate.
+
+`model::tests::model1323_full_asset_native_integration` loads the complete asset
+through the native runtime, checks its SHA-256 and builder provenance, exercises
+all 15 discards for three six-card fixtures in both roles, and checks native WP
+decisions at opening, late-game, and near-out board positions. It is explicitly
+ignored in ordinary CI because the large experimental asset is installed
+separately. Run it with:
+
+```bash
+scripts/run-quiet.sh --show-warnings "Full-asset native integration" cargo test --manifest-path rust/Cargo.toml -p cribbage-shadow-engine --release model1323_full_asset_native_integration -- --ignored
+```
+
+The paired benchmark uses `scripts/run-model1323-vs-model13215-10k.sh` and
+`scripts/report-model1323-vs-model13215-10k.sh`: 5,000 games per orientation,
+10,000 total, seed `0x13201300`, alternating dealer and matching game indexes
+with sides swapped. Ace remains `schell_table-peg_table-13.215`. Six workers per
+orientation reuse the previous paired benchmark allocation; this is not a new
+13.23 throughput optimum claim. The job freezes source, executable and assets
+on the internal disk and resumes only missing game-index ranges. Separate
+stages verify both complete index intervals, generate reports, sync to the
+workspace, and verify the exported results. A failed export is left failed and
+can be completed through the foreground supervisor, as with the asset build.
+
+No production Ace promotion or deployment is included.
+
+Validation: the full Rust suite passes (329 tests across 18 targets), the explicit
+full-asset integration test passes, and the release runner builds successfully.
+The build retains the existing unused-field warning for `WeightedEntry`.
