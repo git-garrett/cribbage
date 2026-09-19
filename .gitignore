@@ -26,3 +26,6 @@ web/src/models/rank-crib-discard/*.status.json
 ios/App/App.xcodeproj/project.xcworkspace/
 references/
 screenlog.*
+
+# Verified 499 MiB experimental asset is retained in benchmarks/model1323.
+rust/cribbage-shadow-engine/assets/model1323-corrections.bin

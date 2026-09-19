@@ -123,7 +123,7 @@ fn incompatible_evaluator_profiles_start_fresh() {
 #[test]
 fn restored_legacy_state_is_normalized_before_play() {
     let mut state: DynamicState = serde_json::from_str(
-        r#"{"profile":{"complete_cycles":20,"ewma_margin":4.0,"strength":100},"cycle_start_scores":[0,0],"first_completed_dealer":null,"delegate":"Tough"}"#,
+        r#"{"profile":{"complete_cycles":20,"ewma_margin":4.0,"strength":100},"cycle_start_scores":[0,0],"first_completed_dealer":null,"delegate":"Tough"}"#.replace("CURRENT_ACE", DYNAMIC_EVALUATOR_VERSION).as_str(),
     )
     .unwrap();
 
@@ -135,7 +135,7 @@ fn restored_legacy_state_is_normalized_before_play() {
 #[test]
 fn older_profile_keeps_strength_but_starts_fresh_cycle_handicap_evidence() {
     let mut state: DynamicState = serde_json::from_str(
-        r#"{"profile":{"profile_version":2,"evaluator_version":"schell_table-peg_table-13.215","started_dynamic":true,"complete_cycles":20,"regret":{"dealer_discard":0.01,"dealer_pegging":0.01,"pone_discard":0.01,"pone_pegging":0.01},"ewma_handicap":-0.01,"strength":100},"first_completed_dealer":null,"delegate_cycles":4,"delegate":"Tough"}"#,
+        r#"{"profile":{"profile_version":2,"evaluator_version":"CURRENT_ACE","started_dynamic":true,"complete_cycles":20,"regret":{"dealer_discard":0.01,"dealer_pegging":0.01,"pone_discard":0.01,"pone_pegging":0.01},"ewma_handicap":-0.01,"strength":100},"first_completed_dealer":null,"delegate_cycles":4,"delegate":"Tough"}"#.replace("CURRENT_ACE", DYNAMIC_EVALUATOR_VERSION).as_str(),
     )
     .unwrap();
 
@@ -149,7 +149,7 @@ fn older_profile_keeps_strength_but_starts_fresh_cycle_handicap_evidence() {
 #[test]
 fn game_based_profile_preserves_its_published_handicap_during_migration() {
     let profile: DynamicProfile = serde_json::from_str(
-        r#"{"profile_version":3,"evaluator_version":"schell_table-peg_table-13.215","started_dynamic":true,"complete_cycles":20,"regret":{"dealer_discard":0.01,"dealer_pegging":0.01,"pone_discard":0.01,"pone_pegging":0.01},"complete_games":2,"ewma_game_handicap":-0.125,"strength":100}"#,
+        r#"{"profile_version":3,"evaluator_version":"CURRENT_ACE","started_dynamic":true,"complete_cycles":20,"regret":{"dealer_discard":0.01,"dealer_pegging":0.01,"pone_discard":0.01,"pone_pegging":0.01},"complete_games":2,"ewma_game_handicap":-0.125,"strength":100}"#.replace("CURRENT_ACE", DYNAMIC_EVALUATOR_VERSION).as_str(),
     )
     .unwrap();
 

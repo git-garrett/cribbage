@@ -1,0 +1,173 @@
+{
+  "candidate": "schell_table-peg_table-13.23",
+  "candidateMeanMargin": 0.6249,
+  "candidateWilson95": [
+    0.5031003684764287,
+    0.5226897243656078
+  ],
+  "candidateWinRate": 0.5129,
+  "candidateWins": 5129,
+  "completedAt": "2026-09-18T19:42:58.089159Z",
+  "games": 10000,
+  "gamesPerOrientation": 5000,
+  "opponent": "schell_table-peg_table-13.215",
+  "opponentWins": 4871,
+  "orientations": {
+    "candidateLeft": {
+      "candidateMeanMargin": 0.4218,
+      "candidateWinRate": 0.5118,
+      "candidateWins": 2559,
+      "opponentWins": 2441
+    },
+    "candidateWinRateDifference": -0.0021999999999999797,
+    "opponentLeft": {
+      "candidateMeanMargin": 0.828,
+      "candidateWinRate": 0.514,
+      "candidateWins": 2570,
+      "opponentWins": 2430
+    }
+  },
+  "pairedSeeds": {
+    "candidateMeanMargin": 0.6249,
+    "candidateSweeps": 542,
+    "opponentSweeps": 413,
+    "pairs": 5000,
+    "splitPairs": 4045
+  },
+  "status": "complete",
+  "timing": {
+    "comparisons": [
+      {
+        "candidate": "schell_table-peg_table-13.23",
+        "candidateAvgMs": 223.65194986164914,
+        "candidateMinusOpponentMs": 9.173553152244608,
+        "candidateToOpponentRatio": 1.0427714552746952,
+        "kind": "discard",
+        "opponent": "schell_table-peg_table-13.215",
+        "opponentAvgMs": 214.47839670940454,
+        "role": "dealer"
+      },
+      {
+        "candidate": "schell_table-peg_table-13.23",
+        "candidateAvgMs": 219.43037861777273,
+        "candidateMinusOpponentMs": 0.015129342731228235,
+        "candidateToOpponentRatio": 1.0000689530138913,
+        "kind": "discard",
+        "opponent": "schell_table-peg_table-13.215",
+        "opponentAvgMs": 219.4152492750415,
+        "role": "pone"
+      },
+      {
+        "candidate": "schell_table-peg_table-13.23",
+        "candidateAvgMs": 467.00099519892535,
+        "candidateMinusOpponentMs": 452.2171241432404,
+        "candidateToOpponentRatio": 31.588546290746148,
+        "kind": "pegging",
+        "opponent": "schell_table-peg_table-13.215",
+        "opponentAvgMs": 14.783871055684925,
+        "role": "dealer"
+      },
+      {
+        "candidate": "schell_table-peg_table-13.23",
+        "candidateAvgMs": 4697.81733948793,
+        "candidateMinusOpponentMs": 4489.9316493121805,
+        "candidateToOpponentRatio": 22.598079432578203,
+        "kind": "pegging",
+        "opponent": "schell_table-peg_table-13.215",
+        "opponentAvgMs": 207.88569017574955,
+        "role": "pone"
+      }
+    ],
+    "note": "Rust model decision calls only; forced no-model rows are excluded. Positive candidateMinusOpponentMs means the candidate was slower.",
+    "rows": [
+      {
+        "avgMs": 219.4152492750415,
+        "decisions": 45175,
+        "kind": "discard",
+        "maxMs": 4005.624,
+        "model": "schell_table-peg_table-13.215",
+        "p50Ms": 214.149,
+        "p90Ms": 247.481,
+        "role": "pone",
+        "totalSeconds": 9912.083886
+      },
+      {
+        "avgMs": 219.43037861777273,
+        "decisions": 45159,
+        "kind": "discard",
+        "maxMs": 3323.172,
+        "model": "schell_table-peg_table-13.23",
+        "p50Ms": 214.362,
+        "p90Ms": 246.91,
+        "role": "pone",
+        "totalSeconds": 9909.256468
+      },
+      {
+        "avgMs": 214.47839670940454,
+        "decisions": 45159,
+        "kind": "discard",
+        "maxMs": 4009.73,
+        "model": "schell_table-peg_table-13.215",
+        "p50Ms": 209.524,
+        "p90Ms": 241.786,
+        "role": "dealer",
+        "totalSeconds": 9685.629917
+      },
+      {
+        "avgMs": 223.65194986164914,
+        "decisions": 45175,
+        "kind": "discard",
+        "maxMs": 3309.379,
+        "model": "schell_table-peg_table-13.23",
+        "p50Ms": 218.211,
+        "p90Ms": 251.726,
+        "role": "dealer",
+        "totalSeconds": 10103.476835
+      },
+      {
+        "avgMs": 207.88569017574955,
+        "decisions": 127511,
+        "kind": "pegging",
+        "maxMs": 7375.5,
+        "model": "schell_table-peg_table-13.215",
+        "p50Ms": 22.627,
+        "p90Ms": 637.419,
+        "role": "pone",
+        "totalSeconds": 26507.71224
+      },
+      {
+        "avgMs": 4697.81733948793,
+        "decisions": 126897,
+        "kind": "pegging",
+        "maxMs": 59921.204,
+        "model": "schell_table-peg_table-13.23",
+        "p50Ms": 260.875,
+        "p90Ms": 16208.869,
+        "role": "pone",
+        "totalSeconds": 596138.926929
+      },
+      {
+        "avgMs": 14.783871055684925,
+        "decisions": 123247,
+        "kind": "pegging",
+        "maxMs": 637.226,
+        "model": "schell_table-peg_table-13.215",
+        "p50Ms": 2.068,
+        "p90Ms": 46.581,
+        "role": "dealer",
+        "totalSeconds": 1822.067756
+      },
+      {
+        "avgMs": 467.00099519892535,
+        "decisions": 120598,
+        "kind": "pegging",
+        "maxMs": 9499.103,
+        "model": "schell_table-peg_table-13.23",
+        "p50Ms": 20.249,
+        "p90Ms": 1614.296,
+        "role": "dealer",
+        "totalSeconds": 56319.386019
+      }
+    ]
+  }
+}

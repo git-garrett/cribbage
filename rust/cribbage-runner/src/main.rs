@@ -145,7 +145,13 @@ fn run(config: Config) -> Result<Summary, String> {
     }
     drop(sender);
     for (index, result) in receiver {
-        let (seed, result) = result?;
+        let (seed, result) = match result {
+            Ok(result) => result,
+            Err(error) => {
+                write_status(&config, &summary, "failed", started.elapsed().as_secs_f64())?;
+                return Err(error);
+            }
+        };
         if let Some(db_path) = &config.db_path {
             insert_game(
                 db_path,
@@ -186,7 +192,8 @@ fn run_game_index(config: &Config, index: u32) -> Result<(u32, PlayoutResult), S
     let seed = config.seed.wrapping_add(index);
     let mut playout = ModelPlayout::new(seed, first_deal, config.left, config.right)?;
     playout.set_model16_policy_mode(config.model16_policy_mode);
-    let result = playout.play_to_end(&config.model_root, config.max_steps)?;
+    let result = playout.play_to_end(&config.model_root, config.max_steps)
+        .map_err(|error| format!("game index {index}, seed {seed}: {error}"))?;
     Ok((seed, result))
 }
 

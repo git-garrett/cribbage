@@ -4110,6 +4110,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires the installed production correction asset; run by predeploy QA"]
     fn human_table_review_persists_ace_evaluation_without_revealing_it_live() {
         let mut server = test_server("human-review");
         server.model_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

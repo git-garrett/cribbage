@@ -131,6 +131,27 @@ reuse the 9.11 terminal cell, and only the suffix after the first changed
 action is replayed. Action traces and evidence caches are builder-local and
 are not runtime assets. See `docs/model-9.11-13.22-sparse-build.md`.
 
+`model1322-corrections.bin` (`M1322C01`) is the resulting finite runtime asset.
+It stores one weighted terminal pegging summary for each canonical six-card
+hand, candidate discard, and role, plus cut-indexed pone opening-lead masks.
+After the opening lead, live pegging continues through the same executable
+legal-information policy used by the builder; the asset contains no later
+observation-to-action table or pegging-path graph.
+
+Model 13.23 requires the separately verified `model1323-corrections.bin`
+(`M1323C01`) correction-only rebuild. It retains exact joint own/opponent
+terminal pegging histograms, not just means. The native engine integrates these
+distributions through the exact BWM2 asset used by 13.215 and selects by live
+board WP. It does not execute the inherited diagnostic lead masks. Live candidate
+forecasts use the unchanged correction-builder continuation chooser, with
+decision-local memoization, exhaustive world enumeration, and exact WP pruning.
+The verified 522,911,094-byte asset is installed separately from the ignored
+`benchmarks/model1323/correction-20260913-v2/work/merged/` archive. Its SHA-256 is
+`ff0894471867cd80c636a46bb4c8c148b7300090a9b536dd61d991fea6fe293a`.
+Verification evidence is committed under `artifact-archive/model1323/`.
+There is no means-only or Model 13.0 board fallback. See
+`docs/model-13.23-wp-strategy.md` for required identities and approximation limits.
+
 The selectable Model 9.11 runtime uses `model911-discard-ev.bin`, an exact
 six-card aggregation of that completed keep-pair matrix. Live pegging executes
 the same legal-information policy with the actor's own discards, cut, public

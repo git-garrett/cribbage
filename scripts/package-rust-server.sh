@@ -32,6 +32,8 @@ for required in \
   fi
 done
 
+node "${ROOT_DIR}/scripts/check-ace-asset.cjs"
+
 cd "$ROOT_DIR"
 COPYFILE_DISABLE=1 tar --no-xattrs -czf "$ARCHIVE" \
   dist \

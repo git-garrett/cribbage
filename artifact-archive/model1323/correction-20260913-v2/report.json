@@ -1,0 +1,23 @@
+{
+  "aggregateWorkerSeconds": 1970521.778728882,
+  "assetSha256": "ff0894471867cd80c636a46bb4c8c148b7300090a9b536dd61d991fea6fe293a",
+  "boardAssetSha256": "099715bc3aed5b296c39fb3edfd8fa30e0dad13239dede1c8963e344dfe8d679",
+  "bytes": 522911094,
+  "compatiblePairs": 3274375,
+  "durableObservationActionTable": false,
+  "exactLegacyMomentsMatch": true,
+  "jointBins": 27856812,
+  "jointWorldVisits": 125017162097,
+  "lastBuildInvocationSeconds": 342335.082875958,
+  "modelVersion": "13.23",
+  "peakAggregateRssKb": 4420080,
+  "referenceSha256": "43ad61c68603254afd8c2b07bb26499e518e0988a4a3c6a022394f44b797cb69",
+  "reporterSha256": "d74295a6d04192ba6cab51344526f02dfae34b8eea95e831479be14c4a92976e",
+  "rowsVerified": 330590,
+  "schemaVersion": 1,
+  "scope": "correction/aggregation asset rebuild, not playing-strength validation",
+  "shards": 40,
+  "sourceRevision": "920ab3c3c0b3a17537b4b3b07298b33f62d0bde8",
+  "status": "complete",
+  "workers": 6
+}
