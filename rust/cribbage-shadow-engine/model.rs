@@ -233,7 +233,7 @@ struct RuntimeTables {
     discard_hist131: OnceLock<Model131DiscardHistogramTable>,
     discard_pairs132: OnceLock<Model132KeepPairTable>,
     corrections1322: OnceLock<Model1322CorrectionTable>,
-    corrections1323: OnceLock<Model1323CorrectionTable>,
+    corrections1323: OnceLock<Result<Model1323CorrectionTable, String>>,
     policy_assets1323: OnceLock<Model1323PolicyAssets>,
     verified_board1323: OnceLock<Arc<BoardWinMatrix>>,
     beliefs91: OnceLock<Model91EmpiricalBeliefs>,
@@ -6157,16 +6157,21 @@ impl RuntimeTables {
     }
 
     fn corrections1323(&self) -> Result<&Model1323CorrectionTable, String> {
-        load_cached(&self.corrections1323, "corrections1323", || {
-            let table =
-                Model1323CorrectionTable::load(self.asset_path("model1323-corrections.bin"))?;
-            if table.input_checksums() != CORRECTION_INPUT_CHECKSUMS {
-                return Err(
-                    "13.23 correction asset has incompatible policy/input provenance".into(),
-                );
-            }
-            Ok(table)
-        })
+        // Serialize the first load: concurrent requests must not allocate
+        // multiple copies of the 499 MiB production asset.
+        self.corrections1323
+            .get_or_init(|| {
+                let table =
+                    Model1323CorrectionTable::load(self.asset_path("model1323-corrections.bin"))?;
+                if table.input_checksums() != CORRECTION_INPUT_CHECKSUMS {
+                    return Err(
+                        "13.23 correction asset has incompatible policy/input provenance".into(),
+                    );
+                }
+                Ok(table)
+            })
+            .as_ref()
+            .map_err(Clone::clone)
     }
 
     fn policy_assets1323(&self) -> Result<&Model1323PolicyAssets, String> {
