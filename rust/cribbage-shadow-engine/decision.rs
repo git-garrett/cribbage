@@ -2,7 +2,8 @@ use crate::board::Role;
 use crate::game::{CribbageGame, Side};
 use crate::information_set::perspective_history;
 use crate::model::{
-    self, Decision, DecisionInput, DecisionKind, Model16PolicyMode, Model911HandCache, PlayerKey,
+    self, Decision, DecisionInput, DecisionKind, Model13HandCache, Model16PolicyMode,
+    Model911HandCache, PlayerKey,
 };
 use crate::model_id::ModelId;
 
@@ -79,9 +80,21 @@ pub fn recommend_peg_for_side_with_model911_cache(
     root: &str,
     model911_cache: Option<&Model911HandCache>,
 ) -> Result<PegDecision, String> {
+    recommend_peg_for_side_with_caches(game, side, model_id, peg_lead, root, model911_cache, None)
+}
+
+pub fn recommend_peg_for_side_with_caches(
+    game: &CribbageGame,
+    side: Side,
+    model_id: ModelId,
+    peg_lead: Option<u8>,
+    root: &str,
+    model911_cache: Option<&Model911HandCache>,
+    model13_cache: Option<&Model13HandCache>,
+) -> Result<PegDecision, String> {
     ensure_native_model(model_id)?;
     let input = decision_input(game, side, model_id, DecisionKind::Peg, peg_lead);
-    match model::evaluate_decision_with_model911_cache(&input, root, model911_cache)? {
+    match model::evaluate_decision_with_caches(&input, root, model911_cache, model13_cache)? {
         Decision::Peg {
             action,
             card_id: _,
@@ -313,6 +326,210 @@ fn mapped_player(player: Option<Side>, perspective: Side) -> Option<PlayerKey> {
 mod tests {
     use super::*;
     use crate::model_id::ModelId;
+
+    #[test]
+    #[ignore = "bounded release-mode engine-played hand cost comparison"]
+    fn model1323_exhaustive_engine_played_hand_cost() {
+        use crate::cards::cards_from_ids;
+        use crate::game::Phase;
+        use std::time::Instant;
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let fixture = std::env::var("MODEL1323_COST_FIXTURE").unwrap_or_else(|_| "opening".into());
+        let repeats: usize = std::env::var("MODEL1323_COST_REPEATS")
+            .unwrap_or_else(|_| "3".into())
+            .parse()
+            .unwrap();
+        assert!(repeats > 0);
+        let (own, opponent, cut, scores) = match fixture.as_str() {
+            "opening" => ([0, 3, 4, 9, 1, 6], [2, 5, 8, 12, 7, 11], 10, [0, 0]),
+            "paired-fives" => ([4, 17, 5, 9, 6, 12], [0, 2, 8, 11, 1, 7], 10, [0, 0]),
+            "low-run" => ([0, 1, 2, 3, 9, 12], [4, 5, 6, 7, 10, 11], 8, [0, 0]),
+            "high-cards" => ([8, 9, 10, 11, 4, 12], [1, 2, 3, 5, 6, 7], 0, [0, 0]),
+            "close-race" => ([0, 3, 4, 9, 1, 6], [2, 5, 8, 12, 7, 11], 10, [116, 118]),
+            _ => panic!("unknown timing fixture"),
+        };
+        let mut initial = CribbageGame::new_with_seed(1323, Side::Right);
+        initial.player_mut(Side::Left).hand = cards_from_ids(&own).unwrap();
+        initial.player_mut(Side::Right).hand = cards_from_ids(&opponent).unwrap();
+        initial.turn_card = crate::cards::Card::new(cut).unwrap();
+        initial.discard(Side::Left, [own[4], own[5]]).unwrap();
+        initial
+            .discard(Side::Right, [opponent[4], opponent[5]])
+            .unwrap();
+        initial.player_mut(Side::Left).score = scores[0];
+        initial.player_mut(Side::Right).score = scores[1];
+        // Warm immutable assets; each timed hand still starts with fresh caches.
+        for model in [ModelId::Schell13215, ModelId::Schell1323] {
+            recommend_peg_for_side(&initial, Side::Left, model, None, root).unwrap();
+        }
+        let mut report = Vec::new();
+        for repeat in 0..repeats {
+            let mut game = initial.clone();
+            let caches13215 = [Model13HandCache::new(), Model13HandCache::new()];
+            let caches1323 = [Model13HandCache::new(), Model13HandCache::new()];
+            let mut turns = [0, 0];
+            while game.phase == Phase::Pegging {
+                if game.pegging_reset_pending {
+                    game.acknowledge_pegging_reset();
+                    continue;
+                }
+                let actor = game.current_player();
+                let legal = game.legal_cards(actor);
+                let chosen = if legal.len() > 1 {
+                    let mut times = [0.0; 2];
+                    let mut decisions = [None, None];
+                    for offset in 0..2 {
+                        let mode = (offset + repeat + turns[actor.index()]) % 2;
+                        let (model, cache) = if mode == 0 {
+                            (ModelId::Schell13215, &caches13215[actor.index()])
+                        } else {
+                            (ModelId::Schell1323, &caches1323[actor.index()])
+                        };
+                        let start = Instant::now();
+                        decisions[mode] = Some(
+                            recommend_peg_for_side_with_caches(
+                                &game,
+                                actor,
+                                model,
+                                None,
+                                root,
+                                None,
+                                Some(cache),
+                            )
+                            .unwrap(),
+                        );
+                        times[mode] = start.elapsed().as_secs_f64();
+                    }
+                    report.push(serde_json::json!({"fixture":fixture,"repeat":repeat,
+                        "actor":actor.index(),"actorTurn":turns[actor.index()],
+                        "count":game.count,"legalActions":legal.len(),
+                        "seconds13215":times[0],"seconds1323":times[1]}));
+                    turns[actor.index()] += 1;
+                    match decisions[1].as_ref().unwrap() {
+                        PegDecision::Play { card_id, .. } => Some(*card_id),
+                        PegDecision::Go => panic!("go with legal cards"),
+                    }
+                } else {
+                    legal.first().map(|card| card.id)
+                };
+                // Actual 13.23 choices advance the hand, not a scripted trace.
+                if let Some(card) = chosen {
+                    game.play_card(actor, card).unwrap();
+                } else {
+                    game.say_go(actor).unwrap();
+                }
+            }
+            std::fs::write(
+                std::env::temp_dir().join(format!("model1323-exhaustive-native-{fixture}.json")),
+                serde_json::to_vec_pretty(&report).unwrap(),
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    #[ignore = "bounded release-mode multi-turn native speed comparison"]
+    fn model1323_hand_cache_native_speed_comparison() {
+        use crate::cards::cards_from_ids;
+        use crate::game::Phase;
+        use std::time::Instant;
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let mut report = Vec::new();
+        for (fixture, own, opponent, cut) in [
+            ("opening", [0, 3, 4, 9, 1, 6], [2, 5, 8, 12, 7, 11], 10),
+            (
+                "paired-fives",
+                [4, 17, 5, 9, 6, 12],
+                [0, 2, 8, 11, 1, 7],
+                10,
+            ),
+        ] {
+            let mut game = CribbageGame::new_with_seed(1323, Side::Right);
+            game.player_mut(Side::Left).hand = cards_from_ids(&own).unwrap();
+            game.player_mut(Side::Right).hand = cards_from_ids(&opponent).unwrap();
+            game.turn_card = crate::cards::Card::new(cut).unwrap();
+            game.discard(Side::Left, [own[4], own[5]]).unwrap();
+            game.discard(Side::Right, [opponent[4], opponent[5]])
+                .unwrap();
+            let initial = game.clone();
+            // Preload immutable runtime assets outside all measurements.
+            for model in [ModelId::Schell13215, ModelId::Schell1323] {
+                recommend_peg_for_side(&game, Side::Left, model, None, root).unwrap();
+            }
+            for repeat in 0..5 {
+                let mut game = initial.clone();
+                let caches13215 = [Model13HandCache::new(), Model13HandCache::new()];
+                let caches1323 = [Model13HandCache::new(), Model13HandCache::new()];
+                let mut turns = [0, 0];
+                while game.phase == Phase::Pegging {
+                    if game.pegging_reset_pending {
+                        game.acknowledge_pegging_reset();
+                        continue;
+                    }
+                    let actor = game.current_player();
+                    let legal = game.legal_cards(actor);
+                    if legal.len() > 1 {
+                        let mut seconds = [0.0; 3];
+                        let mut decisions = [None, None, None];
+                        // Rotate timing order to reduce systematic load/cache bias.
+                        for offset in 0..3 {
+                            let mode = (offset + repeat + turns[actor.index()]) % 3;
+                            let (model, cache) = match mode {
+                                0 => (ModelId::Schell13215, Some(&caches13215[actor.index()])),
+                                1 => (ModelId::Schell1323, None),
+                                _ => (ModelId::Schell1323, Some(&caches1323[actor.index()])),
+                            };
+                            let start = Instant::now();
+                            decisions[mode] = Some(
+                                recommend_peg_for_side_with_caches(
+                                    &game, actor, model, None, root, None, cache,
+                                )
+                                .unwrap(),
+                            );
+                            seconds[mode] = start.elapsed().as_secs_f64();
+                        }
+                        assert_eq!(decisions[1], decisions[2]);
+                        report.push(serde_json::json!({"fixture":fixture,"repeat":repeat,
+                            "actor":actor.index(),"actorTurn":turns[actor.index()],
+                            "count":game.count,"legalActions":legal.len(),
+                            "seconds13215":seconds[0],"seconds1323Uncached":seconds[1],
+                            "seconds1323Cached":seconds[2],"identicalDecision":true}));
+                        turns[actor.index()] += 1;
+                    }
+                    // The same legal trace feeds all three evaluators; no model
+                    // gets easier positions because it chose different cards.
+                    match legal.first() {
+                        Some(card) => {
+                            game.play_card(actor, card.id).unwrap();
+                        }
+                        None => {
+                            game.say_go(actor).unwrap();
+                        }
+                    }
+                }
+                for cache in caches13215.iter().chain(&caches1323) {
+                    cache.clear();
+                }
+                std::fs::write(
+                    std::env::temp_dir().join("model1323-hand-cache-native-timing.json"),
+                    serde_json::to_vec_pretty(&report).unwrap(),
+                )
+                .unwrap();
+            }
+        }
+    }
 
     #[test]
     fn server_stochastic_seed_is_repeatable_and_deal_local() {

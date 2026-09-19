@@ -1,0 +1,22 @@
+{
+  "actorScreens": 7392938438,
+  "bytes": 522911094,
+  "compatiblePairs": 3274375,
+  "dealerKeeps": 1820,
+  "durableObservationActionTable": false,
+  "exactJointWorlds": 125017162097,
+  "jointDistributions": true,
+  "modelVersion": "13.23",
+  "offlineObjective": "net pegging points; unchanged Model911Policy legal-information continuation",
+  "outputChecksum": "b49d218d867a05f1",
+  "poneKeeps": 1820,
+  "poneLeadMasks": "thirteen u16 masks per pone row; bit c marks cut rank c",
+  "roleRows": 165295,
+  "rowOrder": "canonical six-card rank hand, canonical contained two-card discard; dealer and pone arrays use the same 165,295 row order",
+  "schemaVersion": 1,
+  "shards": 40,
+  "stableJointWorlds": 108497464089,
+  "status": "complete",
+  "suffixRollouts": 15145523607,
+  "wallSeconds": 59986.545212
+}

@@ -14,7 +14,7 @@ use cribbage_shadow_engine::cards::{
     PeggingScoreComponents, RANKS, SUIT_NAMES, VALUES,
 };
 use cribbage_shadow_engine::decision::{
-    recommend_discard_for_side, recommend_peg_for_side, recommend_peg_for_side_with_model911_cache,
+    recommend_discard_for_side, recommend_peg_for_side, recommend_peg_for_side_with_caches,
     review_discard_for_side_with_recommendation, review_peg_for_side_with_recommendation,
     DecisionReview as EngineDecisionReview, PegDecision, ReviewedDecisionValue,
 };
@@ -23,7 +23,7 @@ use cribbage_shadow_engine::dynamic::{
     MIN_COMPLETE_CYCLES,
 };
 use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
-use cribbage_shadow_engine::model::Model911HandCache;
+use cribbage_shadow_engine::model::{Model13HandCache, Model911HandCache};
 use cribbage_shadow_engine::model_id::{
     ModelId, ACE_MODEL, ACE_MODEL_ID, DYNAMIC, MODEL_13_0, MODEL_13_215, MODEL_9_1, MODEL_9_11,
     MYRMIDON_5,
@@ -76,6 +76,7 @@ struct Session {
     event_sequence: u64,
     pending_final_scoring: Option<FinalScoring>,
     model911_hand_cache: Model911HandCache,
+    model1323_hand_cache: Model13HandCache,
     dynamic: Option<DynamicState>,
 }
 
@@ -731,6 +732,7 @@ fn game_action(
         }
         if session.game.phase != Phase::Pegging {
             session.model911_hand_cache.clear();
+            session.model1323_hand_cache.clear();
         }
         if session.game.phase == Phase::GameOver
             && session.pending_final_scoring.is_none()
@@ -977,6 +979,7 @@ fn new_session_from_seed(model: ModelId, tag: Option<String>, seed: u32, counter
         event_sequence: 0,
         pending_final_scoring: None,
         model911_hand_cache: Model911HandCache::new(),
+        model1323_hand_cache: Model13HandCache::new(),
         dynamic,
     }
 }
@@ -1118,6 +1121,7 @@ fn restore_persisted_session(stored: PersistedSession) -> Result<Session, String
         event_sequence: stored.event_sequence,
         pending_final_scoring: stored.pending_final_scoring,
         model911_hand_cache: Model911HandCache::new(),
+        model1323_hand_cache: Model13HandCache::new(),
         dynamic: stored.dynamic,
     };
     if let Some(dynamic) = session.dynamic.as_mut() {
@@ -2068,28 +2072,28 @@ fn apply_action(
             }
             let score_before = score_snapshot(&session.game);
             let decision_model = session.decision_model();
-            let (reason, cards, score_components) =
-                match recommend_peg_for_side_with_model911_cache(
-                    &session.game,
-                    AI,
-                    decision_model,
-                    None,
-                    model_root,
-                    Some(&session.model911_hand_cache),
-                )? {
-                    PegDecision::Go => {
-                        session.game.say_go(AI)?;
-                        ("Go", Vec::new(), None)
-                    }
-                    PegDecision::Play { card_id, .. } => {
-                        session.game.play_card(AI, card_id)?;
-                        (
-                            "Pegging play",
-                            Card::new(card_id).ok().into_iter().collect(),
-                            Some(score_count_components(&session.game.plays)),
-                        )
-                    }
-                };
+            let (reason, cards, score_components) = match recommend_peg_for_side_with_caches(
+                &session.game,
+                AI,
+                decision_model,
+                None,
+                model_root,
+                Some(&session.model911_hand_cache),
+                (decision_model == ModelId::Schell1323).then_some(&session.model1323_hand_cache),
+            )? {
+                PegDecision::Go => {
+                    session.game.say_go(AI)?;
+                    ("Go", Vec::new(), None)
+                }
+                PegDecision::Play { card_id, .. } => {
+                    session.game.play_card(AI, card_id)?;
+                    (
+                        "Pegging play",
+                        Card::new(card_id).ok().into_iter().collect(),
+                        Some(score_count_components(&session.game.plays)),
+                    )
+                }
+            };
             record_score_changes(
                 session,
                 score_before,
@@ -4745,7 +4749,7 @@ mod tests {
         for model in [
             ModelId::Myrmidon5,
             ModelId::Schell91,
-            ModelId::Schell13,
+            ACE_MODEL_ID,
             ModelId::Dynamic,
         ] {
             let mut session = new_session_from_seed(model, None, 0x1234_5678, 1);

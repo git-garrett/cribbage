@@ -14,7 +14,7 @@ use crate::information_set::{
 };
 use crate::model91::{
     Model91Actor, Model91Choice, Model91EmpiricalBeliefs, Model91Observation, Model91Policy,
-    Model91PolicyStats,
+    Model91PolicyStats, OpponentHandCache,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
@@ -296,7 +296,7 @@ fn read_u64_slice(bytes: &[u8], offset: usize, count: usize) -> Result<Vec<u64>,
         .collect()
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Model132Observation {
     pub role: Role,
     pub my_score: i32,
@@ -382,7 +382,7 @@ impl Model132Observation {
         }
     }
 
-    fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         if !(0..=121).contains(&self.my_score) || !(0..=121).contains(&self.opponent_score) {
             return Err("Model 13.2 score is outside 0..=121".to_string());
         }
@@ -860,6 +860,10 @@ impl Model911Policy {
         self.lock_inner().stats()
     }
 
+    pub(crate) fn use_compact_continuations(&self) {
+        self.lock_inner().use_compact_continuations();
+    }
+
     pub fn clear_hand_cache(&self) {
         self.lock_inner().clear_future_cache();
     }
@@ -910,10 +914,10 @@ impl Model911Policy {
             self.include_owned_dead_cards,
         )?;
         self.lock_inner().choose_action_for_weighted_opponent_hands(
-                &model91_observation,
-                opponent_hands,
-                &likelihoods,
-            )
+            &model91_observation,
+            opponent_hands,
+            &likelihoods,
+        )
     }
 
     pub fn choose_action_with_net_ev(
@@ -928,6 +932,31 @@ impl Model911Policy {
         )?;
         self.lock_inner()
             .choose_action_with_opponent_likelihood_and_net_ev(&model91_observation, &likelihoods)
+    }
+
+    /// The same legal-information posterior used by the builder's chooser.
+    /// This never accepts an actual opponent hand or opponent private discards.
+    pub fn opponent_hands(
+        &self,
+        observation: &Model132Observation,
+    ) -> Result<Vec<([u8; RANKS], f64)>, String> {
+        self.opponent_hands_with_cache(observation, None)
+    }
+
+    pub(crate) fn opponent_hands_with_cache(
+        &self,
+        observation: &Model132Observation,
+        cache: Option<&mut OpponentHandCache>,
+    ) -> Result<Vec<([u8; RANKS], f64)>, String> {
+        observation.validate()?;
+        let model91_observation = self.model91_observation(observation)?;
+        let likelihoods = model1322_opponent_rank_likelihoods_with_known_cut(
+            observation,
+            self.factors,
+            self.include_owned_dead_cards,
+        )?;
+        self.lock_inner()
+            .opponent_hands_with_cache(&model91_observation, &likelihoods, cache)
     }
 }
 
