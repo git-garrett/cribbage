@@ -874,6 +874,66 @@ async function testPuttingTogetherDiscards(browser, baseUrl, pegCard = "5d", red
   return { ownCrib: true, discardSixNine: true, keepFiveFiveKingQueen: true, peggingAndCounting: true };
 }
 
+async function testAceOpeningLeadThrobber(browser, baseUrl) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await installStaticBuild(page);
+  await installPathwayFixture(page);
+  const model = "schell_table-peg_table-13.23";
+  const card = (id, rank, value) => ({ id, rank, value, suit: "clubs", symbol: "♣", label: `${rank}♣` });
+  const hand = [card(0, "A", 1), card(4, "2", 2), card(8, "3", 3), card(12, "4", 4)];
+  const lead = { ...card(16, "5", 5), owner: "ai" };
+  const snapshot = {
+    version: 1, gameId: "qa-ace-lead", opponent: model, deal: 0, firstDeal: 0, handNumber: 1,
+    human: { hand: hand.map(c => c.id), table: [], crib: [], score: 0 },
+    ai: { hand: [], table: [], crib: [], score: 0 },
+    turnCard: 24, turnCardRevealed: true, crib: [], plays: [], playOwners: [],
+    completedPlays: [], completedPlayOwners: [], count: 0, turn: 1, goPlayer: null,
+    lastPlayer: null, scoringReview: null, phase: "pegging", message: "Ace leads.", log: [], result: [],
+    pegPositions: { human: [0, 0], ai: [0, 0] },
+  };
+  const state = {
+    phase: "pegging", message: "Ace leads.", log: [], result: [], handNumber: 1,
+    scores: { human: 0, ai: 0 }, pegPositions: snapshot.pegPositions,
+    dealer: "User", firstDealer: "User", cribOwner: "User", turn: "AI", count: 0,
+    turnCard: card(24, "7", 7), turnCardRevealed: true, plays: [], completedPlays: [],
+    peggingResetPending: false, humanHand: hand, aiHandCount: 4, humanTable: [], aiTable: [],
+    legalCardIds: [], aiLegalCardIds: [], canGo: false, scoring: null, cutForDeal: null, analyticsEvents: [],
+  };
+  let releaseLead;
+  const leadReady = new Promise(resolve => { releaseLead = resolve; });
+  await page.route("**/api/game/session/load", route => {
+    const requested = route.request().postDataJSON().opponent;
+    return route.fulfill({ json: { session: requested === model ? { gameId: snapshot.gameId, snapshot, state } : null } });
+  });
+  await page.route("**/api/game/action", async route => {
+    const action = route.request().postDataJSON().action;
+    if (action !== "advance-pegging") throw new Error(`Unexpected Ace action: ${action}`);
+    await leadReady;
+    return route.fulfill({ json: {
+      snapshot: { ...snapshot, plays: [16], playOwners: ["ai"], turn: 0, count: 5 },
+      state: { ...state, plays: [lead], aiTable: [lead], aiHandCount: 3, turn: "User", count: 5, legalCardIds: hand.map(c => c.id) },
+    } });
+  });
+  try {
+    await page.goto(`${baseUrl}/?pathwayView=play`, { waitUntil: "networkidle" });
+    await page.locator('[data-pathway-destination="master"]').click();
+    const overlay = page.locator("#thinking-overlay");
+    await overlay.waitFor({ state: "visible", timeout: 5000 });
+    if (await page.locator("#thinking-overlay-label").textContent() !== "Ace is choosing a lead") {
+      throw new Error("Ace opening lead did not show its waiting label.");
+    }
+    if (!await overlay.locator(".throbber").isVisible()) throw new Error("Ace lead throbber is hidden.");
+    await page.screenshot({ path: path.join(require("node:os").tmpdir(), "cribbage-ace-1323-throbber.png") });
+    releaseLead();
+    await overlay.waitFor({ state: "hidden", timeout: 5000 });
+    await page.locator('#plays .card[data-owner="ai"]').waitFor({ state: "visible" });
+    return { model, waitingLabel: true, throbber: true, clearsAfterLead: true };
+  } finally {
+    releaseLead();
+    await page.close();
+  }
+}
+
 async function main() {
   if (!fs.existsSync(path.join(root, "index.html"))) {
     throw new Error("Missing dist/index.html; run npm run build first.");
@@ -931,6 +991,7 @@ async function main() {
       throw new Error(`Authentication recovery regression: ${JSON.stringify(state)}`);
     }
     await page.close();
+    const aceOpeningLead = await testAceOpeningLeadThrobber(browser, baseUrl);
     const puttingTogether = [await testPuttingTogetherDiscards(browser, baseUrl)];
     for (const card of ["5c", "Qc", "Kd"]) puttingTogether.push(await testPuttingTogetherDiscards(browser, baseUrl, card, "reduce"));
     const peggingAnimations = await testTrainingPeggingAnimations(browser, baseUrl);
@@ -942,7 +1003,7 @@ async function main() {
     const blockedIndexedDb = await testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl);
     const people = await testPeopleInteractions(browser, baseUrl);
     const engagement = await testEngagementDashboard(browser, baseUrl);
-    console.log(JSON.stringify({ authenticationRecovery: state, puttingTogether, peggingAnimations, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
+    console.log(JSON.stringify({ authenticationRecovery: state, aceOpeningLead, puttingTogether, peggingAnimations, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
   } finally {
     await browser.close();
   }

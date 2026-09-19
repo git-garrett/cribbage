@@ -682,7 +682,7 @@ pub fn evaluate_selected_decision(
     selected_card_ids: &[u8],
     root: &str,
 ) -> Result<Decision, String> {
-    if input.model != MODEL_13_0 && input.model != MODEL_13_215 {
+    if input.model != MODEL_13_0 && input.model != MODEL_13_215 && input.model != MODEL_13_23 {
         return Err("saved decision review currently supports Ace models only".to_string());
     }
     let selected = match input.kind {
@@ -1898,7 +1898,7 @@ fn recommend_discard_model1323(
     let histogram = tables.corrections1323()?;
     let mut board = BoardModel::from_board_matrix(Arc::clone(tables.verified_board1323()?));
     let crib_rank = tables.crib_rank()?;
-    recommend_discard_model1323_with_assets(input, histogram, crib_rank, &mut board)
+    recommend_discard_model1323_with_assets(input, histogram, crib_rank, &mut board, None)
 }
 
 fn recommend_discard_model1323_with_assets(
@@ -1906,6 +1906,7 @@ fn recommend_discard_model1323_with_assets(
     histogram: &Model1323CorrectionTable,
     crib_rank: &CribRankDiscardTables,
     board: &mut BoardModel,
+    selected_card_ids: Option<&[u8]>,
 ) -> Result<Decision, String> {
     let six = rank_counts(&input.ai_hand);
     let deck: Vec<Card> = full_deck()
@@ -1916,6 +1917,9 @@ fn recommend_discard_model1323_with_assets(
     let mut best: Option<(Vec<Card>, CandidateEvaluation)> = None;
     for indices in crate::cards::combinations_indices(input.ai_hand.len(), 2) {
         let discard: Vec<Card> = indices.iter().map(|index| input.ai_hand[*index]).collect();
+        if selected_card_ids.is_some_and(|ids| !discard.iter().all(|card| ids.contains(&card.id))) {
+            continue;
+        }
         let keep: Vec<Card> = input
             .ai_hand
             .iter()
@@ -2347,6 +2351,14 @@ fn review_discard_model13(
                 .ok_or_else(|| "selected discard is not in the original hand".to_string())
         })
         .collect::<Result<Vec<_>, _>>()?;
+    if input.model == MODEL_13_23 {
+        let tables = runtime_tables(root)?;
+        let mut board = BoardModel::from_board_matrix(Arc::clone(tables.verified_board1323()?));
+        return recommend_discard_model1323_with_assets(
+            input, tables.corrections1323()?, tables.crib_rank()?, &mut board,
+            Some(selected_card_ids),
+        );
+    }
     let keep = input
         .ai_hand
         .iter()
@@ -2766,6 +2778,22 @@ fn review_peg_model13(
         });
     }
     let tables = runtime_tables(root)?;
+    if input.model == MODEL_13_23 {
+        // Review the selected rank without choice pruning: even an inferior
+        // action needs its complete distribution to report its true value.
+        let forecasts = tables.policy_assets1323()?.forecast(
+            &model1323_observation(input), usize::MAX,
+        )?;
+        let selected_forecasts: Vec<_> = forecasts.into_iter()
+            .filter(|forecast| forecast.action == RankPegAction::Play(selected.rank))
+            .collect();
+        let mut evaluator = known_card_pegging_win_evaluator_with_board(
+            input, tables.hold()?,
+            BoardModel::from_board_matrix(Arc::clone(tables.verified_board1323()?)),
+            Some(tables.crib_rank()?),
+        );
+        return select_peg_model1323(input, &[selected], &selected_forecasts, &mut evaluator);
+    }
     let hold = tables.hold()?;
     let opponent_role = other_role(input.role);
     let known_cards = known_cards_for_pegging(input);
@@ -6526,6 +6554,53 @@ mod tests {
     }
 
     #[test]
+    fn model1323_saved_pegging_review_matches_live_values() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let input = parse_decision_input(&format!(
+            "kind=peg;model={MODEL_13_23};turnCard=10;role=pone;ownDiscards=1,6;aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore=95;humanScore=96;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"
+        )).unwrap();
+        let live = evaluate_decision(&input, root.to_str().unwrap()).unwrap();
+        let Decision::Peg {
+            card_id: Some(id),
+            ev,
+            win_probability,
+            ..
+        } = live
+        else {
+            panic!("expected play")
+        };
+        let reviewed = evaluate_selected_decision(&input, &[id], root.to_str().unwrap()).unwrap();
+        let Decision::Peg {
+            ev: reviewed_ev,
+            win_probability: reviewed_wp,
+            ..
+        } = reviewed
+        else {
+            panic!("expected review")
+        };
+        assert_eq!(ev, reviewed_ev);
+        assert_eq!(win_probability, reviewed_wp);
+        let other = input.ai_hand.iter().find(|card| card.id != id).unwrap();
+        let reviewed_other =
+            evaluate_selected_decision(&input, &[other.id], root.to_str().unwrap()).unwrap();
+        let Decision::Peg {
+            card_id,
+            win_probability: other_wp,
+            ..
+        } = reviewed_other
+        else {
+            panic!("expected alternate review")
+        };
+        assert_eq!(card_id, Some(other.id));
+        assert!(other_wp.unwrap() <= win_probability.unwrap());
+        assert!(evaluate_selected_decision(&input, &[51], root.to_str().unwrap()).is_err());
+    }
+
+    #[test]
     fn model1323_peg_selects_wp_even_when_net_points_prefer_another_play() {
         let mut input = model16_peg_input();
         input.model = MODEL_13_23.into();
@@ -6608,6 +6683,7 @@ mod tests {
             &asset,
             tables.crib_rank().unwrap(),
             &mut board,
+            None,
         )
         .unwrap();
         let Decision::Discard {
@@ -6684,6 +6760,19 @@ mod tests {
                     assert_eq!(card_ids.len(), 2);
                     assert_ne!(card_ids[0], card_ids[1]);
                     assert!(card_ids.iter().all(|id| ids.contains(id)));
+                    let reviewed =
+                        evaluate_selected_decision(&input, &card_ids, root.to_str().unwrap())
+                            .unwrap();
+                    let Decision::Discard {
+                        ev: reviewed_ev,
+                        win_probability: reviewed_wp,
+                        ..
+                    } = reviewed
+                    else {
+                        panic!("expected a reviewed discard")
+                    };
+                    assert_eq!(reviewed_ev, ev);
+                    assert_eq!(reviewed_wp, win_probability);
                     assert_eq!(best_lead, None);
                     assert!(ev.unwrap().is_finite());
                     assert!((0.0..=1.0).contains(&win_probability.unwrap()));

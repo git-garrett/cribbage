@@ -17,6 +17,8 @@ npm run --silent test:quiet-wrapper
 npm run --silent typecheck
 npm run --silent test:web
 npm test --silent
+scripts/run-quiet.sh "Production Ace integration" cargo test --manifest-path rust/Cargo.toml -p cribbage-api -- --ignored
+scripts/run-quiet.sh "Full Ace asset integration" cargo test --manifest-path rust/Cargo.toml -p cribbage-shadow-engine --release model1323_full_asset_native_integration -- --ignored
 npm run --silent build:deploy
 scripts/run-quiet.sh "Browser regressions" node scripts/test-browser-regressions.cjs
 scripts/run-quiet.sh "PvP browser regressions" node scripts/test-pvp-browser.cjs

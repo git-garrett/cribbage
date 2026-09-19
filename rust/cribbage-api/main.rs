@@ -605,8 +605,8 @@ fn health_json() -> String {
 
 fn model_json() -> String {
     format!(
-        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"{}\",\"{}\",\"{}\",\"{}\",\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\",\"{}\"]}}",
-        APP_VERSION, ACE_MODEL, MYRMIDON_5, MODEL_9_1, MODEL_9_11, MODEL_13_215, DYNAMIC
+        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\",\"{}\"]}}",
+        APP_VERSION, ACE_MODEL, ACE_MODEL, MYRMIDON_5, MODEL_9_1, MODEL_9_11, MODEL_13_215, DYNAMIC
     )
 }
 
@@ -1337,8 +1337,8 @@ fn load_session_by_tag(
         Some(model) if model.is_ace() => connection
             .query_row(
                 "SELECT session_json FROM cribbage_game_sessions
-             WHERE tag = ?1 AND model IN (?2, ?3) AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
-                params![tag, MODEL_13_0, MODEL_13_215],
+             WHERE tag = ?1 AND model IN (?2, ?3, ?4) AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
+                params![tag, MODEL_13_0, MODEL_13_215, ACE_MODEL],
                 |row| row.get::<_, String>(0),
             )
             .optional(),
@@ -4424,6 +4424,11 @@ mod tests {
 
     #[test]
     fn model_metadata_includes_pathway_and_experimental_models() {
+        let metadata: Value = serde_json::from_str(&model_json()).unwrap();
+        assert!(metadata["models"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(ACE_MODEL)));
         assert!(model_json().contains(MYRMIDON_5));
         assert!(model_json().contains(MODEL_9_1));
         assert!(model_json().contains(MODEL_9_11));
@@ -4522,6 +4527,14 @@ mod tests {
         let replacement = serde_json::from_str::<Value>(&replacement_master.body).unwrap();
         assert_ne!(replacement["snapshot"]["gameId"], master_game_id);
         assert_eq!(replacement["snapshot"]["opponent"], ACE_MODEL);
+        let restored = load_session_by_tag(&data_dir, "Garrett", Some(ACE_MODEL_ID))
+            .unwrap()
+            .expect("the promoted Ace game must survive a reconnect");
+        assert_eq!(
+            restored.id,
+            replacement["snapshot"]["gameId"].as_str().unwrap()
+        );
+        assert_eq!(restored.model, ACE_MODEL_ID);
         std::fs::remove_dir_all(data_dir).unwrap();
     }
 
@@ -4749,24 +4762,38 @@ mod tests {
         for model in [
             ModelId::Myrmidon5,
             ModelId::Schell91,
-            ACE_MODEL_ID,
+            ModelId::Schell13215,
             ModelId::Dynamic,
         ] {
-            let mut session = new_session_from_seed(model, None, 0x1234_5678, 1);
-            session.waiting_for_deal_cut = false;
-            let human_discards = [
-                session.game.player(HUMAN).hand[0].id,
-                session.game.player(HUMAN).hand[1].id,
-            ];
-            session.game.discard(HUMAN, human_discards).unwrap();
-            session.waiting_for_ai_discard = true;
-
-            apply_action(&mut session, "finish-discard", "{}", root.to_str().unwrap()).unwrap();
-
-            assert!(!session.waiting_for_ai_discard);
-            assert_eq!(session.game.player(AI).hand.len(), 4);
-            assert_eq!(session.game.crib.len(), 4);
+            assert_server_authoritative_ai_discard(model, root.to_str().unwrap());
         }
+    }
+
+    #[test]
+    #[ignore = "requires the installed production correction asset; run by predeploy QA"]
+    fn promoted_ace_completes_server_authoritative_ai_discard() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        assert_server_authoritative_ai_discard(ACE_MODEL_ID, root.to_str().unwrap());
+    }
+
+    fn assert_server_authoritative_ai_discard(model: ModelId, root: &str) {
+        let mut session = new_session_from_seed(model, None, 0x1234_5678, 1);
+        session.waiting_for_deal_cut = false;
+        let human_discards = [
+            session.game.player(HUMAN).hand[0].id,
+            session.game.player(HUMAN).hand[1].id,
+        ];
+        session.game.discard(HUMAN, human_discards).unwrap();
+        session.waiting_for_ai_discard = true;
+
+        apply_action(&mut session, "finish-discard", "{}", root).unwrap();
+
+        assert!(!session.waiting_for_ai_discard);
+        assert_eq!(session.game.player(AI).hand.len(), 4);
+        assert_eq!(session.game.crib.len(), 4);
     }
 
     #[test]

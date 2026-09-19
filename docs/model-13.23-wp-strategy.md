@@ -440,3 +440,32 @@ No production Ace promotion or deployment is included.
 Validation: the full Rust suite passes (329 tests across 18 targets), the explicit
 full-asset integration test passes, and the release runner builds successfully.
 The build retains the existing unused-field warning for `WeightedEntry`.
+
+
+## Production Ace promotion, 2026-09-18
+
+The restarted paired benchmark completed all 10,000 games. Model 13.23 won
+5,129 (51.29%; paired-cluster 95% interval 50.69–51.89%) against Ace 13.215,
+with a 0.625-point average score advantage. Both seating orientations favor
+13.23; all 5,000 seed pairs match. Retained reports and the recovery provenance
+are in `artifact-archive/model1323/evaluation-20260918/`.
+
+New production Ace games and advice now select 13.23. Existing 13.215 and 13.0
+games keep their original model and remain resumable. Selected-move reviews
+use 13.23's joint discard distributions and exhaustive live pegging forecasts,
+including inferior choices that production choice pruning would discard.
+The interface shows the existing throbber with “Ace is choosing a lead” while
+an opening pone lead is pending, and clears it when the request resolves.
+
+Dynamic's evaluator follows production Ace. The existing evaluator-version
+invalidation therefore starts a fresh calibration for profiles based on an
+older Ace; old and new regret measurements are not combined.
+
+The production binary asset remains separately installed. Before deployment,
+copy the verified file from the durable correction archive into
+`rust/cribbage-shadow-engine/assets/model1323-corrections.bin` in the clean
+master checkout. Packaging checks its exact byte size and SHA-256 against the
+committed verification evidence, then checks the archive contains it and its
+policy inputs. Predeploy QA explicitly runs the asset-dependent native discard,
+selected-discard consistency, and PvP review integrations. These tests are
+ignored in asset-free CI; all other tests run normally.
