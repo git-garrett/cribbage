@@ -7476,7 +7476,10 @@ function renderSingleGameReport(game: GameState, end: GameEndEvent): void {
   });
   els.singleGameReport.append(newGame);
   // Stored reviews can arrive after the final gameplay snapshot.
-  const events = loadAnalytics().events.filter((event) => event.gameId === end.gameId);
+  const events = mergeStoredAnalyticsEvents(
+    game.analyticsEvents,
+    loadAnalytics().events.filter((event) => event.gameId === end.gameId),
+  );
   renderGameReportInto(els.singleGameReport, events, end, "Game report", game.scores);
 }
 

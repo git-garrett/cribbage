@@ -956,11 +956,20 @@ async function testAceOpeningPlayThrobber(browser, baseUrl, dealer = "User", red
   }
 }
 
-async function testPostgameAceAnalysis(browser, baseUrl) {
+async function testPostgameAceAnalysis(browser, baseUrl, analyticsWritable = true) {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await installStaticBuild(page);
   await installPathwayFixture(page);
   const { model, snapshot, state } = acePeggingFixture();
+  if (!analyticsWritable) {
+    await page.addInitScript(() => {
+      const setItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (key === "strong-cribbage.analytics.v1") throw new DOMException("Storage full", "QuotaExceededError");
+        return setItem.call(this, key, value);
+      };
+    });
+  }
   const gameId = snapshot.gameId;
   const events = [
     { id: "start", at: "2026-09-19T12:00:00Z", gameId, type: "game", action: "start", opponent: model },
@@ -984,7 +993,14 @@ async function testPostgameAceAnalysis(browser, baseUrl) {
     await page.locator('[data-pathway-destination="master"]').click();
     await page.locator("#game-over-close").click();
     const report = page.locator("#single-game-report");
-    await report.getByRole("button", { name: "Analyze with Ace", exact: true }).click();
+    const analyze = report.getByRole("button", { name: "Analyze with Ace", exact: true });
+    await expect(analyze).toBeVisible();
+    if (!analyticsWritable) {
+      await expect(report).toContainText("vs Ace");
+      await expect(report).toContainText("1 QA Player decision still needs Ace analysis");
+      return { liveReportWithoutStorage: true };
+    }
+    await analyze.click();
     await expect.poll(() => reviewCalls).toBe(1);
     await expect.poll(() => page.evaluate(() => {
       const events = JSON.parse(localStorage.getItem("strong-cribbage.analytics.v1")).events;
@@ -1015,7 +1031,7 @@ async function main() {
       return;
     }
     if (process.argv.includes("--postgame-analysis")) {
-      console.log(JSON.stringify(await testPostgameAceAnalysis(browser, baseUrl)));
+      console.log(JSON.stringify([await testPostgameAceAnalysis(browser, baseUrl), await testPostgameAceAnalysis(browser, baseUrl, false)]));
       return;
     }
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
@@ -1067,7 +1083,7 @@ async function main() {
       throw new Error(`Authentication recovery regression: ${JSON.stringify(state)}`);
     }
     await page.close();
-    const postgameAnalysis = await testPostgameAceAnalysis(browser, baseUrl);
+    const postgameAnalysis = [await testPostgameAceAnalysis(browser, baseUrl), await testPostgameAceAnalysis(browser, baseUrl, false)];
     const aceOpeningPlays = [];
     for (const dealer of ["User", "AI"]) {
       for (const motion of ["no-preference", "reduce"]) {
