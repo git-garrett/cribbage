@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
-const { chromium, webkit } = require("@playwright/test");
+const { chromium, webkit, expect } = require("@playwright/test");
 
 const root = path.resolve(__dirname, "../dist");
 const contentTypes = {
@@ -874,10 +874,7 @@ async function testPuttingTogetherDiscards(browser, baseUrl, pegCard = "5d", red
   return { ownCrib: true, discardSixNine: true, keepFiveFiveKingQueen: true, peggingAndCounting: true };
 }
 
-async function testAceOpeningLeadThrobber(browser, baseUrl) {
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-  await installStaticBuild(page);
-  await installPathwayFixture(page);
+function acePeggingFixture() {
   const model = "schell_table-peg_table-13.23";
   const card = (id, rank, value) => ({ id, rank, value, suit: "clubs", symbol: "♣", label: `${rank}♣` });
   const hand = [card(0, "A", 1), card(4, "2", 2), card(8, "3", 3), card(12, "4", 4)];
@@ -899,6 +896,20 @@ async function testAceOpeningLeadThrobber(browser, baseUrl) {
     peggingResetPending: false, humanHand: hand, aiHandCount: 4, humanTable: [], aiTable: [],
     legalCardIds: [], aiLegalCardIds: [], canGo: false, scoring: null, cutForDeal: null, analyticsEvents: [],
   };
+  return { model, hand, lead, snapshot, state };
+}
+
+async function testAceOpeningPlayThrobber(browser, baseUrl, dealer = "User", reducedMotion = "no-preference") {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await installStaticBuild(page);
+  await installPathwayFixture(page);
+  const { model, hand, lead, snapshot, state } = acePeggingFixture();
+  await page.emulateMedia({ reducedMotion });
+  const humanLead = { ...hand[0], owner: "human" };
+  if (dealer === "AI") {
+    Object.assign(snapshot, { deal: 1, turn: 0 });
+    Object.assign(state, { dealer, cribOwner: dealer, turn: "User", legalCardIds: hand.map(card => card.id) });
+  }
   let releaseLead;
   const leadReady = new Promise(resolve => { releaseLead = resolve; });
   await page.route("**/api/game/session/load", route => {
@@ -907,29 +918,100 @@ async function testAceOpeningLeadThrobber(browser, baseUrl) {
   });
   await page.route("**/api/game/action", async route => {
     const action = route.request().postDataJSON().action;
+    if (action === "play-human" && dealer === "AI") {
+      return route.fulfill({ json: {
+        snapshot: { ...snapshot, plays: [humanLead.id], playOwners: ["human"], turn: 1, count: humanLead.value },
+        state: { ...state, plays: [humanLead], humanTable: [humanLead], humanHand: hand.slice(1), turn: "AI", count: humanLead.value, legalCardIds: [] },
+      } });
+    }
     if (action !== "advance-pegging") throw new Error(`Unexpected Ace action: ${action}`);
     await leadReady;
     return route.fulfill({ json: {
-      snapshot: { ...snapshot, plays: [16], playOwners: ["ai"], turn: 0, count: 5 },
-      state: { ...state, plays: [lead], aiTable: [lead], aiHandCount: 3, turn: "User", count: 5, legalCardIds: hand.map(c => c.id) },
+      snapshot: { ...snapshot, plays: dealer === "AI" ? [humanLead.id, lead.id] : [lead.id], playOwners: dealer === "AI" ? ["human", "ai"] : ["ai"], turn: 0, count: dealer === "AI" ? 6 : 5 },
+      state: { ...state, plays: dealer === "AI" ? [humanLead, lead] : [lead], humanTable: dealer === "AI" ? [humanLead] : [], humanHand: dealer === "AI" ? hand.slice(1) : hand, aiTable: [lead], aiHandCount: 3, turn: "User", count: dealer === "AI" ? 6 : 5, legalCardIds: (dealer === "AI" ? hand.slice(1) : hand).map(c => c.id) },
     } });
   });
   try {
     await page.goto(`${baseUrl}/?pathwayView=play`, { waitUntil: "networkidle" });
     await page.locator('[data-pathway-destination="master"]').click();
+    if (dealer === "AI") {
+      await expect(page.locator("#thinking-overlay")).toBeHidden();
+      await page.locator(`#human-hand .card[data-id="${humanLead.id}"]`).click();
+      await page.locator("#play").click();
+    }
     const overlay = page.locator("#thinking-overlay");
     await overlay.waitFor({ state: "visible", timeout: 5000 });
-    if (await page.locator("#thinking-overlay-label").textContent() !== "Ace is choosing a lead") {
-      throw new Error("Ace opening lead did not show its waiting label.");
+    if (await page.locator("#thinking-overlay-label").textContent() !== "Waiting for Ace to play") {
+      throw new Error("Ace opening play did not show its waiting label.");
     }
     if (!await overlay.locator(".throbber").isVisible()) throw new Error("Ace lead throbber is hidden.");
-    await page.screenshot({ path: path.join(require("node:os").tmpdir(), "cribbage-ace-1323-throbber.png") });
+    await page.screenshot({ path: path.join(require("node:os").tmpdir(), `cribbage-ace-wait-${dealer}-${reducedMotion}.png`) });
     releaseLead();
     await overlay.waitFor({ state: "hidden", timeout: 5000 });
     await page.locator('#plays .card[data-owner="ai"]').waitFor({ state: "visible" });
-    return { model, waitingLabel: true, throbber: true, clearsAfterLead: true };
+    return { model, dealer, reducedMotion, waitingLabel: true, throbber: true, clearsAfterPlay: true };
   } finally {
     releaseLead();
+    await page.close();
+  }
+}
+
+async function testPostgameAceAnalysis(browser, baseUrl, analyticsWritable = true) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await installStaticBuild(page);
+  await installPathwayFixture(page);
+  const { model, snapshot, state } = acePeggingFixture();
+  if (!analyticsWritable) {
+    await page.addInitScript(() => {
+      const setItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (key === "strong-cribbage.analytics.v1") throw new DOMException("Storage full", "QuotaExceededError");
+        return setItem.call(this, key, value);
+      };
+    });
+  }
+  const gameId = snapshot.gameId;
+  const events = [
+    { id: "start", at: "2026-09-19T12:00:00Z", gameId, type: "game", action: "start", opponent: model },
+    { id: "discard", at: "2026-09-19T12:01:00Z", gameId, type: "discard", handNumber: 1, player: "human", role: "dealer", cards: ["5♣", "6♣"], cribOwner: "human", cribAfterDiscard: ["5♣", "6♣"], remainingHand: ["A♣", "2♣", "3♣", "4♣"] },
+    { id: "end", at: "2026-09-19T12:02:00Z", gameId, type: "game", action: "end", opponent: model, winner: "ai", finalScores: { human: 100, ai: 121 }, result: "regular" },
+  ];
+  const finished = { ...state, phase: "game_over", scores: events[2].finalScores, analyticsEvents: events };
+  let reviewCalls = 0;
+  await page.route("**/api/game/session/load", route => route.fulfill({ json: { session: { gameId, snapshot, state } } }));
+  await page.route("**/api/game/action", route => route.fulfill({ json: { snapshot: { ...snapshot, phase: "game_over" }, state: finished } }));
+  await page.route("**/api/game/review", route => {
+    reviewCalls += 1;
+    const reviewed = events.map(event => event.type === "discard" ? { ...event, review: {
+      model, selected: event.cards, recommended: ["A♣", "2♣"], selectedEv: 0, recommendedEv: 1,
+      delta: 1, selectedWinProbability: 0.4, recommendedWinProbability: 0.45, winProbabilityDelta: 0.05,
+    } } : event);
+    return route.fulfill({ json: { snapshot: { ...snapshot, phase: "game_over" }, state: { ...finished, analyticsEvents: reviewed } } });
+  });
+  try {
+    await page.goto(`${baseUrl}/?pathwayView=play`, { waitUntil: "networkidle" });
+    await page.locator('[data-pathway-destination="master"]').click();
+    await page.locator("#game-over-close").click();
+    const report = page.locator("#single-game-report");
+    const analyze = report.getByRole("button", { name: "Analyze with Ace", exact: true });
+    await expect(analyze).toBeVisible();
+    if (!analyticsWritable) {
+      await expect(report).toContainText("vs Ace");
+      await expect(report).toContainText("1 QA Player decision still needs Ace analysis");
+      return { liveReportWithoutStorage: true };
+    }
+    await analyze.click();
+    await expect.poll(() => reviewCalls).toBe(1);
+    await expect.poll(() => page.evaluate(() => {
+      const events = JSON.parse(localStorage.getItem("strong-cribbage.analytics.v1")).events;
+      return events.filter(event => event.type === "discard" && event.review).length;
+    })).toBe(1);
+    await expect(report.locator(".decision-review-analyze")).toHaveText("Analysis complete", { timeout: 3000 });
+    await expect(report.locator(".decision-review-analyze")).toBeDisabled();
+    await expect(report.locator(".decision-review-item")).toHaveCount(1);
+    await expect(report).not.toContainText("still needs Ace analysis");
+    return { reviewCalls, updatedReport: true };
+  } finally {
     await page.close();
   }
 }
@@ -942,6 +1024,16 @@ async function main() {
   const browser = await browserType.launch({ headless: true });
   try {
     const baseUrl = "https://strong-cribbage.test";
+    if (process.argv.includes("--ace-waiting")) {
+      for (const dealer of ["User", "AI"]) {
+        console.log(JSON.stringify(await testAceOpeningPlayThrobber(browser, baseUrl, dealer)));
+      }
+      return;
+    }
+    if (process.argv.includes("--postgame-analysis")) {
+      console.log(JSON.stringify([await testPostgameAceAnalysis(browser, baseUrl), await testPostgameAceAnalysis(browser, baseUrl, false)]));
+      return;
+    }
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await installStaticBuild(page);
     const user = { username: "qa-player", displayName: "QA Player", email: "qa@example.test" };
@@ -991,7 +1083,13 @@ async function main() {
       throw new Error(`Authentication recovery regression: ${JSON.stringify(state)}`);
     }
     await page.close();
-    const aceOpeningLead = await testAceOpeningLeadThrobber(browser, baseUrl);
+    const postgameAnalysis = [await testPostgameAceAnalysis(browser, baseUrl), await testPostgameAceAnalysis(browser, baseUrl, false)];
+    const aceOpeningPlays = [];
+    for (const dealer of ["User", "AI"]) {
+      for (const motion of ["no-preference", "reduce"]) {
+        aceOpeningPlays.push(await testAceOpeningPlayThrobber(browser, baseUrl, dealer, motion));
+      }
+    }
     const puttingTogether = [await testPuttingTogetherDiscards(browser, baseUrl)];
     for (const card of ["5c", "Qc", "Kd"]) puttingTogether.push(await testPuttingTogetherDiscards(browser, baseUrl, card, "reduce"));
     const peggingAnimations = await testTrainingPeggingAnimations(browser, baseUrl);
@@ -1003,7 +1101,7 @@ async function main() {
     const blockedIndexedDb = await testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl);
     const people = await testPeopleInteractions(browser, baseUrl);
     const engagement = await testEngagementDashboard(browser, baseUrl);
-    console.log(JSON.stringify({ authenticationRecovery: state, aceOpeningLead, puttingTogether, peggingAnimations, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
+    console.log(JSON.stringify({ authenticationRecovery: state, postgameAnalysis, aceOpeningPlays, puttingTogether, peggingAnimations, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
   } finally {
     await browser.close();
   }

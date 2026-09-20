@@ -7475,7 +7475,12 @@ function renderSingleGameReport(game: GameState, end: GameEndEvent): void {
     void startNewGameFromUi({ forceNew: true });
   });
   els.singleGameReport.append(newGame);
-  renderGameReportInto(els.singleGameReport, game.analyticsEvents, end, "Game report", game.scores);
+  // Stored reviews can arrive after the final gameplay snapshot.
+  const events = mergeStoredAnalyticsEvents(
+    game.analyticsEvents,
+    loadAnalytics().events.filter((event) => event.gameId === end.gameId),
+  );
+  renderGameReportInto(els.singleGameReport, events, end, "Game report", game.scores);
 }
 
 function renderGameReportInto(
@@ -9857,13 +9862,13 @@ function render(game: GameState | null): void {
   if (thinkingLabel) {
     thinkingLabel.textContent = "Loading opponent";
   }
-  const waitingForAceLead = state.aiThinking &&
+  const waitingForAcePlay = state.aiThinking &&
     isAceOpponent(currentSnapshot?.opponent) &&
-    shouldAdvancePeggingAi(game) && game.dealer === "User" &&
-    game.plays.length === 0 && game.completedPlays.length === 0 &&
+    shouldAdvancePeggingAi(game) &&
+    game.plays.length <= 1 && game.completedPlays.length === 0 &&
     !state.turnCutRevealStage && !state.splashOpen;
-  els.thinkingOverlay.hidden = !(showModelLoadingUi || waitingForAceLead);
-  els.thinkingOverlayLabel.textContent = waitingForAceLead ? "Ace is choosing a lead" : "Loading opponent";
+  els.thinkingOverlay.hidden = !(showModelLoadingUi || waitingForAcePlay);
+  els.thinkingOverlayLabel.textContent = waitingForAcePlay ? `Waiting for ${playerName("ai")} to play` : "Loading opponent";
   els.modelLoading.hidden = !showModelLoadingUi;
   renderServerBusy();
   renderCutCard(state.turnCutRevealStage || !game.turnCardRevealed ? null : game.turnCard);
