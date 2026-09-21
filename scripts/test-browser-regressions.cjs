@@ -42,7 +42,7 @@ async function holdAndRelease(page, locator) {
 }
 
 async function installPeopleFixture(page) {
-  const user = { username: "Garrett", displayName: "Garrett", email: "garrett@example.test" };
+  const user = { id: 2, username: "Garrett", displayName: "Garrett", email: "garrett@example.test" };
   const shane = {
     username: "Shane",
     displayName: "Shane",
@@ -80,6 +80,7 @@ async function installPeopleFixture(page) {
   await page.route("**/api/**", async (route) => {
     const apiPath = new URL(route.request().url()).pathname;
     if (apiPath === "/api/auth/session") return route.fulfill({ json: { authenticated: true, user } });
+    if (apiPath === "/api/game/history") return route.fulfill({ json: { events: [] } });
     if (apiPath === "/api/people/me") return route.fulfill({ json: { profile: ownProfile } });
     if (apiPath === "/api/people/presence" || apiPath === "/api/people/online") {
       directoryCalls += 1;
@@ -120,12 +121,12 @@ async function readyPeoplePage(browser, baseUrl) {
   return page;
 }
 
-async function installPathwayFixture(page) {
-  const user = { username: "qa-player", displayName: "QA Player", email: "qa@example.test" };
+async function installPathwayFixture(page, user = { id: 1, username: "qa-player", displayName: "QA Player", email: "qa@example.test" }) {
   const directory = { onlineCount: 1, players: [], incomingChallenges: [], outgoingChallenges: [], activeTable: null };
   await page.route("**/api/**", async (route) => {
     const apiPath = new URL(route.request().url()).pathname;
     if (apiPath === "/api/auth/session") return route.fulfill({ json: { authenticated: true, user } });
+    if (apiPath === "/api/game/history") return route.fulfill({ json: { events: [] } });
     if (apiPath === "/api/people/me") {
       return route.fulfill({ json: { profile: { ...user, online: true, lookingForGame: false, isSelf: true } } });
     }
@@ -322,10 +323,11 @@ async function testLeaderboardTourneyInfoTap(browser, baseUrl) {
 
 async function installLeaderboardBackfillApiFixture(page) {
   const uploads = [];
-  const user = { username: "qa-player", displayName: "QA Player", email: "qa@example.test" };
+  const user = { id: 1, username: "qa-player", displayName: "QA Player", email: "qa@example.test" };
   await page.route("**/api/**", async (route) => {
     const apiPath = new URL(route.request().url()).pathname;
     if (apiPath === "/api/auth/session") return route.fulfill({ json: { authenticated: true, user } });
+    if (apiPath === "/api/game/history") return route.fulfill({ json: { events: [] } });
     if (apiPath === "/api/people/me") {
       return route.fulfill({ json: { profile: { ...user, online: true, lookingForGame: false, isSelf: true } } });
     }
@@ -367,9 +369,9 @@ async function testIndexedDbLeaderboardBackfill(browser, baseUrl) {
       result: "regular",
       finalScores: { human: 121, ai: 110 },
     };
-    localStorage.setItem("strong-cribbage.analytics.v1", JSON.stringify({ version: 1, events: [start] }));
+    localStorage.setItem("strong-cribbage.analytics.v1:user-1", JSON.stringify({ version: 1, events: [start] }));
     await new Promise((resolve, reject) => {
-      const request = indexedDB.open("cribbage-game-log", 1);
+      const request = indexedDB.open("cribbage-game-log:user-1", 1);
       request.onupgradeneeded = () => {
         request.result.createObjectStore("events", { keyPath: "id" });
         request.result.createObjectStore("games", { keyPath: "gameId" });
@@ -392,7 +394,7 @@ async function testIndexedDbLeaderboardBackfill(browser, baseUrl) {
 
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
   await page.locator('body[data-ready="true"][data-auth="signed-in"]').waitFor({ timeout: 5000 });
-  await page.waitForFunction(() => localStorage.getItem("strong-cribbage.serverUploadBackfill.v2") !== null);
+  await page.waitForFunction(() => localStorage.getItem("strong-cribbage.serverUploadBackfill.v2:user-1") !== null);
   if (uploads.length !== 1 || !uploads[0].events.some((event) => event.id === "recovery-game-end")) {
     throw new Error(`IndexedDB leaderboard history was not backfilled: ${JSON.stringify(uploads)}`);
   }
@@ -427,7 +429,7 @@ async function testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl) {
         finalScores: { human: 121, ai: 110 },
       },
     ];
-    localStorage.setItem("strong-cribbage.analytics.v1", JSON.stringify({ version: 1, events }));
+    localStorage.setItem("strong-cribbage.analytics.v1:user-1", JSON.stringify({ version: 1, events }));
   });
   await page.addInitScript(() => {
     Object.defineProperty(window.indexedDB, "open", {
@@ -442,8 +444,8 @@ async function testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl) {
 
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
   await page.locator('body[data-ready="true"][data-auth="signed-in"]').waitFor({ timeout: 5000 });
-  await page.waitForFunction(() => localStorage.getItem("strong-cribbage.serverUploadedGames.v1") !== null);
-  const marker = await page.evaluate(() => localStorage.getItem("strong-cribbage.serverUploadBackfill.v2"));
+  await page.waitForFunction(() => localStorage.getItem("strong-cribbage.serverUploadedGames.v1:user-1") !== null);
+  const marker = await page.evaluate(() => localStorage.getItem("strong-cribbage.serverUploadBackfill.v2:user-1"));
   if (uploads.length !== 1) {
     throw new Error(`LocalStorage history was not uploaded while IndexedDB was blocked: ${JSON.stringify(uploads)}`);
   }
@@ -557,12 +559,13 @@ function engagementFixture(filters = {}) {
 async function testEngagementDashboard(browser, baseUrl) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1050 } });
   await installStaticBuild(page);
-  const user = { username: "Garrett", displayName: "Garrett", email: "garrett@example.test", engagementAdmin: true };
+  const user = { id: 2, username: "Garrett", displayName: "Garrett", email: "garrett@example.test", engagementAdmin: true };
   const profile = { ...user, avatarDataUrl: null, online: true, lookingForGame: false, isSelf: true, textSize: "normal" };
   const engagementRequests = [];
   await page.route("**/api/**", async (route) => {
     const apiPath = new URL(route.request().url()).pathname;
     if (apiPath === "/api/auth/session") return route.fulfill({ json: { authenticated: true, user } });
+    if (apiPath === "/api/game/history") return route.fulfill({ json: { events: [] } });
     if (apiPath === "/api/people/me") return route.fulfill({ json: { profile } });
     if (apiPath === "/api/people/presence" || apiPath === "/api/people/online") {
       return route.fulfill({ json: { players: [], incomingChallenges: [], outgoingChallenges: [], onlineCount: 1 } });
@@ -956,7 +959,7 @@ async function testAceOpeningPlayThrobber(browser, baseUrl, dealer = "User", red
   }
 }
 
-async function testPostgameAceAnalysis(browser, baseUrl, analyticsWritable = true) {
+async function testPostgameAceAnalysis(browser, baseUrl, analyticsWritable = true, retryOnce = false) {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await installStaticBuild(page);
   await installPathwayFixture(page);
@@ -965,7 +968,7 @@ async function testPostgameAceAnalysis(browser, baseUrl, analyticsWritable = tru
     await page.addInitScript(() => {
       const setItem = Storage.prototype.setItem;
       Storage.prototype.setItem = function (key, value) {
-        if (key === "strong-cribbage.analytics.v1") throw new DOMException("Storage full", "QuotaExceededError");
+        if (key.startsWith("strong-cribbage.analytics.v1")) throw new DOMException("Storage full", "QuotaExceededError");
         return setItem.call(this, key, value);
       };
     });
@@ -976,16 +979,23 @@ async function testPostgameAceAnalysis(browser, baseUrl, analyticsWritable = tru
     { id: "discard", at: "2026-09-19T12:01:00Z", gameId, type: "discard", handNumber: 1, player: "human", role: "dealer", cards: ["5♣", "6♣"], cribOwner: "human", cribAfterDiscard: ["5♣", "6♣"], remainingHand: ["A♣", "2♣", "3♣", "4♣"] },
     { id: "end", at: "2026-09-19T12:02:00Z", gameId, type: "game", action: "end", opponent: model, winner: "ai", finalScores: { human: 100, ai: 121 }, result: "regular" },
   ];
-  const finished = { ...state, phase: "game_over", scores: events[2].finalScores, analyticsEvents: events };
+  const discard = events[1];
+  events.splice(1, 1, ...Array.from({ length: 38 }, (_, index) => ({ ...discard, id: `discard-${index}`, handNumber: index + 1 })));
+  const finished = { ...state, phase: "game_over", scores: events.at(-1).finalScores, analyticsEvents: events };
   let reviewCalls = 0;
+  let releaseReview;
+  const reviewReady = new Promise(resolve => { releaseReview = resolve; });
   await page.route("**/api/game/session/load", route => route.fulfill({ json: { session: { gameId, snapshot, state } } }));
   await page.route("**/api/game/action", route => route.fulfill({ json: { snapshot: { ...snapshot, phase: "game_over" }, state: finished } }));
-  await page.route("**/api/game/review", route => {
+  await page.route("**/api/game/review", async route => {
     reviewCalls += 1;
-    const reviewed = events.map(event => event.type === "discard" ? { ...event, review: {
+    await reviewReady;
+    const completed = reviewCalls - (retryOnce ? 1 : 0);
+    const reviewed = events.map((event, index) => event.type === "discard" && index <= completed ? { ...event, review: {
       model, selected: event.cards, recommended: ["A♣", "2♣"], selectedEv: 0, recommendedEv: 1,
       delta: 1, selectedWinProbability: 0.4, recommendedWinProbability: 0.45, winProbabilityDelta: 0.05,
     } } : event);
+    await delay(40);
     return route.fulfill({ json: { snapshot: { ...snapshot, phase: "game_over" }, state: { ...finished, analyticsEvents: reviewed } } });
   });
   try {
@@ -997,20 +1007,130 @@ async function testPostgameAceAnalysis(browser, baseUrl, analyticsWritable = tru
     await expect(analyze).toBeVisible();
     if (!analyticsWritable) {
       await expect(report).toContainText("vs Ace");
-      await expect(report).toContainText("1 QA Player decision still needs Ace analysis");
-      return { liveReportWithoutStorage: true };
+      await expect(report).toContainText("38 QA Player decisions still need Ace analysis");
     }
     await analyze.click();
-    await expect.poll(() => reviewCalls).toBe(1);
-    await expect.poll(() => page.evaluate(() => {
-      const events = JSON.parse(localStorage.getItem("strong-cribbage.analytics.v1")).events;
-      return events.filter(event => event.type === "discard" && event.review).length;
-    })).toBe(1);
+    await expect(report.locator(".decision-review-progress progress")).toBeVisible({ timeout: 1500 });
+    await expect(report).toContainText("Analyzed 0 of 38");
+    releaseReview();
+    if (retryOnce) {
+      await expect(page.locator("#server-busy-alert")).toBeVisible();
+      await expect(report).toContainText("38 QA Player decisions still need Ace analysis");
+      await page.locator("#server-busy-retry").click();
+      await expect(report.locator(".decision-review-progress progress")).toBeVisible();
+    }
+    await expect.poll(() => reviewCalls, { timeout: 12000 }).toBe(38 + (retryOnce ? 1 : 0));
+    if (analyticsWritable) {
+      await expect.poll(() => page.evaluate(() => {
+        const events = JSON.parse(localStorage.getItem("strong-cribbage.analytics.v1:user-1")).events;
+        return events.filter(event => event.type === "discard" && event.review).length;
+      })).toBe(38);
+    }
     await expect(report.locator(".decision-review-analyze")).toHaveText("Analysis complete", { timeout: 3000 });
     await expect(report.locator(".decision-review-analyze")).toBeDisabled();
-    await expect(report.locator(".decision-review-item")).toHaveCount(1);
-    await expect(report).not.toContainText("still needs Ace analysis");
-    return { reviewCalls, updatedReport: true };
+    await expect(report.locator(".decision-review-item")).toHaveCount(38);
+    await expect(report).not.toContainText("still need Ace analysis");
+    return { reviewCalls, analyticsWritable, retryOnce, updatedReport: true };
+  } finally {
+    releaseReview();
+    await page.close();
+  }
+}
+
+async function testAccountGameIsolation(browser, baseUrl) {
+  const page = await browser.newPage({ viewport: { width: 1000, height: 800 } });
+  await installStaticBuild(page);
+  const users = Object.fromEntries(["Test", "Garrett"].map((name, index) => [name, { id: index + 1, username: name, displayName: name, email: `${name.toLowerCase()}@example.test` }]));
+  let signedIn = users.Test;
+  await installPathwayFixture(page, users.Test);
+  const events = ["Test", "Garrett"].flatMap(name => [
+    { id: `${name}-start`, at: "2026-09-21T12:00:00Z", gameId: `${name}-game`, type: "game", action: "start", opponent: "schell_table-peg_table-13.23", sessionTag: name, tags: [name] },
+    { id: `${name}-end`, at: "2026-09-21T12:20:00Z", gameId: `${name}-game`, type: "game", action: "end", opponent: "schell_table-peg_table-13.23", winner: "ai", finalScores: { human: name === "Test" ? 100 : 110, ai: 121 }, result: "regular", sessionTag: name, tags: [name] },
+  ]);
+  const fixture = acePeggingFixture();
+  await page.addInitScript(({ events, fixture }) => {
+    if (localStorage.getItem("legacy-seeded")) return;
+    localStorage.setItem("legacy-seeded", "true");
+    localStorage.setItem("strong-cribbage.analytics.v1", JSON.stringify({ version: 1, events }));
+    localStorage.setItem("strong-cribbage.game.v1", JSON.stringify({ snapshot: { ...fixture.snapshot, gameId: "Test-game", phase: "game_over" }, state: { ...fixture.state, phase: "game_over", analyticsEvents: events.filter(event => event.gameId === "Test-game") } }));
+    localStorage.setItem("strong-cribbage.playerFirstName.v1", "Test");
+  }, { events, fixture });
+  await page.route("**/api/auth/session", route => route.fulfill({ json: { authenticated: Boolean(signedIn), user: signedIn } }));
+  await page.route("**/api/auth/logout", route => {
+    signedIn = null;
+    return route.fulfill({ json: { ok: true } });
+  });
+  await page.route("**/api/auth/login", route => {
+    signedIn = Object.values(users).find(user => user.email === route.request().postDataJSON().email);
+    return route.fulfill({ json: { authenticated: true, user: signedIn } });
+  });
+  await page.route("**/api/game/history", route => route.fulfill({ json: { events: events.filter(event => event.sessionTag === (signedIn?.id === 1 ? "Test" : signedIn?.id === 2 ? "Garrett" : "")) } }));
+  await page.route("**/api/people/me", route => route.fulfill({ json: { profile: { ...signedIn, online: true, lookingForGame: false, isSelf: true } } }));
+  const uploads = [];
+  await page.route("**/api/games", route => {
+    uploads.push({ account: signedIn?.id === 1 ? "Test" : "Garrett", ...route.request().postDataJSON() });
+    return route.fulfill({ json: { ok: true, updated: false } });
+  });
+  try {
+    await page.goto(`${baseUrl}/?pathwayView=statistics`, { waitUntil: "networkidle" });
+    for (const name of ["Test", "Garrett", "Test"]) {
+      if (signedIn?.username !== name) {
+        await page.locator("#people-presence-toggle").click();
+        await page.locator("#auth-logout").click();
+        await page.locator("#auth-email").fill(users[name].email);
+        await page.locator("#auth-password").fill("test-password");
+        await page.locator("#auth-password-submit").click();
+        await page.locator('body[data-auth="signed-in"]').waitFor();
+        await page.goto(`${baseUrl}/?pathwayView=statistics`, { waitUntil: "networkidle" });
+      }
+      await page.locator('[data-stats-view="game-log"]').click();
+      await expect(page.locator("#game-log-list .game-log-item")).toHaveCount(1);
+      await expect(page.locator("#game-log-list")).toContainText(name === "Test" ? "100-121" : "110-121");
+      await expect(page.locator("#game-over-alert")).not.toBeVisible();
+    }
+    if (uploads.some(upload => upload.gameId !== `${upload.account}-game`)) throw new Error("Another account's game was uploaded.");
+    // A rename keeps the immutable namespace, even with no server history response.
+    await page.route("**/api/game/history", route => route.fulfill({ json: { events: [] } }));
+    signedIn = { ...users.Test, username: "Renamed Test", displayName: "Renamed Test" };
+    await page.reload({ waitUntil: "networkidle" });
+    await page.locator('[data-stats-view="game-log"]').click();
+    await expect(page.locator("#game-log-list .game-log-item")).toHaveCount(1);
+    await expect(page.locator("#game-log-list")).toContainText("100-121");
+    // A different account taking the old username cannot inherit that namespace.
+    signedIn = { ...users.Test, id: 99 };
+    await page.reload({ waitUntil: "networkidle" });
+    await page.locator('[data-stats-view="game-log"]').click();
+    await expect(page.locator("#game-log-list .game-log-item")).toHaveCount(0);
+    const legacy = await page.evaluate(() => JSON.parse(localStorage.getItem("strong-cribbage.analytics.v1")));
+    if (legacy.events.length !== 4) throw new Error("Legacy history was deleted.");
+    return { logoutLoginRoundTrip: true, renamedAccountsIsolated: true, isolatedHistory: true, isolatedUploads: true };
+  } finally {
+    await page.close();
+  }
+}
+
+async function testRestoredHumanHistory(browser, baseUrl) {
+  const page = await browser.newPage({ viewport: { width: 1000, height: 800 } });
+  await installStaticBuild(page);
+  await installPathwayFixture(page);
+  const gameId = "shared-human-game";
+  const events = [
+    { id: `${gameId}-start`, at: "2026-09-21T12:00:00Z", gameId, type: "game", action: "start", opponent: "human", players: { human: "QA Player", ai: "Kurt" } },
+    { id: `${gameId}-end`, at: "2026-09-21T12:20:00Z", gameId, type: "game", action: "end", opponent: "human", winner: "ai", finalScores: { human: 100, ai: 121 }, result: "regular" },
+  ];
+  let uploads = 0;
+  await page.route("**/api/game/history", route => route.fulfill({ json: { events } }));
+  await page.route("**/api/games", route => {
+    uploads += 1;
+    return route.fulfill({ json: { ok: true, updated: false } });
+  });
+  try {
+    await page.goto(`${baseUrl}/?pathwayView=statistics`, { waitUntil: "networkidle" });
+    await page.locator('[data-stats-view="game-log"]').click();
+    await expect(page.locator("#game-log-list .game-log-item")).toHaveCount(1);
+    await page.waitForFunction(() => localStorage.getItem("strong-cribbage.serverUploadBackfill.v2:user-1") !== null);
+    if (uploads) throw new Error("Restoring a human game re-uploaded a participant's perspective.");
+    return { restoredHumanReport: true, uploads };
   } finally {
     await page.close();
   }
@@ -1024,6 +1144,10 @@ async function main() {
   const browser = await browserType.launch({ headless: true });
   try {
     const baseUrl = "https://strong-cribbage.test";
+    if (process.argv.includes("--account-isolation")) {
+      console.log(JSON.stringify([await testAccountGameIsolation(browser, baseUrl), await testRestoredHumanHistory(browser, baseUrl)]));
+      return;
+    }
     if (process.argv.includes("--ace-waiting")) {
       for (const dealer of ["User", "AI"]) {
         console.log(JSON.stringify(await testAceOpeningPlayThrobber(browser, baseUrl, dealer)));
@@ -1031,12 +1155,12 @@ async function main() {
       return;
     }
     if (process.argv.includes("--postgame-analysis")) {
-      console.log(JSON.stringify([await testPostgameAceAnalysis(browser, baseUrl), await testPostgameAceAnalysis(browser, baseUrl, false)]));
+      console.log(JSON.stringify([await testPostgameAceAnalysis(browser, baseUrl), await testPostgameAceAnalysis(browser, baseUrl, false), await testPostgameAceAnalysis(browser, baseUrl, true, true)]));
       return;
     }
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await installStaticBuild(page);
-    const user = { username: "qa-player", displayName: "QA Player", email: "qa@example.test" };
+    const user = { id: 1, username: "qa-player", displayName: "QA Player", email: "qa@example.test" };
     await page.route("**/api/**", async (route) => {
       const apiPath = new URL(route.request().url()).pathname;
       if (apiPath === "/api/auth/session") {
@@ -1083,7 +1207,9 @@ async function main() {
       throw new Error(`Authentication recovery regression: ${JSON.stringify(state)}`);
     }
     await page.close();
-    const postgameAnalysis = [await testPostgameAceAnalysis(browser, baseUrl), await testPostgameAceAnalysis(browser, baseUrl, false)];
+    const accountIsolation = await testAccountGameIsolation(browser, baseUrl);
+    const restoredHumanHistory = await testRestoredHumanHistory(browser, baseUrl);
+    const postgameAnalysis = [await testPostgameAceAnalysis(browser, baseUrl), await testPostgameAceAnalysis(browser, baseUrl, false), await testPostgameAceAnalysis(browser, baseUrl, true, true)];
     const aceOpeningPlays = [];
     for (const dealer of ["User", "AI"]) {
       for (const motion of ["no-preference", "reduce"]) {
@@ -1101,7 +1227,7 @@ async function main() {
     const blockedIndexedDb = await testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl);
     const people = await testPeopleInteractions(browser, baseUrl);
     const engagement = await testEngagementDashboard(browser, baseUrl);
-    console.log(JSON.stringify({ authenticationRecovery: state, postgameAnalysis, aceOpeningPlays, puttingTogether, peggingAnimations, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
+    console.log(JSON.stringify({ authenticationRecovery: state, accountIsolation, restoredHumanHistory, postgameAnalysis, aceOpeningPlays, puttingTogether, peggingAnimations, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
   } finally {
     await browser.close();
   }

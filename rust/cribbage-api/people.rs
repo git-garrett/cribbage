@@ -1268,6 +1268,10 @@ struct TableRow {
 }
 
 fn table_row(connection: &rusqlite::Connection, table_id: &str) -> Result<TableRow, PeopleError> {
+    table_row_after(connection, table_id, Some(unix_seconds()))
+}
+
+fn table_row_after(connection: &rusqlite::Connection, table_id: &str, expires_after: Option<i64>) -> Result<TableRow, PeopleError> {
     connection
         .query_row(
             "SELECT c.status, c.challenger_id, c.challenged_id,
@@ -1279,8 +1283,8 @@ fn table_row(connection: &rusqlite::Connection, table_id: &str) -> Result<TableR
              JOIN auth_users b ON b.id = c.challenged_id
              LEFT JOIN people_profiles ap ON ap.user_id = a.id
              LEFT JOIN people_profiles bp ON bp.user_id = b.id
-             WHERE c.table_id = ?1 AND c.expires_at > ?2",
-            params![table_id, unix_seconds()],
+             WHERE c.table_id = ?1 AND (?2 IS NULL OR c.expires_at > ?2)",
+            params![table_id, expires_after],
             |row| {
                 Ok(TableRow {
                     status: row.get(0)?,
@@ -2374,6 +2378,32 @@ fn human_game_message(record: &HumanGameRecord, viewer: Side) -> String {
         "game_over" => "Game over.".to_string(),
         _ => String::new(),
     }
+}
+
+pub fn completed_game_history(server: &Server, user_id: i64) -> Result<Vec<Value>, String> {
+    let connection = open_game_database(&server.data_dir)?;
+    let mut statement = connection
+        .prepare(
+            "SELECT g.table_id FROM people_games g
+         JOIN people_challenges c ON c.table_id = g.table_id
+         WHERE g.completed_at IS NOT NULL AND (c.challenger_id = ?1 OR c.challenged_id = ?1)
+         ORDER BY g.created_at",
+        )
+        .map_err(|error| format!("prepare completed player games: {error}"))?;
+    let rows = statement
+        .query_map([user_id], |row| row.get::<_, String>(0))
+        .map_err(|error| format!("find completed player games: {error}"))?;
+    let mut events = Vec::new();
+    for row in rows {
+        let table_id = row.map_err(|error| format!("read completed player game: {error}"))?;
+        let row = table_row_after(&connection, &table_id, None).map_err(|error| error.message)?;
+        let viewer = table_viewer_side(&row, user_id).map_err(|error| error.message)?;
+        let (record, _) = load_human_game(&connection, &table_id).map_err(|error| error.message)?;
+        if let Value::Array(game_events) = human_game_analytics(&record, &row, viewer) {
+            events.extend(game_events);
+        }
+    }
+    Ok(events)
 }
 
 fn human_game_analytics(record: &HumanGameRecord, row: &TableRow, viewer: Side) -> Value {
@@ -3838,6 +3868,41 @@ mod tests {
             "complete"
         );
 
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
+    fn completed_history_is_limited_to_participants_and_uses_their_perspective() {
+        let server = test_server("account-history");
+        let garrett = user(&server, "Garrett");
+        let kurt = user(&server, "Kurt");
+        let connection = open_game_database(&server.data_dir).unwrap();
+        connection.execute(
+            "INSERT INTO people_challenges
+             (id, table_id, challenger_id, challenged_id, status, dealer_id, created_at, updated_at, expires_at)
+             VALUES ('c', 't', ?1, ?2, 'accepted', ?1, 1, 1, 2)", params![garrett.id, kurt.id]
+        ).unwrap();
+        ensure_human_game(&connection, "t", garrett.id, garrett.id).unwrap();
+        assert!(completed_game_history(&server, garrett.id)
+            .unwrap()
+            .is_empty());
+        let (mut record, _) = load_human_game(&connection, "t").unwrap();
+        record.game.phase = Phase::GameOver;
+        record.game.player_mut(Side::Left).score = 121;
+        record.game.player_mut(Side::Right).score = 100;
+        record.completed_at = Some(2);
+        connection
+            .execute(
+                "UPDATE people_games SET completed_at = 2, game_json = ?1 WHERE table_id = 't'",
+                [serde_json::to_string(&record).unwrap()],
+            )
+            .unwrap();
+        let left = completed_game_history(&server, garrett.id).unwrap();
+        let right = completed_game_history(&server, kurt.id).unwrap();
+        assert_eq!(left.last().unwrap()["finalScores"]["human"], 121);
+        assert_eq!(right.last().unwrap()["finalScores"]["human"], 100);
+        assert!(completed_game_history(&server, -1).unwrap().is_empty());
+        drop(connection);
         std::fs::remove_dir_all(server.data_dir).unwrap();
     }
 

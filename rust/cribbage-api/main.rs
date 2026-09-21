@@ -426,13 +426,18 @@ fn handle_connection(mut stream: TcpStream, server: &Server) -> Result<(), Strin
         ("POST", "/api/game/action") => {
             game_action(server, &request_body, authenticated_user.as_ref())
         }
+        ("GET", "/api/game/history") => game_history(server, authenticated_user.as_ref()),
         ("POST", "/api/game/review") => {
             review_game(server, &request_body, authenticated_user.as_ref())
         }
-        ("POST", "/api/game/session/save") => save_session(server, &request_body),
-        ("POST", "/api/game/session/load") => load_session(server, &request_body),
+        ("POST", "/api/game/session/save") => {
+            save_session(server, &request_body, authenticated_user.as_ref())
+        }
+        ("POST", "/api/game/session/load") => {
+            load_session(server, &request_body, authenticated_user.as_ref())
+        }
         ("POST", "/api/game/session/complete") => Response::json(200, "{\"ok\":true}".to_string()),
-        ("POST", "/api/games") => upload_game(server, &request_body),
+        ("POST", "/api/games") => upload_game(server, &request_body, authenticated_user.as_ref()),
         ("POST", "/api/ai/discard") | ("POST", "/api/ai/peg") => Response::json(
             410,
             "{\"error\":\"Direct decision endpoints were retired; use /api/game/action.\"}"
@@ -644,6 +649,14 @@ fn same_session_opponent(existing: ModelId, requested: ModelId) -> bool {
     existing == requested || existing.is_ace() && requested.is_ace()
 }
 
+fn session_owned_by(session: &Session, user: Option<&auth::AuthUser>) -> bool {
+    session.owner_user_id == user.map(|user| user.id)
+}
+
+fn session_matches_player(session: &Session, user: Option<&auth::AuthUser>, tag: &str) -> bool {
+    session_owned_by(session, user) && (user.is_some() || session.tag.as_deref() == Some(tag))
+}
+
 fn game_action(
     server: &Server,
     body: &str,
@@ -671,7 +684,7 @@ fn game_action(
                 app.sessions
                     .values()
                     .filter(|session| {
-                        session.tag.as_deref() == Some(tag)
+                        session_matches_player(session, authenticated_user, tag)
                             && session_status(session) == "active"
                             && same_session_opponent(session.model, model)
                     })
@@ -722,6 +735,9 @@ fn game_action(
             .sessions
             .get_mut(&session_id)
             .ok_or_else(|| "Game session was not found; start a new game.".to_string())?;
+        if !session_owned_by(session, authenticated_user) {
+            return Err("Game session was not found for this account.".to_string());
+        }
         let before = session.clone();
         if tag.is_some() {
             session.tag = tag;
@@ -1327,34 +1343,35 @@ fn load_session_by_id(data_dir: &Path, session_id: &str) -> Result<Option<Sessio
         .transpose()
 }
 
-fn load_session_by_tag(
+fn load_session_for_player(
     data_dir: &Path,
     tag: &str,
     model: Option<ModelId>,
+    owner_user_id: Option<i64>,
 ) -> Result<Option<Session>, String> {
     let connection = open_game_database(data_dir)?;
     let saved = match model {
         Some(model) if model.is_ace() => connection
             .query_row(
                 "SELECT session_json FROM cribbage_game_sessions
-             WHERE tag = ?1 AND model IN (?2, ?3, ?4) AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
-                params![tag, MODEL_13_0, MODEL_13_215, ACE_MODEL],
+             WHERE json_extract(session_json, '$.owner_user_id') IS :owner AND (:owner IS NOT NULL OR tag = :tag) AND model IN (:model1, :model2, :model3) AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
+                rusqlite::named_params! {":tag": tag, ":model1": MODEL_13_0, ":model2": MODEL_13_215, ":model3": ACE_MODEL, ":owner": owner_user_id},
                 |row| row.get::<_, String>(0),
             )
             .optional(),
         Some(model) => connection
             .query_row(
                 "SELECT session_json FROM cribbage_game_sessions
-             WHERE tag = ?1 AND model = ?2 AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
-                params![tag, model.as_str()],
+             WHERE json_extract(session_json, '$.owner_user_id') IS :owner AND (:owner IS NOT NULL OR tag = :tag) AND model = :model1 AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
+                rusqlite::named_params! {":tag": tag, ":model1": model.as_str(), ":owner": owner_user_id},
                 |row| row.get::<_, String>(0),
             )
             .optional(),
         None => connection
             .query_row(
                 "SELECT session_json FROM cribbage_game_sessions
-             WHERE tag = ?1 AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
-                [tag],
+             WHERE json_extract(session_json, '$.owner_user_id') IS :owner AND (:owner IS NOT NULL OR tag = :tag) AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
+                rusqlite::named_params! {":tag": tag, ":owner": owner_user_id},
                 |row| row.get::<_, String>(0),
             )
             .optional(),
@@ -3462,7 +3479,47 @@ fn json_string_value(value: &str) -> String {
     format!("\"{}\"", json_escape(value))
 }
 
-fn save_session(server: &Server, body: &str) -> Response {
+fn game_history(server: &Server, authenticated_user: Option<&auth::AuthUser>) -> Response {
+    let Some(user) = authenticated_user else {
+        return Response::json(401, json!({"error": "Sign in to continue."}).to_string());
+    };
+    let result = (|| -> Result<Vec<Value>, String> {
+        let connection = open_game_database(&server.data_dir)?;
+        let mut statement = connection
+            .prepare(
+                "SELECT session_json FROM cribbage_game_sessions
+             WHERE status = 'complete' AND json_extract(session_json, '$.owner_user_id') = ?1
+             ORDER BY created_at",
+            )
+            .map_err(|error| format!("prepare account game history: {}", error))?;
+        let rows = statement
+            .query_map([user.id], |row| row.get::<_, String>(0))
+            .map_err(|error| format!("load account game history: {}", error))?;
+        let mut events = Vec::new();
+        for row in rows {
+            let text = row.map_err(|error| format!("read account game history: {}", error))?;
+            let stored = serde_json::from_str::<PersistedSession>(&text)
+                .map_err(|error| format!("parse account game history: {}", error))?;
+            let session = restore_persisted_session(stored)?;
+            events.extend(
+                serde_json::from_str::<Vec<Value>>(&analytics_events_json(&session))
+                    .map_err(|error| format!("parse account analytics: {}", error))?,
+            );
+        }
+        events.extend(people::completed_game_history(server, user.id)?);
+        Ok(events)
+    })();
+    match result {
+        Ok(events) => Response::json(200, json!({"events": events}).to_string()),
+        Err(error) => Response::json(500, json!({"error": error}).to_string()),
+    }
+}
+
+fn save_session(
+    server: &Server,
+    body: &str,
+    authenticated_user: Option<&auth::AuthUser>,
+) -> Response {
     let result = (|| -> Result<(), String> {
         let session_id =
             json_string(body, "gameId").ok_or_else(|| "Missing game session id.".to_string())?;
@@ -3480,6 +3537,9 @@ fn save_session(server: &Server, body: &str) -> Response {
             .sessions
             .get_mut(&session_id)
             .ok_or_else(|| "Game session was not found.".to_string())?;
+        if !session_owned_by(session, authenticated_user) {
+            return Err("Game session was not found for this account.".to_string());
+        }
         let before = session.clone();
         session.tag = tag;
         session.updated_at = isoish_now();
@@ -3495,7 +3555,11 @@ fn save_session(server: &Server, body: &str) -> Response {
     }
 }
 
-fn load_session(server: &Server, body: &str) -> Response {
+fn load_session(
+    server: &Server,
+    body: &str,
+    authenticated_user: Option<&auth::AuthUser>,
+) -> Response {
     let tag = json_string(body, "tag").unwrap_or_default();
     let requested_model =
         json_string(body, "opponent").and_then(|value| ModelId::from_str(&value).ok());
@@ -3508,7 +3572,7 @@ fn load_session(server: &Server, body: &str) -> Response {
             .sessions
             .values()
             .filter(|session| {
-                session.tag.as_deref() == Some(tag.as_str())
+                session_matches_player(session, authenticated_user, &tag)
                     && session_status(session) == "active"
                     && requested_model
                         .is_none_or(|model| same_session_opponent(session.model, model))
@@ -3516,7 +3580,12 @@ fn load_session(server: &Server, body: &str) -> Response {
             .max_by_key(|session| &session.updated_at)
             .map(|session| session.id.clone());
         if in_memory_id.is_none() {
-            if let Some(session) = load_session_by_tag(&server.data_dir, &tag, requested_model)? {
+            if let Some(session) = load_session_for_player(
+                &server.data_dir,
+                &tag,
+                requested_model,
+                authenticated_user.map(|user| user.id),
+            )? {
                 let id = session.id.clone();
                 app.sessions.insert(id, session);
             }
@@ -3528,7 +3597,7 @@ fn load_session(server: &Server, body: &str) -> Response {
                 app.sessions
                     .values()
                     .filter(|session| {
-                        session.tag.as_deref() == Some(tag.as_str())
+                        session_matches_player(session, authenticated_user, &tag)
                             && session_status(session) == "active"
                             && requested_model
                                 .is_none_or(|model| same_session_opponent(session.model, model))
@@ -3552,7 +3621,11 @@ fn load_session(server: &Server, body: &str) -> Response {
     }
 }
 
-fn upload_game(server: &Server, body: &str) -> Response {
+fn upload_game(
+    server: &Server,
+    body: &str,
+    authenticated_user: Option<&auth::AuthUser>,
+) -> Response {
     let result = (|| -> Result<(bool, String), String> {
         let payload = serde_json::from_str::<Value>(body)
             .map_err(|_| "Completed game upload is not valid JSON.".to_string())?;
@@ -3599,6 +3672,15 @@ fn upload_game(server: &Server, body: &str) -> Response {
             .state
             .lock()
             .map_err(|_| "server state lock poisoned".to_string())?;
+        let stored_session = load_session_by_id(&server.data_dir, &game_id)?;
+        if app
+            .sessions
+            .get(&game_id)
+            .or(stored_session.as_ref())
+            .is_some_and(|session| !session_owned_by(session, authenticated_user))
+        {
+            return Err("Game session was not found for this account.".to_string());
+        }
         if let Some(existing) = app.uploads.get(&game_id) {
             if existing.player == upload.player
                 && existing.winner == upload.winner
@@ -4490,6 +4572,7 @@ mod tests {
         let loaded_legacy_ace = load_session(
             &server,
             &json!({"opponent": ACE_MODEL, "tag": "Garrett"}).to_string(),
+            None,
         );
         assert_eq!(loaded_legacy_ace.status, 200);
         let loaded = serde_json::from_str::<Value>(&loaded_legacy_ace.body).unwrap();
@@ -4527,7 +4610,7 @@ mod tests {
         let replacement = serde_json::from_str::<Value>(&replacement_master.body).unwrap();
         assert_ne!(replacement["snapshot"]["gameId"], master_game_id);
         assert_eq!(replacement["snapshot"]["opponent"], ACE_MODEL);
-        let restored = load_session_by_tag(&data_dir, "Garrett", Some(ACE_MODEL_ID))
+        let restored = load_session_for_player(&data_dir, "Garrett", Some(ACE_MODEL_ID), None)
             .unwrap()
             .expect("the promoted Ace game must survive a reconnect");
         assert_eq!(
@@ -4621,6 +4704,118 @@ mod tests {
                 .owner_user_id,
             None
         );
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn account_switch_cannot_read_or_relabel_another_players_game() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-account-isolation-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let mut session =
+            new_session_from_seed(ModelId::Schell13, Some("Test".to_string()), 0x1234_5678, 1);
+        session.owner_user_id = Some(1);
+        let id = session.id.clone();
+        persist_session_snapshot(&data_dir, &session).unwrap();
+        let server = Server {
+            state: Mutex::new(AppState::default()),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+        let owner = auth::test_user(1, "Test", "test@example.test");
+        let other = auth::test_user(2, "Garrett", "garrett@example.test");
+        let request = json!({"action":"state", "gameId":id, "tag":"Garrett"}).to_string();
+        assert_ne!(game_action(&server, &request, Some(&other)).status, 200);
+        assert_ne!(save_session(&server, &request, Some(&other)).status, 200);
+        assert_ne!(upload_game(&server, &request, Some(&other)).status, 200);
+        assert_eq!(
+            server.state.lock().unwrap().sessions[&id].tag.as_deref(),
+            Some("Test")
+        );
+        assert_eq!(
+            load_session_by_id(&data_dir, &id)
+                .unwrap()
+                .unwrap()
+                .tag
+                .as_deref(),
+            Some("Test")
+        );
+        let stolen_tag = json!({"tag":"Test", "opponent": MODEL_13_0}).to_string();
+        assert!(serde_json::from_str::<Value>(
+            &load_session(&server, &stolen_tag, Some(&other)).body
+        )
+        .unwrap()["session"]
+            .is_null());
+        // A changed display name never prevents the actual owner resuming the game.
+        let own_request = json!({"action":"state", "gameId":id, "tag":"Renamed Test"}).to_string();
+        assert_eq!(game_action(&server, &own_request, Some(&owner)).status, 200);
+        server.state.lock().unwrap().sessions.clear();
+        let resumed = load_session(
+            &server,
+            &json!({"tag":"New name"}).to_string(),
+            Some(&owner),
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&resumed.body).unwrap()["session"]["gameId"],
+            id
+        );
+        let other_new = game_action(
+            &server,
+            &json!({"action":"new", "tag":"Renamed Test", "opponent":MODEL_13_0}).to_string(),
+            Some(&other),
+        );
+        assert_eq!(other_new.status, 200);
+        assert_ne!(
+            serde_json::from_str::<Value>(&other_new.body).unwrap()["snapshot"]["gameId"],
+            id
+        );
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn account_history_uses_ownership_even_when_a_legacy_label_is_wrong() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-owned-history-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        auth::initialize(&data_dir).unwrap();
+        people::initialize(&data_dir).unwrap();
+        let server = Server {
+            state: Mutex::new(AppState::default()),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+        let mut ids = Vec::new();
+        for owner in [1, 2] {
+            let mut session = new_session_from_seed(
+                ModelId::Schell13,
+                Some("Garrett".to_string()),
+                0x1234_5678,
+                1,
+            );
+            session.id = format!("account-{owner}-game");
+            session.owner_user_id = Some(owner);
+            session.game.phase = Phase::GameOver;
+            session.game.player_mut(AI).score = 121;
+            persist_session_snapshot(&data_dir, &session).unwrap();
+            ids.push(session.id);
+        }
+        assert_eq!(game_history(&server, None).status, 401);
+        for (index, name) in ["Test", "Garrett"].iter().enumerate() {
+            let user = auth::test_user(index as i64 + 1, name, "owner@example.test");
+            let response = game_history(&server, Some(&user));
+            assert_eq!(response.status, 200, "{}", response.body);
+            let body = serde_json::from_str::<Value>(&response.body).unwrap();
+            let events = body["events"].as_array().unwrap();
+            assert_eq!(events.len(), 2);
+            assert!(events.iter().all(|event| event["gameId"] == ids[index]));
+            assert_eq!(events[1]["action"], "end");
+        }
         std::fs::remove_dir_all(data_dir).unwrap();
     }
 
@@ -5202,7 +5397,7 @@ mod tests {
           ]
         }"#;
 
-        upload_game(&server, game);
+        upload_game(&server, game, None);
         let second_game = r#"{
           "gameId":"second-scored-game",
           "tag":"Garrett",
@@ -5216,7 +5411,7 @@ mod tests {
             {"type":"score","player":"ai","category":"pegging","role":"pone","handNumber":1,"points":3}
           ]
         }"#;
-        let response = upload_game(&server, second_game);
+        let response = upload_game(&server, second_game, None);
         let response_json = serde_json::from_str::<Value>(&response.body).unwrap();
         let row = &response_json["leaderboard"]["playerStats"][0];
         assert_eq!(row["scoringGames"], 2);
@@ -5267,8 +5462,8 @@ mod tests {
         let game = r#"{"gameId":"analyzed-game","tag":"Garrett","winner":"human","result":"regular","model":"schell_table-peg_table-13.0","human":121,"ai":100,"events":[]}"#;
         let analyzed_game = r#"{"gameId":"analyzed-game","tag":"Garrett","winner":"human","result":"regular","model":"schell_table-peg_table-13.0","human":121,"ai":100,"events":[{"type":"discard","player":"human","review":{"selected":["5C","6D"],"recommended":["6D","7H"],"winProbabilityDelta":0.01}}]}"#;
 
-        upload_game(&server, game);
-        let refreshed = upload_game(&server, analyzed_game);
+        upload_game(&server, game, None);
+        let refreshed = upload_game(&server, analyzed_game, None);
         let refreshed_json = serde_json::from_str::<Value>(&refreshed.body).unwrap();
         let row = &refreshed_json["leaderboard"]["playerStats"][0];
         assert!(refreshed.body.contains("\"updated\":true"));
@@ -5337,12 +5532,12 @@ mod tests {
         };
         let game = r#"{"gameId":"finished-game","tag":"Garrett","winner":"human","result":"regular","model":"schell_table-peg_table-13.0","human":121,"ai":100}"#;
 
-        let first = upload_game(&server, game);
+        let first = upload_game(&server, game, None);
         assert!(first.body.contains("\"updated\":true"));
         assert!(first.body.contains("\"games\":1"));
         let cached_after_first = leaderboard_json(&server).unwrap();
 
-        let duplicate = upload_game(&server, game);
+        let duplicate = upload_game(&server, game, None);
         assert!(duplicate.body.contains("\"updated\":false"));
         assert_eq!(leaderboard_json(&server).unwrap(), cached_after_first);
         assert_eq!(server.state.lock().unwrap().uploads.len(), 1);
@@ -5370,7 +5565,7 @@ mod tests {
 
         let easy = r#"{"gameId":"easy-game","tag":"Garrett","winner":"human","result":"regular","model":"myrmidon-5","human":121,"ai":100}"#;
         let easy_response =
-            serde_json::from_str::<Value>(&upload_game(&server, easy).body).unwrap();
+            serde_json::from_str::<Value>(&upload_game(&server, easy, None).body).unwrap();
         assert_eq!(easy_response["leaderboard"]["games"], 0);
         assert!(easy_response["leaderboard"]["playerStats"]
             .as_array()
@@ -5378,7 +5573,8 @@ mod tests {
             .is_empty());
 
         let ace = r#"{"gameId":"ace-game","tag":"Garrett","winner":"human","result":"regular","model":"schell_table-peg_table-13.215","human":121,"ai":100}"#;
-        let ace_response = serde_json::from_str::<Value>(&upload_game(&server, ace).body).unwrap();
+        let ace_response =
+            serde_json::from_str::<Value>(&upload_game(&server, ace, None).body).unwrap();
         assert_eq!(ace_response["leaderboard"]["games"], 1);
         assert_eq!(
             ace_response["leaderboard"]["playerStats"][0]["player"],
@@ -5417,7 +5613,7 @@ mod tests {
           }
         }"#;
 
-        let response = upload_game(&server, game);
+        let response = upload_game(&server, game, None);
         let response_json = serde_json::from_str::<Value>(&response.body).unwrap();
 
         assert_eq!(response_json["leaderboard"]["games"], 1);
@@ -5465,8 +5661,8 @@ mod tests {
         let june_game = r#"{"gameId":"game-mqw4gr42-a76tvpv","tag":"Garrett","model":"schell_table-peg_table-13.0","finalResult":{"at":"2026-06-27T09:12:34.567Z","winner":"human","result":"regular","finalScores":{"human":121,"ai":119}}}"#;
         let july_game = r#"{"gameId":"game-mrdnucml-p0cssyr","tag":"Garrett","model":"schell_table-peg_table-13.0","finalResult":{"at":"2026-07-09T15:49:01.234Z","winner":"human","result":"regular","finalScores":{"human":121,"ai":118}}}"#;
 
-        upload_game(&server, june_game);
-        let response = upload_game(&server, july_game);
+        upload_game(&server, june_game, None);
+        let response = upload_game(&server, july_game, None);
         let response_json = serde_json::from_str::<Value>(&response.body).unwrap();
 
         assert!(response
@@ -5503,7 +5699,7 @@ mod tests {
         };
         let game = r#"{"gameId":"game-mqw4gr42-a76tvpv","tag":"Garrett","model":"schell_table-peg_table-13.0","finalResult":{"at":"2026-02-30T12:00:00.000Z","winner":"human","result":"regular","finalScores":{"human":121,"ai":119}}}"#;
 
-        let response = upload_game(&server, game);
+        let response = upload_game(&server, game, None);
 
         assert!(response
             .body
@@ -5976,6 +6172,7 @@ mod tests {
                 r#"{{"gameId":"completed-ace-game","tag":"Travis","winner":"human","result":"regular","model":"{}","human":121,"ai":110}}"#,
                 ACE_MODEL
             ),
+            None,
         );
         let response_json = serde_json::from_str::<Value>(&response.body).unwrap();
         assert_eq!(

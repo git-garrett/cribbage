@@ -19,11 +19,12 @@ async function prepare(page, seat, read, act, subscribe) {
     const mime = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.mp3': 'audio/mpeg' };
     return route.fulfill({ path: target, contentType: mime[path.extname(target)] || 'application/octet-stream' });
   });
-  const players = ['Garrett', 'Kurt'].map((name) => ({ username: name, displayName: name, email: `${name}@example.test`, online: true, lookingForGame: false, avatarDataUrl: null }));
+  const players = ['Garrett', 'Kurt'].map((name, index) => ({ id: index + 1, username: name, displayName: name, email: `${name}@example.test`, online: true, lookingForGame: false, avatarDataUrl: null }));
   const table = { id: 't', phase: read().state.phase === 'game_over' ? 'complete' : 'playing', viewerSeat: seat === 0 ? 'challenger' : 'challenged', challenger: players[0], challenged: players[1], challengerCut: null, challengedCut: null, dealerUsername: 'Garrett' };
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url()).pathname;
     const data = route.request().postDataJSON() || {};
+    if (url === '/api/game/history') return route.fulfill({ json: { events: [] } });
     if (url === '/api/auth/session') return route.fulfill({ json: { authenticated: true, user: players[seat] } });
     if (url === '/api/people/me') return route.fulfill({ json: { profile: { ...players[seat], isSelf: true } } });
     if (url === '/api/people/presence' || url === '/api/people/online') return route.fulfill({ json: { players, onlineCount: 2, incomingChallenges: [], outgoingChallenges: [], activeTable: table } });

@@ -1138,6 +1138,7 @@ fn user_json(data_dir: &std::path::Path, user: &AuthUser) -> String {
     json!({
         "authenticated": true,
         "user": {
+            "id": user.id,
             "username": user.username,
             "displayName": user.display_name,
             "email": user.email,
@@ -1472,6 +1473,9 @@ mod tests {
 
         assert_eq!(response.status, 200);
         assert!(response.body.contains("\"displayName\":\"Garrett\""));
+        let body: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+        let owner = find_user_by_email(&server.data_dir, "founder@evenvision.com").unwrap().unwrap();
+        assert_eq!(body["user"]["id"], owner.id);
         let cookie = response
             .headers
             .iter()
