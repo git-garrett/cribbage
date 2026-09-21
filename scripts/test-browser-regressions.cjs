@@ -902,6 +902,59 @@ function acePeggingFixture() {
   return { model, hand, lead, snapshot, state };
 }
 
+async function testFirstDealerCutTap(browser, baseUrl, mode = "touch") {
+  const page = await browser.newPage({ viewport: { width: 375, height: 679 }, isMobile: true, hasTouch: true });
+  await installStaticBuild(page);
+  await installPathwayFixture(page);
+  const { snapshot, state, hand } = acePeggingFixture();
+  const dealtHand = [...hand, { ...hand[0], id: 16, rank: "5", value: 5, label: "5♣" }, { ...hand[0], id: 20, rank: "6", value: 6, label: "6♣" }];
+  const opening = { ...state, phase: "cut_for_deal", message: "Cut the deck for first deal.",
+    humanHand: dealtHand, aiHandCount: 6, turn: null, turnCard: null, turnCardRevealed: false };
+  const dealt = { ...opening, phase: "discard", message: "Choose two cards for your crib.",
+    cutForDeal: { human: hand[0], ai: hand[1], prompt: "User deals first." } };
+  const historyDuringTap = mode === "history";
+  const actions = [];
+  let releaseHistory;
+  const historyReady = new Promise(resolve => { releaseHistory = resolve; });
+  if (historyDuringTap) await page.route("**/api/game/history", async route => {
+    await historyReady;
+    await route.fulfill({ json: { events: [] } });
+  });
+  await page.route("**/api/game/session/load", route => route.fulfill({ json: { session: null } }));
+  await page.route("**/api/game/action", async route => {
+    const action = route.request().postDataJSON().action;
+    actions.push(action);
+    if (action === "prepare-cut-for-deal" && mode === "slow") await delay(1500);
+    const next = action === "new" || action === "state" ? opening : dealt;
+    return route.fulfill({ json: { snapshot: { ...snapshot, phase: next.phase, turnCard: null, turnCardRevealed: false }, state: next,
+      recommendation: { cardIds: [16, 20] } } });
+  });
+  try {
+    await page.goto(`${baseUrl}/?pathwayView=play`, { waitUntil: "domcontentloaded" });
+    await page.locator('body[data-ready="true"][data-auth="signed-in"]').waitFor();
+    await page.locator('[data-pathway-destination="master"]').click();
+    const card = page.getByRole("button", { name: "Cut at card 12 of 52", exact: true });
+    await expect(card).toBeEnabled();
+    if (historyDuringTap) {
+      const box = await card.boundingBox();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      const restored = page.waitForResponse("**/api/game/history");
+      releaseHistory();
+      await restored;
+      await delay(200);
+      await page.mouse.up();
+    } else if (mode === "keyboard") {
+      await card.focus();
+      await page.keyboard.press("ArrowRight");
+      await page.keyboard.press("Space");
+    } else await card.tap();
+    await expect(page.locator(".deal-cut-reveal").first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator("#human-hand .card")).toHaveCount(6, { timeout: 10000 });
+    return { mode, firstTapRevealsCut: true, actions };
+  } finally { releaseHistory(); await page.close(); }
+}
+
 async function testAceOpeningPlayThrobber(browser, baseUrl, dealer = "User", reducedMotion = "no-preference") {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await installStaticBuild(page);
@@ -1144,6 +1197,10 @@ async function main() {
   const browser = await browserType.launch({ headless: true });
   try {
     const baseUrl = "https://strong-cribbage.test";
+    if (process.argv.includes("--first-cut")) {
+      for (const mode of ["touch", "history", "slow", "keyboard"]) console.log(JSON.stringify(await testFirstDealerCutTap(browser, baseUrl, mode)));
+      return;
+    }
     if (process.argv.includes("--account-isolation")) {
       console.log(JSON.stringify([await testAccountGameIsolation(browser, baseUrl), await testRestoredHumanHistory(browser, baseUrl)]));
       return;
@@ -1207,6 +1264,8 @@ async function main() {
       throw new Error(`Authentication recovery regression: ${JSON.stringify(state)}`);
     }
     await page.close();
+    const firstDealerCut = [];
+    for (const mode of ["touch", "history", "slow", "keyboard"]) firstDealerCut.push(await testFirstDealerCutTap(browser, baseUrl, mode));
     const accountIsolation = await testAccountGameIsolation(browser, baseUrl);
     const restoredHumanHistory = await testRestoredHumanHistory(browser, baseUrl);
     const postgameAnalysis = [await testPostgameAceAnalysis(browser, baseUrl), await testPostgameAceAnalysis(browser, baseUrl, false), await testPostgameAceAnalysis(browser, baseUrl, true, true)];
@@ -1227,7 +1286,7 @@ async function main() {
     const blockedIndexedDb = await testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl);
     const people = await testPeopleInteractions(browser, baseUrl);
     const engagement = await testEngagementDashboard(browser, baseUrl);
-    console.log(JSON.stringify({ authenticationRecovery: state, accountIsolation, restoredHumanHistory, postgameAnalysis, aceOpeningPlays, puttingTogether, peggingAnimations, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
+    console.log(JSON.stringify({ authenticationRecovery: state, firstDealerCut, accountIsolation, restoredHumanHistory, postgameAnalysis, aceOpeningPlays, puttingTogether, peggingAnimations, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
   } finally {
     await browser.close();
   }

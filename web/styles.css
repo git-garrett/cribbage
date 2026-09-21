@@ -6622,6 +6622,12 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
   min-width: 0;
   min-height: var(--game-card-height);
   place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  appearance: none;
+  opacity: 1;
   cursor: pointer;
   touch-action: manipulation;
 }

@@ -6348,12 +6348,22 @@ function dealCutReveal(
 function renderDealCut(game: GameState, revealStage: "cutting" | "human" | "ai" | null = null): void {
   els.plays.hidden = false;
   const humanIndex = state.dealCutIndex ?? Math.floor(DEAL_CUT_CARD_COUNT / 2);
-  els.plays.replaceChildren(createDealCutSpread({
+  const presentation = {
     cards: game.cutForDeal, revealStage, humanIndex,
     aiIndex: state.dealAiCutIndex ?? Math.max(0, humanIndex - 3),
     selectedIndex: state.dealCutIndex, pending: state.pending,
+    aiLabel: playerName("ai"),
+  };
+  const key = JSON.stringify([currentSnapshot?.gameId, presentation]);
+  // History restoration and viewport updates can render between pointerdown
+  // and click. Keep unchanged controls connected so the first tap reaches them.
+  if (els.plays.firstElementChild?.getAttribute("data-deal-cut-key") === key) return;
+  const spread = createDealCutSpread({
+    ...presentation,
     onChoose: (index) => { void cutForDeal(index); },
-  }));
+  });
+  spread.dataset.dealCutKey = key;
+  els.plays.replaceChildren(spread);
 }
 
 function createDealCutSpread({ cards, revealStage, humanIndex, aiIndex, selectedIndex, pending, onChoose, aiLabel }: {
@@ -6373,10 +6383,11 @@ function createDealCutSpread({ cards, revealStage, humanIndex, aiIndex, selected
   const showHumanCut = Boolean(cards?.human && (revealStage === "human" || revealStage === "ai"));
   const showAiCut = Boolean(cards?.ai && revealStage === "ai");
   for (let index = 0; index < DEAL_CUT_CARD_COUNT; index += 1) {
-    const slot = document.createElement("div");
+    const slot = document.createElement("button");
+    slot.type = "button";
+    slot.disabled = pending || Boolean(revealStage);
     slot.className = "deal-cut-choice";
     if (index === selectedIndex) slot.classList.add("deal-cut-choice-selected");
-    slot.setAttribute("role", "button");
     slot.setAttribute("aria-label", `Cut at card ${index + 1} of ${DEAL_CUT_CARD_COUNT}`);
     slot.tabIndex = pending || revealStage || index !== humanIndex ? -1 : 0;
     const deckCard = cardBack();
@@ -6396,9 +6407,6 @@ function createDealCutSpread({ cards, revealStage, humanIndex, aiIndex, selected
         (row.children.item(targetIndex) as HTMLElement | null)?.focus();
         return;
       }
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      choose();
     });
     slot.append(deckCard);
     if (showHumanCut && index === humanIndex && cards?.human) {
