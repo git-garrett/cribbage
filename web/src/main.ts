@@ -1036,6 +1036,7 @@ const ADMIN_HASH = "#strong-admin-13";
 let playerFirstName = (safeLocalStorageGet(PLAYER_FIRST_NAME_KEY) || "").trim();
 
 interface AuthUser {
+  id: number;
   username: string;
   displayName: string;
   email: string;
@@ -1394,7 +1395,7 @@ interface SavedGameRecord {
 }
 
 function accountStorageKey(key: string): string {
-  return `${key}:${authenticatedUser?.username.toLowerCase() ?? "signed-out"}`;
+  return `${key}:${authenticatedUser ? `user-${authenticatedUser.id}` : "signed-out"}`;
 }
 
 function loadSavedGame(): SavedGameRecord | null {
@@ -3172,6 +3173,7 @@ function authEmail(): string | null {
 }
 
 function finishAuthentication(user: AuthUser): void {
+  if (!Number.isSafeInteger(user.id) || user.id <= 0) throw new Error("Please refresh and sign in again.");
   resetTransientGameUi();
   currentSnapshot = null;
   state.game = null;
@@ -3207,7 +3209,7 @@ async function restoreAccountGameHistory(user: AuthUser): Promise<void> {
   try {
     const response = await authJson<{ events: AnalyticsEvent[] }>("/api/game/history");
     if (authenticatedUser !== user) return;
-    syncAnalytics(response.events);
+    syncAnalytics(response.events, false);
     render(state.game);
   } catch (error) {
     console.warn("Account game history could not be restored", error);
@@ -3369,6 +3371,9 @@ async function uploadLocalCompletedGames(force = false, requireIndexedDbInspecti
   let uploaded = true;
   for (const gameId of completedGameIds(history.events)) {
     if (authenticatedUser !== owner) return false;
+    // Human history is already stored for both participants on the server.
+    // Replaying each perspective through the legacy upload key transfers it.
+    if (history.events.some(event => event.gameId === gameId && event.type === "game" && event.opponent === "human")) continue;
     if (!await uploadCompletedGame(gameId, force, history.events)) uploaded = false;
   }
   return uploaded && (!requireIndexedDbInspection || history.indexedDbInspected);
@@ -3381,7 +3386,7 @@ function backfillLocalCompletedGames(): Promise<void> {
   if (!owner) return Promise.resolve();
   const existing = localCompletedGameBackfills.get(owner);
   if (existing) return existing;
-  const marker = `v2:${authenticatedUser?.username ?? ""}`;
+  const marker = `v2:${owner.id}`;
   if (!authenticatedUser || safeLocalStorageGet(accountStorageKey(SERVER_UPLOAD_BACKFILL_KEY)) === marker) {
     return Promise.resolve();
   }
@@ -3440,7 +3445,7 @@ async function exportPhoneGameLog(): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-function syncAnalytics(events: AnalyticsEvent[]): void {
+function syncAnalytics(events: AnalyticsEvent[], uploadCompleted = true): void {
   if (!authenticatedUser || !events.length) return;
   const store = loadAnalytics();
   const existingIndexes = new Map(store.events.map((event, index) => [event.id, index]));
@@ -3464,6 +3469,7 @@ function syncAnalytics(events: AnalyticsEvent[]): void {
   saveAnalytics(store);
   const owner = authenticatedUser;
   const persisted = persistPhoneGameEvents(changedEvents);
+  if (!uploadCompleted) return;
   const uploadIds = new Set(changedEvents
     .filter((event) => (
       event.type === "game" && event.action === "end"
@@ -10693,6 +10699,7 @@ els.peopleProfileImage.addEventListener("change", async () => {
 els.peopleProfileForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!authenticatedUser || !els.peopleProfileForm.reportValidity()) return;
+  const account = authenticatedUser;
   els.peopleProfileSave.disabled = true;
   els.peopleProfileStatus.textContent = "Saving profile…";
   try {
@@ -10702,12 +10709,13 @@ els.peopleProfileForm.addEventListener("submit", async (event) => {
       avatarDataUrl: pendingAvatarDataUrl,
       textSize: state.fontSize,
     });
+    if (authenticatedUser !== account) return;
     ownPeopleProfile = response.profile;
-    authenticatedUser = {
+    Object.assign(account, {
       username: response.profile.username,
       displayName: response.profile.displayName,
       email: response.profile.email || els.peopleProfileEmail.value,
-    };
+    });
     playerFirstName = response.profile.displayName;
     safeLocalStorageSet(PLAYER_FIRST_NAME_KEY, playerFirstName);
     setPlayerIdentity(
