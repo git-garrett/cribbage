@@ -272,7 +272,7 @@ describe("local pathway navigation", () => {
     expect(source).not.toMatch(/function launchPathwayOpponent[\s\S]*findRemoteActiveGameSession\(DEFAULT_OPPONENT\)[\s\S]*function dismissMasterSessionDialog/);
     expect(source).toMatch(/function suspendActiveGameForPathway[\s\S]*state\.pending = false[\s\S]*resetTransientGameUi\(\)/);
     expect(source).toContain('action: "forfeit"');
-    expect(source).toMatch(/function clearForfeitedLocalGame[\s\S]*safeLocalStorageRemove\(SAVE_KEY\)/);
+    expect(source).toMatch(/function clearForfeitedLocalGame[\s\S]*safeLocalStorageRemove\(accountStorageKey\(SAVE_KEY\)\)/);
     expect(css).toContain(".master-session-dialog");
   });
 

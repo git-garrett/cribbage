@@ -357,7 +357,7 @@ const state: {
   splashOpen: boolean;
   hasResumableGame: boolean;
   resultOverride: string[] | null;
-  serverBusy: { retry: ServerBusyRetry | null } | null;
+  serverBusy: { retry: ServerBusyRetry | null; reconcileGame: boolean } | null;
   parGuides: boolean;
   fontSize: AppFontSize;
   fastCounting: boolean;
@@ -884,7 +884,7 @@ function clearServerBusy(): void {
   renderServerBusy();
 }
 
-function showServerBusy(error: unknown, retry: ServerBusyRetry | null): void {
+function showServerBusy(error: unknown, retry: ServerBusyRetry | null, reconcileGame = true): void {
   if (error instanceof AuthenticationRequiredError) {
     clearServerBusy();
     state.pending = false;
@@ -896,18 +896,19 @@ function showServerBusy(error: unknown, retry: ServerBusyRetry | null): void {
     error: activityErrorSummary(error),
     retryAvailable: Boolean(retry),
   }, true);
-  state.serverBusy = { retry };
+  state.serverBusy = { retry, reconcileGame };
   state.pending = false;
   setAiThinking(false);
   renderServerBusy();
 }
 
 els.serverBusyRetry.addEventListener("click", () => {
-  const retry = state.serverBusy?.retry;
-  if (!retry) return;
+  const busy = state.serverBusy;
+  if (!busy?.retry) return;
+  const retry = busy.retry;
   clearServerBusy();
-  void retryAfterServerBusy(retry).catch((error) => {
-    showServerBusy(error, retry);
+  void Promise.resolve().then(() => busy.reconcileGame ? retryAfterServerBusy(retry) : retry()).catch((error) => {
+    showServerBusy(error, retry, busy.reconcileGame);
   });
 });
 
@@ -982,6 +983,7 @@ const GRANULAR_PARS = {
 } as const;
 const SAVE_KEY = "strong-cribbage.game.v1";
 const ANALYTICS_KEY = "strong-cribbage.analytics.v1";
+const analyticsCache = new Map<string, AnalyticsStore>();
 const PHONE_GAME_DB_NAME = "cribbage-game-log";
 const PHONE_GAME_DB_VERSION = 1;
 const NOTICE_VISIBLE_MS = 2_200;
@@ -1391,15 +1393,19 @@ interface SavedGameRecord {
   state: GameState;
 }
 
+function accountStorageKey(key: string): string {
+  return `${key}:${authenticatedUser?.username.toLowerCase() ?? "signed-out"}`;
+}
+
 function loadSavedGame(): SavedGameRecord | null {
-  const saved = safeLocalStorageGet(SAVE_KEY);
+  const saved = safeLocalStorageGet(accountStorageKey(SAVE_KEY));
   if (!saved) return null;
   try {
     const parsed = JSON.parse(saved) as Partial<SavedGameRecord>;
     if (parsed.version !== 1 || !parsed.snapshot || !parsed.state) return null;
     const record = parsed as SavedGameRecord;
     if (!isCoherentSavedGameState(record.state)) {
-      safeLocalStorageRemove(SAVE_KEY);
+      safeLocalStorageRemove(accountStorageKey(SAVE_KEY));
       return null;
     }
     // Snapshots from before server-authoritative reveal support may already
@@ -1413,14 +1419,14 @@ function loadSavedGame(): SavedGameRecord | null {
     delete record.snapshot.rngState;
     return record;
   } catch {
-    safeLocalStorageRemove(SAVE_KEY);
+    safeLocalStorageRemove(accountStorageKey(SAVE_KEY));
     return null;
   }
 }
 
 function saveGame(): void {
   if (!currentSnapshot || !state.game) return;
-  safeLocalStorageSet(SAVE_KEY, JSON.stringify({ version: 1, snapshot: currentSnapshot, state: state.game }));
+  safeLocalStorageSet(accountStorageKey(SAVE_KEY), JSON.stringify({ version: 1, snapshot: currentSnapshot, state: state.game }));
   syncAnalytics(currentSnapshot.analyticsEvents ?? state.game.analyticsEvents ?? []);
 }
 
@@ -1498,7 +1504,7 @@ if (
   currentSnapshot = null;
   state.game = null;
   gameStateGeneration += 1;
-  safeLocalStorageRemove(SAVE_KEY);
+  safeLocalStorageRemove(accountStorageKey(SAVE_KEY));
 }
 state.hasResumableGame = SIMPLE_NETWORK_MODE &&
   isAllowedSimpleNetworkOpponent(currentSnapshot?.opponent) &&
@@ -1637,32 +1643,38 @@ window.addEventListener("popstate", () => {
 });
 
 function loadAnalytics(): AnalyticsStore {
+  const cached = analyticsCache.get(accountStorageKey(ANALYTICS_KEY));
+  if (cached) return cached;
   const fallback: AnalyticsStore = { version: 1, events: [] };
-  const saved = safeLocalStorageGet(ANALYTICS_KEY);
+  const saved = safeLocalStorageGet(accountStorageKey(ANALYTICS_KEY));
   if (!saved) return fallback;
   try {
     const parsed = JSON.parse(saved) as AnalyticsStore;
     if (parsed.version !== 1 || !Array.isArray(parsed.events)) return fallback;
+    analyticsCache.set(accountStorageKey(ANALYTICS_KEY), parsed);
     return parsed;
   } catch {
-    safeLocalStorageRemove(ANALYTICS_KEY);
+    safeLocalStorageRemove(accountStorageKey(ANALYTICS_KEY));
     return fallback;
   }
 }
 
 function saveAnalytics(store: AnalyticsStore): void {
-  safeLocalStorageSet(ANALYTICS_KEY, JSON.stringify(store));
+  analyticsCache.set(accountStorageKey(ANALYTICS_KEY), store);
+  safeLocalStorageSet(accountStorageKey(ANALYTICS_KEY), JSON.stringify(store));
 }
 
-let phoneGameDbPromise: Promise<IDBDatabase | null> | null = null;
+const phoneGameDbPromises = new Map<string, Promise<IDBDatabase | null>>();
 
 function openPhoneGameDb(): Promise<IDBDatabase | null> {
   if (!("indexedDB" in window)) return Promise.resolve(null);
-  if (phoneGameDbPromise) return phoneGameDbPromise;
-  phoneGameDbPromise = new Promise((resolve) => {
+  const name = accountStorageKey(PHONE_GAME_DB_NAME);
+  const existing = phoneGameDbPromises.get(name);
+  if (existing) return existing;
+  const promise = new Promise<IDBDatabase | null>((resolve) => {
     let request: IDBOpenDBRequest;
     try {
-      request = indexedDB.open(PHONE_GAME_DB_NAME, PHONE_GAME_DB_VERSION);
+      request = indexedDB.open(name, PHONE_GAME_DB_VERSION);
     } catch {
       resolve(null);
       return;
@@ -1685,11 +1697,14 @@ function openPhoneGameDb(): Promise<IDBDatabase | null> {
     request.onerror = () => resolve(null);
     request.onblocked = () => resolve(null);
   });
-  return phoneGameDbPromise;
+  phoneGameDbPromises.set(name, promise);
+  return promise;
 }
 
 async function persistPhoneGameEvents(events: AnalyticsEvent[]): Promise<void> {
   if (!events.length) return;
+  const taggedEvents = events.map((event) => tagPhoneRecord(event));
+  const sessionTag = currentSessionTag();
   try {
     const db = await openPhoneGameDb();
     if (!db) return;
@@ -1700,9 +1715,8 @@ async function persistPhoneGameEvents(events: AnalyticsEvent[]): Promise<void> {
       transaction.onabort = () => reject(transaction.error);
       const eventStore = transaction.objectStore("events");
       const gameStore = transaction.objectStore("games");
-      for (const event of events) {
-        const taggedEvent = tagPhoneRecord(event);
-        eventStore.put(taggedEvent);
+      for (const event of taggedEvents) {
+        eventStore.put(event);
         if (event.type === "game" && event.action === "end") {
           gameStore.put({
             gameId: event.gameId,
@@ -1714,9 +1728,9 @@ async function persistPhoneGameEvents(events: AnalyticsEvent[]): Promise<void> {
             finalScores: event.finalScores ?? null,
             endedAt: event.at,
             includedInTables: 1,
-            tags: currentSessionTag() ? [currentSessionTag()] : [],
-            sessionTag: currentSessionTag() || null,
-            notes: currentSessionTag() ? `tag:${currentSessionTag()}` : "",
+            tags: sessionTag ? [sessionTag] : [],
+            sessionTag: sessionTag || null,
+            notes: sessionTag ? `tag:${sessionTag}` : "",
             randomSeed: null,
           });
         }
@@ -3158,14 +3172,22 @@ function authEmail(): string | null {
 }
 
 function finishAuthentication(user: AuthUser): void {
-  const previousPlayer = playerFirstName;
+  resetTransientGameUi();
+  currentSnapshot = null;
+  state.game = null;
+  state.pending = false;
+  state.hasResumableGame = false;
+  state.selectedLogGameId = null;
+  selectedPathwayOpponent = null;
+  activeHumanTable = null;
+  remoteResumableModelGames = new Map();
   authenticatedUser = user;
   playerFirstName = user.displayName;
-  if (previousPlayer && previousPlayer !== playerFirstName) {
-    currentSnapshot = null;
-    state.game = null;
-    gameStateGeneration += 1;
-    safeLocalStorageRemove(SAVE_KEY);
+  const saved = loadSavedGame();
+  if (saved && saved.state.phase !== "game_over") {
+    currentSnapshot = saved.snapshot;
+    state.game = saved.state;
+    state.hasResumableGame = true;
   }
   safeLocalStorageSet(PLAYER_FIRST_NAME_KEY, playerFirstName);
   document.body.dataset.auth = "signed-in";
@@ -3178,7 +3200,19 @@ function finishAuthentication(user: AuthUser): void {
   cleanUrl.searchParams.delete("reset");
   cleanUrl.searchParams.delete("invite");
   window.history.replaceState({}, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
-  void backfillLocalCompletedGames();
+  void restoreAccountGameHistory(user);
+}
+
+async function restoreAccountGameHistory(user: AuthUser): Promise<void> {
+  try {
+    const response = await authJson<{ events: AnalyticsEvent[] }>("/api/game/history");
+    if (authenticatedUser !== user) return;
+    syncAnalytics(response.events);
+    render(state.game);
+  } catch (error) {
+    console.warn("Account game history could not be restored", error);
+  }
+  if (authenticatedUser === user) await backfillLocalCompletedGames();
 }
 
 async function initializeAuthentication(): Promise<boolean> {
@@ -3238,7 +3272,7 @@ async function completeAuthenticationAndStart(response: AuthSessionResponse, met
 
 function uploadedGameIds(): Set<string> {
   try {
-    const parsed = JSON.parse(safeLocalStorageGet(SERVER_UPLOAD_KEY) || "[]");
+    const parsed = JSON.parse(safeLocalStorageGet(accountStorageKey(SERVER_UPLOAD_KEY)) || "[]");
     return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : []);
   } catch {
     return new Set();
@@ -3248,7 +3282,7 @@ function uploadedGameIds(): Set<string> {
 function markGameUploaded(gameId: string): void {
   const ids = uploadedGameIds();
   ids.add(gameId);
-  safeLocalStorageSet(SERVER_UPLOAD_KEY, JSON.stringify([...ids]));
+  safeLocalStorageSet(accountStorageKey(SERVER_UPLOAD_KEY), JSON.stringify([...ids]));
 }
 
 type StoredAnalyticsHistory = {
@@ -3281,6 +3315,7 @@ async function uploadCompletedGame(
 ): Promise<boolean> {
   if (LOCAL_QA_MODE) return true;
   if (!authenticatedUser) return false;
+  const owner = authenticatedUser;
   const playerTag = currentSessionTag();
   if (!shouldUploadCompletedGame({
     remoteEnabled: usesRemoteAi(),
@@ -3290,6 +3325,7 @@ async function uploadCompletedGame(
     playerTag,
   })) return true;
   const historyEvents = storedEvents ?? (await storedAnalyticsEvents()).events;
+  if (authenticatedUser !== owner) return false;
   const events = historyEvents
     .filter((event) => event.gameId === gameId)
     .map((event) => tagPhoneRecord(event));
@@ -3313,7 +3349,8 @@ async function uploadCompletedGame(
       snapshot: currentSnapshot?.gameId === gameId ? currentSnapshot : null,
       events,
     });
-    if (endEvent) markGameUploaded(gameId);
+    if (authenticatedUser !== owner) return false;
+    markGameUploaded(gameId);
     if (response.updated && response.leaderboard) {
       applyLeaderboardSummary(response.leaderboard, { animate: true });
     }
@@ -3327,30 +3364,36 @@ async function uploadCompletedGame(
 async function uploadLocalCompletedGames(force = false, requireIndexedDbInspection = false): Promise<boolean> {
   if (LOCAL_QA_MODE) return true;
   if (!usesRemoteAi() || !authenticatedUser) return false;
+  const owner = authenticatedUser;
   const history = await storedAnalyticsEvents();
   let uploaded = true;
   for (const gameId of completedGameIds(history.events)) {
+    if (authenticatedUser !== owner) return false;
     if (!await uploadCompletedGame(gameId, force, history.events)) uploaded = false;
   }
   return uploaded && (!requireIndexedDbInspection || history.indexedDbInspected);
 }
 
-let localCompletedGameBackfill: Promise<void> | null = null;
+const localCompletedGameBackfills = new Map<AuthUser, Promise<void>>();
 
 function backfillLocalCompletedGames(): Promise<void> {
-  if (localCompletedGameBackfill) return localCompletedGameBackfill;
+  const owner = authenticatedUser;
+  if (!owner) return Promise.resolve();
+  const existing = localCompletedGameBackfills.get(owner);
+  if (existing) return existing;
   const marker = `v2:${authenticatedUser?.username ?? ""}`;
-  if (!authenticatedUser || safeLocalStorageGet(SERVER_UPLOAD_BACKFILL_KEY) === marker) {
+  if (!authenticatedUser || safeLocalStorageGet(accountStorageKey(SERVER_UPLOAD_BACKFILL_KEY)) === marker) {
     return Promise.resolve();
   }
-  localCompletedGameBackfill = (async () => {
-    if (await uploadLocalCompletedGames(true, true)) {
-      safeLocalStorageSet(SERVER_UPLOAD_BACKFILL_KEY, marker);
+  const backfill = (async () => {
+    if (await uploadLocalCompletedGames(true, true) && authenticatedUser === owner) {
+      safeLocalStorageSet(accountStorageKey(SERVER_UPLOAD_BACKFILL_KEY), marker);
     }
   })().finally(() => {
-    localCompletedGameBackfill = null;
+    localCompletedGameBackfills.delete(owner);
   });
-  return localCompletedGameBackfill;
+  localCompletedGameBackfills.set(owner, backfill);
+  return backfill;
 }
 
 function idbRequest<T>(request: IDBRequest<T>): Promise<T> {
@@ -3398,7 +3441,7 @@ async function exportPhoneGameLog(): Promise<void> {
 }
 
 function syncAnalytics(events: AnalyticsEvent[]): void {
-  if (!events.length) return;
+  if (!authenticatedUser || !events.length) return;
   const store = loadAnalytics();
   const existingIndexes = new Map(store.events.map((event, index) => [event.id, index]));
   const changedEvents: AnalyticsEvent[] = [];
@@ -3419,6 +3462,7 @@ function syncAnalytics(events: AnalyticsEvent[]): void {
   }
   store.events.sort((a, b) => a.at.localeCompare(b.at));
   saveAnalytics(store);
+  const owner = authenticatedUser;
   const persisted = persistPhoneGameEvents(changedEvents);
   const uploadIds = new Set(changedEvents
     .filter((event) => (
@@ -3428,7 +3472,10 @@ function syncAnalytics(events: AnalyticsEvent[]): void {
     ))
     .map((event) => event.gameId));
   void persisted.then(async () => {
-    for (const gameId of uploadIds) await uploadCompletedGame(gameId, true);
+    for (const gameId of uploadIds) {
+      if (authenticatedUser !== owner) return;
+      await uploadCompletedGame(gameId, true);
+    }
   });
 }
 
@@ -3591,7 +3638,7 @@ function clearForfeitedLocalGame(gameId: string): void {
   state.game = null;
   state.hasResumableGame = false;
   gameStateGeneration += 1;
-  safeLocalStorageRemove(SAVE_KEY);
+  safeLocalStorageRemove(accountStorageKey(SAVE_KEY));
 }
 
 function leaveActivePathwayGame(route: PathwayRoute): void {
@@ -10213,12 +10260,17 @@ function requestNextStoredDecisionReview(
   gameId: string,
   reviewId?: string,
 ): Promise<ReturnType<typeof gameAnalysisProgress>> {
+  const owner = authenticatedUser;
+  const epoch = interactionEpoch;
+  const isCurrent = () => authenticatedUser === owner && interactionEpoch === epoch;
   const previous = storedReviewQueues.get(gameId) ?? Promise.resolve(gameAnalysisProgress(loadAnalytics().events, gameId));
   const request = previous.catch(() => gameAnalysisProgress(loadAnalytics().events, gameId)).then(async () => {
+    if (!isCurrent()) throw new AuthenticationRequiredError();
     if (activeHumanTable && currentSnapshot?.gameId === gameId) {
       const response = await authJson<HumanGameResponse>("/api/people/table/game/review", {
         tableId: activeHumanTable.id,
       });
+      if (!isCurrent()) throw new AuthenticationRequiredError();
       applyHumanGameResponse(response);
       return gameAnalysisProgress(loadAnalytics().events, gameId);
     }
@@ -10229,6 +10281,7 @@ function requestNextStoredDecisionReview(
       reviewId,
       tag: currentSessionTag() || null,
     });
+    if (!isCurrent()) throw new AuthenticationRequiredError();
     syncAnalytics(response.state.analyticsEvents);
     mergeReviewedDynamicCalibration(gameId, response.state.dynamicCalibration);
     return gameAnalysisProgress(loadAnalytics().events, gameId);
@@ -10276,26 +10329,33 @@ async function analyzeGameDecisionReviews(gameId: string): Promise<void> {
   if (state.pending || state.completingReviews) return;
   const initial = gameAnalysisProgress(loadAnalytics().events, gameId);
   if (!initial.pending) return;
+  const owner = authenticatedUser;
+  const epoch = interactionEpoch;
+  const isCurrent = () => authenticatedUser === owner && interactionEpoch === epoch;
   state.completingReviews = true;
   state.reviewProgress = { total: initial.pending, remaining: initial.pending };
   render(state.game);
   try {
-    for (;;) {
+    for (; isCurrent();) {
       const beforeRemaining = gameAnalysisProgress(loadAnalytics().events, gameId).pending;
       if (!beforeRemaining) break;
       const progress = await requestNextStoredDecisionReview(gameId);
+      if (!isCurrent()) return;
       const remaining = progress.pending;
       state.reviewProgress = { total: initial.pending, remaining };
       render(state.game);
-      if (!remaining || remaining >= beforeRemaining) break;
+      if (!remaining) break;
+      if (remaining >= beforeRemaining) throw new Error("Ace analysis did not advance. Please try again.");
       await waitMs(35);
     }
   } catch (error) {
-    showServerBusy(error, () => analyzeGameDecisionReviews(gameId));
+    if (isCurrent()) showServerBusy(error, () => analyzeGameDecisionReviews(gameId), false);
   } finally {
-    state.completingReviews = false;
-    state.reviewProgress = null;
-    render(state.game);
+    if (isCurrent()) {
+      state.completingReviews = false;
+      state.reviewProgress = null;
+      render(state.game);
+    }
   }
 }
 
@@ -10306,18 +10366,22 @@ async function analyzeAllLoggedGames(): Promise<void> {
   const gameIds = pendingAnalysisGameIds(events, games.map((game) => game.gameId));
   const total = gameIds.reduce((sum, gameId) => sum + gameAnalysisProgress(events, gameId).pending, 0);
   if (!total) return;
+  const owner = authenticatedUser;
+  const epoch = interactionEpoch;
+  const isCurrent = () => authenticatedUser === owner && interactionEpoch === epoch;
   state.completingReviews = true;
   state.reviewProgress = { total, remaining: total };
   render(state.game);
   try {
     let remaining = total;
     for (const gameId of gameIds) {
-      for (;;) {
+      for (; isCurrent();) {
         const before = gameAnalysisProgress(loadAnalytics().events, gameId).pending;
         if (!before) break;
         const progress = await requestNextStoredDecisionReview(gameId);
+        if (!isCurrent()) return;
         const completed = before - progress.pending;
-        if (completed <= 0) break;
+        if (completed <= 0) throw new Error("Ace analysis did not advance. Please try again.");
         remaining = Math.max(0, remaining - completed);
         state.reviewProgress = { total, remaining };
         render(state.game);
@@ -10325,11 +10389,13 @@ async function analyzeAllLoggedGames(): Promise<void> {
       }
     }
   } catch (error) {
-    showServerBusy(error, () => analyzeAllLoggedGames());
+    if (isCurrent()) showServerBusy(error, () => analyzeAllLoggedGames(), false);
   } finally {
-    state.completingReviews = false;
-    state.reviewProgress = null;
-    render(state.game);
+    if (isCurrent()) {
+      state.completingReviews = false;
+      state.reviewProgress = null;
+      render(state.game);
+    }
   }
 }
 
@@ -11932,6 +11998,10 @@ els.authLogout.addEventListener("click", async () => {
   try {
     await authJson<AuthMessageResponse>("/api/auth/logout", {});
   } finally {
+    resetTransientGameUi();
+    currentSnapshot = null;
+    state.game = null;
+    authenticatedUser = null;
     safeLocalStorageRemove(PLAYER_FIRST_NAME_KEY);
     window.location.reload();
   }
