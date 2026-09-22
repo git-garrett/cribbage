@@ -24,7 +24,7 @@ The distribution of terminal pegging scores expected after a discard, aggregated
 A stored distribution of terminal paired pegging scores for a finite discard context. It contains outcomes, not pegging actions or future paths.
 
 **Handicap**:
-The estimated percentage-point loss in eventual game win probability per game relative to Ace-level choices. It is normalized from interchangeable, role-balanced cycle evidence by the expected number of cycles in a game.
+The estimated percentage-point loss in eventual game win probability per game relative to Ace-level choices. It is normalized from interchangeable, role-balanced cycle evidence by the expected number of cycles in a game. A player has one continuous moving average across evaluator updates: new evidence blends into the existing handicap and game-length history, and each unassisted two-hand cycle counts only once. Evaluator versions identify reviews, not separate handicaps.
 _Avoid_: Per-decision handicap, average decision regret
 
 **Provisional handicap**:

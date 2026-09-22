@@ -40,6 +40,9 @@ mod engagement;
 mod feedback;
 mod handicap_backfill;
 mod people;
+mod player_profile;
+
+use player_profile::PLAYER_HISTORY_KEY;
 
 const HUMAN: Side = Side::Left;
 const AI: Side = Side::Right;
@@ -329,6 +332,8 @@ fn main() {
             error
         )
     });
+    player_profile::migrate(&mut open_game_database(&data_dir).unwrap())
+        .unwrap_or_else(|error| panic!("could not migrate continuous player history: {error}"));
     auth::initialize(&data_dir)
         .unwrap_or_else(|error| panic!("could not initialize authentication storage: {}", error));
     email::initialize(&data_dir)
@@ -1401,94 +1406,11 @@ fn load_dynamic_profile(data_dir: &Path, user_id: i64) -> Result<Option<DynamicP
     load_dynamic_profile_from_connection(&connection, user_id)
 }
 
-/// Prefer established calibration, then the current evaluator. A promotion
-/// must not replace an established player with a provisional profile.
-fn dynamic_profile_rows(
-    connection: &Connection,
-    user_id: i64,
-) -> Result<Vec<(String, String)>, String> {
-    let mut statement = connection
-        .prepare(
-            "SELECT evaluator_version, profile_json FROM dynamic_player_profiles
-         WHERE user_id = ?1
-         ORDER BY (COALESCE(json_extract(profile_json, '$.complete_cycles'), 0) >= ?3) DESC,
-                  (evaluator_version = ?2) DESC, updated_at DESC, evaluator_version",
-        )
-        .map_err(|error| format!("find Dynamic player profiles: {error}"))?;
-    let rows = statement
-        .query_map(
-            params![user_id, DYNAMIC_EVALUATOR_VERSION, MIN_COMPLETE_CYCLES],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
-        .map_err(|error| format!("read Dynamic player profiles: {error}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("collect Dynamic player profiles: {error}"))
-}
-
 fn load_dynamic_profile_from_connection(
     connection: &Connection,
     user_id: i64,
 ) -> Result<Option<DynamicProfile>, String> {
-    for (evaluator, text) in dynamic_profile_rows(connection, user_id)? {
-        if !ModelId::from_str(&evaluator).is_ok_and(|model| model.is_ace()) {
-            continue;
-        }
-        let mut profile = serde_json::from_str::<DynamicProfile>(&text)
-            .map_err(|error| format!("parse Dynamic player profile: {error}"))?;
-        inherit_dynamic_strength(connection, user_id, &mut profile)?;
-        return Ok(Some(profile.into_play_profile()));
-    }
-    Ok(None)
-}
-
-fn inherit_dynamic_strength(
-    connection: &Connection,
-    user_id: i64,
-    profile: &mut DynamicProfile,
-) -> Result<bool, String> {
-    if profile.evaluator_version != DYNAMIC_EVALUATOR_VERSION
-        || profile.strength_baseline_evaluator.is_some()
-    {
-        return Ok(false);
-    }
-    for (evaluator, text) in dynamic_profile_rows(connection, user_id)? {
-        if evaluator == DYNAMIC_EVALUATOR_VERSION
-            || !ModelId::from_str(&evaluator).is_ok_and(|model| model.is_ace())
-        {
-            continue;
-        }
-        let previous = serde_json::from_str::<DynamicProfile>(&text)
-            .map_err(|error| format!("parse prior Dynamic strength: {error}"))?
-            .into_play_profile();
-        if previous.complete_cycles < MIN_COMPLETE_CYCLES || !previous.started_dynamic {
-            continue;
-        }
-        let mut rebuilt = DynamicProfile {
-            strength: previous.strength,
-            ..DynamicProfile::default()
-        };
-        let mut statement = connection.prepare(
-            "SELECT sample_json FROM dynamic_profile_cycles WHERE user_id=?1 AND evaluator_version=?2 ORDER BY rowid",
-        ).map_err(|error| format!("read Dynamic strength evidence: {error}"))?;
-        let samples = statement
-            .query_map(params![user_id, DYNAMIC_EVALUATOR_VERSION], |row| {
-                row.get::<_, String>(0)
-            })
-            .map_err(|error| format!("read Dynamic strength samples: {error}"))?;
-        for sample in samples {
-            let sample =
-                sample.map_err(|error| format!("read Dynamic strength sample: {error}"))?;
-            rebuilt.observe_cycle(
-                serde_json::from_str(&sample)
-                    .map_err(|error| format!("parse Dynamic strength sample: {error}"))?,
-            );
-        }
-        profile.strength = rebuilt.strength;
-        profile.started_dynamic = true;
-        profile.strength_baseline_evaluator = Some(evaluator);
-        return Ok(true);
-    }
-    Ok(false)
+    player_profile::load(connection, user_id)
 }
 
 fn refresh_session_dynamic_profile(data_dir: &Path, session: &mut Session) -> Result<(), String> {
@@ -1682,35 +1604,14 @@ fn sync_dynamic_profile_evidence(
     samples: Vec<EligibleDynamicCycle>,
     game_length: Option<f64>,
 ) -> Result<Option<DynamicProfile>, String> {
-    let saved = transaction
+    let needs_initial_save = !transaction
         .query_row(
-            "SELECT profile_json FROM dynamic_player_profiles
-             WHERE user_id = ?1 AND evaluator_version = ?2",
-            params![user_id, DYNAMIC_EVALUATOR_VERSION],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .map_err(|error| format!("read Dynamic player profile: {}", error))?;
-    let parsed = saved
-        .map(|text| {
-            serde_json::from_str::<DynamicProfile>(&text)
-                .map_err(|error| format!("parse Dynamic player profile: {}", error))
-        })
-        .transpose()?;
-    let needs_initial_save = parsed
-        .as_ref()
-        .map(|profile| !profile.is_current())
-        .unwrap_or(true);
-    let mut profile = parsed.map(DynamicProfile::into_current).unwrap_or_default();
-    let mut changed = inherit_dynamic_strength(transaction, user_id, &mut profile)?;
-    if let Some(previous) = load_dynamic_profile_from_connection(transaction, user_id)? {
-        if previous.evaluator_version != DYNAMIC_EVALUATOR_VERSION {
-            if previous.started_dynamic && !profile.started_dynamic {
-                profile.started_dynamic = true;
-                changed = true;
-            }
-        }
-    }
+            "SELECT EXISTS(SELECT 1 FROM dynamic_player_profiles WHERE user_id=?1 AND evaluator_version=?2)",
+            params![user_id, PLAYER_HISTORY_KEY], |row| row.get::<_, bool>(0),
+        ).map_err(|error| format!("find player history: {error}"))?;
+    let mut profile =
+        load_dynamic_profile_from_connection(transaction, user_id)?.unwrap_or_default();
+    let mut changed = false;
     if started_dynamic && !profile.started_dynamic {
         profile.started_dynamic = true;
         changed = true;
@@ -1728,7 +1629,9 @@ fn sync_dynamic_profile_evidence(
             .execute(
                 "INSERT OR IGNORE INTO dynamic_profile_cycles
                  (user_id, evaluator_version, session_id, first_hand_number, sample_json, applied_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                 SELECT ?1, ?2, ?3, ?4, ?5, ?6
+                 WHERE NOT EXISTS (SELECT 1 FROM dynamic_profile_cycles
+                   WHERE user_id=?1 AND session_id=?3 AND first_hand_number=?4)",
                 params![
                     user_id,
                     DYNAMIC_EVALUATOR_VERSION,
@@ -1751,7 +1654,9 @@ fn sync_dynamic_profile_evidence(
             .execute(
                 "INSERT OR IGNORE INTO dynamic_profile_games
                  (user_id, evaluator_version, session_id, sample_json, applied_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                 SELECT ?1, ?2, ?3, ?4, ?5
+                 WHERE NOT EXISTS (SELECT 1 FROM dynamic_profile_games
+                   WHERE user_id=?1 AND session_id=?3)",
                 params![
                     user_id,
                     DYNAMIC_EVALUATOR_VERSION,
@@ -1768,25 +1673,9 @@ fn sync_dynamic_profile_evidence(
     }
 
     if changed || needs_initial_save {
-        let profile_json = serde_json::to_string(&profile)
-            .map_err(|error| format!("serialize Dynamic player profile: {}", error))?;
-        transaction
-            .execute(
-                "INSERT INTO dynamic_player_profiles
-                 (user_id, evaluator_version, profile_json, updated_at)
-                 VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(user_id, evaluator_version) DO UPDATE SET
-                   profile_json = excluded.profile_json,
-                   updated_at = excluded.updated_at",
-                params![
-                    user_id,
-                    DYNAMIC_EVALUATOR_VERSION,
-                    profile_json,
-                    isoish_now()
-                ],
-            )
-            .map_err(|error| format!("save Dynamic player profile: {}", error))?;
+        player_profile::save(transaction, user_id, &profile)?;
     }
+
     if changed || needs_initial_save {
         load_dynamic_profile_from_connection(transaction, user_id)
     } else {
@@ -6447,6 +6336,50 @@ mod tests {
     }
 
     #[test]
+    fn ace_upgrade_blends_new_cycles_into_existing_handicap() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-continuous-handicap-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let connection = open_game_database(&data_dir).unwrap();
+        let user_id = 123;
+        let mut established = DynamicProfile {
+            started_dynamic: true,
+            complete_cycles: 58,
+            handicap_cycles: 58,
+            ewma_cycle_handicap: -0.02,
+            length_games: 13,
+            ewma_cycles_per_game: 4.6,
+            strength: 110,
+            ..DynamicProfile::default()
+        };
+        established.evaluator_version = MODEL_13_215.to_string();
+        connection.execute("INSERT INTO dynamic_player_profiles (user_id, evaluator_version, profile_json, updated_at) VALUES (?1, ?2, ?3, ?4)", params![user_id, MODEL_13_215, serde_json::to_string(&established).unwrap(), isoish_now()]).unwrap();
+        let session = reviewed_cycle_session(ModelId::Myrmidon5, "post-promotion");
+        let effective = sync_dynamic_player_profile(&data_dir, user_id, &session)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            effective.handicap_cycles, 59,
+            "the first new cycle must extend prior handicap history"
+        );
+        let alpha =
+            1.0 - 0.5_f64.powf(1.0 / cribbage_shadow_engine::dynamic::HANDICAP_HALF_LIFE_CYCLES);
+        let expected = -0.02 + alpha * (-0.09 - -0.02);
+        assert!((effective.ewma_cycle_handicap - expected).abs() < 1e-12);
+        assert_eq!(effective.length_games, 14);
+        let length_alpha = 1.0 - 0.5_f64.powf(1.0 / 18.0);
+        assert!((effective.cycles_per_game() - (4.6 + length_alpha * (1.5 - 4.6))).abs() < 1e-12);
+        assert_eq!(
+            load_dynamic_profile(&data_dir, user_id).unwrap().unwrap(),
+            effective
+        );
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
     fn ace_upgrade_keeps_calibration_and_accepts_evidence_from_every_model() {
         let data_dir = std::env::temp_dir().join(format!(
             "cribbage-calibration-upgrade-{}-{}",
@@ -6473,10 +6406,9 @@ mod tests {
         connection.execute("INSERT INTO dynamic_player_profiles (user_id, evaluator_version, profile_json, updated_at) VALUES (?1, ?2, ?3, ?4)", params![user_id, MODEL_13_215, serde_json::to_string(&established).unwrap(), isoish_now()]).unwrap();
         // Reproduce a partial profile already created by the Ace promotion.
         connection.execute("INSERT INTO dynamic_player_profiles (user_id, evaluator_version, profile_json, updated_at) VALUES (?1, ?2, ?3, ?4)", params![user_id, DYNAMIC_EVALUATOR_VERSION, serde_json::to_string(&DynamicProfile::default()).unwrap(), isoish_now()]).unwrap();
-        assert_eq!(
-            load_dynamic_profile(&data_dir, user_id).unwrap().unwrap(),
-            established
-        );
+        let initial = load_dynamic_profile(&data_dir, user_id).unwrap().unwrap();
+        assert_eq!(initial.handicap_per_game(), established.handicap_per_game());
+        assert_eq!(initial.complete_cycles, established.complete_cycles);
         let models: Vec<String> = serde_json::from_str::<Value>(&model_json()).unwrap()["models"]
             .as_array()
             .unwrap()
@@ -6491,17 +6423,16 @@ mod tests {
             let effective = sync_dynamic_player_profile(&data_dir, user_id, &session)
                 .unwrap()
                 .unwrap();
-            let current: String = connection.query_row("SELECT profile_json FROM dynamic_player_profiles WHERE user_id=?1 AND evaluator_version=?2", params![user_id, DYNAMIC_EVALUATOR_VERSION], |row| row.get(0)).unwrap();
+            let current: String = connection.query_row("SELECT profile_json FROM dynamic_player_profiles WHERE user_id=?1 AND evaluator_version=?2", params![user_id, PLAYER_HISTORY_KEY], |row| row.get(0)).unwrap();
             let current: DynamicProfile = serde_json::from_str(&current).unwrap();
-            assert_eq!(current.complete_cycles, index as u32 + 1, "{model}");
-            assert_eq!(current.handicap_cycles, index as u32 + 1, "{model}");
+            assert_eq!(current.complete_cycles, 20 + index as u32 + 1, "{model}");
+            assert_eq!(current.handicap_cycles, 20 + index as u32 + 1, "{model}");
             assert!(current.started_dynamic);
-            if current.complete_cycles < MIN_COMPLETE_CYCLES {
-                assert_eq!(effective, established, "{model}");
-                assert_eq!(current.strength, 100);
-            } else {
-                assert_eq!(effective.evaluator_version, DYNAMIC_EVALUATOR_VERSION);
-            }
+            assert_eq!(effective, current);
+            assert_eq!(effective.evaluator_version, DYNAMIC_EVALUATOR_VERSION);
+            assert!(
+                effective.handicap_per_game().unwrap() > established.handicap_per_game().unwrap()
+            );
             assert!(
                 sync_dynamic_player_profile(&data_dir, user_id, &session)
                     .unwrap()
@@ -6514,21 +6445,6 @@ mod tests {
             serde_json::from_str::<DynamicProfile>(&original).unwrap(),
             established
         );
-        let expected = load_dynamic_profile(&data_dir, user_id).unwrap().unwrap();
-        // Recover a profile that already passed calibration after being reset
-        // to Easy, without changing its reviewed evidence or handicap.
-        connection.execute("UPDATE dynamic_player_profiles SET profile_json=json_remove(json_set(profile_json, '$.strength', 15), '$.strength_baseline_evaluator') WHERE user_id=?1 AND evaluator_version=?2", params![user_id, DYNAMIC_EVALUATOR_VERSION]).unwrap();
-        let recovered = load_dynamic_profile(&data_dir, user_id).unwrap().unwrap();
-        assert_eq!(recovered.strength, expected.strength);
-        assert_eq!(recovered.handicap_cycles, expected.handicap_cycles);
-        assert_eq!(recovered.handicap_per_game(), expected.handicap_per_game());
-        let duplicate = reviewed_cycle_session(ModelId::Myrmidon5, "model-cycle-0");
-        assert!(sync_dynamic_player_profile(&data_dir, user_id, &duplicate)
-            .unwrap()
-            .is_some());
-        assert!(sync_dynamic_player_profile(&data_dir, user_id, &duplicate)
-            .unwrap()
-            .is_none());
         std::fs::remove_dir_all(data_dir).unwrap();
     }
 
