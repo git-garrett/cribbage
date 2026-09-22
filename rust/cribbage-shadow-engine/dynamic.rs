@@ -101,8 +101,8 @@ pub struct DynamicProfile {
     pub ewma_game_handicap: f64,
     /// 0 = Easy, 100 = Tough, 200 = Ace, with probabilistic blends between.
     pub strength: u16,
-    /// Records the one-time strength carryover when Ace is promoted. Evidence
-    /// and handicap totals remain separate for each evaluator.
+    /// Legacy migration input from the former per-evaluator profiles. The API's
+    /// continuous player history preserves both strength and handicap instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strength_baseline_evaluator: Option<String>,
 }
@@ -128,8 +128,8 @@ impl Default for DynamicProfile {
 }
 
 impl DynamicProfile {
-    /// A previous production Ace remains valid for playing strength and the
-    /// published handicap while a new evaluator gathers separate evidence.
+    /// A previous production Ace remains valid when restoring player history;
+    /// evaluator promotion must preserve the existing aggregates.
     pub fn into_play_profile(mut self) -> Self {
         if !ModelId::from_str(&self.evaluator_version).is_ok_and(|model| model.is_ace()) {
             return Self::default();

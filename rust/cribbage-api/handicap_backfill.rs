@@ -108,15 +108,13 @@ fn calibration_boundary(
     connection: &Connection,
     user_id: i64,
 ) -> Result<(String, String, HashSet<String>), String> {
-    // Calibration is a player milestone that survives evaluator upgrades. Pick
-    // the first evaluator under which the player reached the full threshold;
-    // never combine partial progress from different evaluator versions.
+    // Calibration belongs to the player; distinct cycles can span evaluators.
     let stored = connection
         .prepare(
             "SELECT DISTINCT c.evaluator_version, c.session_id, c.first_hand_number, s.session_json
              FROM dynamic_profile_cycles c
              JOIN cribbage_game_sessions s ON s.session_id = c.session_id
-             WHERE c.user_id = ?1",
+             WHERE c.user_id = ?1 ORDER BY c.rowid",
         )
         .map_err(|error| format!("prepare calibration history: {error}"))?
         .query_map([user_id], |row| {
@@ -130,36 +128,36 @@ fn calibration_boundary(
         .map_err(|error| format!("read calibration history: {error}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("collect calibration history: {error}"))?;
-    let mut by_evaluator = HashMap::<String, Vec<(String, String, u32)>>::new();
+    let mut rows = Vec::new();
+    let mut seen = HashSet::new();
     for (evaluator, session_id, first_hand, text) in stored {
+        if !seen.insert((session_id.clone(), first_hand)) {
+            continue;
+        }
         let session = serde_json::from_str::<PersistedSession>(&text)
             .map_err(|error| format!("parse calibration session {session_id}: {error}"))
             .and_then(restore_persisted_session)?;
-        by_evaluator.entry(evaluator).or_default().push((
+        rows.push((
             cycle_completed_at(&session, first_hand),
             session_id,
             first_hand,
+            evaluator,
         ));
     }
     let minimum = usize::try_from(MIN_COMPLETE_CYCLES).unwrap_or(usize::MAX);
-    let mut candidates = by_evaluator
-        .into_iter()
-        .filter_map(|(evaluator, mut rows)| {
-            rows.sort();
-            (rows.len() >= minimum).then(|| (rows[minimum - 1].0.clone(), evaluator, rows))
-        })
-        .collect::<Vec<_>>();
-    candidates.sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
-    let Some((completed_at, evaluator, rows)) = candidates.into_iter().next() else {
+    rows.sort();
+    if rows.len() < minimum {
         return Err(format!(
-            "player has not completed {} calibration cycles under one evaluator",
+            "player has not completed {} calibration cycles",
             MIN_COMPLETE_CYCLES
         ));
-    };
+    }
+    let completed_at = rows[minimum - 1].0.clone();
+    let evaluator = rows[minimum - 1].3.clone();
     let baseline_sessions = rows
         .iter()
         .take(minimum)
-        .map(|(_, session_id, _)| session_id.clone())
+        .map(|(_, session_id, _, _)| session_id.clone())
         .collect();
     Ok((completed_at, evaluator, baseline_sessions))
 }
@@ -291,26 +289,37 @@ fn prepare_session(mut session: Session, model_root: &str) -> Result<SelectedSes
 }
 
 fn current_handicap(connection: &Connection, user_id: i64) -> Result<Option<f64>, String> {
-    let saved = connection
-        .query_row(
-            "SELECT profile_json FROM dynamic_player_profiles
-             WHERE user_id = ?1 AND evaluator_version = ?2",
-            params![user_id, DYNAMIC_EVALUATOR_VERSION],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .map_err(|error| format!("read current handicap: {error}"))?;
-    saved
-        .map(|text| {
-            serde_json::from_str::<DynamicProfile>(&text)
-                .map_err(|error| format!("parse current handicap: {error}"))
-                .map(|profile| profile.into_current().handicap_per_game())
-        })
-        .transpose()
-        .map(Option::flatten)
+    Ok(load_dynamic_profile_from_connection(connection, user_id)?
+        .and_then(|profile| profile.handicap_per_game()))
 }
 
-fn rebuild_profile(sessions: &[SelectedSession], started_dynamic: bool) -> DynamicProfile {
+fn extend_profile(
+    connection: &Connection,
+    user_id: i64,
+    sessions: &[SelectedSession],
+    started_dynamic: bool,
+) -> Result<DynamicProfile, String> {
+    let mut profile =
+        load_dynamic_profile_from_connection(connection, user_id)?.unwrap_or_default();
+    profile.started_dynamic |= started_dynamic;
+    let seen_cycles = connection
+        .prepare(
+            "SELECT session_id, first_hand_number FROM dynamic_profile_cycles WHERE user_id=?1",
+        )
+        .map_err(|error| format!("read counted cycles: {error}"))?
+        .query_map([user_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+        })
+        .map_err(|error| format!("read counted cycles: {error}"))?
+        .collect::<Result<HashSet<_>, _>>()
+        .map_err(|error| format!("collect counted cycles: {error}"))?;
+    let seen_games = connection
+        .prepare("SELECT session_id FROM dynamic_profile_games WHERE user_id=?1")
+        .map_err(|error| format!("read counted lengths: {error}"))?
+        .query_map([user_id], |row| row.get::<_, String>(0))
+        .map_err(|error| format!("read counted lengths: {error}"))?
+        .collect::<Result<HashSet<_>, _>>()
+        .map_err(|error| format!("collect counted lengths: {error}"))?;
     let mut cycles = sessions
         .iter()
         .flat_map(|selected| {
@@ -334,17 +343,17 @@ fn rebuild_profile(sessions: &[SelectedSession], started_dynamic: bool) -> Dynam
         .collect::<Vec<_>>();
     games.sort_by(|left, right| (left.0, left.1).cmp(&(right.0, right.1)));
 
-    let mut profile = DynamicProfile {
-        started_dynamic,
-        ..DynamicProfile::default()
-    };
-    for (_, _, _, sample) in cycles {
-        profile.observe_cycle(sample);
+    for (_, session_id, first_hand, sample) in cycles {
+        if !seen_cycles.contains(&(session_id.clone(), first_hand)) {
+            profile.observe_cycle(sample);
+        }
     }
-    for (_, _, length) in games {
-        profile.observe_game_length(length);
+    for (_, session_id, length) in games {
+        if !seen_games.contains(session_id) {
+            profile.observe_game_length(length);
+        }
     }
-    profile
+    Ok(profile)
 }
 
 fn persist_player(
@@ -353,19 +362,6 @@ fn persist_player(
     sessions: &mut [SelectedSession],
     profile: &DynamicProfile,
 ) -> Result<(), String> {
-    transaction
-        .execute(
-            "DELETE FROM dynamic_profile_cycles WHERE user_id = ?1 AND evaluator_version = ?2",
-            params![user_id, DYNAMIC_EVALUATOR_VERSION],
-        )
-        .map_err(|error| format!("clear current cycle evidence: {error}"))?;
-    transaction
-        .execute(
-            "DELETE FROM dynamic_profile_games WHERE user_id = ?1 AND evaluator_version = ?2",
-            params![user_id, DYNAMIC_EVALUATOR_VERSION],
-        )
-        .map_err(|error| format!("clear current game lengths: {error}"))?;
-
     for selected in sessions.iter_mut() {
         // Active and forfeited Dynamic sessions may contribute already-played
         // complete cycles, but the repair must not alter their resumable state.
@@ -389,7 +385,8 @@ fn persist_player(
                 .execute(
                     "INSERT INTO dynamic_profile_cycles
                      (user_id, evaluator_version, session_id, first_hand_number, sample_json, applied_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                     SELECT ?1, ?2, ?3, ?4, ?5, ?6 WHERE NOT EXISTS
+                     (SELECT 1 FROM dynamic_profile_cycles WHERE user_id=?1 AND session_id=?3 AND first_hand_number=?4)",
                     params![
                         user_id,
                         DYNAMIC_EVALUATOR_VERSION,
@@ -407,7 +404,8 @@ fn persist_player(
                 .execute(
                     "INSERT INTO dynamic_profile_games
                      (user_id, evaluator_version, session_id, sample_json, applied_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                     SELECT ?1, ?2, ?3, ?4, ?5 WHERE NOT EXISTS
+                     (SELECT 1 FROM dynamic_profile_games WHERE user_id=?1 AND session_id=?3)",
                     params![
                         user_id,
                         DYNAMIC_EVALUATOR_VERSION,
@@ -419,24 +417,7 @@ fn persist_player(
                 .map_err(|error| format!("save game length: {error}"))?;
         }
     }
-    transaction
-        .execute(
-            "INSERT INTO dynamic_player_profiles
-             (user_id, evaluator_version, profile_json, updated_at)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(user_id, evaluator_version) DO UPDATE SET
-               profile_json = excluded.profile_json,
-               updated_at = excluded.updated_at",
-            params![
-                user_id,
-                DYNAMIC_EVALUATOR_VERSION,
-                serde_json::to_string(profile)
-                    .map_err(|error| format!("serialize rebuilt profile: {error}"))?,
-                isoish_now(),
-            ],
-        )
-        .map_err(|error| format!("save rebuilt profile: {error}"))?;
-    Ok(())
+    player_profile::save(transaction, user_id, profile)
 }
 
 fn backup_database(data_dir: &Path) -> Result<PathBuf, String> {
@@ -509,7 +490,7 @@ pub fn run(arguments: &[String], data_dir: &Path, model_root: &str) -> Result<()
             before,
             calibration_completed_at,
             calibration_evaluator_version,
-            started_dynamic,
+            extend_profile(&connection, user_id, &prepared, started_dynamic)?,
             prepared,
         ));
     }
@@ -530,7 +511,7 @@ pub fn run(arguments: &[String], data_dir: &Path, model_root: &str) -> Result<()
         before,
         calibration_completed_at,
         calibration_evaluator_version,
-        started_dynamic,
+        profile,
         mut sessions,
     ) in plans
     {
@@ -538,7 +519,6 @@ pub fn run(arguments: &[String], data_dir: &Path, model_root: &str) -> Result<()
             .iter()
             .map(|session| session.completed_analyses)
             .sum();
-        let profile = rebuild_profile(&sessions, started_dynamic);
         let cycles = usize::try_from(profile.handicap_cycles).unwrap_or(usize::MAX);
         let games = usize::try_from(profile.length_games).unwrap_or(usize::MAX);
         let after = profile.handicap_per_game();
@@ -694,7 +674,7 @@ mod tests {
             .query_row(
                 "SELECT profile_json FROM dynamic_player_profiles
                  WHERE user_id = ?1 AND evaluator_version = ?2",
-                params![user_id, DYNAMIC_EVALUATOR_VERSION],
+                params![user_id, PLAYER_HISTORY_KEY],
                 |row| row.get(0),
             )
             .unwrap();
@@ -895,7 +875,7 @@ mod tests {
         let connection = open_game_database(&data_dir).unwrap();
         connection
             .execute_batch(
-                "CREATE TRIGGER fail_backfill BEFORE INSERT ON dynamic_profile_cycles
+                "CREATE TRIGGER fail_backfill BEFORE UPDATE ON cribbage_game_sessions
                  BEGIN SELECT RAISE(ABORT, 'forced backfill failure'); END;",
             )
             .unwrap();

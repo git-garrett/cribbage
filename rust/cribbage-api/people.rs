@@ -22,8 +22,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{
-    auth::AuthUser, dynamic_profile_rows, open_game_database, refresh_leaderboard_summary,
-    sync_dynamic_profile_evidence, EligibleDynamicCycle, Request, Response, Server,
+    auth::AuthUser, load_dynamic_profile_from_connection, open_game_database,
+    refresh_leaderboard_summary, sync_dynamic_profile_evidence, EligibleDynamicCycle, Request,
+    Response, Server,
 };
 
 const ONLINE_SECONDS: i64 = 15 * 60;
@@ -91,47 +92,36 @@ fn dynamic_handicap_for_user(
     connection: &rusqlite::Connection,
     user_id: i64,
 ) -> Result<Option<Value>, PeopleError> {
-    for (evaluator_version, profile_json) in dynamic_profile_rows(connection, user_id)
+    let Some(profile) = load_dynamic_profile_from_connection(connection, user_id)
         .map_err(|error| PeopleError::internal("read Dynamic handicap", error))?
-    {
-        let profile = serde_json::from_str::<Value>(&profile_json)
-            .map_err(|error| PeopleError::internal("parse Dynamic handicap", error))?;
-        if let Some(handicap) = dynamic_handicap_value(&evaluator_version, &profile) {
-            return Ok(Some(handicap));
-        }
-    }
-    Ok(None)
+    else {
+        return Ok(None);
+    };
+    let value = serde_json::to_value(&profile)
+        .map_err(|error| PeopleError::internal("serialize Dynamic handicap", error))?;
+    Ok(dynamic_handicap_value(&profile.evaluator_version, &value))
 }
 
 pub fn handicap_summaries(data_dir: &Path) -> Result<HashMap<String, Value>, String> {
     let connection = open_game_database(data_dir)?;
     let mut statement = connection
         .prepare(
-            "SELECT u.display_name, dp.evaluator_version, dp.profile_json
-             FROM dynamic_player_profiles dp
-             JOIN auth_users u ON u.id = dp.user_id
-             ORDER BY u.id, (dp.evaluator_version = ?1) DESC, dp.updated_at DESC, dp.evaluator_version",
+            "SELECT DISTINCT u.id, u.display_name FROM dynamic_player_profiles dp
+         JOIN auth_users u ON u.id=dp.user_id ORDER BY u.id",
         )
         .map_err(|error| format!("prepare player handicaps: {error}"))?;
     let rows = statement
-        .query_map([DYNAMIC_EVALUATOR_VERSION], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })
         .map_err(|error| format!("read player handicaps: {error}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("collect player handicaps: {error}"))?;
     let mut handicaps = HashMap::new();
-    for (display_name, evaluator_version, profile_json) in rows {
-        if handicaps.contains_key(&display_name) {
-            continue;
-        }
-        let profile = serde_json::from_str::<Value>(&profile_json)
-            .map_err(|error| format!("parse Dynamic handicap for {display_name}: {error}"))?;
-        if let Some(handicap) = dynamic_handicap_value(&evaluator_version, &profile) {
+    for (user_id, display_name) in rows {
+        if let Some(handicap) = dynamic_handicap_for_user(&connection, user_id)
+            .map_err(|error| format!("load player handicap: {}", error.message))?
+        {
             handicaps.insert(display_name, handicap);
         }
     }
@@ -511,24 +501,16 @@ fn profile_value(
         value["email"] = Value::String(profile.3);
         value["textSize"] = Value::String(profile.5);
     }
-    if let Some((_, profile_json)) = dynamic_profile_rows(&connection, profile.0)
+    if let Some(dynamic_profile) = load_dynamic_profile_from_connection(&connection, profile.0)
         .map_err(|error| PeopleError::internal("read Dynamic handicap", error))?
-        .into_iter()
-        .next()
     {
-        let dynamic_profile = serde_json::from_str::<Value>(&profile_json)
-            .map_err(|error| PeopleError::internal("parse Dynamic handicap", error))?;
-        let cycles = dynamic_profile["complete_cycles"]
-            .as_u64()
-            .unwrap_or_default();
-        let started = dynamic_profile["started_dynamic"]
-            .as_bool()
-            .unwrap_or_default();
+        let cycles = dynamic_profile.complete_cycles;
+        let started = dynamic_profile.started_dynamic;
         value["dynamicCalibration"] = json!({
             "started": started,
             "completeCycles": cycles,
             "minimumCycles": MIN_COMPLETE_CYCLES,
-            "complete": cycles >= u64::from(MIN_COMPLETE_CYCLES),
+            "complete": cycles >= MIN_COMPLETE_CYCLES,
         });
     }
     if let Some(handicap) = dynamic_handicap_for_user(&connection, profile.0)? {
@@ -1718,13 +1700,8 @@ fn human_game_review(
     if review_saved {
         notify_human_game_watchers();
     }
-    let mut response = human_game_response(
-        &input.table_id,
-        &row,
-        &record,
-        response_revision,
-        viewer,
-    );
+    let mut response =
+        human_game_response(&input.table_id, &row, &record, response_revision, viewer);
     response["handicapUpdated"] = Value::Bool(profile_changed);
     Ok(response)
 }
@@ -3080,37 +3057,87 @@ mod tests {
     }
 
     #[test]
-    fn established_handicap_survives_a_provisional_new_evaluator_everywhere() {
+    fn continuous_handicap_is_identical_across_profile_directory_and_leaderboard() {
         let server = test_server("handicap-upgrade");
         let account = user(&server, "Garrett");
-        let connection = open_game_database(&server.data_dir).unwrap();
-        for (version, cycles, handicap, at) in [
-            ("schell_table-peg_table-13.215", 20, -0.025, "2026-09-01"),
-            (DYNAMIC_EVALUATOR_VERSION, 2, -0.01, "2026-09-22"),
-        ] {
-            connection.execute("INSERT INTO dynamic_player_profiles (user_id, evaluator_version, profile_json, updated_at) VALUES (?1, ?2, ?3, ?4)", params![account.id, version, json!({"started_dynamic":true,"complete_cycles":cycles,"handicap_cycles":cycles,"ewma_cycle_handicap":handicap,"length_games":6,"ewma_cycles_per_game":5.0}).to_string(), at]).unwrap();
-        }
-        let check = |expected: f64, cycles: u32, version: &str| {
+        heartbeat(
+            &server,
+            &request("/api/people/presence", json!({"lookingForGame":false})),
+            Some(&account),
+        )
+        .unwrap();
+        let mut connection = open_game_database(&server.data_dir).unwrap();
+        let mut expected = crate::DynamicProfile {
+            started_dynamic: true,
+            complete_cycles: 20,
+            handicap_cycles: 20,
+            ewma_cycle_handicap: -0.025,
+            length_games: 6,
+            ewma_cycles_per_game: 5.0,
+            ..crate::DynamicProfile::default()
+        };
+        let mut old = expected.clone();
+        old.evaluator_version = crate::MODEL_13_215.to_string();
+        connection
+            .execute(
+                "INSERT INTO dynamic_player_profiles VALUES (?1,?2,?3,?4)",
+                params![
+                    account.id,
+                    crate::MODEL_13_215,
+                    serde_json::to_string(&old).unwrap(),
+                    "2026-09-01"
+                ],
+            )
+            .unwrap();
+        let check = |expected: &crate::DynamicProfile| {
             let profile = profile_value(&server, "Garrett", Some(account.id), true).unwrap();
             assert_eq!(profile["profile"]["dynamicCalibration"]["complete"], true);
             assert_eq!(
                 profile["profile"]["dynamicCalibration"]["completeCycles"],
-                cycles
+                expected.complete_cycles
             );
-            let handicap = dynamic_handicap_for_user(&connection, account.id)
-                .unwrap()
-                .unwrap();
-            assert_eq!(profile["profile"]["dynamicHandicap"], handicap);
+            let handicap = profile["profile"]["dynamicHandicap"].clone();
             assert_eq!(
                 handicap_summaries(&server.data_dir).unwrap()["Garrett"],
                 handicap
             );
-            assert_eq!(handicap["wpPerGame"], expected);
-            assert_eq!(handicap["evaluatorVersion"], version);
+            let directory = directory_value(&server, None).unwrap();
+            let listed = directory["players"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|player| player["username"] == "Garrett")
+                .unwrap();
+            assert_eq!(listed["dynamicHandicap"], handicap);
+            assert!((handicap["wpPerGame"].as_f64().unwrap() - expected.handicap_per_game().unwrap()).abs() < 1e-12);
+            assert_eq!(handicap["cycles"], expected.handicap_cycles);
         };
-        check(-0.125, 20, "schell_table-peg_table-13.215");
-        connection.execute("UPDATE dynamic_player_profiles SET profile_json=json_set(profile_json, '$.complete_cycles', 6, '$.handicap_cycles', 6) WHERE user_id=?1 AND evaluator_version=?2", params![account.id, DYNAMIC_EVALUATOR_VERSION]).unwrap();
-        check(-0.05, 6, DYNAMIC_EVALUATOR_VERSION);
+        check(&expected);
+        for index in 0..8 {
+            let sample = crate::DynamicCycleSample {
+                dealer_discard_regret: 0.0025,
+                dealer_pegging_regret: 0.0025,
+                pone_discard_regret: 0.0025,
+                pone_pegging_regret: 0.0025,
+                total_regret: 0.01,
+            };
+            let tx = connection.transaction().unwrap();
+            sync_dynamic_profile_evidence(
+                &tx,
+                account.id,
+                &format!("new-{index}"),
+                false,
+                vec![EligibleDynamicCycle {
+                    first_hand: 1,
+                    strength_sample: sample,
+                }],
+                None,
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            expected.observe_cycle(sample);
+            check(&expected);
+        }
         std::fs::remove_dir_all(server.data_dir).unwrap();
     }
 
@@ -3123,10 +3150,10 @@ mod tests {
             .execute(
                 "INSERT INTO dynamic_player_profiles
                  (user_id, evaluator_version, profile_json, updated_at)
-                 VALUES (?1, 'ace-13.0', ?2, '2026-09-02T00:00:00.000Z')",
+                 VALUES (?1, 'schell_table-peg_table-13.0', ?2, '2026-09-02T00:00:00.000Z')",
                 params![
                     garrett.id,
-                    json!({"started_dynamic": true, "complete_cycles": 8, "handicap_cycles": 8, "ewma_cycle_handicap": -0.025, "length_games": 6, "ewma_cycles_per_game": 5.0}).to_string(),
+                    json!({"profile_version":4,"evaluator_version": "schell_table-peg_table-13.0", "strength":0, "started_dynamic": true, "complete_cycles": 8, "handicap_cycles": 8, "ewma_cycle_handicap": -0.025, "length_games": 6, "ewma_cycles_per_game": 5.0}).to_string(),
                 ],
             )
             .unwrap();
@@ -3143,7 +3170,7 @@ mod tests {
         assert_eq!(value["profile"]["dynamicHandicap"]["wpPerGame"], -0.125);
         assert_eq!(
             value["profile"]["dynamicHandicap"]["evaluatorVersion"],
-            "ace-13.0"
+            DYNAMIC_EVALUATOR_VERSION
         );
         std::fs::remove_dir_all(server.data_dir).unwrap();
     }
@@ -3157,10 +3184,10 @@ mod tests {
             .execute(
                 "INSERT INTO dynamic_player_profiles
                  (user_id, evaluator_version, profile_json, updated_at)
-                 VALUES (?1, 'ace-13.0', ?2, '2026-09-02T00:00:00.000Z')",
+                 VALUES (?1, 'schell_table-peg_table-13.0', ?2, '2026-09-02T00:00:00.000Z')",
                 params![
                     garrett.id,
-                    json!({"started_dynamic": true, "complete_cycles": 5, "handicap_cycles": 5, "ewma_cycle_handicap": -0.025, "length_games": 6, "ewma_cycles_per_game": 5.0}).to_string(),
+                    json!({"profile_version":4,"evaluator_version": "schell_table-peg_table-13.0", "strength":0, "started_dynamic": true, "complete_cycles": 5, "handicap_cycles": 5, "ewma_cycle_handicap": -0.025, "length_games": 6, "ewma_cycles_per_game": 5.0}).to_string(),
                 ],
             )
             .unwrap();
@@ -3183,10 +3210,10 @@ mod tests {
             .execute(
                 "INSERT INTO dynamic_player_profiles
                  (user_id, evaluator_version, profile_json, updated_at)
-                 VALUES (?1, 'ace-13.0', ?2, '2026-09-02T00:00:00.000Z')",
+                 VALUES (?1, 'schell_table-peg_table-13.0', ?2, '2026-09-02T00:00:00.000Z')",
                 params![
                     vince.id,
-                    json!({"started_dynamic": true, "complete_cycles": 8, "handicap_cycles": 8, "ewma_cycle_handicap": -0.025, "length_games": 6, "ewma_cycles_per_game": 5.0}).to_string(),
+                    json!({"profile_version":4,"evaluator_version": "schell_table-peg_table-13.0", "strength":0, "started_dynamic": true, "complete_cycles": 8, "handicap_cycles": 8, "ewma_cycle_handicap": -0.025, "length_games": 6, "ewma_cycles_per_game": 5.0}).to_string(),
                 ],
             )
             .unwrap();
@@ -4404,7 +4431,7 @@ mod tests {
                             "SELECT json_extract(profile_json, '$.handicap_cycles')
                              FROM dynamic_player_profiles
                              WHERE user_id = ?1 AND evaluator_version = ?2",
-                            params![user_id, DYNAMIC_EVALUATOR_VERSION],
+                            params![user_id, crate::PLAYER_HISTORY_KEY],
                             |row| row.get::<_, u32>(0),
                         )
                         .unwrap();
