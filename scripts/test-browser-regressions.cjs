@@ -917,9 +917,25 @@ async function testDynamicCalibrationPresentation(browser, baseUrl, established)
     snapshot: { ...snapshot, opponent: "dynamic", gameId: "qa-dynamic", deal: 1, turn: 0 },
     state: { ...state, turn: "User", dealer: "AI", cribOwner: "AI", legalCardIds: hand.map(card => card.id), dynamicCalibration: provisional },
   };
+  let releaseReview;
+  const reviewReady = new Promise(resolve => { releaseReview = resolve; });
+  let reviewStarted = false;
+  await page.route("**/api/game/review", async route => {
+    reviewStarted = true;
+    await reviewReady;
+    profile.dynamicHandicap = { wpPerGame: -0.166, cycles: 21, cyclesPerGame: 4.516, evaluatorVersion: "current-ace" };
+    return route.fulfill({ json: { ...response, handicapUpdated: true } });
+  });
   await page.route("**/api/people/me", route => route.fulfill({ json: { profile } }));
   await page.route("**/api/game/session/load", route => route.fulfill({ json: { session: null } }));
-  await page.route("**/api/game/action", route => route.fulfill({ json: response }));
+  await page.route("**/api/game/action", route => {
+    if (["play", "play-human"].includes(route.request().postDataJSON().action)) {
+      response.state.humanHand = hand.slice(1);
+      response.state.legalCardIds = hand.slice(1).map(card => card.id);
+      response.state.analyticsEvents = [{ id: "pending-choice", gameId: "qa-dynamic", at: "2026-09-22T00:00:00Z", type: "discard", player: "human", role: "dealer", handNumber: 1, cards: ["5♣", "6♣"], remainingHand: ["A♣", "2♣", "3♣", "4♣"] }];
+    }
+    return route.fulfill({ json: response });
+  });
   try {
     await page.goto(`${baseUrl}/?pathwayView=play`, { waitUntil: "networkidle" });
     await expect(page.locator("#dynamic-card-copy")).toHaveText(established ? "Adapts to your play and plays back at your skill." : "CALIBRATING");
@@ -928,12 +944,20 @@ async function testDynamicCalibrationPresentation(browser, baseUrl, established)
     if (established) {
       await expect(page.locator("#dynamic-calibration-status")).toBeHidden();
       await expect(page.locator("#dynamic-calibration-handicap")).toBeHidden();
+      await page.locator("#human-hand .card").first().click();
+      await page.locator("#play").click();
+      await expect.poll(() => reviewStarted).toBe(true);
+      await page.locator(".mobile-header-reveal:visible").click();
+      await page.locator("#app-back").click();
+      await expect(page.locator("#pathway-page")).toBeVisible();
+      releaseReview();
+      await expect(page.locator("#auth-account-profile .player-handicap")).toHaveText("(16.60)");
     } else {
       await expect(page.locator("#dynamic-calibration-handicap")).toBeVisible();
       await expect(page.locator("#dynamic-calibration-handicap")).toHaveText("Provisional Handicap: 12.50");
     }
     return { established, correctCalibrationDisplay: true, unitlessHandicap: true };
-  } finally { await page.close(); }
+  } finally { releaseReview(); await page.close(); }
 }
 
 async function testFirstDealerCutTap(browser, baseUrl, mode = "touch") {

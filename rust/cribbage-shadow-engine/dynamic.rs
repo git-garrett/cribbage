@@ -295,6 +295,13 @@ pub struct DynamicState {
     #[serde(default)]
     delegate_cycles: u32,
     delegate: DynamicDelegate,
+    // Older saved games may already have prepared a discard.
+    #[serde(default = "delegate_already_committed")]
+    delegate_committed: bool,
+}
+
+fn delegate_already_committed() -> bool {
+    true
 }
 
 impl DynamicState {
@@ -306,6 +313,7 @@ impl DynamicState {
             first_completed_dealer: None,
             delegate_cycles: 0,
             delegate,
+            delegate_committed: false,
         }
     }
 
@@ -330,9 +338,10 @@ impl DynamicState {
 
     /// Use newly reviewed evidence before any decisions in the next cycle.
     pub fn start_hand(&mut self, selector_seed: u32) {
-        if self.first_completed_dealer.is_none() {
+        if self.first_completed_dealer.is_none() && !self.delegate_committed {
             self.delegate =
                 select_delegate(self.profile.strength, selector_seed, self.delegate_cycles);
+            self.delegate_committed = true;
         }
     }
 
@@ -352,6 +361,7 @@ impl DynamicState {
         self.first_completed_dealer = None;
         self.delegate_cycles += 1;
         self.delegate = select_delegate(self.profile.strength, selector_seed, self.delegate_cycles);
+        self.delegate_committed = false;
         true
     }
 }

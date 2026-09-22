@@ -774,7 +774,7 @@ fn game_action(
                 *session = before;
                 return Err(error);
             }
-        } else if session.tag != before.tag {
+        } else if session.tag != before.tag || session.dynamic != before.dynamic {
             session.updated_at = isoish_now();
             if let Err(error) = persist_session_snapshot(&server.data_dir, session) {
                 *session = before;
@@ -2010,7 +2010,14 @@ fn apply_action(
     body: &str,
     model_root: &str,
 ) -> Result<(), String> {
-    if session.game.phase == Phase::Discard
+    if matches!(
+        action,
+        "prepare-cut-for-deal"
+            | "prepare-ai-discard"
+            | "discard"
+            | "finish-discard"
+            | "finish-discard-with-cards"
+    ) && session.game.phase == Phase::Discard
         && session.game.player(HUMAN).hand.len() == 6
         && session.game.player(AI).hand.len() == 6
     {
@@ -5119,6 +5126,76 @@ mod tests {
         assert!(!session.waiting_for_ai_discard);
         assert_eq!(session.game.player(AI).hand.len(), 4);
         assert_eq!(session.game.crib.len(), 4);
+    }
+
+    #[test]
+    fn dynamic_prepared_discard_freezes_the_delegate_across_profile_refresh() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let root = root.to_str().unwrap();
+        let mut session = new_session_from_seed(ModelId::Dynamic, None, 17, 1);
+        session.waiting_for_deal_cut = false;
+        let data_dir = std::env::temp_dir().join(format!(
+            "dynamic-preparation-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        persist_session_snapshot(&data_dir, &session).unwrap();
+        let session_id = session.id.clone();
+        let mut app = AppState::default();
+        app.sessions.insert(session_id.clone(), session);
+        let server = Server {
+            state: Mutex::new(app),
+            data_dir: data_dir.clone(),
+            model_root: root.to_string(),
+        };
+        let response = game_action(
+            &server,
+            &json!({"gameId":session_id,"action":"prepare-ai-discard"}).to_string(),
+            None,
+        );
+        assert_eq!(response.status, 200);
+        let response: Value = serde_json::from_str(&response.body).unwrap();
+        let prepared = response["recommendation"]["cardIds"].clone();
+        let mut session = load_session_by_id(&data_dir, &session_id).unwrap().unwrap();
+        let dynamic = session.dynamic.as_mut().unwrap();
+        dynamic.use_profile(
+            DynamicProfile {
+                strength: 200,
+                ..DynamicProfile::default()
+            },
+            session.seed,
+        );
+        let ids = [
+            session.game.player(HUMAN).hand[0].id,
+            session.game.player(HUMAN).hand[1].id,
+        ];
+        apply_action(
+            &mut session,
+            "discard",
+            &json!({"ids":ids}).to_string(),
+            root,
+        )
+        .unwrap();
+        apply_action(
+            &mut session,
+            "finish-discard-with-cards",
+            &json!({"ids":prepared}).to_string(),
+            root,
+        )
+        .unwrap();
+        assert_eq!(session.decision_model(), ModelId::Myrmidon5);
+        let dynamic = session.dynamic.as_mut().unwrap();
+        assert!(!dynamic.complete_hand(AI, [10, 8], session.seed));
+        dynamic.start_hand(session.seed);
+        assert_eq!(dynamic.decision_model(), ModelId::Myrmidon5);
+        assert!(dynamic.complete_hand(HUMAN, [20, 16], session.seed));
+        dynamic.start_hand(session.seed);
+        assert_eq!(dynamic.decision_model(), ACE_MODEL_ID);
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[test]

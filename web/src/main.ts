@@ -4665,12 +4665,14 @@ async function serverGameAction(action: string, payload: Record<string, unknown>
   }
   const requestSnapshot = currentSnapshot;
   const requestGeneration = currentSnapshotGeneration();
+  const requestOwner = authenticatedUser;
   const response = await serverJson<ServerGameActionResponse>("/api/game/action", {
     action,
     payload: payload ?? {},
     snapshot: requestSnapshot,
     tag: currentSessionTag() || null,
   });
+  if (response.handicapUpdated && authenticatedUser === requestOwner) void refreshOwnHandicap();
   if (!canApplySnapshotResponse(requestSnapshot, requestGeneration)) {
     console.warn("Ignored stale game action response.", {
       action,
@@ -4680,7 +4682,6 @@ async function serverGameAction(action: string, payload: Record<string, unknown>
     return state.game ?? response.state;
   }
   applyAuthoritativeGameState(response.snapshot, response.state);
-  if (response.handicapUpdated) void refreshOwnHandicap();
   const gameId = response.snapshot.gameId;
   if (action === "new" && gameId) {
     activityTracker.track("game_start", {
@@ -10301,9 +10302,9 @@ function requestNextStoredDecisionReview(
       const response = await authJson<HumanGameResponse>("/api/people/table/game/review", {
         tableId: activeHumanTable.id,
       });
+      if (response.handicapUpdated && authenticatedUser === owner) await refreshOwnHandicap();
       if (!isCurrent()) throw new AuthenticationRequiredError();
       applyHumanGameResponse(response);
-      if (response.handicapUpdated) await refreshOwnHandicap();
       return gameAnalysisProgress(loadAnalytics().events, gameId);
     }
     const before = gameAnalysisProgress(loadAnalytics().events, gameId);
@@ -10313,10 +10314,10 @@ function requestNextStoredDecisionReview(
       reviewId,
       tag: currentSessionTag() || null,
     });
+    if (response.handicapUpdated && authenticatedUser === owner) await refreshOwnHandicap();
     if (!isCurrent()) throw new AuthenticationRequiredError();
     syncAnalytics(response.state.analyticsEvents);
     mergeReviewedDynamicCalibration(gameId, response.state.dynamicCalibration);
-    if (response.handicapUpdated) await refreshOwnHandicap();
     return gameAnalysisProgress(loadAnalytics().events, gameId);
   });
   storedReviewQueues.set(gameId, request);
