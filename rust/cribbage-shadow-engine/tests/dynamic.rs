@@ -99,6 +99,23 @@ fn handicap_is_cycle_regret_normalized_to_a_per_game_total() {
 }
 
 #[test]
+fn profile_refresh_applies_at_cycle_start_and_keeps_the_pair_stable() {
+    let mut state = DynamicState::new(DynamicProfile::default(), 7, [0, 0]);
+    let mut stronger = DynamicProfile::default();
+    stronger.strength = 100;
+    state.use_profile(stronger.clone(), 7);
+    state.start_hand(7);
+    assert_eq!(state.decision_model(), ModelId::Schell911);
+    state.complete_hand(Side::Left, [10, 8], 7);
+    stronger.strength = 200;
+    state.use_profile(stronger, 7);
+    state.start_hand(7);
+    assert_eq!(state.decision_model(), ModelId::Schell911);
+    state.complete_hand(Side::Right, [20, 16], 7);
+    assert_eq!(state.decision_model(), ACE_MODEL_ID);
+}
+
+#[test]
 fn delegate_is_reselected_only_after_opposite_dealer_roles() {
     let mut state = DynamicState::new(DynamicProfile::default(), 7, [0, 0]);
 
@@ -106,6 +123,22 @@ fn delegate_is_reselected_only_after_opposite_dealer_roles() {
     assert!(!state.complete_hand(Side::Left, [20, 16], 11));
     assert!(!state.complete_hand(Side::Right, [30, 24], 11));
     assert!(state.complete_hand(Side::Left, [40, 32], 11));
+}
+
+#[test]
+fn ace_upgrade_preserves_calibrated_play_without_relabeling_evidence() {
+    let mut profile = DynamicProfile::default();
+    profile.evaluator_version = "schell_table-peg_table-13.215".to_string();
+    profile.complete_cycles = 20;
+    profile.handicap_cycles = 20;
+    profile.started_dynamic = true;
+    profile.strength = 100;
+    let mut state = DynamicState::new(profile.clone(), 7, [0, 0]);
+    assert_eq!(state.profile(), &profile);
+    assert_eq!(state.decision_model(), ModelId::Schell911);
+    assert!(!state.complete_hand(Side::Left, [10, 8], 7));
+    state.normalize_profile_version(7);
+    assert!(state.complete_hand(Side::Right, [20, 16], 7));
 }
 
 #[test]

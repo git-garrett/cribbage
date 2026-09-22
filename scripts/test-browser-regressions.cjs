@@ -902,6 +902,64 @@ function acePeggingFixture() {
   return { model, hand, lead, snapshot, state };
 }
 
+async function testDynamicCalibrationPresentation(browser, baseUrl, established) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await installStaticBuild(page);
+  await installPathwayFixture(page);
+  const { snapshot, state, hand } = acePeggingFixture();
+  const provisional = { started: true, completeCycles: 2, minimumCycles: 6, complete: false, provisionalHandicapPerGame: -0.125 };
+  const profile = {
+    username: "qa-player", displayName: "QA Player", online: true, lookingForGame: false, isSelf: true,
+    dynamicCalibration: established ? { ...provisional, completeCycles: 20, complete: true } : provisional,
+    ...(established ? { dynamicHandicap: { wpPerGame: -0.125, cycles: 20, cyclesPerGame: 4.516, evaluatorVersion: "previous-ace" } } : {}),
+  };
+  const response = {
+    snapshot: { ...snapshot, opponent: "dynamic", gameId: "qa-dynamic", deal: 1, turn: 0 },
+    state: { ...state, turn: "User", dealer: "AI", cribOwner: "AI", legalCardIds: hand.map(card => card.id), dynamicCalibration: provisional },
+  };
+  let releaseReview;
+  const reviewReady = new Promise(resolve => { releaseReview = resolve; });
+  let reviewStarted = false;
+  await page.route("**/api/game/review", async route => {
+    reviewStarted = true;
+    await reviewReady;
+    profile.dynamicHandicap = { wpPerGame: -0.166, cycles: 21, cyclesPerGame: 4.516, evaluatorVersion: "current-ace" };
+    return route.fulfill({ json: { ...response, handicapUpdated: true } });
+  });
+  await page.route("**/api/people/me", route => route.fulfill({ json: { profile } }));
+  await page.route("**/api/game/session/load", route => route.fulfill({ json: { session: null } }));
+  await page.route("**/api/game/action", route => {
+    if (["play", "play-human"].includes(route.request().postDataJSON().action)) {
+      response.state.humanHand = hand.slice(1);
+      response.state.legalCardIds = hand.slice(1).map(card => card.id);
+      response.state.analyticsEvents = [{ id: "pending-choice", gameId: "qa-dynamic", at: "2026-09-22T00:00:00Z", type: "discard", player: "human", role: "dealer", handNumber: 1, cards: ["5♣", "6♣"], remainingHand: ["A♣", "2♣", "3♣", "4♣"] }];
+    }
+    return route.fulfill({ json: response });
+  });
+  try {
+    await page.goto(`${baseUrl}/?pathwayView=play`, { waitUntil: "networkidle" });
+    await expect(page.locator("#dynamic-card-copy")).toHaveText(established ? "Adapts to your play and plays back at your skill." : "CALIBRATING");
+    await page.locator('[data-pathway-destination="dynamic"]').click();
+    await expect(page.locator("#human-hand .card")).toHaveCount(4);
+    if (established) {
+      await expect(page.locator("#dynamic-calibration-status")).toBeHidden();
+      await expect(page.locator("#dynamic-calibration-handicap")).toBeHidden();
+      await page.locator("#human-hand .card").first().click();
+      await page.locator("#play").click();
+      await expect.poll(() => reviewStarted).toBe(true);
+      await page.locator(".mobile-header-reveal:visible").click();
+      await page.locator("#app-back").click();
+      await expect(page.locator("#pathway-page")).toBeVisible();
+      releaseReview();
+      await expect(page.locator("#auth-account-profile .player-handicap")).toHaveText("(16.60)");
+    } else {
+      await expect(page.locator("#dynamic-calibration-handicap")).toBeVisible();
+      await expect(page.locator("#dynamic-calibration-handicap")).toHaveText("Provisional Handicap: 12.50");
+    }
+    return { established, correctCalibrationDisplay: true, unitlessHandicap: true };
+  } finally { releaseReview(); await page.close(); }
+}
+
 async function testFirstDealerCutTap(browser, baseUrl, mode = "touch") {
   const page = await browser.newPage({ viewport: { width: 375, height: 679 }, isMobile: true, hasTouch: true });
   await installStaticBuild(page);
@@ -1036,6 +1094,11 @@ async function testPostgameAceAnalysis(browser, baseUrl, analyticsWritable = tru
   events.splice(1, 1, ...Array.from({ length: 38 }, (_, index) => ({ ...discard, id: `discard-${index}`, handNumber: index + 1 })));
   const finished = { ...state, phase: "game_over", scores: events.at(-1).finalScores, analyticsEvents: events };
   let reviewCalls = 0;
+  await page.route("**/api/people/me", route => route.fulfill({ json: { profile: {
+    username: "qa-player", displayName: "QA Player", online: true, lookingForGame: false, isSelf: true,
+    dynamicCalibration: { started: true, completeCycles: 8, minimumCycles: 6, complete: true },
+    dynamicHandicap: { wpPerGame: reviewCalls >= 38 ? -0.166 : -0.0913, cycles: 8, cyclesPerGame: 4.516, evaluatorVersion: model },
+  } } }));
   let releaseReview;
   const reviewReady = new Promise(resolve => { releaseReview = resolve; });
   await page.route("**/api/game/session/load", route => route.fulfill({ json: { session: { gameId, snapshot, state } } }));
@@ -1049,7 +1112,7 @@ async function testPostgameAceAnalysis(browser, baseUrl, analyticsWritable = tru
       delta: 1, selectedWinProbability: 0.4, recommendedWinProbability: 0.45, winProbabilityDelta: 0.05,
     } } : event);
     await delay(40);
-    return route.fulfill({ json: { snapshot: { ...snapshot, phase: "game_over" }, state: { ...finished, analyticsEvents: reviewed } } });
+    return route.fulfill({ json: { snapshot: { ...snapshot, phase: "game_over" }, state: { ...finished, analyticsEvents: reviewed }, handicapUpdated: completed === 38 } });
   });
   try {
     await page.goto(`${baseUrl}/?pathwayView=play`, { waitUntil: "networkidle" });
@@ -1083,6 +1146,7 @@ async function testPostgameAceAnalysis(browser, baseUrl, analyticsWritable = tru
     await expect(report.locator(".decision-review-analyze")).toBeDisabled();
     await expect(report.locator(".decision-review-item")).toHaveCount(38);
     await expect(report).not.toContainText("still need Ace analysis");
+    await expect(page.locator("#auth-account-profile .player-handicap")).toHaveText("(16.60)");
     return { reviewCalls, analyticsWritable, retryOnce, updatedReport: true };
   } finally {
     releaseReview();
@@ -1197,6 +1261,10 @@ async function main() {
   const browser = await browserType.launch({ headless: true });
   try {
     const baseUrl = "https://strong-cribbage.test";
+    if (process.argv.includes("--dynamic-calibration")) {
+      console.log(JSON.stringify([await testDynamicCalibrationPresentation(browser, baseUrl, true), await testDynamicCalibrationPresentation(browser, baseUrl, false)]));
+      return;
+    }
     if (process.argv.includes("--first-cut")) {
       for (const mode of ["touch", "history", "slow", "keyboard"]) console.log(JSON.stringify(await testFirstDealerCutTap(browser, baseUrl, mode)));
       return;
@@ -1264,6 +1332,7 @@ async function main() {
       throw new Error(`Authentication recovery regression: ${JSON.stringify(state)}`);
     }
     await page.close();
+    const dynamicCalibration = [await testDynamicCalibrationPresentation(browser, baseUrl, true), await testDynamicCalibrationPresentation(browser, baseUrl, false)];
     const firstDealerCut = [];
     for (const mode of ["touch", "history", "slow", "keyboard"]) firstDealerCut.push(await testFirstDealerCutTap(browser, baseUrl, mode));
     const accountIsolation = await testAccountGameIsolation(browser, baseUrl);
@@ -1286,7 +1355,7 @@ async function main() {
     const blockedIndexedDb = await testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl);
     const people = await testPeopleInteractions(browser, baseUrl);
     const engagement = await testEngagementDashboard(browser, baseUrl);
-    console.log(JSON.stringify({ authenticationRecovery: state, firstDealerCut, accountIsolation, restoredHumanHistory, postgameAnalysis, aceOpeningPlays, puttingTogether, peggingAnimations, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
+    console.log(JSON.stringify({ authenticationRecovery: state, dynamicCalibration, firstDealerCut, accountIsolation, restoredHumanHistory, postgameAnalysis, aceOpeningPlays, puttingTogether, peggingAnimations, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
   } finally {
     await browser.close();
   }

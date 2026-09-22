@@ -54,15 +54,30 @@ describe("Dynamic calibration presentation", () => {
       minimumCycles: 6,
       complete: false,
       provisionalHandicapPerGame: -0.125,
-    })).toBe("Provisional Handicap: 12.50 WP pts/game");
+    })).toBe("Provisional Handicap: 12.50");
     expect(dynamicProvisionalHandicapCopy({
       started: true,
       completeCycles: 0,
       minimumCycles: 6,
       complete: false,
       provisionalHandicapPerGame: 0,
-    })).toBe("Provisional Handicap: 0.00 WP pts/game");
+    })).toBe("Provisional Handicap: 0.00");
     expect(playerHandicapCopy({ wpPerGame: -0.125 })).toBe("(12.50)");
+  });
+
+  it("never labels an established handicap as provisional", () => {
+    expect(dynamicProvisionalHandicapCopy({
+      started: true, completeCycles: 6, minimumCycles: 6, complete: true,
+      provisionalHandicapPerGame: -0.125,
+    })).toBeNull();
+    expect(mainSource).not.toContain("WP pts/game");
+  });
+
+  it("keeps established calibration when a stale game returns provisional progress", () => {
+    const established = { started: true, completeCycles: 6, minimumCycles: 6, complete: true };
+    const stale = { started: true, completeCycles: 2, minimumCycles: 6, complete: false };
+    expect(freshestDynamicCalibration(established, stale)).toBe(established);
+    expect(freshestDynamicCalibration(stale, established)).toBe(established);
   });
 
   it("adopts each newly reviewed cycle without letting a stale review response rewind progress", () => {

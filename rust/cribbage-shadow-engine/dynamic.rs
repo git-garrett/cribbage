@@ -7,6 +7,7 @@
 use crate::game::Side;
 use crate::model_id::{ModelId, ACE_MODEL, ACE_MODEL_ID};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 pub const DYNAMIC_PROFILE_VERSION: u8 = 4;
 pub const DYNAMIC_EVALUATOR_VERSION: &str = ACE_MODEL;
@@ -100,6 +101,10 @@ pub struct DynamicProfile {
     pub ewma_game_handicap: f64,
     /// 0 = Easy, 100 = Tough, 200 = Ace, with probabilistic blends between.
     pub strength: u16,
+    /// Records the one-time strength carryover when Ace is promoted. Evidence
+    /// and handicap totals remain separate for each evaluator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strength_baseline_evaluator: Option<String>,
 }
 
 impl Default for DynamicProfile {
@@ -117,11 +122,25 @@ impl Default for DynamicProfile {
             complete_games: 0,
             ewma_game_handicap: 0.0,
             strength: 0,
+            strength_baseline_evaluator: None,
         }
     }
 }
 
 impl DynamicProfile {
+    /// A previous production Ace remains valid for playing strength and the
+    /// published handicap while a new evaluator gathers separate evidence.
+    pub fn into_play_profile(mut self) -> Self {
+        if !ModelId::from_str(&self.evaluator_version).is_ok_and(|model| model.is_ace()) {
+            return Self::default();
+        }
+        let evaluator = self.evaluator_version.clone();
+        self.evaluator_version = DYNAMIC_EVALUATOR_VERSION.to_string();
+        self = self.into_current();
+        self.evaluator_version = evaluator;
+        self
+    }
+
     pub fn is_current(&self) -> bool {
         self.profile_version == DYNAMIC_PROFILE_VERSION
             && self.evaluator_version == DYNAMIC_EVALUATOR_VERSION
@@ -276,17 +295,25 @@ pub struct DynamicState {
     #[serde(default)]
     delegate_cycles: u32,
     delegate: DynamicDelegate,
+    // Older saved games may already have prepared a discard.
+    #[serde(default = "delegate_already_committed")]
+    delegate_committed: bool,
+}
+
+fn delegate_already_committed() -> bool {
+    true
 }
 
 impl DynamicState {
     pub fn new(profile: DynamicProfile, selector_seed: u32, _scores: [i32; 2]) -> Self {
-        let profile = profile.into_current();
+        let profile = profile.into_play_profile();
         let delegate = select_delegate(profile.strength, selector_seed, 0);
         Self {
             profile,
             first_completed_dealer: None,
             delegate_cycles: 0,
             delegate,
+            delegate_committed: false,
         }
     }
 
@@ -295,18 +322,27 @@ impl DynamicState {
     }
 
     pub fn normalize_profile_version(&mut self, selector_seed: u32) {
-        if !self.profile.is_current() {
-            let profile = std::mem::take(&mut self.profile).into_current();
+        let profile = self.profile.clone().into_play_profile();
+        if profile != self.profile {
             *self = Self::new(profile, selector_seed, [0, 0]);
         }
     }
 
     pub fn use_profile(&mut self, profile: DynamicProfile, _selector_seed: u32) {
-        self.profile = profile.into_current();
+        self.profile = profile.into_play_profile();
     }
 
     pub fn decision_model(&self) -> ModelId {
         self.delegate.model()
+    }
+
+    /// Use newly reviewed evidence before any decisions in the next cycle.
+    pub fn start_hand(&mut self, selector_seed: u32) {
+        if self.first_completed_dealer.is_none() && !self.delegate_committed {
+            self.delegate =
+                select_delegate(self.profile.strength, selector_seed, self.delegate_cycles);
+            self.delegate_committed = true;
+        }
     }
 
     /// Resamples the delegate only after a complete, role-balanced pair of
@@ -325,6 +361,7 @@ impl DynamicState {
         self.first_completed_dealer = None;
         self.delegate_cycles += 1;
         self.delegate = select_delegate(self.profile.strength, selector_seed, self.delegate_cycles);
+        self.delegate_committed = false;
         true
     }
 }

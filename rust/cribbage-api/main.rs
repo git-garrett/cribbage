@@ -680,7 +680,7 @@ fn game_action(
             let model = json_string(body, "opponent")
                 .and_then(|value| ModelId::from_str(&value).ok())
                 .unwrap_or(ACE_MODEL_ID);
-            if let Some(existing) = tag.as_deref().and_then(|tag| {
+            if let Some(existing_id) = tag.as_deref().and_then(|tag| {
                 app.sessions
                     .values()
                     .filter(|session| {
@@ -689,7 +689,13 @@ fn game_action(
                             && same_session_opponent(session.model, model)
                     })
                     .max_by_key(|session| &session.updated_at)
+                    .map(|session| session.id.clone())
             }) {
+                let existing = app
+                    .sessions
+                    .get_mut(&existing_id)
+                    .expect("existing session");
+                refresh_session_dynamic_profile(&server.data_dir, existing)?;
                 return response_for_session(existing).map(|response| (response, None));
             }
             let inherited_dynamic_profile = if model == ModelId::Dynamic {
@@ -738,6 +744,7 @@ fn game_action(
         if !session_owned_by(session, authenticated_user) {
             return Err("Game session was not found for this account.".to_string());
         }
+        refresh_session_dynamic_profile(&server.data_dir, session)?;
         let before = session.clone();
         if tag.is_some() {
             session.tag = tag;
@@ -767,18 +774,20 @@ fn game_action(
                 *session = before;
                 return Err(error);
             }
-        } else if session.tag != before.tag {
+        } else if session.tag != before.tag || session.dynamic != before.dynamic {
             session.updated_at = isoish_now();
             if let Err(error) = persist_session_snapshot(&server.data_dir, session) {
                 *session = before;
                 return Err(error);
             }
         }
+        let mut handicap_updated = false;
         if action == "continue-scoring" {
             if let Some(user) = authenticated_user {
                 if let Some(profile) =
                     sync_dynamic_player_profile(&server.data_dir, user.id, session)?
                 {
+                    handicap_updated = true;
                     if let Some(dynamic) = session.dynamic.as_mut() {
                         dynamic.use_profile(profile, session.seed);
                         persist_session_snapshot(&server.data_dir, session)?;
@@ -786,7 +795,7 @@ fn game_action(
                 }
             }
         }
-        let response = response_for_session(session)?;
+        let response = response_with_handicap_update(session, handicap_updated)?;
         let recommendation_game = if action == "master-hint" {
             let kind = match session.game.phase {
                 Phase::Discard => ReviewKind::Discard,
@@ -946,10 +955,11 @@ fn review_game(
             .state
             .lock()
             .map_err(|_| "server state lock poisoned".to_string())?;
-        response_for_session(
+        response_with_handicap_update(
             app.sessions
                 .get(&game_id)
                 .ok_or_else(|| "The saved game is no longer available.".to_string())?,
+            profile_changed,
         )
     })();
     match result {
@@ -1388,23 +1398,113 @@ fn load_session_for_player(
 
 fn load_dynamic_profile(data_dir: &Path, user_id: i64) -> Result<Option<DynamicProfile>, String> {
     let connection = open_game_database(data_dir)?;
-    let saved = connection
-        .query_row(
-            "SELECT profile_json FROM dynamic_player_profiles
-             WHERE user_id = ?1 AND evaluator_version = ?2",
-            params![user_id, DYNAMIC_EVALUATOR_VERSION],
-            |row| row.get::<_, String>(0),
+    load_dynamic_profile_from_connection(&connection, user_id)
+}
+
+/// Prefer established calibration, then the current evaluator. A promotion
+/// must not replace an established player with a provisional profile.
+fn dynamic_profile_rows(
+    connection: &Connection,
+    user_id: i64,
+) -> Result<Vec<(String, String)>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT evaluator_version, profile_json FROM dynamic_player_profiles
+         WHERE user_id = ?1
+         ORDER BY (COALESCE(json_extract(profile_json, '$.complete_cycles'), 0) >= ?3) DESC,
+                  (evaluator_version = ?2) DESC, updated_at DESC, evaluator_version",
         )
-        .optional()
-        .map_err(|error| format!("find Dynamic player profile: {}", error))?;
-    saved
-        .map(|text| {
-            let profile = serde_json::from_str::<DynamicProfile>(&text)
-                .map_err(|error| format!("parse Dynamic player profile: {}", error))?;
-            Ok(Some(profile.into_current()))
-        })
-        .transpose()
-        .map(Option::flatten)
+        .map_err(|error| format!("find Dynamic player profiles: {error}"))?;
+    let rows = statement
+        .query_map(
+            params![user_id, DYNAMIC_EVALUATOR_VERSION, MIN_COMPLETE_CYCLES],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .map_err(|error| format!("read Dynamic player profiles: {error}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("collect Dynamic player profiles: {error}"))
+}
+
+fn load_dynamic_profile_from_connection(
+    connection: &Connection,
+    user_id: i64,
+) -> Result<Option<DynamicProfile>, String> {
+    for (evaluator, text) in dynamic_profile_rows(connection, user_id)? {
+        if !ModelId::from_str(&evaluator).is_ok_and(|model| model.is_ace()) {
+            continue;
+        }
+        let mut profile = serde_json::from_str::<DynamicProfile>(&text)
+            .map_err(|error| format!("parse Dynamic player profile: {error}"))?;
+        inherit_dynamic_strength(connection, user_id, &mut profile)?;
+        return Ok(Some(profile.into_play_profile()));
+    }
+    Ok(None)
+}
+
+fn inherit_dynamic_strength(
+    connection: &Connection,
+    user_id: i64,
+    profile: &mut DynamicProfile,
+) -> Result<bool, String> {
+    if profile.evaluator_version != DYNAMIC_EVALUATOR_VERSION
+        || profile.strength_baseline_evaluator.is_some()
+    {
+        return Ok(false);
+    }
+    for (evaluator, text) in dynamic_profile_rows(connection, user_id)? {
+        if evaluator == DYNAMIC_EVALUATOR_VERSION
+            || !ModelId::from_str(&evaluator).is_ok_and(|model| model.is_ace())
+        {
+            continue;
+        }
+        let previous = serde_json::from_str::<DynamicProfile>(&text)
+            .map_err(|error| format!("parse prior Dynamic strength: {error}"))?
+            .into_play_profile();
+        if previous.complete_cycles < MIN_COMPLETE_CYCLES || !previous.started_dynamic {
+            continue;
+        }
+        let mut rebuilt = DynamicProfile {
+            strength: previous.strength,
+            ..DynamicProfile::default()
+        };
+        let mut statement = connection.prepare(
+            "SELECT sample_json FROM dynamic_profile_cycles WHERE user_id=?1 AND evaluator_version=?2 ORDER BY rowid",
+        ).map_err(|error| format!("read Dynamic strength evidence: {error}"))?;
+        let samples = statement
+            .query_map(params![user_id, DYNAMIC_EVALUATOR_VERSION], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|error| format!("read Dynamic strength samples: {error}"))?;
+        for sample in samples {
+            let sample =
+                sample.map_err(|error| format!("read Dynamic strength sample: {error}"))?;
+            rebuilt.observe_cycle(
+                serde_json::from_str(&sample)
+                    .map_err(|error| format!("parse Dynamic strength sample: {error}"))?,
+            );
+        }
+        profile.strength = rebuilt.strength;
+        profile.started_dynamic = true;
+        profile.strength_baseline_evaluator = Some(evaluator);
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn refresh_session_dynamic_profile(data_dir: &Path, session: &mut Session) -> Result<(), String> {
+    if session.model != ModelId::Dynamic {
+        return Ok(());
+    }
+    if let Some(user_id) = session.owner_user_id {
+        if let Some(profile) = load_dynamic_profile(data_dir, user_id)? {
+            let dynamic = session.dynamic.as_mut().expect("Dynamic session has state");
+            if dynamic.profile() != &profile {
+                dynamic.use_profile(profile, session.seed);
+                persist_session_snapshot(data_dir, session)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1602,7 +1702,15 @@ fn sync_dynamic_profile_evidence(
         .map(|profile| !profile.is_current())
         .unwrap_or(true);
     let mut profile = parsed.map(DynamicProfile::into_current).unwrap_or_default();
-    let mut changed = false;
+    let mut changed = inherit_dynamic_strength(transaction, user_id, &mut profile)?;
+    if let Some(previous) = load_dynamic_profile_from_connection(transaction, user_id)? {
+        if previous.evaluator_version != DYNAMIC_EVALUATOR_VERSION {
+            if previous.started_dynamic && !profile.started_dynamic {
+                profile.started_dynamic = true;
+                changed = true;
+            }
+        }
+    }
     if started_dynamic && !profile.started_dynamic {
         profile.started_dynamic = true;
         changed = true;
@@ -1679,7 +1787,11 @@ fn sync_dynamic_profile_evidence(
             )
             .map_err(|error| format!("save Dynamic player profile: {}", error))?;
     }
-    Ok((changed || needs_initial_save).then_some(profile))
+    if changed || needs_initial_save {
+        load_dynamic_profile_from_connection(transaction, user_id)
+    } else {
+        Ok(None)
+    }
 }
 
 fn persist_completed_game_upload(data_dir: &Path, game_id: &str, body: &str) -> Result<(), String> {
@@ -1898,6 +2010,21 @@ fn apply_action(
     body: &str,
     model_root: &str,
 ) -> Result<(), String> {
+    if matches!(
+        action,
+        "prepare-cut-for-deal"
+            | "prepare-ai-discard"
+            | "discard"
+            | "finish-discard"
+            | "finish-discard-with-cards"
+    ) && session.game.phase == Phase::Discard
+        && session.game.player(HUMAN).hand.len() == 6
+        && session.game.player(AI).hand.len() == 6
+    {
+        if let Some(dynamic) = session.dynamic.as_mut() {
+            dynamic.start_hand(session.seed);
+        }
+    }
     match action {
         "state" => Ok(()),
         "trouble-game" => {
@@ -2549,6 +2676,13 @@ fn response_for_session(session: &Session) -> Result<String, String> {
     )
     .map_err(|error| error.to_string())?;
     response.push('}');
+    Ok(response)
+}
+
+fn response_with_handicap_update(session: &Session, updated: bool) -> Result<String, String> {
+    let mut response = response_for_session(session)?;
+    response.pop();
+    write!(response, ",\"handicapUpdated\":{updated}}}").map_err(|error| error.to_string())?;
     Ok(response)
 }
 
@@ -3590,7 +3724,7 @@ fn load_session(
                 app.sessions.insert(id, session);
             }
         }
-        let session = in_memory_id
+        let session_id = in_memory_id
             .as_deref()
             .and_then(|id| app.sessions.get(id))
             .or_else(|| {
@@ -3603,8 +3737,11 @@ fn load_session(
                                 .is_none_or(|model| same_session_opponent(session.model, model))
                     })
                     .max_by_key(|session| &session.updated_at)
-            });
-        if let Some(session) = session {
+            })
+            .map(|session| session.id.clone());
+        if let Some(session_id) = session_id {
+            let session = app.sessions.get_mut(&session_id).expect("resumed session");
+            refresh_session_dynamic_profile(&server.data_dir, session)?;
             return Ok(format!(
                 "{{\"ok\":true,\"session\":{{\"gameId\":\"{}\",\"updatedAt\":\"{}\",\"snapshot\":{},\"state\":{}}}}}",
                 json_escape(&session.id),
@@ -4992,6 +5129,140 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_prepared_discard_freezes_the_delegate_across_profile_refresh() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let root = root.to_str().unwrap();
+        let mut session = new_session_from_seed(ModelId::Dynamic, None, 17, 1);
+        session.waiting_for_deal_cut = false;
+        let data_dir = std::env::temp_dir().join(format!(
+            "dynamic-preparation-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        persist_session_snapshot(&data_dir, &session).unwrap();
+        let session_id = session.id.clone();
+        let mut app = AppState::default();
+        app.sessions.insert(session_id.clone(), session);
+        let server = Server {
+            state: Mutex::new(app),
+            data_dir: data_dir.clone(),
+            model_root: root.to_string(),
+        };
+        let response = game_action(
+            &server,
+            &json!({"gameId":session_id,"action":"prepare-ai-discard"}).to_string(),
+            None,
+        );
+        assert_eq!(response.status, 200);
+        let response: Value = serde_json::from_str(&response.body).unwrap();
+        let prepared = response["recommendation"]["cardIds"].clone();
+        let mut session = load_session_by_id(&data_dir, &session_id).unwrap().unwrap();
+        let dynamic = session.dynamic.as_mut().unwrap();
+        dynamic.use_profile(
+            DynamicProfile {
+                strength: 200,
+                ..DynamicProfile::default()
+            },
+            session.seed,
+        );
+        let ids = [
+            session.game.player(HUMAN).hand[0].id,
+            session.game.player(HUMAN).hand[1].id,
+        ];
+        apply_action(
+            &mut session,
+            "discard",
+            &json!({"ids":ids}).to_string(),
+            root,
+        )
+        .unwrap();
+        apply_action(
+            &mut session,
+            "finish-discard-with-cards",
+            &json!({"ids":prepared}).to_string(),
+            root,
+        )
+        .unwrap();
+        assert_eq!(session.decision_model(), ModelId::Myrmidon5);
+        let dynamic = session.dynamic.as_mut().unwrap();
+        assert!(!dynamic.complete_hand(AI, [10, 8], session.seed));
+        dynamic.start_hand(session.seed);
+        assert_eq!(dynamic.decision_model(), ModelId::Myrmidon5);
+        assert!(dynamic.complete_hand(HUMAN, [20, 16], session.seed));
+        dynamic.start_hand(session.seed);
+        assert_eq!(dynamic.decision_model(), ACE_MODEL_ID);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires the installed production correction asset; run by predeploy QA"]
+    fn dynamic_plays_the_selected_executable_policy_at_every_strength_anchor() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let root = root.to_str().unwrap();
+        for (strength, delegate) in [
+            (0, ModelId::Myrmidon5),
+            (100, ModelId::Schell911),
+            (200, ACE_MODEL_ID),
+        ] {
+            let mut session = new_session_from_seed(ModelId::Dynamic, None, 17, 1);
+            session.use_dynamic_profile(DynamicProfile {
+                strength,
+                ..DynamicProfile::default()
+            });
+            session.waiting_for_deal_cut = false;
+            let expected = recommend_discard_for_side(&session.game, AI, delegate, root).unwrap();
+            let original_hand = session.game.player(AI).hand.clone();
+            let discards = [
+                session.game.player(HUMAN).hand[0].id,
+                session.game.player(HUMAN).hand[1].id,
+            ];
+            session.game.discard(HUMAN, discards).unwrap();
+            session.waiting_for_ai_discard = true;
+            apply_action(&mut session, "finish-discard", "{}", root).unwrap();
+            let mut actual = original_hand
+                .iter()
+                .filter(|card| !session.game.player(AI).hand.contains(card))
+                .map(|card| card.id)
+                .collect::<Vec<_>>();
+            let mut expected_ids = expected.card_ids;
+            actual.sort_unstable();
+            expected_ids.sort_unstable();
+            assert_eq!(actual, expected_ids, "discard at strength {strength}");
+            session.turn_card_revealed = true;
+            if session.game.current_player() == HUMAN {
+                let card = session.game.legal_cards(HUMAN)[0].id;
+                session.game.play_card(HUMAN, card).unwrap();
+            }
+            let expected = recommend_peg_for_side_with_caches(
+                &session.game,
+                AI,
+                delegate,
+                None,
+                root,
+                None,
+                None,
+            )
+            .unwrap();
+            let PegDecision::Play { card_id, .. } = expected else {
+                panic!("fixture must allow an AI card");
+            };
+            apply_action(&mut session, "advance-pegging", "{}", root).unwrap();
+            assert_eq!(
+                session.game.plays.last().unwrap().id,
+                card_id,
+                "pegging at strength {strength}"
+            );
+        }
+    }
+
+    #[test]
     fn public_pegging_cards_preserve_current_and_completed_series_owners() {
         let mut session = new_session(ModelId::Schell13, None);
         session.waiting_for_deal_cut = false;
@@ -6115,6 +6386,150 @@ mod tests {
             calibration_review("pone-peg", 2, false, ReviewKind::Peg, 0.50, 0.50),
         ];
         session
+    }
+
+    #[test]
+    fn resumed_dynamic_uses_calibration_earned_in_other_games() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-dynamic-resume-calibration-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        auth::initialize(&data_dir).unwrap();
+        let connection = open_game_database(&data_dir).unwrap();
+        let user = connection.query_row(
+            "SELECT id, username, display_name, email, password_hash FROM auth_users WHERE username = 'Travis'",
+            [], auth::user_from_row,
+        ).unwrap();
+        drop(connection);
+        let server = Server {
+            state: Mutex::new(AppState::default()),
+            model_root: String::new(),
+            data_dir: data_dir.clone(),
+        };
+        let started = game_action(
+            &server,
+            &json!({"action":"new", "opponent":DYNAMIC, "tag":"Travis"}).to_string(),
+            Some(&user),
+        );
+        assert_eq!(started.status, 200);
+        let game_id = server
+            .state
+            .lock()
+            .unwrap()
+            .sessions
+            .keys()
+            .next()
+            .unwrap()
+            .clone();
+        for cycle in 0..MIN_COMPLETE_CYCLES {
+            let reviewed =
+                reviewed_cycle_session(ModelId::Myrmidon5, &format!("other-game-{cycle}"));
+            sync_dynamic_player_profile(&data_dir, user.id, &reviewed).unwrap();
+        }
+        let saved = load_dynamic_profile(&data_dir, user.id).unwrap().unwrap();
+        assert_eq!(saved.complete_cycles, MIN_COMPLETE_CYCLES);
+        // Exercise a persisted resume, not just the in-memory state.
+        server.state.lock().unwrap().sessions.clear();
+        let resumed = game_action(
+            &server,
+            &json!({"action":"state", "gameId":game_id, "tag":"Travis"}).to_string(),
+            Some(&user),
+        );
+        assert_eq!(resumed.status, 200);
+        let value: Value = serde_json::from_str(&resumed.body).unwrap();
+        assert_eq!(
+            value["state"]["dynamicCalibration"]["complete"], true,
+            "an already-calibrated player must not be shown as calibrating on resume"
+        );
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn ace_upgrade_keeps_calibration_and_accepts_evidence_from_every_model() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-calibration-upgrade-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        auth::initialize(&data_dir).unwrap();
+        let connection = open_game_database(&data_dir).unwrap();
+        let user_id: i64 = connection
+            .query_row(
+                "SELECT id FROM auth_users WHERE username = 'Travis'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut established = DynamicProfile::default();
+        established.complete_cycles = 20;
+        established.handicap_cycles = 20;
+        established.ewma_cycle_handicap = -0.125;
+        established.started_dynamic = true;
+        established.strength = 100;
+        established.evaluator_version = MODEL_13_215.to_string();
+        connection.execute("INSERT INTO dynamic_player_profiles (user_id, evaluator_version, profile_json, updated_at) VALUES (?1, ?2, ?3, ?4)", params![user_id, MODEL_13_215, serde_json::to_string(&established).unwrap(), isoish_now()]).unwrap();
+        // Reproduce a partial profile already created by the Ace promotion.
+        connection.execute("INSERT INTO dynamic_player_profiles (user_id, evaluator_version, profile_json, updated_at) VALUES (?1, ?2, ?3, ?4)", params![user_id, DYNAMIC_EVALUATOR_VERSION, serde_json::to_string(&DynamicProfile::default()).unwrap(), isoish_now()]).unwrap();
+        assert_eq!(
+            load_dynamic_profile(&data_dir, user_id).unwrap().unwrap(),
+            established
+        );
+        let models: Vec<String> = serde_json::from_str::<Value>(&model_json()).unwrap()["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap().to_string())
+            .collect();
+        for (index, model) in models.iter().enumerate() {
+            let session = reviewed_cycle_session(
+                ModelId::from_str(model).unwrap(),
+                &format!("model-cycle-{index}"),
+            );
+            let effective = sync_dynamic_player_profile(&data_dir, user_id, &session)
+                .unwrap()
+                .unwrap();
+            let current: String = connection.query_row("SELECT profile_json FROM dynamic_player_profiles WHERE user_id=?1 AND evaluator_version=?2", params![user_id, DYNAMIC_EVALUATOR_VERSION], |row| row.get(0)).unwrap();
+            let current: DynamicProfile = serde_json::from_str(&current).unwrap();
+            assert_eq!(current.complete_cycles, index as u32 + 1, "{model}");
+            assert_eq!(current.handicap_cycles, index as u32 + 1, "{model}");
+            assert!(current.started_dynamic);
+            if current.complete_cycles < MIN_COMPLETE_CYCLES {
+                assert_eq!(effective, established, "{model}");
+                assert_eq!(current.strength, 100);
+            } else {
+                assert_eq!(effective.evaluator_version, DYNAMIC_EVALUATOR_VERSION);
+            }
+            assert!(
+                sync_dynamic_player_profile(&data_dir, user_id, &session)
+                    .unwrap()
+                    .is_none(),
+                "duplicate evidence for {model}"
+            );
+        }
+        let original: String = connection.query_row("SELECT profile_json FROM dynamic_player_profiles WHERE user_id=?1 AND evaluator_version=?2", params![user_id, MODEL_13_215], |row| row.get(0)).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DynamicProfile>(&original).unwrap(),
+            established
+        );
+        let expected = load_dynamic_profile(&data_dir, user_id).unwrap().unwrap();
+        // Recover a profile that already passed calibration after being reset
+        // to Easy, without changing its reviewed evidence or handicap.
+        connection.execute("UPDATE dynamic_player_profiles SET profile_json=json_remove(json_set(profile_json, '$.strength', 15), '$.strength_baseline_evaluator') WHERE user_id=?1 AND evaluator_version=?2", params![user_id, DYNAMIC_EVALUATOR_VERSION]).unwrap();
+        let recovered = load_dynamic_profile(&data_dir, user_id).unwrap().unwrap();
+        assert_eq!(recovered.strength, expected.strength);
+        assert_eq!(recovered.handicap_cycles, expected.handicap_cycles);
+        assert_eq!(recovered.handicap_per_game(), expected.handicap_per_game());
+        let duplicate = reviewed_cycle_session(ModelId::Myrmidon5, "model-cycle-0");
+        assert!(sync_dynamic_player_profile(&data_dir, user_id, &duplicate)
+            .unwrap()
+            .is_some());
+        assert!(sync_dynamic_player_profile(&data_dir, user_id, &duplicate)
+            .unwrap()
+            .is_none());
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[test]
