@@ -2532,7 +2532,7 @@ function renderPeopleProfile(profile: PeopleProfile): void {
   const handicap = profile.dynamicHandicap;
   els.peopleProfileHandicap.hidden = !handicap;
   els.peopleProfileHandicap.textContent = handicap
-    ? `Ace handicap: ${dynamicHandicapPointsCopy(handicap.wpPerGame)} WP pts/game · ${handicap.cycles} calibrated cycle${handicap.cycles === 1 ? "" : "s"}`
+    ? `Ace handicap: ${dynamicHandicapPointsCopy(handicap.wpPerGame)} · ${handicap.cycles} calibrated cycle${handicap.cycles === 1 ? "" : "s"}`
     : "";
   els.peopleProfilePlay.hidden = profile.isSelf || !profile.online;
   els.peopleProfilePlay.textContent = authenticatedUser ? "Play now" : "Sign in to play";
@@ -3543,10 +3543,7 @@ function syncPathwayResumePresentation(): void {
     ? state.game?.dynamicCalibration
     : null;
   const profileCalibration = ownPeopleProfile?.dynamicCalibration;
-  const calibration = liveCalibration &&
-    (!profileCalibration || liveCalibration.completeCycles >= profileCalibration.completeCycles)
-    ? liveCalibration
-    : profileCalibration;
+  const calibration = freshestDynamicCalibration(profileCalibration, liveCalibration);
   const hasStartedGame = Boolean(
     calibration?.started ||
     remoteResumableModelGames.has(PATHWAY_OPPONENTS.dynamic) ||
@@ -3558,8 +3555,10 @@ function syncPathwayResumePresentation(): void {
 }
 
 function renderDynamicCalibrationStatus(game: GameState): void {
-  const calibration = game.dynamicCalibration;
-  const calibrating = isDynamicCalibrating(calibration);
+  const calibration = game.dynamicCalibration
+    ? freshestDynamicCalibration(ownPeopleProfile?.dynamicCalibration, game.dynamicCalibration)
+    : null;
+  const calibrating = isDynamicCalibrating(calibration) && !ownPeopleProfile?.dynamicHandicap;
   els.dynamicCalibrationStatus.hidden = !calibrating;
   if (!calibration || !calibrating) {
     els.dynamicCalibrationStatus.removeAttribute("aria-label");
@@ -4492,6 +4491,23 @@ function cumulativeForecastParThroughHand(
 interface ServerGameActionResponse {
   state: GameState;
   snapshot: GameSnapshot;
+  handicapUpdated?: boolean;
+}
+
+async function refreshOwnHandicap(): Promise<void> {
+  const owner = authenticatedUser;
+  if (!owner) return;
+  try {
+    const { profile } = await authJson<PeopleProfileResponse>("/api/people/me");
+    if (authenticatedUser !== owner) return;
+    ownPeopleProfile = profile;
+    setPlayerIdentity(els.authAccountProfile, profile.displayName, profile.dynamicHandicap ?? null);
+    setPlayerIdentity(els.humanName, profile.displayName, profile.dynamicHandicap ?? null);
+    syncPathwayResumePresentation();
+    if (state.game) renderDynamicCalibrationStatus(state.game);
+  } catch (error) {
+    console.warn("Handicap refresh failed", error);
+  }
 }
 
 interface MasterHint {
@@ -4664,6 +4680,7 @@ async function serverGameAction(action: string, payload: Record<string, unknown>
     return state.game ?? response.state;
   }
   applyAuthoritativeGameState(response.snapshot, response.state);
+  if (response.handicapUpdated) void refreshOwnHandicap();
   const gameId = response.snapshot.gameId;
   if (action === "new" && gameId) {
     activityTracker.track("game_start", {
@@ -10286,6 +10303,7 @@ function requestNextStoredDecisionReview(
       });
       if (!isCurrent()) throw new AuthenticationRequiredError();
       applyHumanGameResponse(response);
+      if (response.handicapUpdated) await refreshOwnHandicap();
       return gameAnalysisProgress(loadAnalytics().events, gameId);
     }
     const before = gameAnalysisProgress(loadAnalytics().events, gameId);
@@ -10298,6 +10316,7 @@ function requestNextStoredDecisionReview(
     if (!isCurrent()) throw new AuthenticationRequiredError();
     syncAnalytics(response.state.analyticsEvents);
     mergeReviewedDynamicCalibration(gameId, response.state.dynamicCalibration);
+    if (response.handicapUpdated) await refreshOwnHandicap();
     return gameAnalysisProgress(loadAnalytics().events, gameId);
   });
   storedReviewQueues.set(gameId, request);

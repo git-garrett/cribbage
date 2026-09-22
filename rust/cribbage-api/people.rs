@@ -22,8 +22,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{
-    auth::AuthUser, open_game_database, refresh_leaderboard_summary, sync_dynamic_profile_evidence,
-    EligibleDynamicCycle, Request, Response, Server,
+    auth::AuthUser, dynamic_profile_rows, open_game_database, refresh_leaderboard_summary,
+    sync_dynamic_profile_evidence, EligibleDynamicCycle, Request, Response, Server,
 };
 
 const ONLINE_SECONDS: i64 = 15 * 60;
@@ -91,22 +91,16 @@ fn dynamic_handicap_for_user(
     connection: &rusqlite::Connection,
     user_id: i64,
 ) -> Result<Option<Value>, PeopleError> {
-    let saved = connection
-        .query_row(
-            "SELECT evaluator_version, profile_json
-             FROM dynamic_player_profiles
-             WHERE user_id = ?1 ORDER BY updated_at DESC LIMIT 1",
-            [user_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
-        .optional()
-        .map_err(|error| PeopleError::internal("read Dynamic handicap", error))?;
-    let Some((evaluator_version, profile_json)) = saved else {
-        return Ok(None);
-    };
-    let profile = serde_json::from_str::<Value>(&profile_json)
-        .map_err(|error| PeopleError::internal("parse Dynamic handicap", error))?;
-    Ok(dynamic_handicap_value(&evaluator_version, &profile))
+    for (evaluator_version, profile_json) in dynamic_profile_rows(connection, user_id)
+        .map_err(|error| PeopleError::internal("read Dynamic handicap", error))?
+    {
+        let profile = serde_json::from_str::<Value>(&profile_json)
+            .map_err(|error| PeopleError::internal("parse Dynamic handicap", error))?;
+        if let Some(handicap) = dynamic_handicap_value(&evaluator_version, &profile) {
+            return Ok(Some(handicap));
+        }
+    }
+    Ok(None)
 }
 
 pub fn handicap_summaries(data_dir: &Path) -> Result<HashMap<String, Value>, String> {
@@ -116,11 +110,11 @@ pub fn handicap_summaries(data_dir: &Path) -> Result<HashMap<String, Value>, Str
             "SELECT u.display_name, dp.evaluator_version, dp.profile_json
              FROM dynamic_player_profiles dp
              JOIN auth_users u ON u.id = dp.user_id
-             ORDER BY u.id, dp.updated_at DESC",
+             ORDER BY u.id, (dp.evaluator_version = ?1) DESC, dp.updated_at DESC, dp.evaluator_version",
         )
         .map_err(|error| format!("prepare player handicaps: {error}"))?;
     let rows = statement
-        .query_map([], |row| {
+        .query_map([DYNAMIC_EVALUATOR_VERSION], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -517,16 +511,10 @@ fn profile_value(
         value["email"] = Value::String(profile.3);
         value["textSize"] = Value::String(profile.5);
     }
-    if let Some((evaluator_version, profile_json)) = connection
-        .query_row(
-            "SELECT evaluator_version, profile_json
-             FROM dynamic_player_profiles
-             WHERE user_id = ?1 ORDER BY updated_at DESC LIMIT 1",
-            [profile.0],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
-        .optional()
+    if let Some((_, profile_json)) = dynamic_profile_rows(&connection, profile.0)
         .map_err(|error| PeopleError::internal("read Dynamic handicap", error))?
+        .into_iter()
+        .next()
     {
         let dynamic_profile = serde_json::from_str::<Value>(&profile_json)
             .map_err(|error| PeopleError::internal("parse Dynamic handicap", error))?;
@@ -542,9 +530,9 @@ fn profile_value(
             "minimumCycles": MIN_COMPLETE_CYCLES,
             "complete": cycles >= u64::from(MIN_COMPLETE_CYCLES),
         });
-        if let Some(handicap) = dynamic_handicap_value(&evaluator_version, &dynamic_profile) {
-            value["dynamicHandicap"] = handicap;
-        }
+    }
+    if let Some(handicap) = dynamic_handicap_for_user(&connection, profile.0)? {
+        value["dynamicHandicap"] = handicap;
     }
     if let Some(viewer_id) = viewer_id.filter(|viewer_id| *viewer_id != profile.0) {
         value["headToHead"] = head_to_head_value(&connection, viewer_id, profile.0)?;
@@ -1271,7 +1259,11 @@ fn table_row(connection: &rusqlite::Connection, table_id: &str) -> Result<TableR
     table_row_after(connection, table_id, Some(unix_seconds()))
 }
 
-fn table_row_after(connection: &rusqlite::Connection, table_id: &str, expires_after: Option<i64>) -> Result<TableRow, PeopleError> {
+fn table_row_after(
+    connection: &rusqlite::Connection,
+    table_id: &str,
+    expires_after: Option<i64>,
+) -> Result<TableRow, PeopleError> {
     connection
         .query_row(
             "SELECT c.status, c.challenger_id, c.challenged_id,
@@ -1523,7 +1515,9 @@ fn human_game_action(
         && (input.payload.get("handNumber").is_some() || input.payload.get("phase").is_some())
         && !counting_position_matches
     {
-        return Err(PeopleError::conflict("That review has already advanced. Refresh the table."));
+        return Err(PeopleError::conflict(
+            "That review has already advanced. Refresh the table.",
+        ));
     }
     if revision != input.revision && input.action != "discard" && !counting_position_matches {
         return Err(PeopleError::conflict(
@@ -1724,13 +1718,15 @@ fn human_game_review(
     if review_saved {
         notify_human_game_watchers();
     }
-    Ok(human_game_response(
+    let mut response = human_game_response(
         &input.table_id,
         &row,
         &record,
         response_revision,
         viewer,
-    ))
+    );
+    response["handicapUpdated"] = Value::Bool(profile_changed);
+    Ok(response)
 }
 
 fn queue_human_decision_review(
@@ -3084,6 +3080,41 @@ mod tests {
     }
 
     #[test]
+    fn established_handicap_survives_a_provisional_new_evaluator_everywhere() {
+        let server = test_server("handicap-upgrade");
+        let account = user(&server, "Garrett");
+        let connection = open_game_database(&server.data_dir).unwrap();
+        for (version, cycles, handicap, at) in [
+            ("schell_table-peg_table-13.215", 20, -0.025, "2026-09-01"),
+            (DYNAMIC_EVALUATOR_VERSION, 2, -0.01, "2026-09-22"),
+        ] {
+            connection.execute("INSERT INTO dynamic_player_profiles (user_id, evaluator_version, profile_json, updated_at) VALUES (?1, ?2, ?3, ?4)", params![account.id, version, json!({"started_dynamic":true,"complete_cycles":cycles,"handicap_cycles":cycles,"ewma_cycle_handicap":handicap,"length_games":6,"ewma_cycles_per_game":5.0}).to_string(), at]).unwrap();
+        }
+        let check = |expected: f64, cycles: u32, version: &str| {
+            let profile = profile_value(&server, "Garrett", Some(account.id), true).unwrap();
+            assert_eq!(profile["profile"]["dynamicCalibration"]["complete"], true);
+            assert_eq!(
+                profile["profile"]["dynamicCalibration"]["completeCycles"],
+                cycles
+            );
+            let handicap = dynamic_handicap_for_user(&connection, account.id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(profile["profile"]["dynamicHandicap"], handicap);
+            assert_eq!(
+                handicap_summaries(&server.data_dir).unwrap()["Garrett"],
+                handicap
+            );
+            assert_eq!(handicap["wpPerGame"], expected);
+            assert_eq!(handicap["evaluatorVersion"], version);
+        };
+        check(-0.125, 20, "schell_table-peg_table-13.215");
+        connection.execute("UPDATE dynamic_player_profiles SET profile_json=json_set(profile_json, '$.complete_cycles', 6, '$.handicap_cycles', 6) WHERE user_id=?1 AND evaluator_version=?2", params![account.id, DYNAMIC_EVALUATOR_VERSION]).unwrap();
+        check(-0.05, 6, DYNAMIC_EVALUATOR_VERSION);
+        std::fs::remove_dir_all(server.data_dir).unwrap();
+    }
+
+    #[test]
     fn player_profile_includes_the_versioned_ace_handicap() {
         let server = test_server("dynamic-handicap");
         let garrett = user(&server, "Garrett");
@@ -4305,10 +4336,15 @@ mod tests {
                 );
                 let row = table_row(&connection, "t").unwrap();
                 if let Ok(dir) = std::env::var("CRIBBAGE_PVP_BROWSER_FIXTURES") {
-                    std::fs::write(std::path::Path::new(&dir).join("report.json"), serde_json::to_vec(&json!([
-                        human_game_response("t", &row, &record, 9999, Side::Left),
-                        human_game_response("t", &row, &record, 9999, Side::Right),
-                    ])).unwrap()).unwrap();
+                    std::fs::write(
+                        std::path::Path::new(&dir).join("report.json"),
+                        serde_json::to_vec(&json!([
+                            human_game_response("t", &row, &record, 9999, Side::Left),
+                            human_game_response("t", &row, &record, 9999, Side::Right),
+                        ]))
+                        .unwrap(),
+                    )
+                    .unwrap();
                 }
                 let mut reviewed = record.clone();
                 for saved in &mut reviewed.decision_reviews {

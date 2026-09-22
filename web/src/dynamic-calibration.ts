@@ -32,6 +32,8 @@ export function freshestDynamicCalibration(
   candidate: DynamicCalibration | null | undefined,
 ): DynamicCalibration | null | undefined {
   if (!candidate) return current;
+  if (current?.complete && !candidate.complete) return current;
+  if (candidate.complete && !current?.complete) return candidate;
   if (!current || candidate.completeCycles > current.completeCycles) return candidate;
   return current;
 }
@@ -39,9 +41,10 @@ export function freshestDynamicCalibration(
 export function dynamicProvisionalHandicapCopy(
   calibration: DynamicCalibration | null | undefined,
 ): string | null {
+  if (!isDynamicCalibrating(calibration)) return null;
   const handicap = calibration?.provisionalHandicapPerGame;
   if (typeof handicap !== "number" || !Number.isFinite(handicap)) return null;
-  return `Provisional Handicap: ${dynamicHandicapPointsCopy(handicap)} WP pts/game`;
+  return `Provisional Handicap: ${dynamicHandicapPointsCopy(handicap)}`;
 }
 
 export function dynamicHandicapPointsCopy(handicap: number): string {
