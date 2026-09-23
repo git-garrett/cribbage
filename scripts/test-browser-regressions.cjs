@@ -1052,7 +1052,7 @@ async function testAceOpeningPlayProgress(browser, baseUrl, dealer = "User", red
     Object.assign(state, { dealer, cribOwner: dealer, turn: "User", legalCardIds: hand.map(card => card.id) });
   }
   let progressRequests = 0;
-  let completed = 0;
+  let completed = 50;
   await page.route("**/api/game/pegging-progress", route => {
     progressRequests += 1;
     const requested = route.request().postDataJSON();
@@ -1096,9 +1096,23 @@ async function testAceOpeningPlayProgress(browser, baseUrl, dealer = "User", red
     const bar = overlay.locator("progress");
     await expect(bar).toBeVisible();
     await expect(bar).toHaveAttribute("value", "0");
-    completed = 40;
+    completed = 70;
     await expect(bar).toHaveAttribute("value", "40");
     await expect(page.locator("#thinking-progress-percent")).toHaveText("40%");
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    const backgroundRequests = progressRequests;
+    await delay(1100);
+    expect(progressRequests).toBe(backgroundRequests);
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await expect(bar).toHaveAttribute("value", "0");
+    completed = 85;
+    await expect(bar).toHaveAttribute("value", "50");
     completed = 100;
     await expect(bar).toHaveAttribute("value", "99");
     await expect(overlay.locator(".throbber")).toHaveCount(0);
@@ -1109,7 +1123,7 @@ async function testAceOpeningPlayProgress(browser, baseUrl, dealer = "User", red
     const stoppedAt = progressRequests;
     await delay(1100);
     expect(progressRequests).toBe(stoppedAt);
-    return { model, dealer, reducedMotion, waitingLabel: true, realProgress: true, stopsPollingAfterPlay: true };
+    return { model, dealer, reducedMotion, waitingLabel: true, realProgress: true, stopsPollingInBackground: true, stopsPollingAfterPlay: true };
   } finally {
     releaseLead();
     await page.close();

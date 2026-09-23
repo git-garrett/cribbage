@@ -1818,6 +1818,14 @@ const aceProgressPoller = new AceProgressPoller(
   },
 );
 
+function refreshAceProgress(): void {
+  aceProgressPoller.watch(state.game && document.visibilityState !== "hidden" &&
+    state.aiThinking && !els.thinkingOverlay.hidden &&
+    currentSnapshot?.opponent === "schell_table-peg_table-13.23" && currentSnapshot.gameId
+    ? { gameId: currentSnapshot.gameId, handNumber: state.game.handNumber, played: state.game.plays.length }
+    : null);
+}
+
 async function serverJson<T>(path: string, body: Record<string, unknown>): Promise<T> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 120_000);
@@ -4936,13 +4944,14 @@ function canStartFreshGame(game: GameState | null): boolean {
   return !game || game.phase === "game_over" || game.phase === "cut_for_deal";
 }
 
-async function findRemoteActiveGameSession(opponent?: Opponent): Promise<RemoteGameSession | null> {
+async function findRemoteActiveGameSession(opponent?: Opponent, resume = false): Promise<RemoteGameSession | null> {
   if (!usesRemoteAi() || !authenticatedUser) return null;
   const tag = currentSessionTag();
   if (!tag) return null;
   const response = await serverJson<RemoteGameSessionResponse>("/api/game/session/load", {
     tag,
     opponent: opponent ?? null,
+    resume,
   });
   const session = response.session;
   if (!session || session.state.phase === "game_over") return null;
@@ -4974,7 +4983,7 @@ async function refreshPathwayResumeSessions(): Promise<void> {
 }
 
 async function loadRemoteActiveGameSession(opponent?: Opponent): Promise<GameState | null> {
-  const session = await findRemoteActiveGameSession(opponent);
+  const session = await findRemoteActiveGameSession(opponent, true);
   if (!session) return null;
   if (SIMPLE_NETWORK_MODE && !isAllowedSimpleNetworkOpponent(session.snapshot.opponent)) return null;
   applyAuthoritativeGameState(session.snapshot, session.state);
@@ -9966,9 +9975,7 @@ function render(game: GameState | null): void {
     !state.turnCutRevealStage && !state.splashOpen;
   els.thinkingOverlay.hidden = !(showModelLoadingUi || waitingForAcePlay);
   els.thinkingOverlayLabel.textContent = waitingForAcePlay ? `Waiting for ${playerName("ai")} to play` : "Loading opponent";
-  aceProgressPoller.watch(waitingForAcePlay && currentSnapshot?.opponent === "schell_table-peg_table-13.23" && currentSnapshot.gameId
-    ? { gameId: currentSnapshot.gameId, handNumber: game.handNumber, played: game.plays.length }
-    : null);
+  refreshAceProgress();
   els.modelLoading.hidden = !showModelLoadingUi;
   renderServerBusy();
   renderCutCard(state.turnCutRevealStage || !game.turnCardRevealed ? null : game.turnCard);
@@ -12183,6 +12190,7 @@ window.addEventListener("pageshow", (event) => {
 });
 document.addEventListener("visibilitychange", () => {
   activityTracker.track("visibility", { state: document.visibilityState });
+  refreshAceProgress();
   if (document.visibilityState === "hidden") {
     stopPeopleChallengeWatch();
     return;

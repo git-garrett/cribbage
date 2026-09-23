@@ -10,13 +10,15 @@ export interface AceProgress {
   state: "running" | "ready" | "failed";
 }
 
-export function aceProgressPercent(progress: AceProgress | null): number | null {
+export function aceProgressPercent(progress: AceProgress | null, startedAt = 0): number | null {
   if (!progress || progress.state === "failed") return null;
   if (progress.state === "ready") return 100;
   if (!Number.isFinite(progress.total) || progress.total <= 0 ||
       !Number.isFinite(progress.completed) || progress.completed < 0) return null;
   // Search may finish its last batch before the move itself is ready.
-  return Math.min(99, Math.floor(100 * progress.completed / progress.total));
+  const remaining = progress.total - startedAt;
+  return remaining <= 0 ? 99 : Math.max(0, Math.min(99,
+    Math.floor(100 * (progress.completed - startedAt) / remaining)));
 }
 
 /** Poll only the visible wait. One request at a time; no game rerenders. */
@@ -40,12 +42,16 @@ export class AceProgressPoller {
     if (!position || !key) return;
     const active = { key, controller: new AbortController(), timer: undefined as ReturnType<typeof setTimeout> | undefined };
     this.active = active;
+    // UI progress covers the wait the user sees, excluding preparation already done.
+    let startedAt: number | null = null;
+    this.show(0);
     const poll = async (): Promise<void> => {
       let finished = false;
       try {
         const progress = await this.read(position, active.controller.signal);
         if (this.active !== active) return;
-        this.show(aceProgressPercent(progress));
+        if (startedAt === null && progress && progress.total > 0) startedAt = progress.completed;
+        this.show(aceProgressPercent(progress, startedAt ?? 0) ?? 0);
         finished = progress?.state === "ready" || progress?.state === "failed";
       } catch {
         // The game action owns errors/retries. A lost progress request must not disrupt play.

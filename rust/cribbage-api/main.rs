@@ -102,7 +102,7 @@ impl Session {
 }
 
 enum DeferredRecommendation {
-    AiDiscard(CribbageGame, ModelId),
+    AiDiscard(String, CribbageGame, ModelId),
     MasterHint {
         session_id: String,
         game: CribbageGame,
@@ -764,6 +764,9 @@ fn game_action(
             return Err("Game session was not found for this account.".to_string());
         }
         refresh_session_dynamic_profile(&server.data_dir, session)?;
+        if action == "advance-pegging" && (session.forfeited || session.completed_at.is_some()) {
+            return Err("This game has ended; refresh the game.".into());
+        }
         let before = session.clone();
         if tag.is_some() {
             session.tag = tag;
@@ -848,20 +851,21 @@ fn game_action(
             && session.game.phase == Phase::Discard
         {
             Some(DeferredRecommendation::AiDiscard(
+                session.id.clone(),
                 session.game.clone(),
                 session.decision_model(),
             ))
         } else {
             None
         };
-        if matches!(action.as_str(), "reveal-turn-card" | "play" | "play-human" | "state") {
+        if matches!(action.as_str(), "finish-discard" | "finish-discard-with-cards" | "reveal-turn-card" | "play" | "play-human" | "state") {
             pegging_work::prepare(server, session);
         }
         Ok((response, recommendation_game))
     })();
     match result {
-        Ok((response, Some(DeferredRecommendation::AiDiscard(game, model)))) => {
-            match response_with_discard_recommendation(response, &game, model, &server.model_root) {
+        Ok((response, Some(DeferredRecommendation::AiDiscard(session_id, game, model)))) => {
+            match response_with_discard_recommendation(response, &game, model, server, &session_id) {
                 Ok(json) => Response::json(200, json),
                 Err(error) => {
                     Response::json(400, format!("{{\"error\":\"{}\"}}", json_escape(&error)))
@@ -2614,9 +2618,11 @@ fn response_with_discard_recommendation(
     mut response: String,
     game: &CribbageGame,
     model: ModelId,
-    model_root: &str,
+    server: &Server,
+    session_id: &str,
 ) -> Result<String, String> {
-    let decision = recommend_discard_for_side(game, AI, model, model_root)?;
+    let decision = recommend_discard_for_side(game, AI, model, &server.model_root)?;
+    pegging_work::prepare_after_discard(server, session_id, game, &decision.card_ids);
     let Some(body) = response.strip_suffix('}').map(str::to_string) else {
         return Err("could not append Rust discard recommendation".to_string());
     };
@@ -3666,6 +3672,13 @@ fn load_session(
         if let Some(session_id) = session_id {
             let session = app.sessions.get_mut(&session_id).expect("resumed session");
             refresh_session_dynamic_profile(&server.data_dir, session)?;
+            // Passive home-page resume listings must not start expensive searches.
+            if serde_json::from_str::<Value>(body)
+                .ok()
+                .is_some_and(|request| request["resume"] == true)
+            {
+                pegging_work::prepare(server, session);
+            }
             return Ok(format!(
                 "{{\"ok\":true,\"session\":{{\"gameId\":\"{}\",\"updatedAt\":\"{}\",\"snapshot\":{},\"state\":{}}}}}",
                 json_escape(&session.id),

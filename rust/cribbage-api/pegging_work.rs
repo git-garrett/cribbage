@@ -5,6 +5,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use cribbage_shadow_engine::decision::{recommend_peg_for_side_with_caches, PegDecision};
+use cribbage_shadow_engine::game::CribbageGame;
 use cribbage_shadow_engine::game::Phase;
 use cribbage_shadow_engine::model_id::ModelId;
 use cribbage_shadow_engine::progress::{with_progress, DecisionProgress};
@@ -118,7 +119,10 @@ pub(super) fn opening_key(session: &Session) -> Option<String> {
     let own = game.player(AI);
     let opponent = game.player(HUMAN);
     if session.model != ModelId::Schell1323
-        || !session.turn_card_revealed
+        || session.forfeited
+        || session.completed_at.is_some()
+        || session.waiting_for_deal_cut
+        || session.waiting_for_ai_discard
         || game.phase != Phase::Pegging
         || game.pegging_reset_pending
         || game.current_player() != AI
@@ -148,7 +152,7 @@ pub(super) fn opening_key(session: &Session) -> Option<String> {
     ))
 }
 
-/// Called once the starter is public, or immediately after the opponent leads.
+/// The logical cut is independent of the browser's reveal/confirmation animation.
 pub(super) fn prepare(server: &Server, session: &Session) -> Option<Arc<Work>> {
     let key = opening_key(session)?;
     let game = session.game.clone();
@@ -166,6 +170,47 @@ pub(super) fn prepare(server: &Server, session: &Session) -> Option<Arc<Work>> {
             Some(&cache13),
         )
     }))
+}
+
+/// Project the next opening once Ace has chosen its discard. The starter was
+/// fixed at deal time; only the opponent's eventual four-card count is needed.
+/// This cannot influence the already-completed discard decision or human UI.
+fn after_discard(session: &Session, cards: &[u8]) -> Option<Session> {
+    if session.model != ModelId::Schell1323
+        || session.game.dealer != HUMAN
+        || session.game.phase != Phase::Discard
+        || cards.len() != 2
+        || session.game.player(AI).hand.len() != 6
+    {
+        return None;
+    }
+    let mut opening = session.clone();
+    // The policy sees only this count, never these hidden ranks or a guessed discard.
+    opening.game.player_mut(HUMAN).hand.truncate(4);
+    opening.game.discard(AI, [cards[0], cards[1]]).ok()?;
+    opening.waiting_for_ai_discard = false;
+    opening_key(&opening)?;
+    Some(opening)
+}
+
+pub(super) fn prepare_after_discard(
+    server: &Server,
+    session_id: &str,
+    discarded_from: &CribbageGame,
+    cards: &[u8],
+) {
+    let Ok(app) = server.state.lock() else { return };
+    let Some(session) = app.sessions.get(session_id) else {
+        return;
+    };
+    if session.game.hand_number != discarded_from.hand_number
+        || session.game.player(AI).hand != discarded_from.player(AI).hand
+    {
+        return;
+    }
+    if let Some(opening) = after_discard(session, cards) {
+        prepare(server, &opening);
+    }
 }
 
 pub(super) struct PreparedDecision {
@@ -258,10 +303,17 @@ mod tests {
     fn legal_observation_gates_preparation_and_invalidates_stale_results() {
         let mut session = opening();
         let key = opening_key(&session).unwrap();
+        session.forfeited = true;
+        assert!(opening_key(&session).is_none());
+        session.forfeited = false;
+        session.completed_at = Some("finished".into());
+        assert!(opening_key(&session).is_none());
+        session.completed_at = None;
         session.turn_card_revealed = false;
-        assert!(
-            opening_key(&session).is_none(),
-            "never inspect an unrevealed starter"
+        assert_eq!(
+            opening_key(&session).unwrap(),
+            key,
+            "presentation must not delay calculation"
         );
         session.turn_card_revealed = true;
         session.game.player_mut(HUMAN).hand[0] =
@@ -341,6 +393,48 @@ mod tests {
     }
 
     #[test]
+    fn discard_projection_matches_the_actual_opening_for_every_opponent_discard() {
+        let mut heels_cases = 0;
+        for seed in 0..32 {
+            let mut session = new_session_from_seed(ModelId::Schell1323, None, seed, 1);
+            session.game = CribbageGame::new_with_seed(seed, HUMAN);
+            session.waiting_for_deal_cut = false;
+            if seed == 0 {
+                session.game.turn_card = crate::full_deck()
+                    .into_iter()
+                    .find(|card| {
+                        card.rank == 10
+                            && !session.game.player(AI).hand.contains(card)
+                            && !session.game.player(HUMAN).hand.contains(card)
+                    })
+                    .unwrap();
+            }
+            let cards = [
+                session.game.player(AI).hand[0].id,
+                session.game.player(AI).hand[1].id,
+            ];
+            let projected = after_discard(&session, &cards).unwrap();
+            assert!(!projected.turn_card_revealed, "no UI reveal is required");
+            if session.game.turn_card.rank == 10 {
+                heels_cases += 1;
+            }
+            for i in 0..6 {
+                for j in i + 1..6 {
+                    let mut actual = session.clone();
+                    let human_cards = [
+                        actual.game.player(HUMAN).hand[i].id,
+                        actual.game.player(HUMAN).hand[j].id,
+                    ];
+                    actual.game.discard(HUMAN, human_cards).unwrap();
+                    actual.game.discard(AI, cards).unwrap();
+                    assert_eq!(opening_key(&projected), opening_key(&actual));
+                }
+            }
+        }
+        assert!(heels_cases > 0, "cover heels scores in the projection");
+    }
+
+    #[test]
     fn failed_work_can_be_retried_without_poisoning_the_next_move() {
         let session = opening();
         let registry = Registry::default();
@@ -353,7 +447,7 @@ mod tests {
     }
     #[test]
     #[ignore = "full production Ace opening; run in release mode with assets"]
-    fn revealed_starter_prepares_the_lead_before_any_play_request() {
+    fn discard_calculation_prepares_the_lead_before_opponent_discard_or_reveal() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
@@ -365,8 +459,9 @@ mod tests {
             crate::unix_millis()
         ));
         crate::initialize_game_database(&data_dir).unwrap();
-        let mut session = opening();
-        session.turn_card_revealed = false;
+        let mut session = new_session_from_seed(ModelId::Schell1323, None, 42, 1);
+        session.game = CribbageGame::new_with_seed(42, HUMAN);
+        session.waiting_for_deal_cut = false;
         let id = session.id.clone();
         let server = Server {
             pegging_work: Registry::default(),
@@ -380,12 +475,13 @@ mod tests {
             .unwrap()
             .sessions
             .insert(id.clone(), session);
-        let revealed = crate::game_action(
+        let discarded = crate::game_action(
             &server,
-            &json!({"gameId":id,"action":"reveal-turn-card"}).to_string(),
+            &json!({"gameId":id,"action":"prepare-ai-discard"}).to_string(),
             None,
         );
-        assert_eq!(revealed.status, 200, "{}", revealed.body);
+        assert_eq!(discarded.status, 200, "{}", discarded.body);
+        let response: Value = serde_json::from_str(&discarded.body).unwrap();
         let job = server
             .pegging_work
             .0
@@ -393,7 +489,25 @@ mod tests {
             .unwrap()
             .get(&id)
             .cloned()
-            .expect("reveal must start work before advance-pegging is requested");
+            .expect("discard calculation must start work without a UI reveal or human discard");
+        let human_cards = {
+            let app = server.state.lock().unwrap();
+            let session = &app.sessions[&id];
+            assert!(!session.turn_card_revealed);
+            assert_eq!(session.game.player(HUMAN).hand.len(), 6);
+            [
+                session.game.player(HUMAN).hand[0].id,
+                session.game.player(HUMAN).hand[1].id,
+            ]
+        };
+        for body in [
+            json!({"gameId":id,"action":"discard","ids":human_cards}),
+            json!({"gameId":id,"action":"finish-discard-with-cards","ids":response["recommendation"]["cardIds"]}),
+            json!({"gameId":id,"action":"reveal-turn-card"}),
+        ] {
+            let result = crate::game_action(&server, &body.to_string(), None);
+            assert_eq!(result.status, 200, "{}", result.body);
+        }
         let expected = job.wait().unwrap();
         let advanced = crate::game_action(
             &server,
