@@ -400,7 +400,6 @@ const state: {
   dealCutRevealStage: "cutting" | "human" | "ai" | null;
   dealCutIndex: number | null;
   dealAiCutIndex: number | null;
-  dealCutResolve: (() => void) | null;
   scoreSummaryQueue: ScoreSummary[];
   activeScoreSummary: ScoreSummary | null;
   confirmedScoreSummaryKey: string | null;
@@ -469,7 +468,6 @@ const state: {
   dealCutRevealStage: null,
   dealCutIndex: null,
   dealAiCutIndex: null,
-  dealCutResolve: null,
   scoreSummaryQueue: [],
   activeScoreSummary: null,
   confirmedScoreSummaryKey: null,
@@ -521,8 +519,6 @@ function resetTransientGameUi(): void {
   state.dealCutRevealStage = null;
   state.dealCutIndex = null;
   state.dealAiCutIndex = null;
-  if (state.dealCutResolve) state.dealCutResolve();
-  state.dealCutResolve = null;
   state.scoreSummaryQueue = [];
   state.activeScoreSummary = null;
   state.confirmedScoreSummaryKey = null;
@@ -4712,7 +4708,6 @@ function canAskMaster(game: GameState): boolean {
   const interactionBlocked = Boolean(
     state.dealAnimation ||
     state.dealCutRevealStage ||
-    state.dealCutResolve ||
     state.turnCutRevealStage,
   );
   return shouldOfferMasterHint(
@@ -5740,17 +5735,17 @@ async function runPuttingTogetherAction(action: PuttingTogetherAction, cutIndex 
   if (actionButton) actionButton.disabled = true;
   if (action === "cut") {
     renderPuttingTogetherCut(cutIndex, "cutting");
-    await waitForTableMotion(580);
+    await waitForTableMotion(DEAL_CUT_TIMING.lift);
     if (!isCurrent()) return;
     renderPuttingTogetherCut(cutIndex, "human");
     cardSounds.play("cut");
     await waitForPaint();
-    await waitForTableMotion(800);
+    await waitForTableMotion(DEAL_CUT_TIMING.human);
     if (!isCurrent()) return;
     renderPuttingTogetherCut(cutIndex, "ai");
     cardSounds.play("cut");
     await waitForPaint();
-    await waitForTableMotion(1_250);
+    await waitForTableMotion(DEAL_CUT_TIMING.result);
     if (!isCurrent()) return;
     const instruction = introElement<HTMLElement>("[data-training-intro-instruction]");
     if (instruction) { instruction.hidden = false; instruction.textContent = "You cut the low card. You get the first crib."; }
@@ -6339,6 +6334,7 @@ function renderPlayedCards(game: GameState): void {
 }
 
 const DEAL_CUT_CARD_COUNT = 52;
+const DEAL_CUT_TIMING = { lift: 260, human: 500, result: 900 };
 
 function cutCardText(card: NonNullable<GameState["turnCard"]>): string {
   return `${card.rank}${card.symbol}`;
@@ -6396,6 +6392,7 @@ function createDealCutSpread({ cards, revealStage, humanIndex, aiIndex, selected
 }): HTMLElement {
   const row = document.createElement("div");
   row.className = "deal-cut-spread";
+  row.style.setProperty("--deal-cut-lift-duration", `${DEAL_CUT_TIMING.lift}ms`);
   row.setAttribute("role", "group");
   row.setAttribute("aria-label", "Choose where to cut the 52-card deck");
   const showHumanCut = Boolean(cards?.human && (revealStage === "human" || revealStage === "ai"));
@@ -9915,7 +9912,6 @@ function render(game: GameState | null): void {
   const showingDealCut = Boolean(state.dealCutRevealStage) || game.phase === "cut_for_deal";
   els.app.dataset.dealCutActive = showingDealCut ? "true" : "false";
   els.app.dataset.dealAnimationActive = state.dealAnimation ? "true" : "false";
-  els.app.dataset.cutConfirming = state.dealCutResolve ? "true" : "false";
   renderUtilityPages();
   els.app.dataset.inlineResult = shouldInlineResult(game) ? "true" : "false";
   const showParGuides = shouldShowStrategicGuides(state.parGuides, SIMPLE_NETWORK_MODE);
@@ -9988,7 +9984,7 @@ function render(game: GameState | null): void {
     renderDealAnimation();
   } else if (state.turnCutRevealStage) {
     renderTurnCut(game);
-  } else if (state.dealCutRevealStage && game.cutForDeal) {
+  } else if (state.dealCutRevealStage) {
     renderDealCut(game, state.dealCutRevealStage);
   } else if (game.phase === "cut_for_deal") {
     renderDealCut(game);
@@ -10020,13 +10016,12 @@ function render(game: GameState | null): void {
   const gameActive = game.phase !== "game_over";
   const turnCut = turnCutPresentation(state.turnCutRevealStage);
   const waitingForTurnCutClick = Boolean(turnCut?.action);
-  const waitingForDealCutOk = Boolean(state.dealCutResolve);
   const selectedPlay = selectedPlayableCard(game);
   const aceAdviceEligible = canAskMaster(game);
   const masterAdviceAvailable = state.hintsEnabled && aceAdviceEligible && !state.masterHint;
   els.cutForDeal.hidden = !gameActive || !waitingForTurnCutClick;
-  els.discard.hidden = !gameActive || Boolean(state.dealAnimation) || Boolean(state.dealCutRevealStage) || waitingForDealCutOk || Boolean(state.turnCutRevealStage) || game.phase !== "discard";
-  els.play.hidden = !gameActive || Boolean(state.dealAnimation) || waitingForDealCutOk || Boolean(state.turnCutRevealStage) || game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User");
+  els.discard.hidden = !gameActive || Boolean(state.dealAnimation) || Boolean(state.dealCutRevealStage) || Boolean(state.turnCutRevealStage) || game.phase !== "discard";
+  els.play.hidden = !gameActive || Boolean(state.dealAnimation) || Boolean(state.turnCutRevealStage) || game.peggingResetPending || !(game.phase === "pegging" && game.turn === "User");
   els.askMaster.hidden = !masterAdviceAvailable;
   els.go.hidden = !(activeHumanTable && game.phase === "pegging" && game.turn === "User" && game.canGo && !game.peggingResetPending);
   els.discard.disabled = !(game.phase === "discard" && state.selected.size === 2);
@@ -10045,7 +10040,6 @@ function render(game: GameState | null): void {
   els.continuePegging.hidden = game.peggingResetPending || game.phase !== "pegging_complete" || humanScoringWait;
   if (state.pending) {
     els.discard.disabled = true;
-    els.cutForDeal.disabled = !(waitingForDealCutOk || waitingForTurnCutClick);
     els.play.disabled = true;
     els.askMaster.disabled = true;
     els.go.disabled = true;
@@ -10112,19 +10106,6 @@ function waitMs(ms: number): Promise<void> {
 
 function waitForTableMotion(ms: number): Promise<void> {
   return waitMs(state.fontSize === "x-large" ? 0 : ms);
-}
-
-function completeDealCutReveal(): void {
-  const resolve = state.dealCutResolve;
-  if (!resolve) return;
-  state.dealCutResolve = null;
-  resolve();
-}
-
-function waitForDealCutOk(): Promise<void> {
-  return new Promise((resolve) => {
-    state.dealCutResolve = resolve;
-  });
 }
 
 function dealAnimationKey(game: GameState): string | null {
@@ -11552,7 +11533,7 @@ async function cutForDeal(cutIndex = Math.floor(DEAL_CUT_CARD_COUNT / 2)): Promi
   await waitForPaint();
   try {
     state.resultOverride = null;
-    const cutAnimation = waitForTableMotion(580);
+    const cutAnimation = waitForTableMotion(DEAL_CUT_TIMING.lift);
     const preparedCut = preparedCutForDealFor(state.game);
     let next: GameState;
     if (preparedCut) {
@@ -11573,12 +11554,12 @@ async function cutForDeal(cutIndex = Math.floor(DEAL_CUT_CARD_COUNT / 2)): Promi
       render(next);
       cardSounds.play("cut");
       await waitForPaint();
-      await waitForTableMotion(800);
+      await waitForTableMotion(DEAL_CUT_TIMING.human);
       state.dealCutRevealStage = "ai";
       render(next);
       cardSounds.play("cut");
       await waitForPaint();
-      await waitForTableMotion(1_250);
+      await waitForTableMotion(DEAL_CUT_TIMING.result);
       state.dealCutRevealStage = null;
       state.resultOverride = null;
       render(next);
@@ -11592,20 +11573,12 @@ async function cutForDeal(cutIndex = Math.floor(DEAL_CUT_CARD_COUNT / 2)): Promi
     state.dealCutRevealStage = null;
     state.dealCutIndex = null;
     state.dealAiCutIndex = null;
-    state.dealCutResolve = null;
     state.pending = false;
     render(state.game);
   }
 }
 
-els.cutForDeal.addEventListener("click", () => {
-  if (state.turnCutResolve) {
-    completeTurnCutInteraction();
-    return;
-  }
-  if (state.turnCutRevealStage) return;
-  void cutForDeal(Math.floor(DEAL_CUT_CARD_COUNT / 2));
-});
+els.cutForDeal.addEventListener("click", completeTurnCutInteraction);
 
 els.askMaster.addEventListener("click", () => {
   void requestMasterHint();
