@@ -1208,6 +1208,7 @@ mod tests {
         super::super::initialize_game_database(&data_dir).unwrap();
         initialize(&data_dir).unwrap();
         Server {
+            pegging_work: crate::pegging_work::Registry::default(),
             state: Mutex::new(super::super::AppState {
                 sessions: HashMap::new(),
                 uploads: HashMap::new(),

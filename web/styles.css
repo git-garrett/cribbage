@@ -2793,11 +2793,16 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   box-shadow: var(--settings-shadow);
 }
 
-.thinking-overlay-throbber {
-  width: 34px;
-  height: 34px;
-  flex-basis: 34px;
-  border-width: 4px;
+.thinking-progress {
+  width: min(240px, 60vw);
+  height: 10px;
+  accent-color: #e5c16c;
+}
+
+.thinking-progress-percent {
+  min-height: 1em;
+  font-size: var(--fine-font);
+  font-variant-numeric: tabular-nums;
 }
 
 .ask-master {

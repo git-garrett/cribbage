@@ -40,6 +40,7 @@ mod engagement;
 mod feedback;
 mod handicap_backfill;
 mod people;
+mod pegging_work;
 mod player_profile;
 
 use player_profile::PLAYER_HISTORY_KEY;
@@ -301,6 +302,7 @@ struct AppState {
 }
 
 struct Server {
+    pegging_work: pegging_work::Registry,
     state: Mutex<AppState>,
     model_root: String,
     data_dir: PathBuf,
@@ -368,6 +370,7 @@ fn main() {
     let listener = TcpListener::bind(&address)
         .unwrap_or_else(|error| panic!("could not bind Rust API server at {}: {}", address, error));
     let server = Arc::new(Server {
+        pegging_work: pegging_work::Registry::default(),
         state: Mutex::new(AppState {
             sessions,
             uploads,
@@ -430,6 +433,9 @@ fn handle_connection(mut stream: TcpStream, server: &Server) -> Result<(), Strin
         ("GET", "/api/leaderboard") => Response::json(200, leaderboard_json(server)?),
         ("POST", "/api/game/action") => {
             game_action(server, &request_body, authenticated_user.as_ref())
+        }
+        ("POST", "/api/game/pegging-progress") => {
+            pegging_work::progress(server, &request_body, authenticated_user.as_ref())
         }
         ("GET", "/api/game/history") => game_history(server, authenticated_user.as_ref()),
         ("POST", "/api/game/review") => {
@@ -668,6 +674,14 @@ fn game_action(
     authenticated_user: Option<&auth::AuthUser>,
 ) -> Response {
     let action = json_string(body, "action").unwrap_or_default();
+    let prepared_peg = if action == "advance-pegging" {
+        match pegging_work::decision(server, body, authenticated_user) {
+            Ok(prepared) => prepared,
+            Err(error) => return Response::json(400, json!({"error":error}).to_string()),
+        }
+    } else {
+        None
+    };
     let tag = json_string(body, "tag")
         .filter(|value| !value.trim().is_empty())
         .map(|value| value.chars().take(80).collect());
@@ -754,7 +768,13 @@ fn game_action(
         if tag.is_some() {
             session.tag = tag;
         }
-        if let Err(error) = apply_action(session, &action, body, &server.model_root) {
+        if prepared_peg.as_ref().is_some_and(|prepared| !prepared.matches(session)) {
+            return Err("The pegging position changed; refresh the game.".into());
+        }
+        if let Err(error) = apply_action_with_peg_decision(
+            session, &action, body, &server.model_root,
+            prepared_peg.as_ref().map(|prepared| prepared.decision.clone()),
+        ) {
             *session = before;
             return Err(error);
         }
@@ -834,6 +854,9 @@ fn game_action(
         } else {
             None
         };
+        if matches!(action.as_str(), "reveal-turn-card" | "play" | "play-human" | "state") {
+            pegging_work::prepare(server, session);
+        }
         Ok((response, recommendation_game))
     })();
     match result {
@@ -1893,11 +1916,22 @@ fn first_dealer_for_deal_cuts(deal_cuts: [Card; 2]) -> Option<Side> {
     }
 }
 
+#[cfg(test)]
 fn apply_action(
     session: &mut Session,
     action: &str,
     body: &str,
     model_root: &str,
+) -> Result<(), String> {
+    apply_action_with_peg_decision(session, action, body, model_root, None)
+}
+
+fn apply_action_with_peg_decision(
+    session: &mut Session,
+    action: &str,
+    body: &str,
+    model_root: &str,
+    prepared_peg: Option<PegDecision>,
 ) -> Result<(), String> {
     if matches!(
         action,
@@ -2105,7 +2139,7 @@ fn apply_action(
             }
             let score_before = score_snapshot(&session.game);
             let decision_model = session.decision_model();
-            let (reason, cards, score_components) = match recommend_peg_for_side_with_caches(
+            let decision = prepared_peg.map(Ok).unwrap_or_else(|| recommend_peg_for_side_with_caches(
                 &session.game,
                 AI,
                 decision_model,
@@ -2113,7 +2147,8 @@ fn apply_action(
                 model_root,
                 Some(&session.model911_hand_cache),
                 (decision_model == ModelId::Schell1323).then_some(&session.model1323_hand_cache),
-            )? {
+            ))?;
+            let (reason, cards, score_components) = match decision {
                 PegDecision::Go => {
                     session.game.say_go(AI)?;
                     ("Go", Vec::new(), None)
@@ -4575,6 +4610,7 @@ mod tests {
         ));
         initialize_game_database(&data_dir).unwrap();
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(AppState::default()),
             model_root: String::new(),
             data_dir: data_dir.clone(),
@@ -4650,6 +4686,7 @@ mod tests {
     #[test]
     fn guest_access_allows_easy_and_tough_but_requires_login_for_master() {
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(AppState::default()),
             model_root: String::new(),
             data_dir: std::env::temp_dir().join("cribbage-unused-guest-access"),
@@ -4747,6 +4784,7 @@ mod tests {
         let id = session.id.clone();
         persist_session_snapshot(&data_dir, &session).unwrap();
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(AppState::default()),
             model_root: String::new(),
             data_dir: data_dir.clone(),
@@ -4812,6 +4850,7 @@ mod tests {
         auth::initialize(&data_dir).unwrap();
         people::initialize(&data_dir).unwrap();
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(AppState::default()),
             model_root: String::new(),
             data_dir: data_dir.clone(),
@@ -4865,6 +4904,7 @@ mod tests {
         let mut app = AppState::default();
         app.sessions.insert(game_id.clone(), session);
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(app),
             model_root: String::new(),
             data_dir: data_dir.clone(),
@@ -4911,6 +4951,7 @@ mod tests {
         let mut app = AppState::default();
         app.sessions.insert(game_id.clone(), session);
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(app),
             model_root: String::new(),
             data_dir: data_dir.clone(),
@@ -4946,6 +4987,7 @@ mod tests {
         let mut app = AppState::default();
         app.sessions.insert(game_id.clone(), session);
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(app),
             model_root: String::new(),
             data_dir: data_dir.clone(),
@@ -5037,6 +5079,7 @@ mod tests {
         let mut app = AppState::default();
         app.sessions.insert(session_id.clone(), session);
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(app),
             data_dir: data_dir.clone(),
             model_root: root.to_string(),
@@ -5531,6 +5574,7 @@ mod tests {
         ));
         initialize_game_database(&data_dir).unwrap();
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(AppState {
                 sessions: HashMap::new(),
                 uploads: HashMap::new(),
@@ -5611,6 +5655,7 @@ mod tests {
         ));
         initialize_game_database(&data_dir).unwrap();
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(AppState {
                 sessions: HashMap::new(),
                 uploads: HashMap::new(),
@@ -5682,6 +5727,7 @@ mod tests {
         initialize_game_database(&data_dir).unwrap();
         let uploads = HashMap::new();
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(AppState {
                 sessions: HashMap::new(),
                 uploads,
@@ -5714,6 +5760,7 @@ mod tests {
         ));
         initialize_game_database(&data_dir).unwrap();
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(AppState {
                 sessions: HashMap::new(),
                 uploads: HashMap::new(),
@@ -5753,6 +5800,7 @@ mod tests {
         ));
         initialize_game_database(&data_dir).unwrap();
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(AppState {
                 sessions: HashMap::new(),
                 uploads: HashMap::new(),
@@ -5810,6 +5858,7 @@ mod tests {
         ));
         initialize_game_database(&data_dir).unwrap();
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(AppState {
                 sessions: HashMap::new(),
                 uploads: HashMap::new(),
@@ -5849,6 +5898,7 @@ mod tests {
         ));
         initialize_game_database(&data_dir).unwrap();
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(AppState {
                 sessions: HashMap::new(),
                 uploads: HashMap::new(),
@@ -6293,6 +6343,7 @@ mod tests {
         ).unwrap();
         drop(connection);
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(AppState::default()),
             model_root: String::new(),
             data_dir: data_dir.clone(),
@@ -6493,6 +6544,7 @@ mod tests {
         assert_ne!(after.handicap_per_game(), before.handicap_per_game());
 
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(AppState::default()),
             model_root: String::new(),
             data_dir: data_dir.clone(),
@@ -6678,6 +6730,7 @@ mod tests {
         );
 
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(AppState::default()),
             model_root: String::new(),
             data_dir: data_dir.clone(),
@@ -6839,6 +6892,7 @@ mod tests {
             .unwrap();
         drop(connection);
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(AppState::default()),
             model_root: String::new(),
             data_dir: data_dir.clone(),
@@ -6899,6 +6953,7 @@ mod tests {
             },
         };
         let server = Server {
+            pegging_work: pegging_work::Registry::default(),
             state: Mutex::new(AppState {
                 sessions: HashMap::from([(session_id.clone(), session)]),
                 ..AppState::default()

@@ -1,3 +1,4 @@
+import { AceProgressPoller, type AceProgress } from "./ace-progress";
 import { Capacitor } from "@capacitor/core";
 import { cardSounds } from "./card-sounds";
 
@@ -508,6 +509,7 @@ function resetTransientGameUi(): void {
   state.gameOverAdPending = false;
   safeLocalStorageRemove(DISMISSED_GAME_OVER_STORAGE_KEY);
   state.aiThinking = false;
+  aceProgressPoller.watch(null);
   state.modelLoading = false;
   state.completingReviews = false;
   state.reviewProgress = null;
@@ -548,6 +550,7 @@ function resetTransientGameUi(): void {
 
 function setAiThinking(active: boolean): void {
   state.aiThinking = active;
+  if (!active) aceProgressPoller.watch(null);
 }
 
 const els = {
@@ -793,6 +796,8 @@ const els = {
   modelThinking: document.querySelector("#model-thinking") as HTMLElement,
   thinkingOverlay: document.querySelector("#thinking-overlay") as HTMLElement,
   thinkingOverlayLabel: document.querySelector("#thinking-overlay-label") as HTMLElement,
+  thinkingProgress: document.querySelector("#thinking-progress") as HTMLProgressElement,
+  thinkingProgressPercent: document.querySelector("#thinking-progress-percent") as HTMLElement,
   serverBusyAlert: document.querySelector("#server-busy-alert") as HTMLElement,
   serverBusyRetry: document.querySelector("#server-busy-retry") as HTMLButtonElement,
   turnCard: document.querySelector("#turn-card") as HTMLElement,
@@ -1795,6 +1800,23 @@ function saveSplashName(): boolean {
 function usesRemoteAi(): boolean {
   return SIMPLE_NETWORK_MODE && !REMOTE_AI_DISABLED && (!IS_VITE_DEV || REMOTE_AI_EXPLICIT);
 }
+
+const aceProgressPoller = new AceProgressPoller(
+  async (position, signal) => {
+    const response = await fetch(`${REMOTE_AI_BASE}/api/game/pegging-progress`, {
+      method: "POST", credentials: "include", signal,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(position),
+    });
+    if (!response.ok) throw new Error("Progress unavailable");
+    return (await response.json() as { progress: AceProgress | null }).progress;
+  },
+  (percent) => {
+    if (percent === null) els.thinkingProgress.removeAttribute("value");
+    else els.thinkingProgress.value = percent;
+    els.thinkingProgressPercent.textContent = percent === null ? "" : `${percent}%`;
+  },
+);
 
 async function serverJson<T>(path: string, body: Record<string, unknown>): Promise<T> {
   const controller = new AbortController();
@@ -9944,6 +9966,9 @@ function render(game: GameState | null): void {
     !state.turnCutRevealStage && !state.splashOpen;
   els.thinkingOverlay.hidden = !(showModelLoadingUi || waitingForAcePlay);
   els.thinkingOverlayLabel.textContent = waitingForAcePlay ? `Waiting for ${playerName("ai")} to play` : "Loading opponent";
+  aceProgressPoller.watch(waitingForAcePlay && currentSnapshot?.opponent === "schell_table-peg_table-13.23" && currentSnapshot.gameId
+    ? { gameId: currentSnapshot.gameId, handNumber: game.handNumber, played: game.plays.length }
+    : null);
   els.modelLoading.hidden = !showModelLoadingUi;
   renderServerBusy();
   renderCutCard(state.turnCutRevealStage || !game.turnCardRevealed ? null : game.turnCard);
@@ -10237,10 +10262,6 @@ async function finishTurnCardReveal(game: GameState, startStage: TurnCutProgress
     await waitForTableMotion(700);
   }
   return revealAndConfirmTurnCard();
-}
-
-async function prepareModel13Pegging(game: GameState): Promise<void> {
-  void game;
 }
 
 async function continuePeggingAfterRender(game: GameState): Promise<GameState> {
@@ -11690,7 +11711,7 @@ els.discard.addEventListener("click", async () => {
       finishDiscardInBackground(interactionEpoch);
       return;
     }
-    await prepareModel13Pegging(next);
+
   } catch (error) {
     state.selected = new Set(selectedIds);
     showServerBusy(error, () => els.discard.click());
@@ -12049,7 +12070,7 @@ els.troubleGame.addEventListener("click", async () => {
     els.settingsPanel.hidden = true;
     els.menuToggle.setAttribute("aria-expanded", "false");
     render(next);
-    await prepareModel13Pegging(next);
+
   } catch (error) {
     showServerBusy(error, () => els.troubleGame.click());
   } finally {
@@ -12223,7 +12244,7 @@ async function finishDiscardInBackground(
     const revealedGame = await finishTurnCardReveal(next, startStage);
     if (!isCurrent()) return;
     setAiThinking(true);
-    await prepareModel13Pegging(revealedGame);
+
     if (!isCurrent()) return;
     await continuePeggingAfterRender(revealedGame);
   } catch (error) {
