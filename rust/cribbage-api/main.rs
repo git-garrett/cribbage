@@ -781,9 +781,13 @@ fn game_action(
             *session = before;
             return Err(error);
         }
-        if session.game.phase != Phase::Pegging {
-            session.model911_hand_cache.clear();
-            session.model1323_hand_cache.clear();
+        if session.game.hand_number != before.game.hand_number
+            || (before.game.phase == Phase::Pegging && session.game.phase != Phase::Pegging)
+        {
+            // Early opening work may still own the old caches. Replace handles
+            // at the hand boundary without waiting under the shared state lock.
+            session.model911_hand_cache = Default::default();
+            session.model1323_hand_cache = Default::default();
         }
         if session.game.phase == Phase::GameOver
             && session.pending_final_scoring.is_none()
