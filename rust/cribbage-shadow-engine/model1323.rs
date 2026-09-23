@@ -643,6 +643,11 @@ fn forecast_worlds_for_choice(
     posterior_worlds: usize,
     win_probability: &mut impl FnMut(u8, u8) -> f64,
 ) -> Result<Vec<PegCandidateForecast>, String> {
+    let progress = crate::progress::current();
+    let actions = observation.legal_actions();
+    if let Some(progress) = &progress {
+        progress.begin(worlds.len() * actions.len());
+    }
     let mut remaining = vec![0.0; worlds.len() + 1];
     for index in (0..worlds.len()).rev() {
         remaining[index] = remaining[index + 1] + worlds[index].weight;
@@ -661,11 +666,16 @@ fn forecast_worlds_for_choice(
     let mut incumbent = f64::NEG_INFINITY;
     let mut forecasts = Vec::new();
     let mut utilities = BTreeMap::new();
-    for action in observation.legal_actions() {
+    for (action_index, action) in actions.into_iter().enumerate() {
         let mut outcomes = BTreeMap::new();
         let mut partial_wp = 0.0;
         let mut inferior = false;
         for (index, world) in worlds.iter().enumerate() {
+            if index % 256 == 0 {
+                if let Some(progress) = &progress {
+                    progress.complete(action_index * worlds.len() + index);
+                }
+            }
             let score = rollout_candidate(observation, policy, world, action)?;
             *outcomes.entry(score).or_insert(0.0) += world.weight;
             let utility = *utilities
@@ -680,6 +690,10 @@ fn forecast_worlds_for_choice(
                 inferior = true;
                 break;
             }
+        }
+        // Pruned work is resolved too; it must not leave the bar short.
+        if let Some(progress) = &progress {
+            progress.complete((action_index + 1) * worlds.len());
         }
         if inferior {
             continue;
@@ -1113,6 +1127,14 @@ mod tests {
                 &mut |a, b| utility(a, b),
             )
             .unwrap();
+            let progress = std::sync::Arc::new(crate::progress::DecisionProgress::default());
+            let observed = crate::progress::with_progress(std::sync::Arc::clone(&progress), || {
+                forecast_worlds_for_choice(&observation, &FirstLegal, &worlds, worlds.len(),
+                    &mut |a, b| utility(a, b)).unwrap()
+            });
+            assert_identical_forecasts(&bounded, &observed);
+            let total = worlds.len() * observation.legal_actions().len();
+            assert_eq!(progress.snapshot(), (total, total), "pruned branches count as resolved");
             let score = |f: &PegCandidateForecast| {
                 f.outcomes
                     .iter()

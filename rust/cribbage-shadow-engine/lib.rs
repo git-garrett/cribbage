@@ -19,6 +19,7 @@ pub mod myrmidon;
 pub mod playout;
 pub mod policy;
 pub mod policy_transition;
+pub mod progress;
 pub mod sidecar;
 
 #[cfg(test)]

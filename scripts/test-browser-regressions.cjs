@@ -1040,7 +1040,7 @@ async function testFirstDealerCutTap(browser, baseUrl, mode = "touch") {
   } finally { releaseHistory(); await page.close(); }
 }
 
-async function testAceOpeningPlayThrobber(browser, baseUrl, dealer = "User", reducedMotion = "no-preference") {
+async function testAceOpeningPlayProgress(browser, baseUrl, dealer = "User", reducedMotion = "no-preference") {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await installStaticBuild(page);
   await installPathwayFixture(page);
@@ -1051,6 +1051,14 @@ async function testAceOpeningPlayThrobber(browser, baseUrl, dealer = "User", red
     Object.assign(snapshot, { deal: 1, turn: 0 });
     Object.assign(state, { dealer, cribOwner: dealer, turn: "User", legalCardIds: hand.map(card => card.id) });
   }
+  let progressRequests = 0;
+  let completed = 50;
+  await page.route("**/api/game/pegging-progress", route => {
+    progressRequests += 1;
+    const requested = route.request().postDataJSON();
+    expect(requested).toEqual({ gameId: snapshot.gameId, handNumber: 1, played: dealer === "AI" ? 1 : 0 });
+    return route.fulfill({ json: { progress: { completed, total: 100, state: "running" } } });
+  });
   let releaseLead;
   const leadReady = new Promise(resolve => { releaseLead = resolve; });
   await page.route("**/api/game/session/load", route => {
@@ -1085,12 +1093,37 @@ async function testAceOpeningPlayThrobber(browser, baseUrl, dealer = "User", red
     if (await page.locator("#thinking-overlay-label").textContent() !== "Waiting for Ace to play") {
       throw new Error("Ace opening play did not show its waiting label.");
     }
-    if (!await overlay.locator(".throbber").isVisible()) throw new Error("Ace lead throbber is hidden.");
+    const bar = overlay.locator("progress");
+    await expect(bar).toBeVisible();
+    await expect(bar).toHaveAttribute("value", "0");
+    completed = 70;
+    await expect(bar).toHaveAttribute("value", "40");
+    await expect(page.locator("#thinking-progress-percent")).toHaveText("40%");
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    const backgroundRequests = progressRequests;
+    await delay(1100);
+    expect(progressRequests).toBe(backgroundRequests);
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await expect(bar).toHaveAttribute("value", "0");
+    completed = 85;
+    await expect(bar).toHaveAttribute("value", "50");
+    completed = 100;
+    await expect(bar).toHaveAttribute("value", "99");
+    await expect(overlay.locator(".throbber")).toHaveCount(0);
     await page.screenshot({ path: path.join(require("node:os").tmpdir(), `cribbage-ace-wait-${dealer}-${reducedMotion}.png`) });
     releaseLead();
     await overlay.waitFor({ state: "hidden", timeout: 5000 });
     await page.locator('#plays .card[data-owner="ai"]').waitFor({ state: "visible" });
-    return { model, dealer, reducedMotion, waitingLabel: true, throbber: true, clearsAfterPlay: true };
+    const stoppedAt = progressRequests;
+    await delay(1100);
+    expect(progressRequests).toBe(stoppedAt);
+    return { model, dealer, reducedMotion, waitingLabel: true, realProgress: true, stopsPollingInBackground: true, stopsPollingAfterPlay: true };
   } finally {
     releaseLead();
     await page.close();
@@ -1302,7 +1335,7 @@ async function main() {
     }
     if (process.argv.includes("--ace-waiting")) {
       for (const dealer of ["User", "AI"]) {
-        console.log(JSON.stringify(await testAceOpeningPlayThrobber(browser, baseUrl, dealer)));
+        console.log(JSON.stringify(await testAceOpeningPlayProgress(browser, baseUrl, dealer)));
       }
       return;
     }
@@ -1368,7 +1401,7 @@ async function main() {
     const aceOpeningPlays = [];
     for (const dealer of ["User", "AI"]) {
       for (const motion of ["no-preference", "reduce"]) {
-        aceOpeningPlays.push(await testAceOpeningPlayThrobber(browser, baseUrl, dealer, motion));
+        aceOpeningPlays.push(await testAceOpeningPlayProgress(browser, baseUrl, dealer, motion));
       }
     }
     const puttingTogether = [await testPuttingTogetherDiscards(browser, baseUrl)];

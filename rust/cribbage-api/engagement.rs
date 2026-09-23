@@ -1036,6 +1036,7 @@ mod tests {
         super::super::auth::initialize(&data_dir).unwrap();
         super::super::activity::initialize(&data_dir).unwrap();
         Server {
+            pegging_work: crate::pegging_work::Registry::default(),
             state: std::sync::Mutex::new(Default::default()),
             model_root: ".".to_string(),
             data_dir,
