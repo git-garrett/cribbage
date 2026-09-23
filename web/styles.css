@@ -4502,10 +4502,6 @@ button.card {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.app[data-cut-confirming="true"] #plays {
-  display: block;
-}
-
 .app[data-phase="discard"] .user-panel-header,
 .app[data-phase="ai_discarding"] .user-panel-header,
 .app[data-phase="cut_for_deal"] #human-hand,
@@ -6668,7 +6664,7 @@ body[data-font-size="x-large"] .app[data-view="game"][data-phase="score_crib"] >
 }
 
 .app[data-view="game"] .deal-cut-choice .deal-cut-card-lift {
-  animation: deal-cut-choice-lift 0.58s cubic-bezier(0.2, 0.82, 0.2, 1) both;
+  animation: deal-cut-choice-lift var(--deal-cut-lift-duration) cubic-bezier(0.2, 0.82, 0.2, 1) both;
 }
 
 @keyframes deal-cut-choice-lift {

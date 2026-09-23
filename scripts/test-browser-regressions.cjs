@@ -993,7 +993,25 @@ async function testFirstDealerCutTap(browser, baseUrl, mode = "touch") {
     await page.locator('[data-pathway-destination="master"]').click();
     const card = page.getByRole("button", { name: "Cut at card 12 of 52", exact: true });
     await expect(card).toBeEnabled();
-    if (historyDuringTap) {
+    if (mode === "timing") {
+      // Freeze time only after preparation has finished. This measures deliberate
+      // presentation delays, independently of network and machine speed.
+      await page.waitForLoadState("networkidle");
+      await page.clock.install();
+      await page.clock.pauseAt(Date.now());
+      // The touch modes below exercise hit testing; activate the native button
+      // here so Safari's synthesized-click scheduling is outside this clock.
+      await card.evaluate(button => button.click());
+      await expect(page.locator(".deal-cut-card-lift")).toHaveCount(1);
+      await expect(page.locator("#plays .deal-cut-choice:disabled")).toHaveCount(52);
+      await page.clock.runFor(400);
+      await expect(page.locator(".deal-cut-reveal-human")).toHaveCount(1);
+      await page.clock.runFor(600);
+      await expect(page.locator(".deal-cut-reveal-ai")).toHaveCount(1);
+      await page.clock.runFor(1000);
+      await expect(page.locator('.app[data-deal-animation-active="true"]')).toHaveCount(1);
+      await page.clock.runFor(3000);
+    } else if (historyDuringTap) {
       const box = await card.boundingBox();
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
       await page.mouse.down();
@@ -1006,9 +1024,18 @@ async function testFirstDealerCutTap(browser, baseUrl, mode = "touch") {
       await card.focus();
       await page.keyboard.press("ArrowRight");
       await page.keyboard.press("Space");
-    } else await card.tap();
-    await expect(page.locator(".deal-cut-reveal").first()).toBeVisible({ timeout: 5000 });
+    } else {
+      await card.tap();
+      if (mode === "slow") {
+        await expect(page.locator(".deal-cut-card-lift")).toBeVisible();
+        // A second tap while the prepared response is pending must not restart
+        // the cut or submit another action.
+        await card.tap({ force: true });
+      }
+    }
+    if (mode !== "timing") await expect(page.locator(".deal-cut-reveal").first()).toBeVisible({ timeout: 5000 });
     await expect(page.locator("#human-hand .card")).toHaveCount(6, { timeout: 10000 });
+    expect(actions.filter(action => action === "prepare-cut-for-deal" || action === "cut-for-deal")).toHaveLength(1);
     return { mode, firstTapRevealsCut: true, actions };
   } finally { releaseHistory(); await page.close(); }
 }
@@ -1266,7 +1293,7 @@ async function main() {
       return;
     }
     if (process.argv.includes("--first-cut")) {
-      for (const mode of ["touch", "history", "slow", "keyboard"]) console.log(JSON.stringify(await testFirstDealerCutTap(browser, baseUrl, mode)));
+      for (const mode of ["timing", "touch", "history", "slow", "keyboard"]) console.log(JSON.stringify(await testFirstDealerCutTap(browser, baseUrl, mode)));
       return;
     }
     if (process.argv.includes("--account-isolation")) {
@@ -1334,7 +1361,7 @@ async function main() {
     await page.close();
     const dynamicCalibration = [await testDynamicCalibrationPresentation(browser, baseUrl, true), await testDynamicCalibrationPresentation(browser, baseUrl, false)];
     const firstDealerCut = [];
-    for (const mode of ["touch", "history", "slow", "keyboard"]) firstDealerCut.push(await testFirstDealerCutTap(browser, baseUrl, mode));
+    for (const mode of ["timing", "touch", "history", "slow", "keyboard"]) firstDealerCut.push(await testFirstDealerCutTap(browser, baseUrl, mode));
     const accountIsolation = await testAccountGameIsolation(browser, baseUrl);
     const restoredHumanHistory = await testRestoredHumanHistory(browser, baseUrl);
     const postgameAnalysis = [await testPostgameAceAnalysis(browser, baseUrl), await testPostgameAceAnalysis(browser, baseUrl, false), await testPostgameAceAnalysis(browser, baseUrl, true, true)];
