@@ -1040,11 +1040,14 @@ async function testFirstDealerCutTap(browser, baseUrl, mode = "touch") {
   } finally { releaseHistory(); await page.close(); }
 }
 
-async function testAceOpeningPlayProgress(browser, baseUrl, dealer = "User", reducedMotion = "no-preference") {
+async function testAceOpeningPlayProgress(browser, baseUrl, dealer = "User", reducedMotion = "no-preference", dynamic = false) {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await installStaticBuild(page);
   await installPathwayFixture(page);
-  const { model, hand, lead, snapshot, state } = acePeggingFixture();
+  const { hand, lead, snapshot, state } = acePeggingFixture();
+  const model = dynamic ? "dynamic" : snapshot.opponent;
+  snapshot.opponent = model;
+  if (dynamic) state.peggingProgressAvailable = dealer === "User";
   await page.emulateMedia({ reducedMotion });
   const humanLead = { ...hand[0], owner: "human" };
   if (dealer === "AI") {
@@ -1070,19 +1073,19 @@ async function testAceOpeningPlayProgress(browser, baseUrl, dealer = "User", red
     if (action === "play-human" && dealer === "AI") {
       return route.fulfill({ json: {
         snapshot: { ...snapshot, plays: [humanLead.id], playOwners: ["human"], turn: 1, count: humanLead.value },
-        state: { ...state, plays: [humanLead], humanTable: [humanLead], humanHand: hand.slice(1), turn: "AI", count: humanLead.value, legalCardIds: [] },
+        state: { ...state, peggingProgressAvailable: true, plays: [humanLead], humanTable: [humanLead], humanHand: hand.slice(1), turn: "AI", count: humanLead.value, legalCardIds: [] },
       } });
     }
     if (action !== "advance-pegging") throw new Error(`Unexpected Ace action: ${action}`);
     await leadReady;
     return route.fulfill({ json: {
       snapshot: { ...snapshot, plays: dealer === "AI" ? [humanLead.id, lead.id] : [lead.id], playOwners: dealer === "AI" ? ["human", "ai"] : ["ai"], turn: 0, count: dealer === "AI" ? 6 : 5 },
-      state: { ...state, plays: dealer === "AI" ? [humanLead, lead] : [lead], humanTable: dealer === "AI" ? [humanLead] : [], humanHand: dealer === "AI" ? hand.slice(1) : hand, aiTable: [lead], aiHandCount: 3, turn: "User", count: dealer === "AI" ? 6 : 5, legalCardIds: (dealer === "AI" ? hand.slice(1) : hand).map(c => c.id) },
+      state: { ...state, peggingProgressAvailable: false, plays: dealer === "AI" ? [humanLead, lead] : [lead], humanTable: dealer === "AI" ? [humanLead] : [], humanHand: dealer === "AI" ? hand.slice(1) : hand, aiTable: [lead], aiHandCount: 3, turn: "User", count: dealer === "AI" ? 6 : 5, legalCardIds: (dealer === "AI" ? hand.slice(1) : hand).map(c => c.id) },
     } });
   });
   try {
     await page.goto(`${baseUrl}/?pathwayView=play`, { waitUntil: "networkidle" });
-    await page.locator('[data-pathway-destination="master"]').click();
+    await page.locator(`[data-pathway-destination="${dynamic ? "dynamic" : "master"}"]`).click();
     if (dealer === "AI") {
       await expect(page.locator("#thinking-overlay")).toBeHidden();
       await page.locator(`#human-hand .card[data-id="${humanLead.id}"]`).click();
@@ -1090,7 +1093,7 @@ async function testAceOpeningPlayProgress(browser, baseUrl, dealer = "User", red
     }
     const overlay = page.locator("#thinking-overlay");
     await overlay.waitFor({ state: "visible", timeout: 5000 });
-    if (await page.locator("#thinking-overlay-label").textContent() !== "Waiting for Ace to play") {
+    if (await page.locator("#thinking-overlay-label").textContent() !== `Waiting for ${dynamic ? "Dynamic" : "Ace"} to play`) {
       throw new Error("Ace opening play did not show its waiting label.");
     }
     const bar = overlay.locator("progress");
@@ -1116,7 +1119,7 @@ async function testAceOpeningPlayProgress(browser, baseUrl, dealer = "User", red
     completed = 100;
     await expect(bar).toHaveAttribute("value", "99");
     await expect(overlay.locator(".throbber")).toHaveCount(0);
-    await page.screenshot({ path: path.join(require("node:os").tmpdir(), `cribbage-ace-wait-${dealer}-${reducedMotion}.png`) });
+    await page.screenshot({ path: path.join(require("node:os").tmpdir(), `cribbage-${model}-wait-${dealer}-${reducedMotion}.png`) });
     releaseLead();
     await overlay.waitFor({ state: "hidden", timeout: 5000 });
     await page.locator('#plays .card[data-owner="ai"]').waitFor({ state: "visible" });
@@ -1333,9 +1336,9 @@ async function main() {
       console.log(JSON.stringify([await testAccountGameIsolation(browser, baseUrl), await testRestoredHumanHistory(browser, baseUrl)]));
       return;
     }
-    if (process.argv.includes("--ace-waiting")) {
+    if (process.argv.includes("--ace-waiting") || process.argv.includes("--dynamic-ace-waiting")) {
       for (const dealer of ["User", "AI"]) {
-        console.log(JSON.stringify(await testAceOpeningPlayProgress(browser, baseUrl, dealer)));
+        console.log(JSON.stringify(await testAceOpeningPlayProgress(browser, baseUrl, dealer, "no-preference", process.argv.includes("--dynamic-ace-waiting"))));
       }
       return;
     }
@@ -1402,6 +1405,7 @@ async function main() {
     for (const dealer of ["User", "AI"]) {
       for (const motion of ["no-preference", "reduce"]) {
         aceOpeningPlays.push(await testAceOpeningPlayProgress(browser, baseUrl, dealer, motion));
+        aceOpeningPlays.push(await testAceOpeningPlayProgress(browser, baseUrl, dealer, motion, true));
       }
     }
     const puttingTogether = [await testPuttingTogetherDiscards(browser, baseUrl)];

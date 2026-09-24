@@ -118,7 +118,7 @@ pub(super) fn opening_key(session: &Session) -> Option<String> {
     let game = &session.game;
     let own = game.player(AI);
     let opponent = game.player(HUMAN);
-    if session.model != ModelId::Schell1323
+    if session.decision_model() != ModelId::Schell1323
         || session.forfeited
         || session.completed_at.is_some()
         || session.waiting_for_deal_cut
@@ -176,7 +176,7 @@ pub(super) fn prepare(server: &Server, session: &Session) -> Option<Arc<Work>> {
 /// fixed at deal time; only the opponent's eventual four-card count is needed.
 /// This cannot influence the already-completed discard decision or human UI.
 fn after_discard(session: &Session, cards: &[u8]) -> Option<Session> {
-    if session.model != ModelId::Schell1323
+    if session.decision_model() != ModelId::Schell1323
         || session.game.dealer != HUMAN
         || session.game.phase != Phase::Discard
         || cards.len() != 2
@@ -297,6 +297,70 @@ mod tests {
         session.waiting_for_deal_cut = false;
         session.turn_card_revealed = true;
         session
+    }
+
+    #[test]
+    fn dynamic_ace_openings_expose_progress_for_both_roles() {
+        for dealer in [HUMAN, AI] {
+            let mut session = new_session_from_seed(ModelId::Dynamic, None, 42, 1);
+            session.game = CribbageGame::new_with_seed(42, dealer);
+            session.use_dynamic_profile(crate::DynamicProfile {
+                strength: 200,
+                ..crate::DynamicProfile::default()
+            });
+            session.waiting_for_deal_cut = false;
+            let cards = [
+                session.game.player(AI).hand[0].id,
+                session.game.player(AI).hand[1].id,
+            ];
+            if dealer == HUMAN {
+                assert!(
+                    after_discard(&session, &cards).is_some(),
+                    "prepare Dynamic's Ace pone lead"
+                );
+            }
+            for side in [HUMAN, AI] {
+                let cards = [
+                    session.game.player(side).hand[0].id,
+                    session.game.player(side).hand[1].id,
+                ];
+                session.game.discard(side, cards).unwrap();
+            }
+            if dealer == AI {
+                assert!(opening_key(&session).is_none(), "wait for the pone lead");
+                let lead = session.game.player(HUMAN).hand[0].id;
+                session.game.play_card(HUMAN, lead).unwrap();
+            }
+            assert_eq!(session.decision_model(), crate::ACE_MODEL_ID);
+            let key = opening_key(&session).expect("Dynamic Ace opening must have progress");
+            let state: Value = serde_json::from_str(&crate::game_state_json(&session)).unwrap();
+            assert_eq!(state["peggingProgressAvailable"], true);
+            let server = Server {
+                pegging_work: Registry::default(),
+                state: Mutex::new(AppState::default()),
+                model_root: String::new(),
+                data_dir: std::env::temp_dir(),
+            };
+            let job = server.pegging_work.start(&session, key, || Ok(PegDecision::Go));
+            job.wait().unwrap();
+            let played = usize::from(dealer == AI);
+            let query = json!({"gameId":session.id,"handNumber":1,"played":played}).to_string();
+            let ready: Value = serde_json::from_str(&progress(&server, &query, None).body).unwrap();
+            assert_eq!(ready["progress"]["state"], "ready");
+            let wrong_role = json!({"gameId":session.id,"handNumber":1,"played":1-played}).to_string();
+            let stale: Value = serde_json::from_str(&progress(&server, &wrong_role, None).body).unwrap();
+            assert!(stale["progress"].is_null());
+
+            for strength in [0, 100] {
+                session.use_dynamic_profile(crate::DynamicProfile {
+                    strength,
+                    ..crate::DynamicProfile::default()
+                });
+                assert!(opening_key(&session).is_none(), "Easy/Tough have no Ace work");
+                let state: Value = serde_json::from_str(&crate::game_state_json(&session)).unwrap();
+                assert_eq!(state["peggingProgressAvailable"], false);
+            }
+        }
     }
 
     #[test]
