@@ -37,7 +37,7 @@ use crate::model91_discard::model91_schell_crib_ev;
 use crate::model_id::{
     MODEL_13_0, MODEL_13_1, MODEL_13_2, MODEL_13_21, MODEL_13_215, MODEL_13_22, MODEL_13_23,
     MODEL_14_3, MODEL_14_8, MODEL_14_8_1, MODEL_15_0, MODEL_15_1, MODEL_15_2, MODEL_16_0,
-    MODEL_16_1, MODEL_16_3, MODEL_9_0, MODEL_9_1, MODEL_9_11, MYRMIDON_5,
+    MODEL_16_1, MODEL_16_3, MODEL_20_0, MODEL_9_0, MODEL_9_1, MODEL_9_11, MYRMIDON_5,
 };
 use crate::policy::PolicyArtifact;
 
@@ -682,7 +682,7 @@ pub fn evaluate_selected_decision(
     selected_card_ids: &[u8],
     root: &str,
 ) -> Result<Decision, String> {
-    if input.model != MODEL_13_0 && input.model != MODEL_13_215 && input.model != MODEL_13_23 {
+    if !matches!(input.model.as_str(), MODEL_13_0 | MODEL_13_215 | MODEL_13_23 | MODEL_20_0) {
         return Err("saved decision review currently supports Ace models only".to_string());
     }
     let selected = match input.kind {
@@ -712,6 +712,7 @@ fn is_supported_rust_model(model: &str) -> bool {
         || model == MODEL_16_0
         || model == MODEL_16_1
         || model == MODEL_16_3
+        || model == MODEL_20_0
         || model == MYRMIDON_5
 }
 
@@ -832,7 +833,7 @@ fn recommend_discard(input: &DecisionInput, root: &str) -> Result<Decision, Stri
     if input.model == MODEL_13_22 {
         return recommend_discard_model1322(input, root);
     }
-    if input.model == MODEL_13_23 {
+    if matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0) {
         return recommend_discard_model1323(input, runtime_tables(root)?);
     }
     if input.model == MODEL_9_0 {
@@ -990,7 +991,7 @@ fn recommend_peg(
     if input.model == MODEL_13_22 {
         return recommend_peg_model1322(input, &legal, tables, model911_cache);
     }
-    if input.model == MODEL_13_23 {
+    if matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0) {
         return recommend_peg_model1323(input, &legal, tables, model13_cache);
     }
     if input.model == MYRMIDON_5 {
@@ -2351,7 +2352,7 @@ fn review_discard_model13(
                 .ok_or_else(|| "selected discard is not in the original hand".to_string())
         })
         .collect::<Result<Vec<_>, _>>()?;
-    if input.model == MODEL_13_23 {
+    if matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0) {
         let tables = runtime_tables(root)?;
         let mut board = BoardModel::from_board_matrix(Arc::clone(tables.verified_board1323()?));
         return recommend_discard_model1323_with_assets(
@@ -2778,7 +2779,7 @@ fn review_peg_model13(
         });
     }
     let tables = runtime_tables(root)?;
-    if input.model == MODEL_13_23 {
+    if matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0) {
         // Review the selected rank without choice pruning: even an inferior
         // action needs its complete distribution to report its true value.
         let forecasts = tables.policy_assets1323()?.forecast(

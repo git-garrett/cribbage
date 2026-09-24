@@ -1,5 +1,5 @@
 {
-  "version": "16.3.0",
+  "version": "20.0.0",
   "scripts": {
     "build": "scripts/run-quiet.sh --show-warnings \"Client build\" scripts/build-client.sh",
     "build:training-drills": "python3 scripts/build_training_drills.py",

@@ -1,0 +1,50 @@
+use cribbage_shadow_engine::model::{
+    evaluate_decision, evaluate_decision_with_caches, evaluate_selected_decision,
+    parse_decision_input, Decision, Model13HandCache,
+};
+use cribbage_shadow_engine::model_id::{MODEL_13_23, MODEL_20_0};
+
+fn assert_matches_ace(fields: &str) {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let root = root.to_str().unwrap();
+    let ace = parse_decision_input(&format!("model={MODEL_13_23};{fields}")).unwrap();
+    let copy = parse_decision_input(&format!("model={MODEL_20_0};{fields}")).unwrap();
+    let expected = evaluate_decision(&ace, root).unwrap();
+    let actual = evaluate_decision(&copy, root).unwrap();
+    assert_eq!(format!("{actual:?}"), format!("{expected:?}"), "{fields}");
+    let cache = Model13HandCache::new();
+    let cached = evaluate_decision_with_caches(&copy, root, None, Some(&cache)).unwrap();
+    assert_eq!(format!("{cached:?}"), format!("{expected:?}"));
+    let selected = match actual {
+        Decision::Discard { card_ids, .. } => card_ids,
+        Decision::Peg { card_id, .. } => card_id.into_iter().collect(),
+    };
+    let expected_review = evaluate_selected_decision(&ace, &selected, root).unwrap();
+    let actual_review = evaluate_selected_decision(&copy, &selected, root).unwrap();
+    assert_eq!(format!("{actual_review:?}"), format!("{expected_review:?}"));
+}
+
+#[test]
+fn model20_pegging_and_review_match_frozen_ace() {
+    for role in ["dealer", "pone"] {
+        assert_matches_ace(&format!(
+            "kind=peg;turnCard=10;role={role};ownDiscards=1,6;aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore=95;humanScore=96;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"
+        ));
+    }
+}
+
+#[test]
+#[ignore = "requires the installed production correction asset"]
+fn model20_discard_and_review_match_frozen_ace() {
+    for role in ["dealer", "pone"] {
+        for (own, opponent) in [(0, 0), (118, 117)] {
+            assert_matches_ace(&format!(
+                "kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore={own};humanScore={opponent}"
+            ));
+        }
+    }
+}

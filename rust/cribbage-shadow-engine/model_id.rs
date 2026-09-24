@@ -49,6 +49,9 @@ pub const MODEL_16_1: &str = "schell_table-peg_table-16.1";
 /// Model 16.3 is the compact public-information scorer, with frozen Model 13
 /// as its final fallback. It deliberately has no exact-policy lookup table.
 pub const MODEL_16_3: &str = "schell_table-peg_table-16.3";
+/// Model 20.0 starts from the frozen production Ace 13.23 strategy and assets.
+/// Keep this experimental identity separate from the production Ace alias.
+pub const MODEL_20_0: &str = "schell_table-peg_table-20.0";
 /// Five-sample Myrmidon agent from the Moulton cribbage RL framework. Strong
 /// Cribbage exposes it as the Easy opponent and also retains it for benchmarks.
 pub const MYRMIDON_5: &str = "myrmidon-5";
@@ -77,6 +80,7 @@ pub enum ModelId {
     Schell160,
     Schell161,
     Schell163,
+    Schell200,
     Myrmidon5,
     Dynamic,
 }
@@ -105,6 +109,7 @@ impl ModelId {
             ModelId::Schell160 => MODEL_16_0,
             ModelId::Schell161 => MODEL_16_1,
             ModelId::Schell163 => MODEL_16_3,
+            ModelId::Schell200 => MODEL_20_0,
             ModelId::Myrmidon5 => MYRMIDON_5,
             ModelId::Dynamic => DYNAMIC,
         }
@@ -131,6 +136,7 @@ impl ModelId {
             ModelId::Schell160 => "Schell Table + Peg Table 16.0",
             ModelId::Schell161 => "Schell Table + Peg Table 16.1",
             ModelId::Schell163 => "Schell Table + Peg Table 16.3",
+            ModelId::Schell200 => "Schell Table + Peg Table 20.0",
             ModelId::Myrmidon5 => "Myrmidon (5 simulations)",
             ModelId::Dynamic => "Dynamic",
         }
@@ -158,6 +164,7 @@ impl ModelId {
                 | ModelId::Schell160
                 | ModelId::Schell161
                 | ModelId::Schell163
+                | ModelId::Schell200
                 | ModelId::Myrmidon5
         )
     }
@@ -209,6 +216,7 @@ impl FromStr for ModelId {
             MODEL_16_0 => Ok(ModelId::Schell160),
             MODEL_16_1 => Ok(ModelId::Schell161),
             MODEL_16_3 => Ok(ModelId::Schell163),
+            MODEL_20_0 => Ok(ModelId::Schell200),
             MYRMIDON_5 => Ok(ModelId::Myrmidon5),
             DYNAMIC => Ok(ModelId::Dynamic),
             other => Err(format!("unsupported model id: {}", other)),
@@ -252,6 +260,12 @@ mod tests {
         assert_eq!(MODEL_13_23.parse::<ModelId>().unwrap(), ModelId::Schell1323);
         assert!(ModelId::Schell1323.has_native_rust_decisions());
         assert!(ModelId::Schell1323.is_ace());
+        assert_eq!(MODEL_20_0.parse::<ModelId>().unwrap(), ModelId::Schell200);
+        assert_eq!(ModelId::Schell200.as_str(), MODEL_20_0);
+        assert!(ModelId::Schell200.has_native_rust_decisions());
+        assert!(!ModelId::Schell200.is_strength_model());
+        assert!(!ModelId::Schell200.is_ace());
+        assert_ne!(ModelId::Schell200, ACE_MODEL_ID);
         assert_eq!(ACE_MODEL_ID.as_str(), ACE_MODEL);
         assert!(ACE_MODEL_ID.is_ace());
         assert!(ModelId::Schell13.is_ace());
