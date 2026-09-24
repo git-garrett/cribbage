@@ -2799,12 +2799,6 @@ body[data-font-size="x-large"] .single-game-report-table th:first-child {
   accent-color: #e5c16c;
 }
 
-.thinking-progress-percent {
-  min-height: 1em;
-  font-size: var(--fine-font);
-  font-variant-numeric: tabular-nums;
-}
-
 .ask-master {
   border-color: #d7b65e;
   background: color-mix(in srgb, #e8c575 18%, #0b5b43);

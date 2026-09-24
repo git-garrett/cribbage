@@ -1098,7 +1098,7 @@ async function testAceOpeningPlayProgress(browser, baseUrl, dealer = "User", red
     await expect(bar).toHaveAttribute("value", "0");
     completed = 70;
     await expect(bar).toHaveAttribute("value", "40");
-    await expect(page.locator("#thinking-progress-percent")).toHaveText("40%");
+    await expect(overlay).not.toContainText("%");
     await page.evaluate(() => {
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
       document.dispatchEvent(new Event("visibilitychange"));
