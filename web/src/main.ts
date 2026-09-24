@@ -1819,7 +1819,8 @@ const aceProgressPoller = new AceProgressPoller(
 function refreshAceProgress(): void {
   aceProgressPoller.watch(state.game && document.visibilityState !== "hidden" &&
     state.aiThinking && !els.thinkingOverlay.hidden &&
-    currentSnapshot?.opponent === "schell_table-peg_table-13.23" && currentSnapshot.gameId
+    (state.game.peggingProgressAvailable || currentSnapshot?.opponent === "schell_table-peg_table-13.23") &&
+    currentSnapshot?.gameId
     ? { gameId: currentSnapshot.gameId, handNumber: state.game.handNumber, played: state.game.plays.length }
     : null);
 }
@@ -9967,7 +9968,7 @@ function render(game: GameState | null): void {
     thinkingLabel.textContent = "Loading opponent";
   }
   const waitingForAcePlay = state.aiThinking &&
-    isAceOpponent(currentSnapshot?.opponent) &&
+    (game.peggingProgressAvailable || isAceOpponent(currentSnapshot?.opponent)) &&
     shouldAdvancePeggingAi(game) &&
     game.plays.length <= 1 && game.completedPlays.length === 0 &&
     !state.turnCutRevealStage && !state.splashOpen;

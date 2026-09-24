@@ -2854,7 +2854,7 @@ fn game_state_json(session: &Session) -> String {
         })
         .unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"phase\":\"{}\",\"message\":\"{}\",\"log\":[],\"result\":{},\"handNumber\":{},\"scores\":{{\"human\":{},\"ai\":{}}},\"pegPositions\":{{\"human\":[{},{}],\"ai\":[{},{}]}},\"dealer\":\"{}\",\"firstDealer\":\"{}\",\"cribOwner\":\"{}\",\"turn\":{},\"count\":{},\"turnCard\":{},\"turnCardRevealed\":{},\"plays\":{},\"completedPlays\":{},\"peggingResetPending\":{},\"humanHand\":{},\"aiHandCount\":{},\"humanTable\":{},\"aiTable\":{},\"legalCardIds\":{},\"aiLegalCardIds\":{},\"canGo\":{},\"scoring\":{},\"cutForDeal\":{},\"dynamicCalibration\":{},\"analyticsEvents\":{}}}",
+        "{{\"phase\":\"{}\",\"message\":\"{}\",\"log\":[],\"result\":{},\"handNumber\":{},\"scores\":{{\"human\":{},\"ai\":{}}},\"pegPositions\":{{\"human\":[{},{}],\"ai\":[{},{}]}},\"dealer\":\"{}\",\"firstDealer\":\"{}\",\"cribOwner\":\"{}\",\"turn\":{},\"count\":{},\"turnCard\":{},\"turnCardRevealed\":{},\"plays\":{},\"completedPlays\":{},\"peggingResetPending\":{},\"peggingProgressAvailable\":{},\"humanHand\":{},\"aiHandCount\":{},\"humanTable\":{},\"aiTable\":{},\"legalCardIds\":{},\"aiLegalCardIds\":{},\"canGo\":{},\"scoring\":{},\"cutForDeal\":{},\"dynamicCalibration\":{},\"analyticsEvents\":{}}}",
         phase,
         json_escape(&message_for(session)),
         result_json(session),
@@ -2875,6 +2875,7 @@ fn game_state_json(session: &Session) -> String {
         cards_with_owners_json(&game.plays, &game.play_owners),
         nested_cards_with_owners_json(&game.completed_plays, &game.completed_play_owners),
         game.pegging_reset_pending,
+        pegging_work::opening_key(session).is_some(),
         human_hand,
         game.player(AI).hand.len(),
         human_table,

@@ -207,6 +207,7 @@ export interface GameState {
   plays: SerializedCard[];
   completedPlays: SerializedCard[][];
   peggingResetPending: boolean;
+  peggingProgressAvailable?: boolean;
   humanHand: SerializedCard[];
   aiHandCount: number;
   humanTable: SerializedCard[];
