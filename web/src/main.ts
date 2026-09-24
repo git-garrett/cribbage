@@ -797,7 +797,6 @@ const els = {
   thinkingOverlay: document.querySelector("#thinking-overlay") as HTMLElement,
   thinkingOverlayLabel: document.querySelector("#thinking-overlay-label") as HTMLElement,
   thinkingProgress: document.querySelector("#thinking-progress") as HTMLProgressElement,
-  thinkingProgressPercent: document.querySelector("#thinking-progress-percent") as HTMLElement,
   serverBusyAlert: document.querySelector("#server-busy-alert") as HTMLElement,
   serverBusyRetry: document.querySelector("#server-busy-retry") as HTMLButtonElement,
   turnCard: document.querySelector("#turn-card") as HTMLElement,
@@ -1814,7 +1813,6 @@ const aceProgressPoller = new AceProgressPoller(
   (percent) => {
     if (percent === null) els.thinkingProgress.removeAttribute("value");
     else els.thinkingProgress.value = percent;
-    els.thinkingProgressPercent.textContent = percent === null ? "" : `${percent}%`;
   },
 );
 
