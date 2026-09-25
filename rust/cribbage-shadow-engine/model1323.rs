@@ -124,6 +124,14 @@ pub struct PolicyAssets {
 }
 
 impl PolicyAssets {
+    pub(crate) fn opening_keep_weights(
+        &self,
+        opponent_role: Role,
+        available: &[u8; 13],
+    ) -> Result<Vec<([u8; 13], f64)>, String> {
+        self.beliefs.opening_hands(opponent_role, available)
+    }
+
     pub fn load(directory: &Path) -> Result<Self, String> {
         for (name, expected) in [
             (

@@ -101,6 +101,15 @@ before any opponent play, conditioned on legally known cards. Historical live
 policies do not load this JSON. See `docs/model-20-baseline.md` for the depletion
 rule and the unchanged discard-asset boundary.
 
+Model 20 also uses that keep prior for cut-conditioned opponent hand scores
+when choosing discards. `empirical-discard-keep-14.8.bin` supplies its empirical
+same-suit opponent-discard rates by role and rank pair, plus role-level fallback
+rates, during discard evaluation and live pegging/review. This existing packed
+asset is unchanged; it was built from 211,303 games and 2,079,994 usable
+discard/keep rows. See `docs/research/model-9-table-provenance.md` for the
+historical builder and source JSON. Model 20 continues using the existing
+crib rank/histogram assets for rank weights and scores.
+
 Model 13.22 calibration uses `model1322-decline-factors.json`, a schema-3
 empirical evidence asset derived from human server play and compact benchmark
 logs. For every observed non-scoring decline it records whether the player

@@ -49,7 +49,7 @@ pub const MODEL_16_1: &str = "schell_table-peg_table-16.1";
 /// Model 16.3 is the compact public-information scorer, with frozen Model 13
 /// as its final fallback. It deliberately has no exact-policy lookup table.
 pub const MODEL_16_3: &str = "schell_table-peg_table-16.3";
-/// Model 20.0 adds empirical opening keeps and depletion to Ace 13.23 pegging.
+/// Model 20.0 adds conditioned beliefs and suit-aware show forecasts to Ace 13.23.
 /// Keep this experimental identity separate from the production Ace alias.
 pub const MODEL_20_0: &str = "schell_table-peg_table-20.0";
 /// Five-sample Myrmidon agent from the Moulton cribbage RL framework. Strong

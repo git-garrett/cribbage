@@ -224,6 +224,25 @@ pub struct Model91EmpiricalBeliefs {
 }
 
 impl Model91EmpiricalBeliefs {
+    pub(crate) fn opening_hands(
+        &self,
+        opponent_role: Role,
+        available: &[u8; RANKS],
+    ) -> Result<Vec<([u8; RANKS], f64)>, String> {
+        let hands = self
+            .hands(opponent_role, [0; RANKS], available, 4)
+            .ok_or("empirical opening keep prior is missing")?;
+        Ok(hands
+            .into_iter()
+            .map(|(hand, weight)| {
+                (
+                    hand,
+                    depleted_empirical_weight(weight, &hand, available, &[4; RANKS]),
+                )
+            })
+            .collect())
+    }
+
     pub(crate) fn load_opening_keep_prior(&mut self, path: &Path) -> Result<(), String> {
         #[derive(serde::Deserialize)]
         struct KeepPrior {

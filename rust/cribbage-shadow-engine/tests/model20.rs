@@ -4,7 +4,7 @@ use cribbage_shadow_engine::model::{
 };
 use cribbage_shadow_engine::model_id::{MODEL_13_23, MODEL_20_0};
 
-fn assert_matches_ace(fields: &str) {
+fn assert_discard_cache_and_review(fields: &str) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
@@ -12,20 +12,19 @@ fn assert_matches_ace(fields: &str) {
         .unwrap();
     let root = root.to_str().unwrap();
     let ace = parse_decision_input(&format!("model={MODEL_13_23};{fields}")).unwrap();
-    let copy = parse_decision_input(&format!("model={MODEL_20_0};{fields}")).unwrap();
-    let expected = evaluate_decision(&ace, root).unwrap();
-    let actual = evaluate_decision(&copy, root).unwrap();
-    assert_eq!(format!("{actual:?}"), format!("{expected:?}"), "{fields}");
+    let model20 = parse_decision_input(&format!("model={MODEL_20_0};{fields}")).unwrap();
+    let frozen = evaluate_decision(&ace, root).unwrap();
+    let actual = evaluate_decision(&model20, root).unwrap();
+    assert_ne!(format!("{actual:?}"), format!("{frozen:?}"), "{fields}");
     let cache = Model13HandCache::new();
-    let cached = evaluate_decision_with_caches(&copy, root, None, Some(&cache)).unwrap();
-    assert_eq!(format!("{cached:?}"), format!("{expected:?}"));
-    let selected = match actual {
-        Decision::Discard { card_ids, .. } => card_ids,
-        Decision::Peg { card_id, .. } => card_id.into_iter().collect(),
+    let cached = evaluate_decision_with_caches(&model20, root, None, Some(&cache)).unwrap();
+    assert_eq!(format!("{cached:?}"), format!("{actual:?}"));
+    let selected = match &actual {
+        Decision::Discard { card_ids, .. } => card_ids.clone(),
+        Decision::Peg { card_id, .. } => card_id.iter().copied().collect(),
     };
-    let expected_review = evaluate_selected_decision(&ace, &selected, root).unwrap();
-    let actual_review = evaluate_selected_decision(&copy, &selected, root).unwrap();
-    assert_eq!(format!("{actual_review:?}"), format!("{expected_review:?}"));
+    let review = evaluate_selected_decision(&model20, &selected, root).unwrap();
+    assert_eq!(format!("{review:?}"), format!("{actual:?}"));
 }
 
 #[test]
@@ -66,10 +65,10 @@ fn model20_pegging_cache_and_review_use_corrected_beliefs() {
 
 #[test]
 #[ignore = "requires the installed production correction asset"]
-fn model20_discard_and_review_match_frozen_ace() {
+fn model20_discard_and_review_use_conditioned_show_scores() {
     for role in ["dealer", "pone"] {
         for (own, opponent) in [(0, 0), (118, 117)] {
-            assert_matches_ace(&format!(
+            assert_discard_cache_and_review(&format!(
                 "kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore={own};humanScore={opponent}"
             ));
         }
