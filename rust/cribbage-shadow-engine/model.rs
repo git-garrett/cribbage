@@ -235,6 +235,7 @@ struct RuntimeTables {
     corrections1322: OnceLock<Model1322CorrectionTable>,
     corrections1323: OnceLock<Result<Model1323CorrectionTable, String>>,
     policy_assets1323: OnceLock<Model1323PolicyAssets>,
+    policy_assets20: OnceLock<Model1323PolicyAssets>,
     verified_board1323: OnceLock<Arc<BoardWinMatrix>>,
     beliefs91: OnceLock<Model91EmpiricalBeliefs>,
     decline_factors1322: OnceLock<Model1322DeclineFactors>,
@@ -2033,7 +2034,7 @@ fn recommend_peg_model1323(
         BoardModel::from_board_matrix(Arc::clone(tables.verified_board1323()?)),
         Some(tables.crib_rank()?),
     );
-    let forecasts = tables.policy_assets1323()?.forecast_for_choice(
+    let forecasts = tables.pegging_policy_assets(input)?.forecast_for_choice(
         &observation,
         hand_cache.map(|cache| &cache.model1323),
         &mut |own, opponent| {
@@ -2782,7 +2783,7 @@ fn review_peg_model13(
     if matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0) {
         // Review the selected rank without choice pruning: even an inferior
         // action needs its complete distribution to report its true value.
-        let forecasts = tables.policy_assets1323()?.forecast(
+        let forecasts = tables.pegging_policy_assets(input)?.forecast(
             &model1323_observation(input), usize::MAX,
         )?;
         let selected_forecasts: Vec<_> = forecasts.into_iter()
@@ -6106,6 +6107,7 @@ impl RuntimeTables {
             corrections1322: OnceLock::new(),
             corrections1323: OnceLock::new(),
             policy_assets1323: OnceLock::new(),
+            policy_assets20: OnceLock::new(),
             verified_board1323: OnceLock::new(),
             beliefs91: OnceLock::new(),
             decline_factors1322: OnceLock::new(),
@@ -6179,6 +6181,16 @@ impl RuntimeTables {
         load_cached(&self.policy_assets1323, "policy_assets1323", || {
             Model1323PolicyAssets::load(&self.asset_path(""))
         })
+    }
+
+    fn pegging_policy_assets(&self, input: &DecisionInput) -> Result<&Model1323PolicyAssets, String> {
+        if input.model == MODEL_20_0 {
+            load_cached(&self.policy_assets20, "policy_assets20", || {
+                Model1323PolicyAssets::load_model20(&self.asset_path(""))
+            })
+        } else {
+            self.policy_assets1323()
+        }
     }
 
     fn verified_board1323(&self) -> Result<&Arc<BoardWinMatrix>, String> {

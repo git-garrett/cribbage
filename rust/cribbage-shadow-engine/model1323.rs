@@ -1,5 +1,6 @@
-//! Model 13.23's live candidate forecasts. Board utility is applied by the
-//! caller; continuation actions use the unchanged correction-builder policy.
+//! Model 13.23's live candidate forecasts, with opt-in Model 20 beliefs.
+//! Board utility is applied by the caller. The default continuation policy
+//! preserves the frozen correction builder.
 //! Only finite outcome distributions leave this module. No paths or actions
 //! keyed by observations survive a decision.
 use crate::board::Role;
@@ -119,6 +120,7 @@ pub struct PolicyAssets {
     beliefs: Model91EmpiricalBeliefs,
     factors: Model1322DeclineFactors,
     discards: OpponentDiscardPrior,
+    empirical_depletion: bool,
 }
 
 impl PolicyAssets {
@@ -146,6 +148,7 @@ impl PolicyAssets {
             }
         }
         Ok(Self {
+            empirical_depletion: false,
             beliefs: Model91EmpiricalBeliefs::load(directory.join("model91-pegging-beliefs.bin"))?,
             factors: Model1322DeclineFactors::load(
                 directory.join("model1322-decline-factors.json"),
@@ -162,6 +165,22 @@ impl PolicyAssets {
         world_budget: usize,
     ) -> Result<Vec<PegCandidateForecast>, String> {
         self.forecast_with_hand_cache(observation, world_budget, None)
+    }
+
+    pub(crate) fn load_model20(directory: &Path) -> Result<Self, String> {
+        let path = directory.join("model132-keep-prior.json");
+        let bytes = fs::read(&path).map_err(|e| format!("read Model 20 keep prior: {e}"))?;
+        if format!("{:x}", Sha256::digest(bytes))
+            != "ce5f9e6fc81854d5a6cab52a539906298e65c70861afa54ddfaf94eb4c09b4a4"
+        {
+            return Err(
+                "Model 20 keep prior differs from the frozen 13.23 builder input".to_string(),
+            );
+        }
+        let mut assets = Self::load(directory)?;
+        assets.beliefs.load_opening_keep_prior(&path)?;
+        assets.empirical_depletion = true;
+        Ok(assets)
     }
 
     pub(crate) fn forecast_with_hand_cache(
@@ -201,6 +220,9 @@ impl PolicyAssets {
             1_000_000,
         )?;
         policy.use_compact_continuations();
+        if self.empirical_depletion {
+            policy.use_empirical_depletion();
+        }
         Ok(policy)
     }
 
@@ -764,6 +786,65 @@ mod tests {
             };
             assert_eq!(bits(actual), bits(expected));
         }
+    }
+
+    #[test]
+    fn model20_loads_empirical_opening_prior_without_changing_frozen_ace() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let frozen = PolicyAssets::load(&directory).unwrap();
+        let model20 = PolicyAssets::load_model20(&directory).unwrap();
+        let physical = Model911Policy::new(None, frozen.factors, 0, 0).unwrap();
+        let mut observation = opening().0;
+        for role in [Role::Dealer, Role::Pone] {
+            observation.role = role;
+            let original = frozen
+                .decision_policy()
+                .unwrap()
+                .opponent_hands_with_cache(&observation, None)
+                .unwrap();
+            assert_eq!(
+                original,
+                physical
+                    .opponent_hands_with_cache(&observation, None)
+                    .unwrap()
+            );
+            let policy = model20.decision_policy().unwrap();
+            let corrected = policy
+                .opponent_hands_with_cache(&observation, None)
+                .unwrap();
+            assert!(!corrected.is_empty());
+            assert_ne!(corrected, original);
+            let cache = HandCache::default();
+            let expected = model20.worlds(&observation, &policy).unwrap();
+            for _ in 0..2 {
+                let actual = model20
+                    .worlds_for_hand(&observation, &policy, Some(&cache))
+                    .unwrap();
+                assert_eq!(actual.len(), expected.len());
+                for (actual, expected) in actual.iter().zip(&expected) {
+                    assert_eq!(actual.remaining, expected.remaining);
+                    assert_eq!(actual.discards, expected.discards);
+                    assert_eq!(actual.weight.to_bits(), expected.weight.to_bits());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn model20_requires_the_frozen_empirical_keep_asset() {
+        let directory =
+            std::env::temp_dir().join(format!("model20-keep-prior-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        assert!(PolicyAssets::load_model20(&directory)
+            .err()
+            .unwrap()
+            .contains("read Model 20 keep prior"));
+        fs::write(directory.join("model132-keep-prior.json"), b"{}").unwrap();
+        assert!(PolicyAssets::load_model20(&directory)
+            .err()
+            .unwrap()
+            .contains("differs from the frozen"));
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

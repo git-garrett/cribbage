@@ -864,6 +864,10 @@ impl Model911Policy {
         self.lock_inner().use_compact_continuations();
     }
 
+    pub(crate) fn use_empirical_depletion(&self) {
+        self.lock_inner().use_empirical_depletion();
+    }
+
     pub fn clear_hand_cache(&self) {
         self.lock_inner().clear_future_cache();
     }

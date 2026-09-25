@@ -12,7 +12,7 @@
 use crate::board::Role;
 use crate::cards::{
     choose, enumerate_rank_hands, peg_card_for_rank, rank_combination_count, rank_count_total,
-    score_count, VALUES,
+    rank_counts_from_key, score_count, VALUES,
 };
 use crate::information_set::{PegSeat, RankPegAction, RankPegEvent, RankPegState};
 use std::collections::HashMap;
@@ -224,6 +224,46 @@ pub struct Model91EmpiricalBeliefs {
 }
 
 impl Model91EmpiricalBeliefs {
+    pub(crate) fn load_opening_keep_prior(&mut self, path: &Path) -> Result<(), String> {
+        #[derive(serde::Deserialize)]
+        struct KeepPrior {
+            version: u32,
+            roles: std::collections::BTreeMap<String, std::collections::BTreeMap<String, u64>>,
+        }
+        let prior: KeepPrior = serde_json::from_slice(
+            &fs::read(path).map_err(|e| format!("read opening keep prior: {e}"))?,
+        )
+        .map_err(|e| format!("parse opening keep prior: {e}"))?;
+        if prior.version != 1 {
+            return Err("unsupported opening keep prior version".to_string());
+        }
+        for (name, opponent_role) in [("dealer", Role::Dealer), ("pone", Role::Pone)] {
+            let rows = prior
+                .roles
+                .get(name)
+                .filter(|rows| !rows.is_empty())
+                .ok_or_else(|| format!("opening keep prior missing {name} hands"))?;
+            let hands = rows
+                .iter()
+                .map(|(key, weight)| {
+                    let hand = rank_counts_from_key(key)?;
+                    if rank_count_total(&hand) != 4 || *weight == 0 {
+                        return Err("opening keep prior has invalid hand or weight".to_string());
+                    }
+                    Ok((hand, *weight))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            self.entries.insert(
+                BeliefKey {
+                    opponent_role,
+                    played: [0; RANKS],
+                },
+                hands,
+            );
+        }
+        Ok(())
+    }
+
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
         let path = path.as_ref();
         let bytes = fs::read(path).map_err(|error| {
@@ -548,6 +588,7 @@ impl OpponentHandCache {
 enum Model91EvidenceWeightMode {
     Physical,
     Empirical,
+    DepletedEmpirical([u8; RANKS]),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -595,6 +636,7 @@ pub struct Model91Choice {
 
 pub struct Model91Policy {
     empirical: Option<Model91EmpiricalBeliefs>,
+    empirical_depletion: bool,
     decision_cache: HashMap<Model91DecisionKey, Model91Choice>,
     cache_limit: usize,
     future_cache: ContinuationMemo,
@@ -606,6 +648,13 @@ pub struct Model91Policy {
 }
 
 impl Model91Policy {
+    /// Model 20 opt-in. Historical policies retain their empirical weights.
+    pub(crate) fn use_empirical_depletion(&mut self) {
+        self.empirical_depletion = true;
+        self.decision_cache.clear();
+        self.clear_evidence_cache();
+    }
+
     /// Representation-only opt-in; historical models retain the reference path.
     pub(crate) fn use_compact_continuations(&mut self) {
         self.future_cache = ContinuationMemo::Compact(compact::Memo::default());
@@ -614,6 +663,7 @@ impl Model91Policy {
     pub fn new(empirical: Option<Model91EmpiricalBeliefs>, cache_limit: usize) -> Self {
         Model91Policy {
             empirical,
+            empirical_depletion: false,
             decision_cache: HashMap::new(),
             cache_limit,
             future_cache: ContinuationMemo::default(),
@@ -901,17 +951,16 @@ impl Model91Policy {
             Role::Dealer => Role::Pone,
             Role::Pone => Role::Dealer,
         };
-        let (hands, weight_mode) = if rank_count_total(&observation.opponent_played) > 0 {
-            if let Some(hands) = self.empirical.as_ref().and_then(|beliefs| {
+        let (hands, weight_mode) = if let Some(hands) =
+            self.empirical.as_ref().and_then(|beliefs| {
                 beliefs.hands(opponent_role, observation.opponent_played, &available, size)
             }) {
-                (hands, Model91EvidenceWeightMode::Empirical)
+            let mode = if self.empirical_depletion {
+                Model91EvidenceWeightMode::DepletedEmpirical(empirical_baseline(observation))
             } else {
-                (
-                    RankHandIndex::shared().compatible_hands(&available, size)?,
-                    Model91EvidenceWeightMode::Physical,
-                )
-            }
+                Model91EvidenceWeightMode::Empirical
+            };
+            (hands, mode)
         } else {
             (
                 RankHandIndex::shared().compatible_hands(&available, size)?,
@@ -1053,14 +1102,22 @@ impl Model91Policy {
             Role::Pone => Role::Dealer,
         };
         self.stats.posterior_requests = self.stats.posterior_requests.saturating_add(1);
-        let empirical = if rank_count_total(&observation.opponent_played) > 0 {
-            self.empirical.as_ref().and_then(|beliefs| {
-                beliefs.hands(opponent_role, observation.opponent_played, &available, size)
-            })
-        } else {
-            None
-        };
+        let empirical = self.empirical.as_ref().and_then(|beliefs| {
+            beliefs.hands(opponent_role, observation.opponent_played, &available, size)
+        });
         let base = match (empirical, cache) {
+            (Some(hands), _) if self.empirical_depletion => {
+                let baseline = empirical_baseline(observation);
+                hands
+                    .into_iter()
+                    .map(|(hand, weight)| {
+                        (
+                            hand,
+                            depleted_empirical_weight(weight, &hand, &available, &baseline),
+                        )
+                    })
+                    .collect()
+            }
             (Some(hands), _) => hands,
             (None, Some(cache)) => cache.physical_hands(observation, &available, size)?,
             (None, None) => RankHandIndex::shared().compatible_hands(&available, size)?,
@@ -1098,6 +1155,9 @@ fn evidence_hand_weight(
     let mut weight = match weight_mode {
         Model91EvidenceWeightMode::Physical => 1.0,
         Model91EvidenceWeightMode::Empirical => hand.base_weight,
+        Model91EvidenceWeightMode::DepletedEmpirical(baseline) => {
+            depleted_empirical_weight(hand.base_weight, &hand.ranks, available, &baseline)
+        }
     };
     // At most four ranks occur in a hand. Omitted ranks only contributed a
     // compatibility check of 0 <= available and multiplication by exactly 1.
@@ -1121,6 +1181,25 @@ fn evidence_hand_weight(
         weight = weight * f64::from(rank_likelihood_ppm[rank]) / 1_000_000.0;
     }
     weight
+}
+
+fn empirical_baseline(observation: &Model91Observation) -> [u8; RANKS] {
+    // The empirical row already conditions on the opponent's played ranks.
+    // Only additional known cards should reduce its remaining-hand weights.
+    std::array::from_fn(|rank| 4_u8.saturating_sub(observation.opponent_played[rank]))
+}
+
+fn depleted_empirical_weight(
+    weight: f64,
+    hand: &[u8; RANKS],
+    available: &[u8; RANKS],
+    baseline: &[u8; RANKS],
+) -> f64 {
+    let before = rank_combination_count(hand, baseline);
+    if before == 0.0 {
+        return 0.0;
+    }
+    weight * (rank_combination_count(hand, available) / before)
 }
 
 fn reweight_opponent_hands(
@@ -1759,6 +1838,7 @@ mod tests {
                                     rank_combination_count(&ranks, &available)
                                 }
                                 Model91EvidenceWeightMode::Empirical => hand.base_weight,
+                                Model91EvidenceWeightMode::DepletedEmpirical(_) => unreachable!(),
                             };
                             ranks
                                 .iter()
@@ -1857,6 +1937,155 @@ mod tests {
         assert_eq!(score_count_for_ranks(&[4, 4, 4, 4]), 12);
         assert_eq!(score_count_for_ranks(&[0, 2, 1]), 3);
         assert_eq!(score_count_for_ranks(&[9, 9, 9, 0]), 2);
+    }
+
+    #[test]
+    fn empirical_depletion_conditions_surviving_hands_without_recounting_public_cards() {
+        let mut observation =
+            Model91Observation::from_state(&state(hand(&[(0, 1), (4, 2), (12, 1)])), PegSeat::Zero)
+                .unwrap();
+        observation.opponent_played = hand(&[(0, 1)]);
+        observation.own_discards = hand(&[(4, 1), (1, 1)]);
+        let pair = hand(&[(4, 2), (12, 1)]);
+        let single = hand(&[(4, 1), (12, 2)]);
+        let impossible = hand(&[(4, 3)]);
+        let mut beliefs = Model91EmpiricalBeliefs::default();
+        beliefs
+            .insert(
+                Role::Dealer,
+                observation.opponent_played,
+                vec![(pair, 60), (single, 60), (impossible, 60)],
+            )
+            .unwrap();
+        let neutral = [1_000_000; RANKS];
+        let mut frozen = Model91Policy::new(Some(beliefs.clone()), 0);
+        assert_eq!(
+            frozen.opponent_hands(&observation, &neutral).unwrap(),
+            vec![(pair, 60.0), (single, 60.0)]
+        );
+        let mut corrected = Model91Policy::new(Some(beliefs), 0);
+        corrected.use_empirical_depletion();
+        assert_eq!(
+            corrected.opponent_hands(&observation, &neutral).unwrap(),
+            vec![(pair, 10.0), (single, 30.0)]
+        );
+
+        // An empirical row with one public five already has only three unseen
+        // fives in its baseline. Two additional known fives leave one of three.
+        observation.opponent_played = hand(&[(4, 1)]);
+        let baseline = empirical_baseline(&observation);
+        assert_eq!(baseline[4], 3);
+        assert_eq!(
+            depleted_empirical_weight(60.0, &single, &baseline, &baseline),
+            60.0
+        );
+        assert_eq!(
+            depleted_empirical_weight(
+                60.0,
+                &single,
+                &opponent_available(&observation).unwrap(),
+                &baseline
+            ),
+            20.0
+        );
+    }
+
+    #[test]
+    fn empirical_depletion_evidence_cache_matches_uncached_policy() {
+        let mut baseline =
+            Model91Observation::from_state(&state(hand(&[(0, 1), (4, 2), (12, 1)])), PegSeat::Zero)
+                .unwrap();
+        baseline.own_discards = [0; RANKS];
+        baseline.turn_rank = None;
+        // Exercise both the opening prior and an empirical played-card row.
+        for played in [[0; RANKS], hand(&[(4, 1)])] {
+            baseline.opponent_played = played;
+            let size = baseline.opponent_remaining_count().unwrap();
+            let mut beliefs = Model91EmpiricalBeliefs::default();
+            beliefs.entries.insert(
+                BeliefKey {
+                    opponent_role: Role::Dealer,
+                    played,
+                },
+                vec![
+                    (hand(&[(4, 2), (12, size - 2)]), 60),
+                    (hand(&[(4, 1), (12, size - 1)]), 60),
+                ],
+            );
+            let mut cached =
+                Model91Policy::new_with_evidence_cache(Some(beliefs.clone()), 0, 100_000, 0);
+            cached.use_empirical_depletion();
+            cached.choose_action(&baseline).unwrap();
+            for cut in [4, 12] {
+                let mut observation = baseline;
+                observation.own_discards = hand(&[(4, 1), (1, 1)]);
+                observation.turn_rank = Some(cut);
+                let mut likelihoods = [1_000_000; RANKS];
+                likelihoods[12] = 250_000;
+                let mut uncached = Model91Policy::new(Some(beliefs.clone()), 0);
+                uncached.use_empirical_depletion();
+                let expected = uncached
+                    .choose_action_with_opponent_likelihood_and_net_ev(&observation, &likelihoods)
+                    .unwrap();
+                let actual = cached
+                    .choose_action_with_opponent_likelihood_and_net_ev(&observation, &likelihoods)
+                    .unwrap();
+                assert_eq!(actual.action, expected.action);
+                assert!((actual.net_ev.unwrap() - expected.net_ev.unwrap()).abs() < 1e-12);
+            }
+            assert_eq!(cached.stats().evidence_cache_hits, 2);
+        }
+    }
+
+    #[test]
+    fn opening_keep_prior_preserves_role_weights_and_conditions_known_cards() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/model132-keep-prior.json");
+        let raw: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let mut beliefs = Model91EmpiricalBeliefs::default();
+        beliefs.load_opening_keep_prior(&path).unwrap();
+        let mut observation = Model91Observation::from_state(
+            &state(hand(&[(1, 1), (2, 1), (3, 1), (7, 1)])),
+            PegSeat::Zero,
+        )
+        .unwrap();
+        let mut policy = Model91Policy::new(Some(beliefs), 0);
+        policy.use_empirical_depletion();
+        for (own_role, opponent_role, count) in
+            [(Role::Dealer, "pone", 1798), (Role::Pone, "dealer", 1740)]
+        {
+            observation.role = own_role;
+            let rows = raw["roles"][opponent_role].as_object().unwrap();
+            assert_eq!(rows.len(), count);
+            let available = opponent_available(&observation).unwrap();
+            let mut expected: Vec<_> = rows
+                .iter()
+                .filter_map(|(key, weight)| {
+                    let ranks = rank_counts_from_key(key).unwrap();
+                    let combinations = rank_combination_count(&ranks, &available);
+                    (combinations > 0.0).then(|| {
+                        (
+                            ranks,
+                            weight.as_u64().unwrap() as f64
+                                * (combinations / rank_combination_count(&ranks, &[4; RANKS])),
+                        )
+                    })
+                })
+                .collect();
+            expected.sort_by_key(|(ranks, _)| *ranks);
+            let actual = policy
+                .opponent_hands(&observation, &[1_000_000; RANKS])
+                .unwrap();
+            assert_eq!(actual.len(), expected.len());
+            for ((ranks, weight), (expected_ranks, expected_weight)) in actual.iter().zip(expected)
+            {
+                assert_eq!(*ranks, expected_ranks);
+                assert!((weight - expected_weight).abs() < expected_weight * 1e-14);
+            }
+            let historical = Model91Policy::new(None, 0)
+                .opponent_hands(&observation, &[1_000_000; RANKS])
+                .unwrap();
+            assert_ne!(actual, historical);
+        }
     }
 
     #[test]
