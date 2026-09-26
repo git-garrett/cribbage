@@ -316,15 +316,18 @@ impl WpMemo {
         rank: u8,
         board: &BoardWinMatrix,
     ) -> Result<f64, String> {
-        self.play(
-            WpState {
-                peg: State::from_reference(state),
-                scores,
-                role,
-            },
-            rank,
-            board,
-        )
+        let state = WpState {
+            peg: State::from_reference(state),
+            scores,
+            role,
+        };
+        if rank >= RANKS as u8 || state.peg.copies(state.peg.current(), rank) == 0 {
+            return Err("Model 20.1 WP evaluator selected an absent rank".into());
+        }
+        if state.peg.count() + VALUES[rank as usize] > 31 {
+            return Err("Model 20.1 WP evaluator selected an illegal play".into());
+        }
+        self.play(state, rank, board)
     }
 
     fn terminal(state: WpState, board: &BoardWinMatrix) -> f64 {
@@ -425,11 +428,11 @@ impl WpMemo {
 
     fn play(&mut self, state: WpState, rank: u8, board: &BoardWinMatrix) -> Result<f64, String> {
         let current = state.peg.current();
-        if rank >= RANKS as u8 || state.peg.copies(current, rank) == 0 {
-            return Err("Model 20.1 WP evaluator selected an absent rank".into());
-        }
+        // forced_play checks the entry; future visits only present, playable ranks.
+        debug_assert!(rank < RANKS as u8 && state.peg.copies(current, rank) > 0);
         let count = state.peg.count() + VALUES[rank as usize];
-        if count > 31 || state.peg.len() >= MAX_SERIES {
+        debug_assert!(count <= 31);
+        if state.peg.len() >= MAX_SERIES {
             return Err("Model 20.1 WP evaluator selected an illegal play".into());
         }
         let mut next = state;
@@ -454,6 +457,41 @@ impl WpMemo {
 mod tests {
     use super::*;
     use crate::information_set::{PegSeat, RankPegState};
+
+    #[test]
+    fn wp_checked_entry_and_recursive_series_guard_reject_invalid_plays() {
+        let board = BoardWinMatrix::from_function(|_, _, _| 0.5);
+        let mut memo = WpMemo::default();
+        let mut hands = [[0; RANKS]; 2];
+        hands[0][0] = 1;
+        let state = AverageState::new(hands, &[], 0, 0, None, None).unwrap();
+        for rank in [1, 13, 255] {
+            assert_eq!(
+                memo.forced_play(&state, [0, 0], Role::Dealer, rank, &board)
+                    .unwrap_err(),
+                "Model 20.1 WP evaluator selected an absent rank"
+            );
+        }
+        hands[0] = [0; RANKS];
+        hands[0][4] = 1;
+        let blocked = AverageState::new(hands, &[9, 9, 9], 30, 0, None, Some(1)).unwrap();
+        assert_eq!(
+            memo.forced_play(&blocked, [0, 0], Role::Dealer, 4, &board)
+                .unwrap_err(),
+            "Model 20.1 WP evaluator selected an illegal play"
+        );
+        // An invalid internal caller can supply more cards than a hand permits.
+        // Retain the series bound even after a legal root play and a forced go.
+        hands[0] = [0; RANKS];
+        hands[0][2] = 2;
+        let oversized =
+            AverageState::new(hands, &[0, 1, 0, 1, 0, 1, 0], 10, 0, None, Some(1)).unwrap();
+        assert_eq!(
+            memo.forced_play(&oversized, [0, 0], Role::Dealer, 2, &board)
+                .unwrap_err(),
+            "Model 20.1 WP evaluator selected an illegal play"
+        );
+    }
 
     fn reference_wp(state: &RankPegState, board: &BoardWinMatrix) -> f64 {
         if let Some(winner) = state.winner {
