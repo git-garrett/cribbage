@@ -353,13 +353,15 @@ impl WpMemo {
         }
         // Memoize zero-count states, where different played series can converge.
         // Keep cheap one/two-card tails out of the bounded memo as well.
-        let hands = state.peg.0 & HAND_MASK;
-        // Rank counts occupy three-bit fields; sum their bit planes.
-        let rank_low_bits = HAND_MASK / 7;
-        let remaining = (hands & rank_low_bits).count_ones()
-            + 2 * ((hands >> 1) & rank_low_bits).count_ones()
-            + 4 * ((hands >> 2) & rank_low_bits).count_ones();
-        let cache = remaining > 2 && state.peg.count() == 0;
+        let cache = state.peg.count() == 0 && {
+            let hands = state.peg.0 & HAND_MASK;
+            // Rank counts occupy three-bit fields; sum their bit planes.
+            let rank_low_bits = HAND_MASK / 7;
+            let remaining = (hands & rank_low_bits).count_ones()
+                + 2 * ((hands >> 1) & rank_low_bits).count_ones()
+                + 4 * ((hands >> 2) & rank_low_bits).count_ones();
+            remaining > 2
+        };
         if cache {
             if let Some(value) = self.outcomes.get(&WpKey::from(state)) {
                 return Ok(*value);
