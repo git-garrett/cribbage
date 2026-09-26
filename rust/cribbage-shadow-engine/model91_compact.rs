@@ -262,7 +262,7 @@ struct WpState {
 
 #[derive(Default)]
 pub(super) struct WpMemo {
-    outcomes: HashMap<WpState, f64>,
+    outcomes: HashMap<WpState, f64, BuildHasherDefault<StateHasher>>,
 }
 
 impl WpMemo {
