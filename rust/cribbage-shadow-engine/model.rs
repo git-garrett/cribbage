@@ -1913,7 +1913,7 @@ fn recommend_discard_model1323(
 
 struct Model20DiscardContext<'a> {
     opponent_hands: Vec<Vec<(i32, f64)>>,
-    suit_rates: &'a EmpiricalRoleTable,
+    suit_rates: &'a crate::model20_discards::SuitedDiscardRates,
 }
 
 struct Model20ShowOutcomes<'a> {
@@ -1975,7 +1975,7 @@ fn model20_discard_context<'a>(
     }
     Ok(Some(Model20DiscardContext {
         opponent_hands,
-        suit_rates: empirical_role(tables.empirical()?, opponent_role),
+        suit_rates: policy.suited_discard_rates(opponent_role)?,
     }))
 }
 
@@ -3106,7 +3106,7 @@ fn crib_score_outcomes_for_cut(
     role: Role,
     seen_cards: &[Card],
     crib_rank: &CribRankDiscardTables,
-    suit_rates: Option<&EmpiricalRoleTable>,
+    suit_rates: Option<&crate::model20_discards::SuitedDiscardRates>,
 ) -> Vec<(i32, f64)> {
     let discard_key = rank_count_key(&rank_counts(discard));
     let Some(entry) = crib_rank.histogram(role_index(role), &discard_key, cut.rank) else {
@@ -4933,7 +4933,7 @@ fn empirical_suited_split_weights(
 fn model20_discard_suit_weights(
     ranks: &[u8; 13],
     weight: f64,
-    role_table: &EmpiricalRoleTable,
+    role_table: &crate::model20_discards::SuitedDiscardRates,
     suited_len: usize,
     unsuited_len: usize,
 ) -> (f64, f64) {
@@ -4943,19 +4943,7 @@ fn model20_discard_suit_weights(
     if unsuited_len == 0 {
         return (weight, 0.0);
     }
-    let rate = role_table
-        .discards
-        .iter()
-        .find(|entry| entry.ranks == *ranks)
-        .map(|entry| entry.suited_rate)
-        .unwrap_or_else(|| {
-            if role_table.distinct_suited_discard_rate != 0.0 {
-                role_table.distinct_suited_discard_rate
-            } else {
-                role_table.suited_discard_rate
-            }
-        })
-        .clamp(0.0, 1.0);
+    let rate = role_table.rate(ranks);
     (weight * rate, weight * (1.0 - rate))
 }
 
@@ -5887,7 +5875,11 @@ fn model1323_pegging_win_evaluator(
             input.role,
             &known,
             tables.crib_rank()?,
-            Some(empirical_role(tables.empirical()?, other_role(input.role))),
+            Some(
+                tables
+                    .pegging_policy_assets(input)?
+                    .suited_discard_rates(other_role(input.role))?,
+            ),
         );
     }
     Ok(PeggingWinEvaluator {
@@ -6941,20 +6933,18 @@ mod tests {
 
     #[test]
     fn model20_empirical_suit_rates_preserve_mass_and_legal_support() {
+        use crate::model20_discards::{SuitEvidence, SuitedDiscardRates};
         let ranks = rank_counts(&cards_from_ids(&[0, 4]).unwrap());
-        let mut rates = EmpiricalRoleTable {
-            suited_discard_rate: 0.2,
-            distinct_suited_discard_rate: 0.3,
-            discards: vec![EmpiricalEntry {
-                key: rank_count_key(&ranks),
-                ranks,
-                count: 100,
-                suited_rate: 0.8,
-                full_combination_count: 16.0,
-            }],
-            keeps: Vec::new(),
+        let mut rates = SuitedDiscardRates {
+            overall_rate: 0.2,
+            distinct_rate: 0.3,
+            pairs: [SuitEvidence {
+                observations: 100,
+                same_suit: 80,
+                rate: 0.8,
+            }; 91],
         };
-        let check = |rates: &EmpiricalRoleTable, suited, unsuited, expected: (f64, f64)| {
+        let check = |rates: &SuitedDiscardRates, suited, unsuited, expected: (f64, f64)| {
             let actual = model20_discard_suit_weights(&ranks, 100.0, rates, suited, unsuited);
             assert!((actual.0 - expected.0).abs() < 1e-12);
             assert!((actual.1 - expected.1).abs() < 1e-12);
@@ -6964,9 +6954,11 @@ mod tests {
         check(&rates, 1, 3, (80.0, 20.0));
         check(&rates, 0, 3, (0.0, 100.0));
         check(&rates, 1, 0, (100.0, 0.0));
-        rates.discards[0].suited_rate = 0.0;
+        for entry in &mut rates.pairs {
+            entry.rate = 0.0;
+        }
         check(&rates, 4, 12, (0.0, 100.0));
-        rates.discards.clear();
+        rates.pairs = [SuitEvidence::default(); 91];
         check(&rates, 4, 12, (30.0, 70.0));
     }
 
@@ -7041,10 +7033,13 @@ mod tests {
                 input.role,
                 &known,
                 tables.crib_rank().unwrap(),
-                Some(empirical_role(
-                    tables.empirical().unwrap(),
-                    other_role(input.role),
-                )),
+                Some(
+                    tables
+                        .pegging_policy_assets(&input)
+                        .unwrap()
+                        .suited_discard_rates(other_role(input.role))
+                        .unwrap(),
+                ),
             );
             let frozen = model13_crib_score_outcomes_for_cut(
                 &input.own_discards,
@@ -7063,6 +7058,10 @@ mod tests {
                 panic!("known-card evaluator required")
             };
             assert_eq!(context.crib, expected);
+            assert!(
+                tables.empirical.get().is_none(),
+                "Model 20 must not load the 14.8 asset"
+            );
             input.model = MODEL_13_23.into();
             let PeggingWinMode::KnownCards(context) =
                 model1323_pegging_win_evaluator(&input, &tables)
@@ -7116,10 +7115,11 @@ mod tests {
                                     );
                                     46
                                 ],
-                                suit_rates: empirical_role(
-                                    tables.empirical().unwrap(),
-                                    other_role(input.role),
-                                ),
+                                suit_rates: tables
+                                    .pegging_policy_assets(&input)
+                                    .unwrap()
+                                    .suited_discard_rates(other_role(input.role))
+                                    .unwrap(),
                             }),
                             _ => model20_discard_context(&input, &tables).unwrap(),
                         };

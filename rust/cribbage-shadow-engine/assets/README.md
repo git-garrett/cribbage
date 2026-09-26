@@ -102,13 +102,23 @@ policies do not load this JSON. See `docs/model-20-baseline.md` for the depletio
 rule and the unchanged discard-asset boundary.
 
 Model 20 also uses that keep prior for cut-conditioned opponent hand scores
-when choosing discards. `empirical-discard-keep-14.8.bin` supplies its empirical
-same-suit opponent-discard rates by role and rank pair, plus role-level fallback
-rates, during discard evaluation and live pegging/review. This existing packed
-asset is unchanged; it was built from 211,303 games and 2,079,994 usable
-discard/keep rows. See `docs/research/model-9-table-provenance.md` for the
-historical builder and source JSON. Model 20 continues using the existing
-crib rank/histogram assets for rank weights and scores.
+when choosing discards. `model20-opponent-discards.bin` supplies its conditional
+opponent-discard rank distributions and same-suit rates during discard evaluation
+and live pegging/review. It losslessly consolidates
+`model1322-opponent-discard-histograms.json` and the suited-discard information in
+`empirical-discard-keep-14.8.bin`. The original 14.8 JSON supplies exact total and
+same-suit counts, preserving the evidence behind the rounded rates. Those counts
+come from 211,303 games and 2,079,994 usable discard/keep rows; they are not added
+to the separate normalized rank weights. Model 20 no longer loads either legacy
+discard asset. Historical models retain both original files unchanged.
+
+Regenerate with `python3 scripts/pack_model20_opponent_discards.py`; use `--check`
+to verify byte-for-byte reproducibility. The packer reads the original suit JSON
+from its recorded Git revision, or accepts `--suit-source PATH` when that history
+is unavailable. Runtime needs only the committed packed file. See
+`docs/model-20-opponent-discards.md` for format, provenance, and validation.
+Model 20 continues using the existing crib rank/histogram assets for crib rank
+weights and scores.
 
 Model 13.22 calibration uses `model1322-decline-factors.json`, a schema-3
 empirical evidence asset derived from human server play and compact benchmark

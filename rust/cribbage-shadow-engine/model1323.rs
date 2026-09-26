@@ -15,6 +15,7 @@ use crate::model132::{
     choose_for_state, Model1322DeclineFactors, Model132Observation, Model132PeggingPolicy,
     Model911Policy,
 };
+use crate::model20_discards::{Model20DiscardAsset, SuitedDiscardRates};
 use crate::model91::{Model91EmpiricalBeliefs, OpponentHandCache};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -120,6 +121,7 @@ pub struct PolicyAssets {
     beliefs: Model91EmpiricalBeliefs,
     factors: Model1322DeclineFactors,
     discards: OpponentDiscardPrior,
+    suit_rates: Option<[SuitedDiscardRates; 2]>,
     empirical_depletion: bool,
 }
 
@@ -132,7 +134,9 @@ impl PolicyAssets {
         self.beliefs.opening_hands(opponent_role, available)
     }
 
-    pub fn load(directory: &Path) -> Result<Self, String> {
+    fn load_pegging_inputs(
+        directory: &Path,
+    ) -> Result<(Model91EmpiricalBeliefs, Model1322DeclineFactors), String> {
         for (name, expected) in [
             (
                 "model91-pegging-beliefs.bin",
@@ -141,10 +145,6 @@ impl PolicyAssets {
             (
                 "model1322-decline-factors.json",
                 "4dfb1b8c20f612153a6b0d57496fd77c5219a8a2ba7e01acb8909b862d5418dc",
-            ),
-            (
-                "model1322-opponent-discard-histograms.json",
-                "c2b274d38e94f8ff5c0aeabcddf7980dee89ae374af7564330f6d7e69193ac87",
             ),
         ] {
             let bytes = fs::read(directory.join(name))
@@ -155,12 +155,26 @@ impl PolicyAssets {
                 ));
             }
         }
+        Ok((
+            Model91EmpiricalBeliefs::load(directory.join("model91-pegging-beliefs.bin"))?,
+            Model1322DeclineFactors::load(directory.join("model1322-decline-factors.json"))?,
+        ))
+    }
+
+    pub fn load(directory: &Path) -> Result<Self, String> {
+        let (beliefs, factors) = Self::load_pegging_inputs(directory)?;
+        let path = directory.join("model1322-opponent-discard-histograms.json");
+        let bytes = fs::read(&path).map_err(|e| format!("read 13.23 discard input: {e}"))?;
+        if format!("{:x}", Sha256::digest(bytes))
+            != "c2b274d38e94f8ff5c0aeabcddf7980dee89ae374af7564330f6d7e69193ac87"
+        {
+            return Err("13.23 discard input differs from its correction builder".into());
+        }
         Ok(Self {
             empirical_depletion: false,
-            beliefs: Model91EmpiricalBeliefs::load(directory.join("model91-pegging-beliefs.bin"))?,
-            factors: Model1322DeclineFactors::load(
-                directory.join("model1322-decline-factors.json"),
-            )?,
+            beliefs,
+            factors,
+            suit_rates: None,
             discards: OpponentDiscardPrior::load(
                 &directory.join("model1322-opponent-discard-histograms.json"),
             )?,
@@ -185,10 +199,27 @@ impl PolicyAssets {
                 "Model 20 keep prior differs from the frozen 13.23 builder input".to_string(),
             );
         }
-        let mut assets = Self::load(directory)?;
-        assets.beliefs.load_opening_keep_prior(&path)?;
-        assets.empirical_depletion = true;
-        Ok(assets)
+        let (mut beliefs, factors) = Self::load_pegging_inputs(directory)?;
+        beliefs.load_opening_keep_prior(&path)?;
+        let packed =
+            Model20DiscardAsset::load(&directory.join(crate::model20_discards::ASSET_NAME))?;
+        Ok(Self {
+            beliefs,
+            factors,
+            discards: OpponentDiscardPrior {
+                by_role_keep: packed.discards,
+            },
+            suit_rates: Some(packed.suits),
+            empirical_depletion: true,
+        })
+    }
+
+    pub(crate) fn suited_discard_rates(&self, role: Role) -> Result<&SuitedDiscardRates, String> {
+        let rates = self
+            .suit_rates
+            .as_ref()
+            .ok_or("Model 20 suited-discard evidence is missing")?;
+        Ok(&rates[if role == Role::Dealer { 0 } else { 1 }])
     }
 
     pub(crate) fn forecast_with_hand_cache(
@@ -794,6 +825,129 @@ mod tests {
             };
             assert_eq!(bits(actual), bits(expected));
         }
+    }
+
+    #[test]
+    fn model20_packed_discards_preserve_every_legacy_weight_and_suit_rate() {
+        use crate::artifacts::EmpiricalDiscardKeepTable;
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let old = OpponentDiscardPrior::load(
+            &directory.join("model1322-opponent-discard-histograms.json"),
+        )
+        .unwrap();
+        let packed =
+            Model20DiscardAsset::load(&directory.join(crate::model20_discards::ASSET_NAME))
+                .unwrap();
+        // Includes the missing-keep fallback, physical filtering and stable order
+        // for all 3,640 role/keep rows, not just a sample of recommendations.
+        assert_eq!(packed.discards, old.by_role_keep);
+        let legacy =
+            EmpiricalDiscardKeepTable::load_edk1(directory.join("empirical-discard-keep-14.8.bin"))
+                .unwrap();
+        for (old, new) in [&legacy.dealer, &legacy.pone]
+            .into_iter()
+            .zip(&packed.suits)
+        {
+            assert_eq!(
+                old.suited_discard_rate.to_bits(),
+                new.overall_rate.to_bits()
+            );
+            assert_eq!(
+                old.distinct_suited_discard_rate.to_bits(),
+                new.distinct_rate.to_bits()
+            );
+            for (entry, evidence) in old.discards.iter().zip(&new.pairs) {
+                assert_eq!(u64::from(entry.count), evidence.observations);
+                assert_eq!(
+                    (entry.count as f64 * entry.suited_rate).round() as u64,
+                    evidence.same_suit
+                );
+                assert_eq!(
+                    entry.suited_rate.to_bits(),
+                    new.rate(&entry.ranks).to_bits()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn model20_loads_without_either_legacy_discard_asset() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let directory =
+            std::env::temp_dir().join(format!("model20-packed-only-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        for name in [
+            "model91-pegging-beliefs.bin",
+            "model1322-decline-factors.json",
+            "model132-keep-prior.json",
+            crate::model20_discards::ASSET_NAME,
+        ] {
+            fs::copy(source.join(name), directory.join(name)).unwrap();
+        }
+        let assets = PolicyAssets::load_model20(&directory).unwrap();
+        assert_eq!(assets.discards.by_role_keep.len(), 3640);
+        for role in [Role::Dealer, Role::Pone] {
+            assert!(assets.suited_discard_rates(role).is_ok());
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    #[ignore = "release-only, paired asset-loading timing probe"]
+    fn model20_discard_asset_load_timing() {
+        use crate::artifacts::EmpiricalDiscardKeepTable;
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let mut old_times = Vec::new();
+        let mut new_times = Vec::new();
+        for iteration in 0..22 {
+            for mode in [iteration % 2, 1 - iteration % 2] {
+                let start = std::time::Instant::now();
+                if mode == 0 {
+                    let ranks = OpponentDiscardPrior::load(
+                        &directory.join("model1322-opponent-discard-histograms.json"),
+                    )
+                    .unwrap();
+                    let suits = EmpiricalDiscardKeepTable::load_edk1(
+                        directory.join("empirical-discard-keep-14.8.bin"),
+                    )
+                    .unwrap();
+                    let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+                    std::hint::black_box((&ranks, &suits));
+                    if iteration >= 2 {
+                        old_times.push(elapsed);
+                    }
+                } else {
+                    let packed = Model20DiscardAsset::load(
+                        &directory.join(crate::model20_discards::ASSET_NAME),
+                    )
+                    .unwrap();
+                    let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+                    std::hint::black_box(&packed);
+                    if iteration >= 2 {
+                        new_times.push(elapsed);
+                    }
+                }
+            }
+        }
+        old_times.sort_by(f64::total_cmp);
+        new_times.sort_by(f64::total_cmp);
+        let report = serde_json::json!({
+            "legacyMedianMs": (old_times[9] + old_times[10]) / 2.0,
+            "packedMedianMs": (new_times[9] + new_times[10]) / 2.0,
+            "legacyMs": old_times,
+            "packedMs": new_times,
+        });
+        fs::write(
+            std::env::temp_dir().join("model20-discard-asset-load-timing.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .unwrap();
+        println!(
+            "asset-load median legacy_ms={:.3} packed_ms={:.3} repetitions={}",
+            (old_times[9] + old_times[10]) / 2.0,
+            (new_times[9] + new_times[10]) / 2.0,
+            new_times.len()
+        );
     }
 
     #[test]

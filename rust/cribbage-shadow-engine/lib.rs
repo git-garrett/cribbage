@@ -10,6 +10,7 @@ pub mod joint_scores;
 pub mod model;
 pub mod model132;
 pub mod model1323;
+mod model20_discards;
 pub mod model162;
 pub mod model90;
 pub mod model91;

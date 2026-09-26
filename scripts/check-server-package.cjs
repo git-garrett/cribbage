@@ -24,6 +24,8 @@ const required = [
   "rust/cribbage-shadow-engine/assets/model1323-corrections.bin",
   "rust/cribbage-shadow-engine/assets/model1322-decline-factors.json",
   "rust/cribbage-shadow-engine/assets/model1322-opponent-discard-histograms.json",
+  "rust/cribbage-shadow-engine/assets/model20-opponent-discards.bin",
+  "rust/cribbage-shadow-engine/assets/model132-keep-prior.json",
   "rust/cribbage-shadow-engine/assets/board-win-matrix.bin",
   "rust/cribbage-shadow-engine/assets/model91-discard-ev.bin",
   "rust/cribbage-shadow-engine/assets/model911-discard-ev.bin",

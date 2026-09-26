@@ -34,7 +34,7 @@ for asset in \
   "$ASSET_DIR/model91-pegging-beliefs.bin" \
   "$ASSET_DIR/board-win-matrix.bin" \
   "$ASSET_DIR/model132-keep-prior.json" \
-  "$ASSET_DIR/empirical-discard-keep-14.8.bin" \
+  "$ASSET_DIR/model20-opponent-discards.bin" \
   "$ASSET_DIR/model13-hold.bin" \
   "$ASSET_DIR/crib-rank-score-by-discard-cut.json" \
   "$ASSET_DIR/crib-score-histogram-by-discard-cut.json"; do
@@ -54,6 +54,7 @@ fi
 
 RUNNER_SHA256="$(shasum -a 256 "$RUNNER" | awk '{print $1}')"
 CORRECTION_SHA256="$(shasum -a 256 "$CORRECTION_ASSET" | awk '{print $1}')"
+OPPONENT_DISCARDS_SHA256="$(shasum -a 256 "$ASSET_DIR/model20-opponent-discards.bin" | awk '{print $1}')"
 if [[ "$EXPECTED_RUNNER_SHA256" != "unknown" && "$RUNNER_SHA256" != "$EXPECTED_RUNNER_SHA256" ]]; then
   echo "Runner checksum differs from the frozen job specification." >&2
   exit 1
@@ -86,7 +87,7 @@ if [[ ! -f "$OUT_DIR/manifest.txt" ]]; then
     printf 'crossBenchmarkPairing=fresh-random-sequence-independent-of-earlier-benchmarks\n'
     printf 'correctionAssetSha256=%s\n' "$CORRECTION_SHA256"
     printf 'keepPriorSha256=%s\n' "$(shasum -a 256 "$ASSET_DIR/model132-keep-prior.json" | awk '{print $1}')"
-    printf 'empiricalSuitsSha256=%s\n' "$(shasum -a 256 "$ASSET_DIR/empirical-discard-keep-14.8.bin" | awk '{print $1}')"
+    printf 'opponentDiscardsSha256=%s\n' "$OPPONENT_DISCARDS_SHA256"
     printf 'declineFactorsSha256=%s\n' "$(shasum -a 256 "$ASSET_DIR/model1322-decline-factors.json" | awk '{print $1}')"
     printf 'boardMatrixSha256=%s\n' "$(shasum -a 256 "$ASSET_DIR/board-win-matrix.bin" | awk '{print $1}')"
     printf 'runnerSha256=%s\n' "$RUNNER_SHA256"
@@ -96,6 +97,7 @@ else
     "sourceCommit=$SOURCE_COMMIT" \
     "candidate=$MODEL20" \
     "opponent=$ACE" \
+    "opponentDiscardsSha256=$OPPONENT_DISCARDS_SHA256" \
     "gamesPerOrientation=$GAMES_PER_ORIENTATION" \
     "workersPerOrientation=$WORKERS" \
     "seed=$SEED" \

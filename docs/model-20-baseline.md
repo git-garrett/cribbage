@@ -46,7 +46,7 @@ forecast the new live policy.
 ## Suit-aware show forecasts
 
 Model 20 uses the opponent's role and discard rank pair to read empirical
-same-suit rates from `empirical-discard-keep-14.8.bin`. Within each rank pair,
+same-suit rates from `model20-opponent-discards.bin`. Within each rank pair,
 the crib forecast allocates that fraction of weight to compatible same-suit
 assignments and the rest to different-suit assignments, distributing weight
 equally within each group. A missing rank pair uses the role's distinct-rank
@@ -95,10 +95,15 @@ to the process temporary directory.
 
 | Asset | Model 20 use | Change |
 |---|---|---|
-| `empirical-discard-keep-14.8.bin` | Opponent same-suit discard rates by role/rank pair, with role-level fallback rates. | Newly used by Model 20 in this change; existing packaged asset, unchanged. |
+| `model20-opponent-discards.bin` | Conditional opponent discard ranks and same-suit rates by role/rank pair, with role-level fallbacks and original suit counts. | Lossless consolidation of the 13.22 discard JSON and 14.8 suited-discard evidence; replaces both Model 20 dependencies. |
 | `model132-keep-prior.json` | Blended empirical opponent keeps for opening pegging beliefs and now discard-time hand-score forecasts, conditioned on known cards. | Newly packaged for Model 20 in `e864f47`; reused here, unchanged. |
 | `model91-pegging-beliefs.bin` | Empirical remaining hands after opponent plays; the previous change added depletion weighting. | Existing Model 20 dependency; no asset change. |
 
 The suit-aware scoring and depletion multipliers are runtime calculations,
 not new learned assets. The existing crib rank-score and crib histogram JSON
 files continue to provide the crib rank distributions.
+
+The consolidation changes storage and loading only. Conditional discard weights,
+fallback behavior, and historical rounded suit rates are preserved exactly; the
+frozen pegging correction asset does not need rebuilding for this migration.
+See [the consolidated asset specification](model-20-opponent-discards.md).
