@@ -281,9 +281,16 @@ impl From<WpState> for WpKey {
 
 impl Hash for WpKey {
     fn hash<H: Hasher>(&self, hasher: &mut H) {
-        hasher.write_u128(u128::from(self.peg[0]) | (u128::from(self.peg[1]) << 64));
-        self.scores.hash(hasher);
-        self.role.hash(hasher);
+        // Mix board context before multiplication; appending it left score
+        // variants in the same probe chain. Equality still checks every field.
+        let role = match self.role {
+            Role::Dealer => 0_u64,
+            Role::Pone => 1,
+        };
+        let context = u64::from(self.scores[0]) | (u64::from(self.scores[1]) << 8) | (role << 16);
+        hasher.write_u128(
+            u128::from(self.peg[0]) | (u128::from(self.peg[1] ^ (context << 14)) << 64),
+        );
     }
 }
 
@@ -699,34 +706,71 @@ mod wp_key_tests {
     use super::*;
 
     #[test]
-    fn wp_key_retains_state_scores_role_and_original_hash_without_alignment_padding() {
+    fn wp_key_hash_distributes_board_scores_across_buckets() {
+        // Same remaining hands can recur at many board scores. Appending scores
+        // without mixing them into the low hash bits puts them in one probe chain.
+        for role in [Role::Dealer, Role::Pone] {
+            let mut buckets = std::collections::HashSet::new();
+            let mut fingerprints = std::collections::HashSet::new();
+            for ours in 0..9 {
+                for theirs in 0..9 {
+                    let state = WpState {
+                        peg: State((1 << 0) | (1 << 3) | (1 << 6) | (1 << 39) | (1 << 42)),
+                        scores: [ours, theirs],
+                        role,
+                    };
+                    let mut hasher = StateHasher::default();
+                    WpKey::from(state).hash(&mut hasher);
+                    let hash = hasher.finish();
+                    buckets.insert(hash & ((1 << 19) - 1));
+                    fingerprints.insert(hash >> 57);
+                }
+            }
+            assert!(
+                buckets.len() >= 64,
+                "only {} initial buckets",
+                buckets.len()
+            );
+            assert!(
+                fingerprints.len() >= 16,
+                "only {} fingerprints",
+                fingerprints.len()
+            );
+        }
+    }
+
+    #[test]
+    fn wp_key_retains_all_fields_under_hash_collisions_without_alignment_padding() {
+        #[derive(Default)]
+        struct CollisionHasher;
+        impl Hasher for CollisionHasher {
+            fn finish(&self) -> u64 {
+                0
+            }
+            fn write(&mut self, _: &[u8]) {}
+        }
         assert_eq!(std::mem::size_of::<(WpKey, f64)>(), 32);
         assert_eq!(std::mem::size_of::<(WpState, f64)>(), 48);
-        let states = [
-            0,
-            1,
-            u128::from(u64::MAX),
-            1_u128 << 64,
-            (1_u128 << 124) - 1,
-        ];
-        let mut outcomes = HashMap::<WpKey, usize, BuildHasherDefault<StateHasher>>::default();
+        let states = std::iter::once(0)
+            .chain((0..128).map(|bit| 1_u128 << bit))
+            .chain(std::iter::once(u128::MAX));
+        let mut score_cases = vec![[0, 0], [120, 119], [119, 120], [255, 255]];
+        for bit in 0..8 {
+            score_cases.push([1_u8 << bit, 0]);
+            score_cases.push([0, 1_u8 << bit]);
+        }
+        let mut outcomes = HashMap::<WpKey, usize, BuildHasherDefault<CollisionHasher>>::default();
         let mut cases = Vec::new();
         for peg in states {
-            for scores in [[0, 0], [1, 0], [0, 1], [120, 119], [119, 120]] {
+            for scores in &score_cases {
                 for role in [Role::Dealer, Role::Pone] {
                     let state = WpState {
                         peg: State(peg),
-                        scores,
+                        scores: *scores,
                         role,
                     };
-                    let key = WpKey::from(state);
-                    let mut original = StateHasher::default();
-                    let mut packed = StateHasher::default();
-                    state.hash(&mut original);
-                    key.hash(&mut packed);
-                    assert_eq!(original.finish(), packed.finish());
                     let value = cases.len();
-                    assert_eq!(outcomes.insert(key, value), None);
+                    assert_eq!(outcomes.insert(WpKey::from(state), value), None);
                     cases.push(state);
                 }
             }
