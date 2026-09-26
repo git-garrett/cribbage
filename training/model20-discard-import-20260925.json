@@ -1,0 +1,541 @@
+{
+  "after": {
+    "dealer": {
+      "cellCoveragePercent": 22.606249432832207,
+      "cellsAtLeast10": 11100,
+      "keepsBelow10IncludingMissing": 147,
+      "keepsBelow30IncludingMissing": 422,
+      "legalCells": 165295,
+      "medianObservedKeepCount": 79.0,
+      "observations": 373864,
+      "observedCells": 37367,
+      "observedKeeps": 1793,
+      "possibleKeeps": 1820,
+      "singletonCells": 8363
+    },
+    "pone": {
+      "cellCoveragePercent": 24.231827943978946,
+      "cellsAtLeast10": 11398,
+      "keepsBelow10IncludingMissing": 93,
+      "keepsBelow30IncludingMissing": 392,
+      "legalCells": 165295,
+      "medianObservedKeepCount": 82.0,
+      "observations": 373452,
+      "observedCells": 40054,
+      "observedKeeps": 1814,
+      "possibleKeeps": 1820,
+      "singletonCells": 9137
+    }
+  },
+  "assetSha256": "e6c812af43b632df1eac4016f366b0cee76ad69895ee51056eccdce5cfdfba8c",
+  "before": {
+    "dealer": {
+      "cellCoveragePercent": 17.341722375147462,
+      "cellsAtLeast10": 7950,
+      "keepsBelow10IncludingMissing": 254,
+      "keepsBelow30IncludingMissing": 718,
+      "legalCells": 165295,
+      "medianObservedKeepCount": 49.0,
+      "observations": 225432,
+      "observedCells": 28665,
+      "observedKeeps": 1735,
+      "possibleKeeps": 1820,
+      "singletonCells": 6096
+    },
+    "pone": {
+      "cellCoveragePercent": 19.148189600411385,
+      "cellsAtLeast10": 7841,
+      "keepsBelow10IncludingMissing": 183,
+      "keepsBelow30IncludingMissing": 683,
+      "legalCells": 165295,
+      "medianObservedKeepCount": 50.0,
+      "observations": 225020,
+      "observedCells": 31651,
+      "observedKeeps": 1796,
+      "possibleKeeps": 1820,
+      "singletonCells": 7744
+    }
+  },
+  "evidenceSha256": "a2629272b376a183051030c9d682d62fdbf846f66f3270204ae5ddc2508f980b",
+  "gamesAdded": 16418,
+  "gamesAfter": 46418,
+  "gamesBefore": 30000,
+  "model20Snapshot": {
+    "baseSeed": "0x28960455",
+    "gamesRemainingFromPlanned10000": 3582,
+    "importedGames": 6418,
+    "runnerSha256": "1b076818aed58b0ffd82b08ac6c1f86cc3740a35de571029958958e9046cfc4c",
+    "scope": "Completed games in two frozen SQLite backups; not a live progress figure.",
+    "sourceCommit": "1925d15bb13a1c4ac8d39a7d87a6d89b7fc7aeed"
+  },
+  "observationsByModel": {
+    "13.0": 178873,
+    "13.1": 90325,
+    "13.215": 90334,
+    "13.23": 148432,
+    "20.0": 58098,
+    "9.0": 88496,
+    "9.1": 92758
+  },
+  "pairedDeals": {
+    "crossBenchmarkOverlap": [
+      [
+        "model9-vs13",
+        "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model1323/evaluation-20260918/13.23-vs-13.215-10k",
+        5
+      ]
+    ],
+    "interpretation": "Decision counts are correlated within shared deals; do not use raw counts as independent sample sizes.",
+    "overlapDetails": {
+      "newHandNumbers": [
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "newSeed": "320871704",
+      "oldHandNumbers": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "oldSeed": "model9-vs13-paired-v1:4986"
+    },
+    "uniqueDealsByBenchmark": {
+      "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model131/evaluation-20260827/13.0-vs-13.1-10k": 46252,
+      "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model1323/evaluation-20260918/13.23-vs-13.215-10k": 46257,
+      "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/myrmidon/9.1-vs-myrmidon5-10k-20260829": 48463,
+      "model20-vs-Ace": 29488,
+      "model9-vs13": 46119
+    }
+  },
+  "sources": [
+    {
+      "historical": true,
+      "includedGames": [
+        {
+          "gameCount": 5000,
+          "includedGameIndexRanges": [
+            [
+              0,
+              4999
+            ]
+          ],
+          "leftEngine": "schell_table-peg_table-9.0",
+          "matchupId": "schell_table-peg_table-9.0__vs__schell_table-peg_table-13.0__w5-g5000-old1024",
+          "rightEngine": "schell_table-peg_table-13.0",
+          "runId": "9-left"
+        }
+      ],
+      "latestGameEndedAt": "2026-08-27T09:16:53.513Z",
+      "observationsByModel": {
+        "schell_table-peg_table-13.0": 44273,
+        "schell_table-peg_table-9.0": 44234
+      },
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model9-vs13-10k-20260826/9-left.db",
+      "sha256": "2eabeb02421ff20f15f826c0913175f260df1b87006eb1cd8917ba56c41d8557",
+      "statistics": {
+        "decisionsAdded": 88507,
+        "gamesAdded": 5000,
+        "invalidDecisions": 1503
+      }
+    },
+    {
+      "historical": true,
+      "includedGames": [
+        {
+          "gameCount": 5000,
+          "includedGameIndexRanges": [
+            [
+              0,
+              4999
+            ]
+          ],
+          "leftEngine": "schell_table-peg_table-13.0",
+          "matchupId": "schell_table-peg_table-13.0__vs__schell_table-peg_table-9.0__w5-g5000-old1024",
+          "rightEngine": "schell_table-peg_table-9.0",
+          "runId": "13-left"
+        }
+      ],
+      "latestGameEndedAt": "2026-08-27T09:17:00.034Z",
+      "observationsByModel": {
+        "schell_table-peg_table-13.0": 44275,
+        "schell_table-peg_table-9.0": 44262
+      },
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model9-vs13-10k-20260826/13-left.db",
+      "sha256": "7e7f3b18920cb710a9340982e2713512bfdf7dd1b553e3b67c02e3967e726ca3",
+      "statistics": {
+        "decisionsAdded": 88537,
+        "gamesAdded": 5000,
+        "invalidDecisions": 1429
+      }
+    },
+    {
+      "historical": true,
+      "includedGames": [
+        {
+          "gameCount": 5000,
+          "includedGameIndexRanges": [
+            [
+              0,
+              4999
+            ]
+          ],
+          "leftEngine": "schell_table-peg_table-9.1",
+          "matchupId": "9.1-vs-myrmidon-5",
+          "rightEngine": "myrmidon-5",
+          "runId": "model91-myrmidon-9.1-left"
+        }
+      ],
+      "latestGameEndedAt": "2026-08-29T17:35:41Z",
+      "observationsByModel": {
+        "schell_table-peg_table-9.1": 46406
+      },
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/myrmidon/9.1-vs-myrmidon5-10k-20260829/9.1-left/games.db",
+      "sha256": "3aefefb8fb28c7f8fa482c7865aac13143d83fd0a347770f1c441b4cb01b8381",
+      "statistics": {
+        "decisionsAdded": 46406,
+        "gamesAdded": 5000,
+        "ineligibleActorDecisions": 46406
+      }
+    },
+    {
+      "historical": true,
+      "includedGames": [
+        {
+          "gameCount": 5000,
+          "includedGameIndexRanges": [
+            [
+              0,
+              4999
+            ]
+          ],
+          "leftEngine": "myrmidon-5",
+          "matchupId": "9.1-vs-myrmidon-5",
+          "rightEngine": "schell_table-peg_table-9.1",
+          "runId": "model91-myrmidon-myrmidon-left"
+        }
+      ],
+      "latestGameEndedAt": "2026-08-29T17:35:22Z",
+      "observationsByModel": {
+        "schell_table-peg_table-9.1": 46352
+      },
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/myrmidon/9.1-vs-myrmidon5-10k-20260829/myrmidon-left/games.db",
+      "sha256": "1950e64b706044d8e0a152b7e89d6cf15fc261ed80c764b97be021f6dcd7661f",
+      "statistics": {
+        "decisionsAdded": 46352,
+        "gamesAdded": 5000,
+        "ineligibleActorDecisions": 46352
+      }
+    },
+    {
+      "historical": true,
+      "includedGames": [
+        {
+          "gameCount": 5000,
+          "includedGameIndexRanges": [
+            [
+              0,
+              4999
+            ]
+          ],
+          "leftEngine": "schell_table-peg_table-13.0",
+          "matchupId": "13.0-vs-13.1",
+          "rightEngine": "schell_table-peg_table-13.1",
+          "runId": "model131-13.0-left"
+        }
+      ],
+      "latestGameEndedAt": "2026-08-28T06:49:14Z",
+      "observationsByModel": {
+        "schell_table-peg_table-13.0": 45132,
+        "schell_table-peg_table-13.1": 45132
+      },
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model131/evaluation-20260827/13.0-vs-13.1-10k/13.0-left/games.db",
+      "sha256": "6f1027247cef0a705ee87e1e5caccc08de3305c483d43fb99f99fb0e066d8427",
+      "statistics": {
+        "decisionsAdded": 90264,
+        "gamesAdded": 5000
+      }
+    },
+    {
+      "historical": true,
+      "includedGames": [
+        {
+          "gameCount": 5000,
+          "includedGameIndexRanges": [
+            [
+              0,
+              4999
+            ]
+          ],
+          "leftEngine": "schell_table-peg_table-13.1",
+          "matchupId": "13.0-vs-13.1",
+          "rightEngine": "schell_table-peg_table-13.0",
+          "runId": "model131-13.1-left"
+        }
+      ],
+      "latestGameEndedAt": "2026-08-28T06:48:37Z",
+      "observationsByModel": {
+        "schell_table-peg_table-13.0": 45193,
+        "schell_table-peg_table-13.1": 45193
+      },
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model131/evaluation-20260827/13.0-vs-13.1-10k/13.1-left/games.db",
+      "sha256": "909ea4e6e683e85c21bb1b488a1cb21261e785de31595a6e3874b3aa4a864cde",
+      "statistics": {
+        "decisionsAdded": 90386,
+        "gamesAdded": 5000
+      }
+    },
+    {
+      "historical": false,
+      "includedGames": [
+        {
+          "gameCount": 5000,
+          "includedGameIndexRanges": [
+            [
+              0,
+              4999
+            ]
+          ],
+          "leftEngine": "schell_table-peg_table-13.23",
+          "matchupId": "13.23-vs-13.215",
+          "rightEngine": "schell_table-peg_table-13.215",
+          "runId": "model1323-13.23-left"
+        }
+      ],
+      "latestGameEndedAt": "2026-09-18T19:37:50Z",
+      "observationsByModel": {
+        "schell_table-peg_table-13.215": 45145,
+        "schell_table-peg_table-13.23": 45145
+      },
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model1323/evaluation-20260918/13.23-vs-13.215-10k/13.23-left/games.db",
+      "sha256": "0554d64c390415cda4af247b82587ef87e185b5ff41795495b8536186c316db1",
+      "statistics": {
+        "decisionsAdded": 90290,
+        "gamesAdded": 5000
+      }
+    },
+    {
+      "historical": false,
+      "includedGames": [
+        {
+          "gameCount": 5000,
+          "includedGameIndexRanges": [
+            [
+              0,
+              4999
+            ]
+          ],
+          "leftEngine": "schell_table-peg_table-13.215",
+          "matchupId": "13.23-vs-13.215",
+          "rightEngine": "schell_table-peg_table-13.23",
+          "runId": "model1323-13.215-left"
+        }
+      ],
+      "latestGameEndedAt": "2026-09-18T19:42:41Z",
+      "observationsByModel": {
+        "schell_table-peg_table-13.215": 45189,
+        "schell_table-peg_table-13.23": 45189
+      },
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model1323/evaluation-20260918/13.23-vs-13.215-10k/13.215-left/games.db",
+      "sha256": "97cef36df960705a58dea8ab416844ef304e6bfaa2cccb4934859a6530466cb0",
+      "statistics": {
+        "decisionsAdded": 90378,
+        "gamesAdded": 5000
+      }
+    },
+    {
+      "historical": false,
+      "includedGames": [
+        {
+          "gameCount": 3209,
+          "includedGameIndexRanges": [
+            [
+              0,
+              3184
+            ],
+            [
+              3186,
+              3187
+            ],
+            [
+              3189,
+              3190
+            ],
+            [
+              3192,
+              3193
+            ],
+            [
+              3195,
+              3196
+            ],
+            [
+              3199,
+              3199
+            ],
+            [
+              3201,
+              3202
+            ],
+            [
+              3205,
+              3205
+            ],
+            [
+              3207,
+              3208
+            ],
+            [
+              3211,
+              3211
+            ],
+            [
+              3213,
+              3214
+            ],
+            [
+              3220,
+              3220
+            ],
+            [
+              3226,
+              3226
+            ],
+            [
+              3232,
+              3232
+            ],
+            [
+              3238,
+              3238
+            ],
+            [
+              3244,
+              3244
+            ],
+            [
+              3250,
+              3250
+            ],
+            [
+              3256,
+              3256
+            ]
+          ],
+          "leftEngine": "schell_table-peg_table-13.23",
+          "matchupId": "20.0-vs-13.23",
+          "rightEngine": "schell_table-peg_table-20.0",
+          "runId": "model20-13.23-left"
+        }
+      ],
+      "latestGameEndedAt": "2026-09-26T03:16:26Z",
+      "observationsByModel": {
+        "schell_table-peg_table-13.23": 29036,
+        "schell_table-peg_table-20.0": 29036
+      },
+      "path": "/private/tmp/model20-discard-enrichment-20260925/13.23-left.db",
+      "sha256": "e672620151d450713be5147382db1984193df55d1631fe4969236f22584a843c",
+      "statistics": {
+        "decisionsAdded": 58072,
+        "gamesAdded": 3209
+      }
+    },
+    {
+      "historical": false,
+      "includedGames": [
+        {
+          "gameCount": 3209,
+          "includedGameIndexRanges": [
+            [
+              0,
+              3181
+            ],
+            [
+              3183,
+              3187
+            ],
+            [
+              3189,
+              3193
+            ],
+            [
+              3195,
+              3196
+            ],
+            [
+              3199,
+              3199
+            ],
+            [
+              3201,
+              3202
+            ],
+            [
+              3205,
+              3205
+            ],
+            [
+              3207,
+              3208
+            ],
+            [
+              3211,
+              3211
+            ],
+            [
+              3214,
+              3214
+            ],
+            [
+              3220,
+              3220
+            ],
+            [
+              3226,
+              3226
+            ],
+            [
+              3232,
+              3232
+            ],
+            [
+              3238,
+              3238
+            ],
+            [
+              3244,
+              3244
+            ],
+            [
+              3250,
+              3250
+            ],
+            [
+              3256,
+              3256
+            ]
+          ],
+          "leftEngine": "schell_table-peg_table-20.0",
+          "matchupId": "20.0-vs-13.23",
+          "rightEngine": "schell_table-peg_table-13.23",
+          "runId": "model20-20.0-left"
+        }
+      ],
+      "latestGameEndedAt": "2026-09-26T03:16:20Z",
+      "observationsByModel": {
+        "schell_table-peg_table-13.23": 29062,
+        "schell_table-peg_table-20.0": 29062
+      },
+      "path": "/private/tmp/model20-discard-enrichment-20260925/20.0-left.db",
+      "sha256": "7157f11d54ac721d48f2ed249d0cdac4f2b365be6a0f8e8664727b502d784915",
+      "statistics": {
+        "decisionsAdded": 58124,
+        "gamesAdded": 3209
+      }
+    }
+  ]
+}

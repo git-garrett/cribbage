@@ -30,20 +30,20 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def pack(discard_bytes, suit_bytes, legacy_bytes):
+def pack(discard_bytes, suit_bytes, legacy_bytes, source_name="model1322-opponent-discard-histograms.json"):
     discards = json.loads(discard_bytes)
     suits = json.loads(suit_bytes)
-    if discards["schemaVersion"] != 1 or discards["modelVersion"] != "13.22":
+    if discards["schemaVersion"] != 1 or discards["modelVersion"] not in ("13.22", "20.0"):
         raise ValueError("unsupported conditional discard source")
     keeps, pairs = rank_keys(4), rank_keys(2)
     pair_ids = {key: index for index, key in enumerate(pairs)}
     # Retain provenance and cohort weights. Normalized rank weights are NOT counts.
     metadata = {
         "schemaVersion": 1,
-        "rankWeights": "normalized historical cohort weights, not observation counts",
+        "rankWeights": "normalized cohort weights, not observation counts; raw counts retained in training evidence",
         "suitCounts": "independent historical observations; do not add to rank weights",
         "conditionalDiscards": {
-            "asset": "model1322-opponent-discard-histograms.json",
+            "asset": source_name,
             "sha256": digest(discard_bytes),
             **{key: value for key, value in discards.items()
                if key not in ("roles", "fallbackByRole")},
@@ -114,13 +114,23 @@ def main():
     parser.add_argument("--suit-source", type=Path,
                         help="original 14.8 JSON; defaults to its recorded Git revision")
     parser.add_argument("--output", type=Path, default=ASSETS / "model20-opponent-discards.bin")
+    parser.add_argument("--evidence", type=Path,
+                        default=ROOT / "training/model20-opponent-discard-evidence.json.gz")
     parser.add_argument("--check", action="store_true", help="verify reproducibility without writing")
     args = parser.parse_args()
     suit_bytes = args.suit_source.read_bytes() if args.suit_source else subprocess.check_output(
         ["git", "show", f"{SUIT_REVISION}:{SUIT_PATH}"], cwd=ROOT
     )
-    packed = pack((ASSETS / "model1322-opponent-discard-histograms.json").read_bytes(),
-                  suit_bytes, (ASSETS / "empirical-discard-keep-14.8.bin").read_bytes())
+    from build_model20_discard_evidence import histograms, read_evidence
+    discards = histograms(read_evidence(args.evidence))
+    # Game indices and fingerprints live in the retained training evidence. Avoid
+    # duplicating that audit ledger in the runtime asset's provenance header.
+    for source in discards["sources"]:
+        source.pop("includedGames", None)
+    discards["evidenceSha256"] = digest(args.evidence.read_bytes())
+    packed = pack(json.dumps(discards, sort_keys=True, separators=(",", ":")).encode(),
+                  suit_bytes, (ASSETS / "empirical-discard-keep-14.8.bin").read_bytes(),
+                  "training/model20-opponent-discard-evidence.json.gz")
     if args.check:
         if args.output.read_bytes() != packed:
             raise SystemExit("packed Model 20 discard asset is not reproducible")

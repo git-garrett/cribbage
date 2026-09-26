@@ -49,6 +49,7 @@ impl SuitedDiscardRates {
 pub(crate) struct Model20DiscardAsset {
     pub discards: DiscardRows,
     pub suits: [SuitedDiscardRates; 2],
+    pub fingerprint: [u8; 32],
 }
 
 impl Model20DiscardAsset {
@@ -130,7 +131,11 @@ impl Model20DiscardAsset {
             return Err("trailing Model 20 discard data".into());
         }
         let suits = suits.try_into().map_err(|_| "missing Model 20 suit role")?;
-        Ok(Self { discards, suits })
+        Ok(Self {
+            discards,
+            suits,
+            fingerprint: expected_hash.try_into().unwrap(),
+        })
     }
 }
 

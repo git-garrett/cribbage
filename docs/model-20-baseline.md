@@ -95,7 +95,7 @@ to the process temporary directory.
 
 | Asset | Model 20 use | Change |
 |---|---|---|
-| `model20-opponent-discards.bin` | Conditional opponent discard ranks and same-suit rates by role/rank pair, with role-level fallbacks and original suit counts. | Lossless consolidation of the 13.22 discard JSON and 14.8 suited-discard evidence; replaces both Model 20 dependencies. |
+| `model20-opponent-discards.bin` | Conditional opponent discard ranks and same-suit rates by role/rank pair, with role-level fallbacks and original suit counts. | Original 13.22 conditional evidence plus 16,418 newer completed games; unchanged 14.8 suited-discard evidence. See `model-20-opponent-discards.md` for the exact import ledger and coverage. |
 | `model132-keep-prior.json` | Blended empirical opponent keeps for opening pegging beliefs and now discard-time hand-score forecasts, conditioned on known cards. | Newly packaged for Model 20 in `e864f47`; reused here, unchanged. |
 | `model91-pegging-beliefs.bin` | Empirical remaining hands after opponent plays; the previous change added depletion weighting. | Existing Model 20 dependency; no asset change. |
 

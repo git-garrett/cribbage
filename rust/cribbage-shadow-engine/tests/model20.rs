@@ -45,7 +45,8 @@ fn model20_pegging_cache_and_review_use_corrected_beliefs() {
         let actual = evaluate_decision(&model20, root).unwrap();
         assert_ne!(format!("{actual:?}"), format!("{frozen:?}"));
         let cache = Model13HandCache::new();
-        // Card support may be reused across models; posterior weights may not.
+        // The cache retains conditioned discard weights; switching assets must
+        // invalidate those weights in both directions.
         evaluate_decision_with_caches(&ace, root, None, Some(&cache)).unwrap();
         for _ in 0..2 {
             let cached = evaluate_decision_with_caches(&model20, root, None, Some(&cache)).unwrap();
@@ -60,6 +61,8 @@ fn model20_pegging_cache_and_review_use_corrected_beliefs() {
         };
         let review = evaluate_selected_decision(&model20, &[card], root).unwrap();
         assert_eq!(format!("{review:?}"), format!("{actual:?}"));
+        let ace_again = evaluate_decision_with_caches(&ace, root, None, Some(&cache)).unwrap();
+        assert_eq!(format!("{ace_again:?}"), format!("{frozen:?}"));
     }
 }
 

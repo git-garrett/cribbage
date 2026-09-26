@@ -38,8 +38,8 @@ pub const CORRECTION_INPUT_CHECKSUMS: [u64; 5] = [
 /// comparisons through the explicit forecast interface.
 pub const LIVE_WORLD_BUDGET: usize = usize::MAX;
 
-/// One actor's current-hand card population. Only card support is retained;
-/// all history-dependent weights, sampling and policy solves remain fresh.
+/// One actor's current-hand card population and conditioned discard prior,
+/// scoped to its asset fingerprint. History-dependent weights and solves stay fresh.
 #[derive(Clone, Default)]
 pub(crate) struct HandCache(Arc<Mutex<Option<HandPopulation>>>);
 
@@ -69,6 +69,7 @@ impl HandCache {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct HandIdentity {
+    discard_asset_sha256: [u8; 32],
     role: Role,
     own_keep: [u8; 13],
     own_discards: [u8; 13],
@@ -76,8 +77,9 @@ struct HandIdentity {
 }
 
 impl HandIdentity {
-    fn from_observation(observation: &Model132Observation) -> Self {
+    fn from_observation(observation: &Model132Observation, discard_asset_sha256: [u8; 32]) -> Self {
         Self {
+            discard_asset_sha256,
             role: observation.role,
             own_keep: std::array::from_fn(|rank| {
                 observation.own_remaining[rank] + observation.own_played[rank]
@@ -121,6 +123,7 @@ pub struct PolicyAssets {
     beliefs: Model91EmpiricalBeliefs,
     factors: Model1322DeclineFactors,
     discards: OpponentDiscardPrior,
+    discard_asset_sha256: [u8; 32],
     suit_rates: Option<[SuitedDiscardRates; 2]>,
     empirical_depletion: bool,
 }
@@ -165,7 +168,8 @@ impl PolicyAssets {
         let (beliefs, factors) = Self::load_pegging_inputs(directory)?;
         let path = directory.join("model1322-opponent-discard-histograms.json");
         let bytes = fs::read(&path).map_err(|e| format!("read 13.23 discard input: {e}"))?;
-        if format!("{:x}", Sha256::digest(bytes))
+        let discard_asset_sha256 = Sha256::digest(&bytes);
+        if format!("{discard_asset_sha256:x}")
             != "c2b274d38e94f8ff5c0aeabcddf7980dee89ae374af7564330f6d7e69193ac87"
         {
             return Err("13.23 discard input differs from its correction builder".into());
@@ -175,6 +179,7 @@ impl PolicyAssets {
             beliefs,
             factors,
             suit_rates: None,
+            discard_asset_sha256: discard_asset_sha256.into(),
             discards: OpponentDiscardPrior::load(
                 &directory.join("model1322-opponent-discard-histograms.json"),
             )?,
@@ -206,6 +211,7 @@ impl PolicyAssets {
         Ok(Self {
             beliefs,
             factors,
+            discard_asset_sha256: packed.fingerprint,
             discards: OpponentDiscardPrior {
                 by_role_keep: packed.discards,
             },
@@ -275,7 +281,7 @@ impl PolicyAssets {
             // Release the hand cache before the expensive decision-local solve.
             let mut population = cache.0.lock().unwrap_or_else(|error| error.into_inner());
             observation.validate()?;
-            let identity = HandIdentity::from_observation(observation);
+            let identity = HandIdentity::from_observation(observation, self.discard_asset_sha256);
             if population.as_ref().is_none_or(|p| p.identity != identity) {
                 *population = Some(HandPopulation::new(identity));
             }
@@ -828,19 +834,15 @@ mod tests {
     }
 
     #[test]
-    fn model20_packed_discards_preserve_every_legacy_weight_and_suit_rate() {
+    fn model20_enriched_discards_preserve_every_legacy_suit_rate() {
         use crate::artifacts::EmpiricalDiscardKeepTable;
         let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
-        let old = OpponentDiscardPrior::load(
-            &directory.join("model1322-opponent-discard-histograms.json"),
-        )
-        .unwrap();
         let packed =
             Model20DiscardAsset::load(&directory.join(crate::model20_discards::ASSET_NAME))
                 .unwrap();
-        // Includes the missing-keep fallback, physical filtering and stable order
-        // for all 3,640 role/keep rows, not just a sample of recommendations.
-        assert_eq!(packed.discards, old.by_role_keep);
+        // Conditional weights now include later games. The Python packing tests
+        // compare every rank weight against the retained raw-count evidence.
+        assert_eq!(packed.discards.len(), 3640);
         let legacy =
             EmpiricalDiscardKeepTable::load_edk1(directory.join("empirical-discard-keep-14.8.bin"))
                 .unwrap();

@@ -104,13 +104,17 @@ rule and the unchanged discard-asset boundary.
 Model 20 also uses that keep prior for cut-conditioned opponent hand scores
 when choosing discards. `model20-opponent-discards.bin` supplies its conditional
 opponent-discard rank distributions and same-suit rates during discard evaluation
-and live pegging/review. It losslessly consolidates
+and live pegging/review. It originally consolidated
 `model1322-opponent-discard-histograms.json` and the suited-discard information in
 `empirical-discard-keep-14.8.bin`. The original 14.8 JSON supplies exact total and
 same-suit counts, preserving the evidence behind the rounded rates. Those counts
 come from 211,303 games and 2,079,994 usable discard/keep rows; they are not added
 to the separate normalized rank weights. Model 20 no longer loads either legacy
-discard asset. Historical models retain both original files unchanged.
+discard asset. Historical models retain both original files unchanged. The
+conditional section now adds 16,418 newer completed games from 13.215, 13.23 and
+20.0, bringing it to 747,316 usable decisions. Raw conditional counts and the
+exact per-run import ledger are retained in
+`training/model20-opponent-discard-evidence.json.gz`. The suit section is unchanged.
 
 Regenerate with `python3 scripts/pack_model20_opponent_discards.py`; use `--check`
 to verify byte-for-byte reproducibility. The packer reads the original suit JSON

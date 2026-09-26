@@ -15,6 +15,11 @@ SPEC.loader.exec_module(FACTORS)
 
 
 class DeclineFactorTest(unittest.TestCase):
+    def test_defunct_families_are_not_eligible(self):
+        self.assertFalse(any(model.startswith(("schell_table-peg_table-15.",
+                                               "schell_table-peg_table-16."))
+                             for model in FACTORS.EXHAUSTIVE_PEGGING_MODELS))
+
     def test_completion_categories(self):
         self.assertEqual(FACTORS.completion([2], 2), "pair")
         self.assertEqual(FACTORS.completion([2, 2], 2), "threeOfAKind")
@@ -29,6 +34,8 @@ class DeclineFactorTest(unittest.TestCase):
             db = sqlite3.connect(database)
             db.executescript(
                 """
+                CREATE TABLE compact_games (game_id TEXT, left_engine TEXT, right_engine TEXT);
+                INSERT INTO compact_games VALUES ('g', 'schell_table-peg_table-13.0', 'schell_table-peg_table-13.1');
                 CREATE TABLE compact_hands (
                   game_id TEXT, hand_number INTEGER, left_keep BLOB, right_keep BLOB
                 );
@@ -52,6 +59,18 @@ class DeclineFactorTest(unittest.TestCase):
             self.assertEqual(counts["pair"]["first"]["declined"], 1)
             self.assertEqual(counts["pair"]["first"]["observedDeclines"], 1)
             self.assertEqual(counts["pair"]["first"]["declinesWithCardHeld"], 1)
+            db = sqlite3.connect(database)
+            db.execute("UPDATE compact_games SET left_engine='schell_table-peg_table-15.2'")
+            db.commit()
+            db.close()
+            excluded = FACTORS.database_counts(database)
+            self.assertEqual(excluded["pair"]["first"]["declined"], 0)
+            db = sqlite3.connect(database)
+            db.execute("DROP TABLE compact_games")
+            db.commit()
+            db.close()
+            with self.assertRaisesRegex(ValueError, "model identity is required"):
+                FACTORS.database_counts(database)
 
     def test_new_pair_tactics_use_exhaustive_models_and_exclude_empty_opponents(self):
         with tempfile.TemporaryDirectory() as directory:
