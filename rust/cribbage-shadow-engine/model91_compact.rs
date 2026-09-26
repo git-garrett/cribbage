@@ -260,9 +260,36 @@ struct WpState {
     role: Role,
 }
 
+// Splitting the packed state into words avoids u128 alignment padding in
+// each hash-table entry. Equality and hashing retain every state/score/role bit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WpKey {
+    peg: [u64; 2],
+    scores: [u8; 2],
+    role: Role,
+}
+
+impl From<WpState> for WpKey {
+    fn from(state: WpState) -> Self {
+        Self {
+            peg: [state.peg.0 as u64, (state.peg.0 >> 64) as u64],
+            scores: state.scores,
+            role: state.role,
+        }
+    }
+}
+
+impl Hash for WpKey {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        hasher.write_u128(u128::from(self.peg[0]) | (u128::from(self.peg[1]) << 64));
+        self.scores.hash(hasher);
+        self.role.hash(hasher);
+    }
+}
+
 #[derive(Default)]
 pub(super) struct WpMemo {
-    outcomes: HashMap<WpState, f64, BuildHasherDefault<StateHasher>>,
+    outcomes: HashMap<WpKey, f64, BuildHasherDefault<StateHasher>>,
 }
 
 impl WpMemo {
@@ -333,7 +360,7 @@ impl WpMemo {
             + 4 * ((hands >> 2) & rank_low_bits).count_ones();
         let cache = remaining > 2;
         if cache {
-            if let Some(value) = self.outcomes.get(&state) {
+            if let Some(value) = self.outcomes.get(&WpKey::from(state)) {
                 return Ok(*value);
             }
         }
@@ -368,7 +395,7 @@ impl WpMemo {
             if self.outcomes.len() >= 1_000_000 {
                 self.outcomes.clear();
             }
-            self.outcomes.insert(state, value);
+            self.outcomes.insert(WpKey::from(state), value);
         }
         Ok(value)
     }
@@ -660,6 +687,50 @@ mod tests {
                 State::from_reference(&state).score(),
                 super::super::score_count_for_ranks(&series)
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod wp_key_tests {
+    use super::*;
+
+    #[test]
+    fn wp_key_retains_state_scores_role_and_original_hash_without_alignment_padding() {
+        assert_eq!(std::mem::size_of::<(WpKey, f64)>(), 32);
+        assert_eq!(std::mem::size_of::<(WpState, f64)>(), 48);
+        let states = [
+            0,
+            1,
+            u128::from(u64::MAX),
+            1_u128 << 64,
+            (1_u128 << 124) - 1,
+        ];
+        let mut outcomes = HashMap::<WpKey, usize, BuildHasherDefault<StateHasher>>::default();
+        let mut cases = Vec::new();
+        for peg in states {
+            for scores in [[0, 0], [1, 0], [0, 1], [120, 119], [119, 120]] {
+                for role in [Role::Dealer, Role::Pone] {
+                    let state = WpState {
+                        peg: State(peg),
+                        scores,
+                        role,
+                    };
+                    let key = WpKey::from(state);
+                    let mut original = StateHasher::default();
+                    let mut packed = StateHasher::default();
+                    state.hash(&mut original);
+                    key.hash(&mut packed);
+                    assert_eq!(original.finish(), packed.finish());
+                    let value = cases.len();
+                    assert_eq!(outcomes.insert(key, value), None);
+                    cases.push(state);
+                }
+            }
+        }
+        assert_eq!(outcomes.len(), cases.len());
+        for (value, state) in cases.into_iter().enumerate() {
+            assert_eq!(outcomes.get(&WpKey::from(state)), Some(&value));
         }
     }
 }
