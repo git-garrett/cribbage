@@ -87,9 +87,6 @@ impl State {
     fn len(self) -> usize {
         self.field(LENGTH, 15) as usize
     }
-    fn rank(self, index: usize) -> u8 {
-        self.field(SERIES + index as u32 * 4, 15)
-    }
     fn reset(&mut self, current: u8) {
         self.0 &= HAND_MASK;
         self.0 |= u128::from(current) << CURRENT;
@@ -99,29 +96,36 @@ impl State {
         if len < 2 {
             return 0;
         }
-        let mut points = if matches!(self.count(), 15 | 31) {
+        let points = if matches!(self.count(), 15 | 31) {
             2
         } else {
             0
         };
-        let last = self.rank(len - 1);
-        let same = 1
-            + (0..len - 1)
-                .rev()
-                .take_while(|i| self.rank(*i) == last)
-                .count();
-        points += match same {
-            2 => 2,
-            3 => 6,
-            4 => 12,
-            _ => 0,
-        };
-        let mut seen = 0_u16;
-        let mut min = 13;
-        let mut max = 0;
+        let series = (self.0 >> SERIES) as u32;
+        let last = ((series >> ((len - 1) * 4)) & 15) as u8;
+        let mut same = 1;
+        for index in (0..len - 1).rev() {
+            if ((series >> (index * 4)) & 15) as u8 != last {
+                break;
+            }
+            same += 1;
+        }
+        // A repeated final rank rules out every run ending at this play.
+        if same >= 2 {
+            return points
+                + match same {
+                    2 => 2,
+                    3 => 6,
+                    4 => 12,
+                    _ => 0,
+                };
+        }
+        let mut seen = 1_u16 << last;
+        let mut min = last;
+        let mut max = last;
         let mut run = 0;
-        for length in 1..=len {
-            let rank = self.rank(len - length);
+        for length in 2..=len {
+            let rank = ((series >> ((len - length) * 4)) & 15) as u8;
             let bit = 1_u16 << rank;
             if seen & bit != 0 {
                 break;
@@ -376,11 +380,20 @@ impl WpMemo {
         }
         let mut weighted = 0.0;
         let mut copies = 0_u8;
-        for rank in 0..RANKS as u8 {
-            let count = state.peg.copies(state.peg.current(), rank);
-            if count == 0 || state.peg.count() + VALUES[rank as usize] > 31 {
-                continue;
-            }
+        // The active hand has at most four ranks. Visit present, playable
+        // ranks in ascending order so the floating-point sum stays identical.
+        let hand_mask = (1_u64 << HAND_BITS) - 1;
+        let hand = (state.peg.0 >> (u32::from(state.peg.current()) * HAND_BITS)) as u64
+            & hand_mask;
+        let room = 31 - state.peg.count();
+        let legal_ranks = if room >= 10 { 13 } else { u32::from(room) };
+        let mut present = (hand | (hand >> 1) | (hand >> 2)) & (hand_mask / 7)
+            & ((1_u64 << (legal_ranks * 3)) - 1);
+        while present != 0 {
+            let shift = present.trailing_zeros();
+            present &= present - 1;
+            let rank = (shift / 3) as u8;
+            let count = ((hand >> shift) & 7) as u8;
             weighted += f64::from(count) * self.play(state, rank, board)?;
             copies += count;
         }

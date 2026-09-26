@@ -1411,7 +1411,21 @@ fn evidence_hand_weight(
         Model91EvidenceWeightMode::Physical => 1.0,
         Model91EvidenceWeightMode::Empirical => hand.base_weight,
         Model91EvidenceWeightMode::DepletedEmpirical(baseline) => {
-            depleted_empirical_weight(hand.base_weight, &hand.ranks, available, &baseline)
+            // Zero-copy ranks contribute exactly one. Use the evidence's
+            // existing rank mask, preserving multiplication order per product.
+            let mut before = 1.0;
+            let mut after = 1.0;
+            let mut mask = hand.rank_mask;
+            while mask != 0 {
+                let rank = mask.trailing_zeros() as usize;
+                mask &= mask - 1;
+                before *= choose(baseline[rank], hand.ranks[rank]);
+                after *= choose(available[rank], hand.ranks[rank]);
+            }
+            if before == 0.0 {
+                return 0.0;
+            }
+            hand.base_weight * (after / before)
         }
     };
     // At most four ranks occur in a hand. Omitted ranks only contributed a
@@ -2133,6 +2147,8 @@ mod tests {
                     for mode in [
                         Model91EvidenceWeightMode::Physical,
                         Model91EvidenceWeightMode::Empirical,
+                        Model91EvidenceWeightMode::DepletedEmpirical([4; RANKS]),
+                        Model91EvidenceWeightMode::DepletedEmpirical([0, 1, 2, 3, 4, 3, 2, 1, 0, 4, 3, 2, 1]),
                     ] {
                         let expected = if ranks.iter().zip(available).any(|(n, a)| *n > a) {
                             0.0
@@ -2142,7 +2158,11 @@ mod tests {
                                     rank_combination_count(&ranks, &available)
                                 }
                                 Model91EvidenceWeightMode::Empirical => hand.base_weight,
-                                Model91EvidenceWeightMode::DepletedEmpirical(_) => unreachable!(),
+                                Model91EvidenceWeightMode::DepletedEmpirical(baseline) => {
+                                    depleted_empirical_weight(
+                                        hand.base_weight, &ranks, &available, &baseline,
+                                    )
+                                }
                             };
                             ranks
                                 .iter()
