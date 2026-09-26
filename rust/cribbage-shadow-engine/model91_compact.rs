@@ -324,8 +324,18 @@ impl WpMemo {
             }
             return Ok(Self::terminal(state, board));
         }
-        if let Some(value) = self.outcomes.get(&state) {
-            return Ok(*value);
+        // Avoid filling the bounded memo with cheap one/two-card tails.
+        let hands = state.peg.0 & HAND_MASK;
+        // Rank counts occupy three-bit fields; sum their bit planes.
+        let rank_low_bits = HAND_MASK / 7;
+        let remaining = (hands & rank_low_bits).count_ones()
+            + 2 * ((hands >> 1) & rank_low_bits).count_ones()
+            + 4 * ((hands >> 2) & rank_low_bits).count_ones();
+        let cache = remaining > 2;
+        if cache {
+            if let Some(value) = self.outcomes.get(&state) {
+                return Ok(*value);
+            }
         }
         let mut weighted = 0.0;
         let mut copies = 0_u8;
@@ -354,10 +364,12 @@ impl WpMemo {
             self.future(next, board)?
         };
         // This memo exists for one live decision and includes scores and role.
-        if self.outcomes.len() >= 1_000_000 {
-            self.outcomes.clear();
+        if cache {
+            if self.outcomes.len() >= 1_000_000 {
+                self.outcomes.clear();
+            }
+            self.outcomes.insert(state, value);
         }
-        self.outcomes.insert(state, value);
         Ok(value)
     }
 
