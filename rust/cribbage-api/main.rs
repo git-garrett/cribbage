@@ -621,7 +621,7 @@ fn health_json() -> String {
 
 fn model_json() -> String {
     format!(
-        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\",\"schell_table-peg_table-20.0\",\"{}\"]}}",
+        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\",\"schell_table-peg_table-20.0\",\"schell_table-peg_table-20.1\",\"{}\"]}}",
         APP_VERSION, ACE_MODEL, ACE_MODEL, MYRMIDON_5, MODEL_9_1, MODEL_9_11, MODEL_13_215, DYNAMIC
     )
 }
@@ -2154,7 +2154,7 @@ fn apply_action_with_peg_decision(
                 None,
                 model_root,
                 Some(&session.model911_hand_cache),
-                matches!(decision_model, ModelId::Schell1323 | ModelId::Schell200)
+                matches!(decision_model, ModelId::Schell1323 | ModelId::Schell200 | ModelId::Schell201)
                     .then_some(&session.model1323_hand_cache),
             ))?;
             let (reason, cards, score_components) = match decision {
@@ -4611,6 +4611,7 @@ mod tests {
             ModelId::Schell13,
             ModelId::Schell13215,
             ModelId::Schell200,
+            ModelId::Schell201,
             ModelId::Dynamic,
         ] {
             let session = new_session_from_seed(model, Some("Player".to_string()), 0x1234_5678, 1);

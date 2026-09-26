@@ -239,10 +239,19 @@ impl ModelPlayout {
     }
 
     pub fn play_to_end(&mut self, root: &str, max_steps: u32) -> Result<PlayoutResult, String> {
+        self.play_to_end_with_override(root, max_steps, &mut |_| Ok(None))
+    }
+
+    /// Benchmark seam for a separately frozen engine. Only the acting player's
+    /// legal DecisionInput crosses the boundary; scoring and records stay here.
+    pub fn play_to_end_with_override(
+        &mut self, root: &str, max_steps: u32,
+        decide: &mut dyn FnMut(&DecisionInput) -> Result<Option<Decision>, String>,
+    ) -> Result<PlayoutResult, String> {
         for step in 0..max_steps {
             match self.game.phase {
-                Phase::Discard => self.play_discard_round(root)?,
-                Phase::Pegging => self.play_pegging_step(root)?,
+                Phase::Discard => self.play_discard_round_with_override(root, decide)?,
+                Phase::Pegging => self.play_pegging_step_with_override(root, decide)?,
                 Phase::PeggingComplete => {
                     let hand_number = self.game.hand_number;
                     self.clear_pegging_hand_caches();
@@ -280,11 +289,21 @@ impl ModelPlayout {
     }
 
     fn play_discard_round(&mut self, root: &str) -> Result<(), String> {
+        self.play_discard_round_with_override(root, &mut |_| Ok(None))
+    }
+
+    fn play_discard_round_with_override(
+        &mut self, root: &str,
+        decide: &mut dyn FnMut(&DecisionInput) -> Result<Option<Decision>, String>,
+    ) -> Result<(), String> {
         for side in [Side::Left, Side::Right] {
             if self.game.phase == Phase::Discard && self.game.player(side).hand.len() == 6 {
                 let input = self.decision_input(side, DecisionKind::Discard);
                 let decision_started = Instant::now();
-                let decision = evaluate_decision(&input, root)?;
+                let decision = match decide(&input)? {
+                    Some(decision) => decision,
+                    None => evaluate_decision(&input, root)?,
+                };
                 let decision_elapsed_us = elapsed_micros(decision_started);
                 let Decision::Discard {
                     card_ids,
@@ -335,6 +354,13 @@ impl ModelPlayout {
     }
 
     fn play_pegging_step(&mut self, root: &str) -> Result<(), String> {
+        self.play_pegging_step_with_override(root, &mut |_| Ok(None))
+    }
+
+    fn play_pegging_step_with_override(
+        &mut self, root: &str,
+        decide: &mut dyn FnMut(&DecisionInput) -> Result<Option<Decision>, String>,
+    ) -> Result<(), String> {
         if self.game.pegging_reset_pending {
             let count_before = self.game.count;
             let left_before = self.game.player(Side::Left).score;
@@ -437,12 +463,12 @@ impl ModelPlayout {
         let model13_cache = self
             .model13_hand_cache_enabled
             .then_some(&self.model13_hand_caches[side.index()]);
-        let decision = evaluate_decision_with_caches(
-            &input,
-            root,
-            Some(&self.model911_hand_caches[side.index()]),
-            model13_cache,
-        )?;
+        let decision = match decide(&input)? {
+            Some(decision) => decision,
+            None => evaluate_decision_with_caches(
+                &input, root, Some(&self.model911_hand_caches[side.index()]), model13_cache,
+            )?,
+        };
         let decision_elapsed_us = elapsed_micros(decision_started);
         match decision {
             Decision::Peg { action, .. } if action == "go" => {

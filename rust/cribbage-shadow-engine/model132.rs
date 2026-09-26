@@ -584,6 +584,7 @@ pub struct Model911Policy {
     inner: Arc<Mutex<Model91Policy>>,
     factors: Model1322DeclineFactors,
     include_owned_dead_cards: bool,
+    wp_board: Option<Arc<crate::board_matrix::BoardWinMatrix>>,
 }
 
 /// Model 13.22 uses Model 9.11's executable policy with actor-owned dead cards
@@ -842,6 +843,7 @@ impl Model911Policy {
             ))),
             factors,
             include_owned_dead_cards: true,
+            wp_board: None,
         })
     }
 
@@ -853,6 +855,7 @@ impl Model911Policy {
             inner: Arc::clone(&self.inner),
             factors: self.factors,
             include_owned_dead_cards: false,
+            wp_board: None,
         }
     }
 
@@ -866,6 +869,16 @@ impl Model911Policy {
 
     pub(crate) fn use_empirical_depletion(&self) {
         self.lock_inner().use_empirical_depletion();
+    }
+
+    /// The live Model 20.1 adapter changes the executable chooser's utility;
+    /// the offline baseline/correction constructors remain points-based.
+    pub(crate) fn with_win_probability(
+        mut self,
+        board: Arc<crate::board_matrix::BoardWinMatrix>,
+    ) -> Self {
+        self.wp_board = Some(board);
+        self
     }
 
     pub fn clear_hand_cache(&self) {
@@ -966,14 +979,24 @@ impl Model911Policy {
 
 impl Model132PeggingPolicy for Model911Policy {
     fn choose_action(&self, observation: &Model132Observation) -> Result<RankPegAction, String> {
+        observation.validate()?;
         let model91_observation = self.model91_observation(observation)?;
         let likelihoods = model1322_opponent_rank_likelihoods_with_known_cut(
             observation,
             self.factors,
             self.include_owned_dead_cards,
         )?;
-        self.lock_inner()
-            .choose_action_with_opponent_likelihood(&model91_observation, &likelihoods)
+        if let Some(board) = &self.wp_board {
+            self.lock_inner().choose_action_by_wp(
+                &model91_observation,
+                &likelihoods,
+                [observation.my_score as u8, observation.opponent_score as u8],
+                board,
+            )
+        } else {
+            self.lock_inner()
+                .choose_action_with_opponent_likelihood(&model91_observation, &likelihoods)
+        }
     }
 }
 

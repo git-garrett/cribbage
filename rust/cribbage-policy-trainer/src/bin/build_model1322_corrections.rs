@@ -31,6 +31,8 @@ const KEEP_COUNT: usize = 1_820;
 const ROLE_ROW_COUNT: usize = 165_295;
 const MAGIC: &[u8; 8] = b"M1322C01";
 const JOINT_MAGIC: &[u8; 8] = b"M1323C01";
+const MODEL20_JOINT_MAGIC: &[u8; 8] = b"M20DC001";
+const NORMALIZED_DISCARD_WEIGHT: u64 = 1_000_000_000_000;
 const VERSION: u32 = 1;
 const HEADER_BYTES: usize = 128;
 const ACCUMULATOR_BYTES: usize = 48;
@@ -67,6 +69,7 @@ struct BuildConfig {
     future_cache_limit: usize,
     verify_first_worlds: usize,
     joint_distributions: bool,
+    normalize_discard_rows: bool,
 }
 
 #[derive(Debug)]
@@ -232,6 +235,12 @@ struct BuildState {
     baseline_checksum: String,
 }
 
+impl BuildState {
+    fn has_joint_distributions(&self) -> bool {
+        matches!(self.model_version.as_str(), "13.23" | "20.0")
+    }
+}
+
 struct PartialAsset {
     state: BuildState,
     dealer: Vec<WeightedAccumulator>,
@@ -272,7 +281,8 @@ fn parse_command() -> Result<Command, String> {
                  --keep-prior FILE --discard-histograms FILE --baseline-pairs FILE \
                  --dealer-start N --dealer-count N [--pone-start N --pone-count N] [--resume] \
                  [--action-cache-limit N] [--evidence-cache-outcome-limit N] \
-                 [--future-cache-limit N] [--verify-first-worlds N] [--joint-distributions]\n\
+                 [--future-cache-limit N] [--verify-first-worlds N] [--joint-distributions] \
+                 [--model20-normalized-discards]\n\
                  build_model1322_corrections merge --shards DIR --output DIR"
             );
             process::exit(0);
@@ -298,6 +308,7 @@ fn parse_build(args: &[String]) -> Result<BuildConfig, String> {
     let mut future_cache_limit = 3_000_000_usize;
     let mut verify_first_worlds = 0_usize;
     let mut joint_distributions = false;
+    let mut normalize_discard_rows = false;
     let mut index = 0_usize;
     while index < args.len() {
         let flag = &args[index];
@@ -331,6 +342,10 @@ fn parse_build(args: &[String]) -> Result<BuildConfig, String> {
             }
             "--resume" => resume = true,
             "--joint-distributions" => joint_distributions = true,
+            "--model20-normalized-discards" => {
+                normalize_discard_rows = true;
+                joint_distributions = true;
+            }
             other => return Err(format!("unknown Model 13.22 build argument {other}")),
         }
     }
@@ -353,6 +368,7 @@ fn parse_build(args: &[String]) -> Result<BuildConfig, String> {
         future_cache_limit,
         verify_first_worlds,
         joint_distributions,
+        normalize_discard_rows,
     };
     validate_range("dealer", config.dealer_start, config.dealer_count)?;
     validate_range("pone", config.pone_start, config.pone_count)?;
@@ -387,6 +403,12 @@ fn parse_merge(args: &[String]) -> Result<MergeConfig, String> {
 }
 
 fn build(config: &BuildConfig) -> Result<(), String> {
+    if config.normalize_discard_rows {
+        let factors: serde_json::Value =
+            serde_json::from_slice(&fs::read(&config.factors).map_err(|error| error.to_string())?)
+                .map_err(|error| error.to_string())?;
+        validate_model20_factor_provenance(&factors)?;
+    }
     fs::create_dir_all(&config.output)
         .map_err(|error| format!("create {} failed: {error}", config.output.display()))?;
     let checksums = [
@@ -413,6 +435,7 @@ fn build(config: &BuildConfig) -> Result<(), String> {
         &config.discard_histograms,
         &keep_keys,
         &contexts,
+        config.normalize_discard_rows,
     )?;
     let baseline = load_baseline_pairs(&config.baseline_pairs)?;
     let beliefs = Model91EmpiricalBeliefs::load(&config.beliefs)?;
@@ -530,6 +553,7 @@ fn build(config: &BuildConfig) -> Result<(), String> {
             "durableOutput": if config.joint_distributions { "exact joint own/opponent terminal pegging distributions, first moments, and diagnostic pone lead masks" } else { "weighted terminal six-card/discard summaries and pone lead cut masks only" },
             "offlineObjective": "net pegging points; executable Model911Policy with legal-information dead-card and decline inference",
             "boardConditioning": false,
+            "discardNormalization": discard_normalization_description(&partial.state),
             "dealerRange": {"start": config.dealer_start, "count": config.dealer_count},
             "poneRange": {"start": config.pone_start, "count": config.pone_count},
             "roleRows": ROLE_ROW_COUNT,
@@ -868,6 +892,7 @@ fn load_priors(
     histogram_path: &Path,
     keep_keys: &[String],
     contexts: &ContextIndex,
+    normalize_rows: bool,
 ) -> Result<Priors, String> {
     let prior: KeepPriorFile = serde_json::from_slice(
         &fs::read(prior_path)
@@ -882,7 +907,10 @@ fn load_priors(
             .map_err(|error| format!("read {} failed: {error}", histogram_path.display()))?,
     )
     .map_err(|error| format!("parse {} failed: {error}", histogram_path.display()))?;
-    if histograms.schema_version != 1 || histograms.model_version != "13.22" {
+    if histograms.schema_version != 1
+        || !(histograms.model_version == "13.22"
+            || (normalize_rows && histograms.model_version == "20.0"))
+    {
         return Err("unsupported Model 13.22 discard histogram".to_string());
     }
     let dealer_keep = prior_vector(&prior.roles.dealer, keep_keys)?;
@@ -892,12 +920,14 @@ fn load_priors(
         histograms.fallback_by_role.dealer,
         keep_keys,
         contexts,
+        normalize_rows,
     )?;
     let pone_discards = discard_vectors(
         histograms.roles.pone,
         histograms.fallback_by_role.pone,
         keep_keys,
         contexts,
+        normalize_rows,
     )?;
     Ok(Priors {
         dealer_keep,
@@ -919,6 +949,7 @@ fn discard_vectors(
     fallback: BTreeMap<String, u64>,
     keep_keys: &[String],
     contexts: &ContextIndex,
+    normalize_rows: bool,
 ) -> Result<Vec<Vec<DiscardVariant>>, String> {
     keep_keys
         .iter()
@@ -954,9 +985,83 @@ fn discard_vectors(
                     "Model 13.22 keep {keep_key} has no physical discard histogram"
                 ));
             }
+            if normalize_rows {
+                normalize_discard_weights(&mut variants)?;
+            }
             Ok(variants)
         })
         .collect()
+}
+
+fn normalize_discard_weights(variants: &mut [DiscardVariant]) -> Result<(), String> {
+    // P(discard | keep, role) must have the same total for every keep, regardless
+    // of how many empirical cohorts contributed. First exclude discards that
+    // cannot coexist with the keep; normalize before applying actor-known cards.
+    let total: u128 = variants
+        .iter()
+        .map(|variant| u128::from(variant.weight))
+        .sum();
+    if total == 0 {
+        return Err("cannot normalize an empty discard distribution".into());
+    }
+    let mut remainders = Vec::with_capacity(variants.len());
+    let mut assigned = 0_u64;
+    for (index, variant) in variants.iter_mut().enumerate() {
+        let numerator = u128::from(variant.weight) * u128::from(NORMALIZED_DISCARD_WEIGHT);
+        variant.weight = (numerator / total) as u64;
+        assigned += variant.weight;
+        remainders.push((index, numerator % total));
+    }
+    // Largest-remainder apportionment gives exact equal row totals, with less
+    // than 1e-12 probability error per entry and deterministic rank-order ties.
+    remainders.sort_by(|(left_index, left), (right_index, right)| {
+        right.cmp(left).then(left_index.cmp(right_index))
+    });
+    for (index, _) in remainders
+        .iter()
+        .take((NORMALIZED_DISCARD_WEIGHT - assigned) as usize)
+    {
+        variants[*index].weight += 1;
+    }
+    if variants.iter().any(|variant| variant.weight == 0) {
+        return Err("discard normalization precision would erase observed support".into());
+    }
+    Ok(())
+}
+
+fn validate_model20_factor_provenance(factors: &serde_json::Value) -> Result<(), String> {
+    let models = factors["modelCohort"]["includedModels"]
+        .as_array()
+        .filter(|models| !models.is_empty())
+        .ok_or(
+            "Model 20 correction build requires attributed decline-factor evidence (ADR-0002)",
+        )?;
+    for model in models {
+        let name = model.as_str().unwrap_or("");
+        let version = name.strip_prefix("schell_table-peg_table-").unwrap_or("");
+        let mut parts = version.split('.');
+        let major = parts.next().and_then(|part| part.parse::<u8>().ok());
+        let minor_parts = parts.collect::<Vec<_>>();
+        if !matches!(major, Some(13 | 14 | 20))
+            || minor_parts.is_empty()
+            || minor_parts
+                .iter()
+                .any(|part| part.is_empty() || !part.bytes().all(|c| c.is_ascii_digit()))
+        {
+            return Err(format!(
+                "Model 20 correction build rejects decline source {name:?} (ADR-0002)"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn discard_normalization_description(state: &BuildState) -> &'static str {
+    if state.model_version == "20.0" {
+        "each physically legal keep/role row totals 1000000000000 before actor-known-card conditioning"
+    } else {
+        "legacy unnormalized conditional cohort weights"
+    }
 }
 
 fn adjusted_prior_weight(
@@ -1026,7 +1131,9 @@ fn baseline_outcome(values: &[u16], dealer_id: usize, pone_id: usize) -> Result<
 fn new_state(config: &BuildConfig, checksums: &[String; 5]) -> BuildState {
     BuildState {
         schema_version: 1,
-        model_version: if config.joint_distributions {
+        model_version: if config.normalize_discard_rows {
+            "20.0"
+        } else if config.joint_distributions {
             "13.23"
         } else {
             "13.22"
@@ -1177,7 +1284,7 @@ fn write_partial(path: &Path, partial: &PartialAsset) -> Result<(), String> {
             .write_all(&mask.to_le_bytes())
             .map_err(|error| format!("write {} failed: {error}", temporary.display()))?;
     }
-    if partial.state.model_version == "13.23" {
+    if partial.state.has_joint_distributions() {
         for value in partial.dealer.iter().chain(&partial.pone) {
             value.validate_joint()?;
             value
@@ -1207,7 +1314,7 @@ fn read_partial(path: &Path) -> Result<PartialAsset, String> {
         return Err("truncated correction header".into());
     }
     let state = read_header(&bytes[..HEADER_BYTES])?;
-    let has_joint = state.model_version == "13.23";
+    let has_joint = state.has_joint_distributions();
     if bytes.len() < expected || (!has_joint && bytes.len() != expected) {
         return Err(format!(
             "Model 13.22 partial has {} bytes; expected {expected}",
@@ -1267,7 +1374,9 @@ fn write_header(writer: &mut impl Write, state: &BuildState) -> Result<(), Strin
         parse_checksum(&state.baseline_checksum)?,
     ];
     writer
-        .write_all(if state.model_version == "13.23" {
+        .write_all(if state.model_version == "20.0" {
+            MODEL20_JOINT_MAGIC
+        } else if state.model_version == "13.23" {
             JOINT_MAGIC
         } else {
             MAGIC
@@ -1304,7 +1413,9 @@ fn write_header(writer: &mut impl Write, state: &BuildState) -> Result<(), Strin
 
 fn read_header(bytes: &[u8]) -> Result<BuildState, String> {
     if bytes.len() != HEADER_BYTES
-        || (&bytes[..8] != MAGIC && &bytes[..8] != JOINT_MAGIC)
+        || (&bytes[..8] != MAGIC
+            && &bytes[..8] != JOINT_MAGIC
+            && &bytes[..8] != MODEL20_JOINT_MAGIC)
         || read_u32(bytes, 8)? != VERSION
     {
         return Err("invalid Model 13.22 correction header".to_string());
@@ -1315,7 +1426,9 @@ fn read_header(bytes: &[u8]) -> Result<BuildState, String> {
     let checksum = |offset| checksum_string(read_u64(bytes, offset).unwrap());
     Ok(BuildState {
         schema_version: 1,
-        model_version: if &bytes[..8] == JOINT_MAGIC {
+        model_version: if &bytes[..8] == MODEL20_JOINT_MAGIC {
+            "20.0"
+        } else if &bytes[..8] == JOINT_MAGIC {
             "13.23"
         } else {
             "13.22"
@@ -1378,8 +1491,8 @@ fn merge(config: &MergeConfig) -> Result<(), String> {
             state: "complete".to_string(),
             ..first.clone()
         },
-        dealer: vec![WeightedAccumulator::new(first.model_version == "13.23"); ROLE_ROW_COUNT],
-        pone: vec![WeightedAccumulator::new(first.model_version == "13.23"); ROLE_ROW_COUNT],
+        dealer: vec![WeightedAccumulator::new(first.has_joint_distributions()); ROLE_ROW_COUNT],
+        pone: vec![WeightedAccumulator::new(first.has_joint_distributions()); ROLE_ROW_COUNT],
         pone_lead_masks: vec![0_u16; ROLE_ROW_COUNT * RANKS],
     };
     merged.state.compatible_pairs = 0;
@@ -1414,7 +1527,9 @@ fn merge(config: &MergeConfig) -> Result<(), String> {
         ));
     }
     validate_merged_rows(&merged)?;
-    let output_path = config.output.join(if first.model_version == "13.23" {
+    let output_path = config.output.join(if first.model_version == "20.0" {
+        "model20-corrections.bin"
+    } else if first.model_version == "13.23" {
         "model1323-corrections.bin"
     } else {
         MERGED_FILE
@@ -1441,7 +1556,8 @@ fn merge(config: &MergeConfig) -> Result<(), String> {
             "rowOrder": "canonical six-card rank hand, canonical contained two-card discard; dealer and pone arrays use the same 165,295 row order",
             "poneLeadMasks": "thirteen u16 masks per pone row; bit c marks cut rank c",
             "durableObservationActionTable": false,
-            "jointDistributions": first.model_version == "13.23",
+            "jointDistributions": first.has_joint_distributions(),
+            "discardNormalization": discard_normalization_description(&merged.state),
             "offlineObjective": "net pegging points; unchanged Model911Policy legal-information continuation",
         }),
     )?;
@@ -1687,6 +1803,149 @@ mod tests {
     use super::*;
 
     #[test]
+    fn normalized_discard_weights_are_invariant_to_cohort_scale() {
+        let keys = enumerate_rank_count_keys(4);
+        let keeps = keys
+            .iter()
+            .map(|key| rank_counts_from_key(key).unwrap())
+            .collect::<Vec<_>>();
+        let contexts = build_context_index(&keys, &keeps).unwrap();
+        // Every keep uses the same fallback distribution. Doubling one row's
+        // counts must not double its contribution to the correction forecast.
+        let fallback = BTreeMap::from([
+            ("1100000000000".to_string(), 300_u64),
+            ("0011000000000".to_string(), 100_u64),
+        ]);
+        let scaled = BTreeMap::from([(
+            keys[0].clone(),
+            fallback
+                .iter()
+                .map(|(key, weight)| (key.clone(), weight * 2))
+                .collect(),
+        )]);
+        let original =
+            discard_vectors(BTreeMap::new(), fallback.clone(), &keys, &contexts, true).unwrap();
+        let changed = discard_vectors(scaled, fallback.clone(), &keys, &contexts, true).unwrap();
+        for ((before, after), key) in original.iter().zip(&changed).zip(&keys) {
+            let weights = |row: &[DiscardVariant]| {
+                row.iter()
+                    .map(|variant| (variant.context_index, variant.weight))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(weights(before), weights(after), "keep {key}");
+            assert_eq!(
+                before.iter().map(|variant| variant.weight).sum::<u64>(),
+                NORMALIZED_DISCARD_WEIGHT
+            );
+        }
+        let legacy = discard_vectors(BTreeMap::new(), fallback, &keys, &contexts, false).unwrap();
+        assert_eq!(
+            legacy[0].iter().map(|variant| variant.weight).sum::<u64>(),
+            400
+        );
+        assert_eq!(
+            original[0]
+                .iter()
+                .map(|variant| variant.weight)
+                .collect::<Vec<_>>(),
+            vec![
+                NORMALIZED_DISCARD_WEIGHT / 4,
+                NORMALIZED_DISCARD_WEIGHT * 3 / 4
+            ]
+        );
+        // Known-card depletion must remain after normalization. Four known aces
+        // eliminate the A-2 discard, leaving only its original 1/4 probability.
+        let mut own_six = [0; RANKS];
+        own_six[0] = 4;
+        own_six[4] = 2;
+        let conditioned = adjusted_discard_variants(&original[0], &keeps[0], &own_six).unwrap();
+        assert_eq!(conditioned.len(), 1);
+        assert_eq!(conditioned[0].weight, NORMALIZED_DISCARD_WEIGHT / 4);
+    }
+
+    #[test]
+    fn normalized_discard_rows_have_exact_totals_without_overflow_or_silent_support_loss() {
+        let variants = |weights: &[u64]| {
+            weights
+                .iter()
+                .enumerate()
+                .map(|(index, weight)| DiscardVariant {
+                    context_index: index,
+                    ranks: [0; RANKS],
+                    weight: *weight,
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut thirds = variants(&[1, 1, 1]);
+        normalize_discard_weights(&mut thirds).unwrap();
+        assert_eq!(
+            thirds
+                .iter()
+                .map(|variant| variant.weight)
+                .collect::<Vec<_>>(),
+            vec![333_333_333_334, 333_333_333_333, 333_333_333_333]
+        );
+        let mut huge = variants(&[u64::MAX, u64::MAX]);
+        normalize_discard_weights(&mut huge).unwrap();
+        assert!(huge
+            .iter()
+            .all(|variant| variant.weight == NORMALIZED_DISCARD_WEIGHT / 2));
+        assert!(normalize_discard_weights(&mut variants(&[u64::MAX, 1])).is_err());
+        assert!(normalize_discard_weights(&mut []).is_err());
+    }
+
+    #[test]
+    fn model20_mode_is_explicit_and_requires_clean_factor_provenance() {
+        let args = [
+            "--output",
+            "out",
+            "--beliefs",
+            "beliefs",
+            "--factors",
+            "factors",
+            "--keep-prior",
+            "keeps",
+            "--discard-histograms",
+            "discards",
+            "--baseline-pairs",
+            "pairs",
+            "--dealer-start",
+            "0",
+            "--dealer-count",
+            "1",
+        ];
+        let mut args = args.into_iter().map(str::to_string).collect::<Vec<_>>();
+        let legacy = parse_build(&args).unwrap();
+        assert!(!legacy.normalize_discard_rows);
+        args.push("--model20-normalized-discards".into());
+        let model20 = parse_build(&args).unwrap();
+        assert!(model20.normalize_discard_rows && model20.joint_distributions);
+        let checksums = std::array::from_fn(|_| "0000000000000000".into());
+        assert_eq!(new_state(&model20, &checksums).model_version, "20.0");
+        for version in ["15.0", "15.2", "16.0", "16.99", "13.23-renamed"] {
+            let value = json!({"modelCohort": {"includedModels": [format!("schell_table-peg_table-{version}")]}});
+            assert!(
+                validate_model20_factor_provenance(&value).is_err(),
+                "{version}"
+            );
+        }
+        assert!(validate_model20_factor_provenance(&json!({})).is_err());
+        assert!(validate_model20_factor_provenance(
+            &json!({"modelCohort": {"includedModels": ["schell_table-peg_table-13.23"]}})
+        )
+        .is_ok());
+        let current: serde_json::Value = serde_json::from_slice(
+            &fs::read(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../cribbage-shadow-engine/assets/model1322-decline-factors.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(validate_model20_factor_provenance(&current).is_err());
+    }
+
+    #[test]
     fn canonical_context_index_has_expected_rows() {
         let keys = enumerate_rank_count_keys(4);
         let keeps = keys
@@ -1731,38 +1990,45 @@ mod tests {
 
     #[test]
     fn joint_checkpoint_roundtrip_and_resume_format_guard() {
-        let mut header = [0_u8; HEADER_BYTES];
-        header[..8].copy_from_slice(JOINT_MAGIC);
-        header[8..12].copy_from_slice(&VERSION.to_le_bytes());
-        header[12..16].copy_from_slice(&(ROLE_ROW_COUNT as u32).to_le_bytes());
-        header[20..24].copy_from_slice(&1_u32.to_le_bytes());
-        header[28..32].copy_from_slice(&1_u32.to_le_bytes());
-        header[32..36].copy_from_slice(&1_u32.to_le_bytes());
-        let state = read_header(&header).unwrap();
-        let mut asset = PartialAsset {
-            state,
-            dealer: vec![WeightedAccumulator::new(true); ROLE_ROW_COUNT],
-            pone: vec![WeightedAccumulator::new(true); ROLE_ROW_COUNT],
-            pone_lead_masks: vec![0; ROLE_ROW_COUNT * RANKS],
-        };
-        asset.dealer[17].add(0, 4, 17).unwrap();
-        asset.dealer[17].add(4, 0, 17).unwrap();
-        asset.pone[92].add(7, 8, 49).unwrap();
-        let path = env::temp_dir().join(format!("model1323-checkpoint-test-{}.bin", process::id()));
-        write_partial(&path, &asset).unwrap();
-        let restored = read_partial(&path).unwrap();
-        fs::remove_file(&path).unwrap();
-        assert_eq!(restored.dealer, asset.dealer);
-        assert_eq!(restored.pone, asset.pone);
-        validate_state(&restored.state, &asset.state).unwrap();
-        let mut wrong_format = asset.state.clone();
-        wrong_format.model_version = "13.22".into();
-        assert!(validate_state(&restored.state, &wrong_format).is_err());
-        assert!(validate_initial_checkpoint(&restored.state, &asset.state).is_err());
-        let mut initial = asset.state.clone();
-        initial.state = "running".into();
-        initial.completed_dealer_keeps = 0;
-        validate_initial_checkpoint(&initial, &initial).unwrap();
-        assert!(validate_initial_checkpoint(&initial, &wrong_format).is_err());
+        for (magic, label) in [(JOINT_MAGIC, "13.23"), (MODEL20_JOINT_MAGIC, "20.0")] {
+            let mut header = [0_u8; HEADER_BYTES];
+            header[..8].copy_from_slice(magic);
+            header[8..12].copy_from_slice(&VERSION.to_le_bytes());
+            header[12..16].copy_from_slice(&(ROLE_ROW_COUNT as u32).to_le_bytes());
+            header[20..24].copy_from_slice(&1_u32.to_le_bytes());
+            header[28..32].copy_from_slice(&1_u32.to_le_bytes());
+            header[32..36].copy_from_slice(&1_u32.to_le_bytes());
+            let state = read_header(&header).unwrap();
+            assert_eq!(state.model_version, label);
+            let mut asset = PartialAsset {
+                state,
+                dealer: vec![WeightedAccumulator::new(true); ROLE_ROW_COUNT],
+                pone: vec![WeightedAccumulator::new(true); ROLE_ROW_COUNT],
+                pone_lead_masks: vec![0; ROLE_ROW_COUNT * RANKS],
+            };
+            asset.dealer[17].add(0, 4, 17).unwrap();
+            asset.dealer[17].add(4, 0, 17).unwrap();
+            asset.pone[92].add(7, 8, 49).unwrap();
+            let path =
+                env::temp_dir().join(format!("model1323-checkpoint-test-{}.bin", process::id()));
+            write_partial(&path, &asset).unwrap();
+            let restored = read_partial(&path).unwrap();
+            fs::remove_file(&path).unwrap();
+            assert_eq!(restored.dealer, asset.dealer);
+            assert_eq!(restored.pone, asset.pone);
+            validate_state(&restored.state, &asset.state).unwrap();
+            let mut wrong_format = asset.state.clone();
+            wrong_format.model_version = if label == "20.0" { "13.23" } else { "20.0" }.into();
+            assert!(validate_state(&restored.state, &wrong_format).is_err());
+            let mut means_only = asset.state.clone();
+            means_only.model_version = "13.22".into();
+            assert!(validate_state(&restored.state, &means_only).is_err());
+            assert!(validate_initial_checkpoint(&restored.state, &asset.state).is_err());
+            let mut initial = asset.state.clone();
+            initial.state = "running".into();
+            initial.completed_dealer_keeps = 0;
+            validate_initial_checkpoint(&initial, &initial).unwrap();
+            assert!(validate_initial_checkpoint(&initial, &wrong_format).is_err());
+        }
     }
 }

@@ -43,6 +43,93 @@ physical fallback. Ace 13.23 and earlier models retain their original behavior.
 The frozen discard-time pegging correction asset is unchanged and has not been rebuilt to
 forecast the new live policy.
 
+## Conditional-weight normalization fix
+
+Status: implemented in the correction builder and regression-tested; **not yet
+active in gameplay**. Model 20 still loads the frozen `model1323-corrections.bin`.
+
+The historical builder multiplies each opponent keep's prior by its conditional
+discard weights. Those discard rows have different totals depending on how many
+empirical cohorts supplied observations, unintentionally changing the relative
+probability of the keeps. The new `--model20-normalized-discards` build mode
+normalizes each physically legal keep/role row to a common integer total of
+`1_000_000_000_000` before applying actor-known-card depletion. Conditioning may
+then reduce different rows by different amounts; normalizing again after that
+step would incorrectly discard this evidence. Largest-remainder rounding gives
+exact row totals and fails rather than silently rounding observed support to zero.
+This fixes row scaling, not missing empirical support or the continuation objective.
+
+The mode produces joint distributions in a separate `model20-corrections.bin`
+with magic `M20DC001`. Historical build modes retain their original behavior,
+and checkpoint/resume/merge validation rejects mixed model versions. Manifests
+record the normalization convention. Existing runtime readers reject the new
+format; activation requires a Model 20 reader/dispatch path and pinned, verified
+input checksums after the replacement asset has been built.
+
+The planned batched rebuild must first audit its inherited evidence under
+[ADR-0002](adr/0002-exclude-defunct-models-from-learning-data.md). In particular,
+the frozen decline factors contain excluded 15.x evidence. The new mode rejects
+missing or ineligible decline-factor model attribution before starting work;
+that metadata check does not replace an audit of the underlying observations.
+Cleaning factors or changing the continuation policy also requires a compatible
+Model 9.11 keep-pair baseline. Freeze the audited inputs, run the baseline and
+correction builds through the job supervisor, verify the new distributions and
+their own moments, and only then activate the replacement for Model 20. The
+historical correction build took roughly four days on six workers, excluding
+prerequisite work. No replacement build has been queued for this fix yet.
+
+Model 20.0 discard and pegging selection maximize board win probability. Discards
+break WP ties by total EV; pegging breaks them by immediate points and rank.
+Both the offline builder and live pegging forecasts simulate future choices
+with the net-pegging-point `Model911Policy`. At its next actual turn, the playing
+engine evaluates the choices again by WP rather than executing the forecast's
+continuation choice. Keeping the offline
+asset independent of board scores avoids a naive additional `121 × 121` score
+dimension, but does not establish that board-aware continuation is infeasible.
+A future board-aware policy change must update both its baseline and correction
+forecast; it is separate from the conditional normalization fix.
+
+## Model 20.1 live WP continuation
+
+`schell_table-peg_table-20.1` retains the existing EV-built
+`model1323-corrections.bin` for discards. The normalized replacement described
+above is a separate, pending asset build; the 20.1 benchmark does not claim to
+contain that replacement. Live play and saved-decision review now use a WP
+continuation chooser for **both** actors at every contested simulated turn.
+Model 20.0 and production Ace retain their EV continuation chooser.
+
+The chooser aggregates compatible opponent hands from the acting player's
+legal-information posterior before selecting one move. For each candidate it
+averages terminal win probabilities over card-order continuations, using the
+verified board matrix's after-pegging seam, actual scores, and the acting
+player's dealer/pone perspective. It stops scoring at the first player to reach
+121. It does not convert mean net points into WP. Exact WP ties use immediate
+points and then rank, matching the live selection convention.
+
+This is an approximate executable policy, not a recursive equilibrium solver.
+The inner action-value calculation averages legal card choices by remaining
+card multiplicity; the outer forecast executes WP-selected actions at every
+turn. The inner board seam integrates generic later hand/crib scoring, while
+the root move comparison retains the existing known-card show evaluator.
+Thus the forecast now models WP-seeking players, but its inner value estimates
+are not identical to the full root evaluator. No EV fallback is used for a
+contested 20.1 continuation choice. Empty empirical support falls back to
+physically compatible hands with the same go/decline evidence.
+
+Action and outcome caches exist only within one decision. Their keys include
+board scores and role. Outcomes can be reused across actor discard variants
+because only their posterior weights change. Rank worlds remain exhaustive;
+only the existing provable WP bound can stop an inferior root candidate early.
+
+The September 25 benchmark compares 20.1 with the **frozen previous benchmark's
+20.0 engine and inputs**, revision `1925d15bb13a1c4ac8d39a7d87a6d89b7fc7aeed`.
+A streaming adapter is compiled against that frozen source without changing
+its model code. The adapter retains hand caching and full EV/WP diagnostics.
+Each game records the explicit versioned model IDs; the experiment also pins
+both source trees, binaries, asset checksums, and a fresh paired seed range.
+This compares the latest 20.1—including the conditional-discard evidence
+refresh—with the actual earlier 20.0, not an isolated WP-only ablation.
+
 ## Suit-aware show forecasts
 
 Model 20 uses the opponent's role and discard rank pair to read empirical

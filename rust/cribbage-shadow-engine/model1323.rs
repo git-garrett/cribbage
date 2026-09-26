@@ -1,4 +1,4 @@
-//! Model 13.23's live candidate forecasts, with opt-in Model 20 beliefs.
+//! Model 13.23 live forecasts, Model 20 beliefs, and Model 20.1 WP continuation.
 //! Board utility is applied by the caller. The default continuation policy
 //! preserves the frozen correction builder.
 //! Only finite outcome distributions leave this module. No paths or actions
@@ -126,6 +126,7 @@ pub struct PolicyAssets {
     discard_asset_sha256: [u8; 32],
     suit_rates: Option<[SuitedDiscardRates; 2]>,
     empirical_depletion: bool,
+    wp_board: Option<Arc<crate::board_matrix::BoardWinMatrix>>,
 }
 
 impl PolicyAssets {
@@ -176,6 +177,7 @@ impl PolicyAssets {
         }
         Ok(Self {
             empirical_depletion: false,
+            wp_board: None,
             beliefs,
             factors,
             suit_rates: None,
@@ -217,7 +219,16 @@ impl PolicyAssets {
             },
             suit_rates: Some(packed.suits),
             empirical_depletion: true,
+            wp_board: None,
         })
+    }
+
+    pub(crate) fn load_model201(directory: &Path) -> Result<Self, String> {
+        let mut assets = Self::load_model20(directory)?;
+        assets.wp_board = Some(Arc::new(
+            crate::board_matrix::BoardWinMatrix::load_verified_model13215(
+                directory.join("board-win-matrix.bin"))?));
+        Ok(assets)
     }
 
     pub(crate) fn suited_discard_rates(&self, role: Role) -> Result<&SuitedDiscardRates, String> {
@@ -268,7 +279,9 @@ impl PolicyAssets {
         if self.empirical_depletion {
             policy.use_empirical_depletion();
         }
-        Ok(policy)
+        Ok(if let Some(board) = &self.wp_board {
+            policy.with_win_probability(Arc::clone(board))
+        } else { policy })
     }
 
     fn worlds_for_hand(
@@ -957,6 +970,8 @@ mod tests {
         let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
         let frozen = PolicyAssets::load(&directory).unwrap();
         let model20 = PolicyAssets::load_model20(&directory).unwrap();
+        assert!(frozen.wp_board.is_none() && model20.wp_board.is_none());
+        assert!(PolicyAssets::load_model201(&directory).unwrap().wp_board.is_some());
         let physical = Model911Policy::new(None, frozen.factors, 0, 0).unwrap();
         let mut observation = opening().0;
         for role in [Role::Dealer, Role::Pone] {
