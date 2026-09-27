@@ -23,3 +23,12 @@ sections. The separate frozen `model1322-decline-factors.json` still records
 must remove those observations. Its builder now excludes those versions and
 requires attributable model identities. This decision does not retroactively
 certify other historical assets as clean.
+
+Model 20.3 uses `model203-decline-factors.json`, rebuilt from attributable
+approved-model games with all 15.x/16.x actors excluded. The later asset-specific
+qualification in [ADR-0003](0003-qualify-decline-data-by-pegging-policy.md) also
+excludes weak or unverified pegging policies and the unclassified human aggregate.
+Its current raw counts and provenance are in
+`training/model203-decline-qualified-evidence.json.gz`; see
+[the refresh report](../model-20.3-decline-factors.md). The previous broad evidence
+and contaminated historical factors remain solely for audit/frozen reproduction.

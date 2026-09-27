@@ -479,6 +479,36 @@ pub struct Model1322DeclineFactors {
 }
 
 impl Model1322DeclineFactors {
+    pub(crate) fn load_model203(path: &Path) -> Result<Self, String> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Asset {
+            schema_version: u32,
+            model_version: String,
+            factors: BTreeMap<String, [u32; 3]>,
+        }
+        let asset: Asset = serde_json::from_slice(
+            &fs::read(path).map_err(|e| format!("read Model 20.3 decline factors: {e}"))?,
+        ).map_err(|e| format!("parse Model 20.3 decline factors: {e}"))?;
+        if asset.schema_version != 1 || asset.model_version != "20.3" || asset.factors.len() != 7 {
+            return Err("unsupported Model 20.3 decline-factor asset".into());
+        }
+        let row = |name: &str| asset.factors.get(name).copied()
+            .ok_or_else(|| format!("Model 20.3 decline factors missing {name}"));
+        if asset.factors.values().flatten().any(|p| *p == 0 || *p >= 1_000_000) {
+            return Err("Model 20.3 behavioral probabilities must lie strictly between zero and one".into());
+        }
+        Ok(Self {
+            three_card_run_ppm: row("threeCardRun")?,
+            four_plus_card_run_ppm: row("fourPlusCardRun")?,
+            pair_ppm: row("pair")?,
+            pair_royal_after_pair_ppm: row("pairRoyalAfterPair")?,
+            four_of_a_kind_after_pair_royal_ppm: row("fourOfAKindAfterPairRoyal")?,
+            safe_pair_ppm: row("safePair")?,
+            safe_pair_royal_ppm: row("safePairRoyal")?,
+        })
+    }
+
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
         let path = path.as_ref();
         let asset: serde_json::Value = serde_json::from_slice(
@@ -586,6 +616,17 @@ pub struct Model911Policy {
     include_owned_dead_cards: bool,
     preserve_soft_support: bool,
     wp_board: Option<Arc<crate::board_matrix::BoardWinMatrix>>,
+    likelihood_cache: Option<Mutex<DeclineLikelihoodCache>>,
+}
+
+/// Public-history features only, owned by one live decision policy. Borrowed
+/// slice lookup avoids cloning history on cache hits; no hidden cards enter it.
+#[derive(Default)]
+struct DeclineLikelihoodCache {
+    by_cut: HashMap<Option<u8>, HashMap<Vec<PublicPegEvent>, [u32; RANKS]>>,
+    entries: usize,
+    #[cfg(test)]
+    hits: usize,
 }
 
 /// Model 13.22 uses Model 9.11's executable policy with actor-owned dead cards
@@ -846,6 +887,7 @@ impl Model911Policy {
             include_owned_dead_cards: true,
             preserve_soft_support: false,
             wp_board: None,
+            likelihood_cache: None,
         })
     }
 
@@ -859,6 +901,7 @@ impl Model911Policy {
             include_owned_dead_cards: false,
             preserve_soft_support: self.preserve_soft_support,
             wp_board: None,
+            likelihood_cache: None,
         }
     }
 
@@ -879,6 +922,43 @@ impl Model911Policy {
         self
     }
 
+    pub(crate) fn with_likelihood_cache(mut self) -> Self {
+        self.likelihood_cache = Some(Mutex::new(DeclineLikelihoodCache::default()));
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn without_likelihood_cache(mut self) -> Self {
+        self.likelihood_cache = None;
+        self
+    }
+
+    fn opponent_likelihoods(&self, observation: &Model132Observation) -> [u32; RANKS] {
+        // The constructor validates these immutable factors once.
+        let calculate = || opponent_rank_likelihoods_validated(
+            observation, self.factors, self.include_owned_dead_cards, self.preserve_soft_support,
+        );
+        let Some(cache) = &self.likelihood_cache else { return calculate() };
+        // These are the kernel's only varying inputs. Its factors and soft-zero
+        // mode are fixed for this policy; new behavioral features need a new key.
+        let cut = self.include_owned_dead_cards.then_some(observation.turn_rank);
+        let mut cache = cache.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(value) = cache.by_cut.get(&cut)
+            .and_then(|rows| rows.get(observation.public_history.as_slice())).copied() {
+            #[cfg(test)]
+            { cache.hits += 1; }
+            return value;
+        }
+        let value = calculate();
+        if cache.entries >= 4096 {
+            cache.by_cut.clear();
+            cache.entries = 0;
+        }
+        cache.by_cut.entry(cut).or_default().insert(observation.public_history.clone(), value);
+        cache.entries += 1;
+        value
+    }
+
     /// The live Model 20.1 adapter changes the executable chooser's utility;
     /// the offline baseline/correction constructors remain points-based.
     pub(crate) fn with_win_probability(
@@ -895,6 +975,9 @@ impl Model911Policy {
 
     pub fn clear_edit_evidence_cache(&self) {
         self.lock_inner().clear_evidence_cache();
+        if let Some(cache) = &self.likelihood_cache {
+            *cache.lock().unwrap_or_else(|error| error.into_inner()) = DeclineLikelihoodCache::default();
+        }
     }
 
     fn lock_inner(&self) -> MutexGuard<'_, Model91Policy> {
@@ -933,12 +1016,7 @@ impl Model911Policy {
         opponent_hands: Vec<([u8; RANKS], f64)>,
     ) -> Result<RankPegAction, String> {
         let model91_observation = self.model91_observation(observation)?;
-        let likelihoods = opponent_rank_likelihoods(
-            observation,
-            self.factors,
-            self.include_owned_dead_cards,
-            self.preserve_soft_support,
-        )?;
+        let likelihoods = self.opponent_likelihoods(observation);
         self.lock_inner().choose_action_for_weighted_opponent_hands(
             &model91_observation,
             opponent_hands,
@@ -951,12 +1029,7 @@ impl Model911Policy {
         observation: &Model132Observation,
     ) -> Result<Model91Choice, String> {
         let model91_observation = self.model91_observation(observation)?;
-        let likelihoods = opponent_rank_likelihoods(
-            observation,
-            self.factors,
-            self.include_owned_dead_cards,
-            self.preserve_soft_support,
-        )?;
+        let likelihoods = self.opponent_likelihoods(observation);
         self.lock_inner()
             .choose_action_with_opponent_likelihood_and_net_ev(&model91_observation, &likelihoods)
     }
@@ -977,12 +1050,7 @@ impl Model911Policy {
     ) -> Result<Vec<([u8; RANKS], f64)>, String> {
         observation.validate()?;
         let model91_observation = self.model91_observation(observation)?;
-        let likelihoods = opponent_rank_likelihoods(
-            observation,
-            self.factors,
-            self.include_owned_dead_cards,
-            self.preserve_soft_support,
-        )?;
+        let likelihoods = self.opponent_likelihoods(observation);
         self.lock_inner()
             .opponent_hands_with_cache(&model91_observation, &likelihoods, cache)
     }
@@ -992,12 +1060,7 @@ impl Model132PeggingPolicy for Model911Policy {
     fn choose_action(&self, observation: &Model132Observation) -> Result<RankPegAction, String> {
         observation.validate()?;
         let model91_observation = self.model91_observation(observation)?;
-        let likelihoods = opponent_rank_likelihoods(
-            observation,
-            self.factors,
-            self.include_owned_dead_cards,
-            self.preserve_soft_support,
-        )?;
+        let likelihoods = self.opponent_likelihoods(observation);
         if let Some(board) = &self.wp_board {
             self.lock_inner().choose_action_by_wp(
                 &model91_observation,
@@ -1057,32 +1120,23 @@ fn declined_completion(series: &[u8], candidate: u8) -> Option<DeclinedCompletio
         3.. => return Some(DeclinedCompletion::FourOfAKind),
         _ => {}
     }
-    let mut with_candidate = series.to_vec();
-    with_candidate.push(candidate);
-    for length in (3..=with_candidate.len()).rev() {
-        let tail = &with_candidate[with_candidate.len() - length..];
-        let mut seen = [false; RANKS];
-        let mut min = u8::MAX;
-        let mut max = 0_u8;
-        let unique = tail.iter().all(|rank| {
-            let index = *rank as usize;
-            if index >= RANKS || seen[index] {
-                return false;
-            }
-            seen[index] = true;
-            min = min.min(*rank);
-            max = max.max(*rank);
-            true
-        });
-        if unique && usize::from(max - min + 1) == length {
-            return Some(if length == 3 {
+    let mut seen = 1_u16 << candidate;
+    let (mut min, mut max, mut length, mut best) = (candidate, candidate, 1, None);
+    for &rank in series.iter().rev() {
+        if rank as usize >= RANKS || seen & (1 << rank) != 0 { break; }
+        seen |= 1 << rank;
+        min = min.min(rank);
+        max = max.max(rank);
+        length += 1;
+        if length >= 3 && usize::from(max - min + 1) == length {
+            best = Some(if length == 3 {
                 DeclinedCompletion::ThreeCardRun
             } else {
                 DeclinedCompletion::FourPlusCardRun
             });
         }
     }
-    None
+    best
 }
 
 /// Reconstruct the likelihood evidence available to the acting player. A go
@@ -1111,6 +1165,15 @@ fn opponent_rank_likelihoods(
     preserve_soft_support: bool,
 ) -> Result<[u32; RANKS], String> {
     factors.validate()?;
+    Ok(opponent_rank_likelihoods_validated(observation, factors, include_known_cut, preserve_soft_support))
+}
+
+fn opponent_rank_likelihoods_validated(
+    observation: &Model132Observation,
+    factors: Model1322DeclineFactors,
+    include_known_cut: bool,
+    preserve_soft_support: bool,
+) -> [u32; RANKS] {
     let mut likelihoods = [1_000_000_u32; RANKS];
     let mut series = Vec::<u8>::new();
     let mut count = 0_u8;
@@ -1181,7 +1244,7 @@ fn opponent_rank_likelihoods(
             }
         }
     }
-    Ok(likelihoods)
+    likelihoods
 }
 
 impl Model132HeuristicPolicy {
@@ -1919,6 +1982,150 @@ mod tests {
             safe_pair_ppm: [110_000; 3],
             safe_pair_royal_ppm: [220_000; 3],
         }
+    }
+
+    fn frozen_declined_completion(series: &[u8], candidate: u8) -> Option<DeclinedCompletion> {
+        let same_suffix = series
+            .iter()
+            .rev()
+            .take_while(|rank| **rank == candidate)
+            .count();
+        match same_suffix {
+            1 => return Some(DeclinedCompletion::Pair),
+            2 => return Some(DeclinedCompletion::PairRoyal),
+            3.. => return Some(DeclinedCompletion::FourOfAKind),
+            _ => {}
+        }
+        let mut with_candidate = series.to_vec();
+        with_candidate.push(candidate);
+        for length in (3..=with_candidate.len()).rev() {
+            let tail = &with_candidate[with_candidate.len() - length..];
+            let mut seen = [false; RANKS];
+            let mut min = u8::MAX;
+            let mut max = 0_u8;
+            let unique = tail.iter().all(|rank| {
+                let index = *rank as usize;
+                if index >= RANKS || seen[index] {
+                    return false;
+                }
+                seen[index] = true;
+                min = min.min(*rank);
+                max = max.max(*rank);
+                true
+            });
+            if unique && usize::from(max - min + 1) == length {
+                return Some(if length == 3 {
+                    DeclinedCompletion::ThreeCardRun
+                } else {
+                    DeclinedCompletion::FourPlusCardRun
+                });
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn decline_completion_preserves_frozen_categories_without_allocations() {
+        let mut seed = 91231_u64;
+        for i in 0..30000 {
+            let series: Vec<_> = (0..i % 9).map(|_| {
+                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+                ((seed >> 32) % 13) as u8
+            }).collect();
+            for rank in 0..13 {
+                assert_eq!(declined_completion(&series, rank), frozen_declined_completion(&series, rank));
+            }
+        }
+    }
+
+    fn decline_history_cases() -> Vec<Model132Observation> {
+        let mut seed = 17293_u64;
+        let mut cases = Vec::new();
+        for _ in 0..64 {
+            let mut position = state(hand(&[(1, 1), (5, 1), (9, 1), (11, 1)]), hand(&[(6, 1), (10, 1)]));
+            while !position.complete && position.winner.is_none() {
+                cases.push(Model132Observation::from_state(&position, position.current).unwrap());
+                let legal = position.legal_actions();
+                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+                position.apply(legal[(seed >> 32) as usize % legal.len()]).unwrap();
+            }
+        }
+        cases
+    }
+
+    #[test]
+    fn decline_likelihood_cache_matches_uncached_history_and_cut_variants() {
+        let factors = decline_factors();
+        let policy = Model911Policy::new(None, factors, 0, 0).unwrap()
+            .with_positive_soft_evidence().with_likelihood_cache();
+        for mut observation in decline_history_cases() {
+            for cut in 0..13 {
+                observation.turn_rank = cut;
+                let expected = opponent_rank_likelihoods(&observation, factors, true, true).unwrap();
+                assert_eq!(policy.opponent_likelihoods(&observation), expected);
+                observation.my_score = 110;
+                observation.own_discards = hand(&[(0, 2)]);
+                assert_eq!(policy.opponent_likelihoods(&observation), expected);
+            }
+        }
+        {
+            let cache = policy.likelihood_cache.as_ref().unwrap().lock().unwrap();
+            assert!(cache.hits > 1000);
+            assert!(cache.entries <= 4096);
+        }
+        let baseline = policy.context_free_baseline();
+        assert!(baseline.likelihood_cache.is_none());
+        for observation in decline_history_cases().iter().take(20) {
+            assert_eq!(baseline.opponent_likelihoods(observation),
+                opponent_rank_likelihoods(observation, factors, false, true).unwrap());
+        }
+        policy.clear_edit_evidence_cache();
+        assert_eq!(policy.likelihood_cache.as_ref().unwrap().lock().unwrap().entries, 0);
+    }
+
+    #[test]
+    fn model203_decline_asset_is_positive_and_keeps_go_exclusions() {
+        let factors = Model1322DeclineFactors::load_model203(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/model203-decline-factors.json"),
+        ).unwrap();
+        assert!(factors.four_of_a_kind_after_pair_royal_ppm.iter().all(|p| *p > 1));
+        let mut observation = decline_history_cases().remove(0);
+        observation.public_history = vec![PublicPegEvent::SelfPlay(4), PublicPegEvent::OpponentPlay(4),
+            PublicPegEvent::SelfPlay(4), PublicPegEvent::OpponentPlay(0)];
+        let policy = Model911Policy::new(None, factors, 0, 0).unwrap()
+            .with_positive_soft_evidence().with_likelihood_cache();
+        assert_eq!(policy.opponent_likelihoods(&observation)[4], factors.four_of_a_kind_after_pair_royal_ppm[1]);
+        observation.public_history = vec![PublicPegEvent::SelfPlay(9), PublicPegEvent::SelfPlay(10),
+            PublicPegEvent::SelfPlay(4), PublicPegEvent::OpponentGo];
+        let result = policy.opponent_likelihoods(&observation);
+        assert_eq!(&result[..6], &[0; 6]);
+        assert!(result[6..].iter().all(|p| *p > 0));
+    }
+
+    #[test]
+    #[ignore = "release-only likelihood kernel timing probe"]
+    fn model203_decline_likelihood_timing() {
+        let cases = decline_history_cases();
+        let mut times = [Vec::new(), Vec::new()];
+        for sample in 0..8 {
+            for mode in [sample % 2, 1 - sample % 2] {
+                let policy = Model911Policy::new(None, decline_factors(), 0, 0).unwrap().with_positive_soft_evidence();
+                let policy = if mode == 1 { policy.with_likelihood_cache() } else { policy };
+                let start = std::time::Instant::now();
+                for _ in 0..100 {
+                    for observation in &cases {
+                        std::hint::black_box(policy.opponent_likelihoods(std::hint::black_box(observation)));
+                    }
+                }
+                times[mode].push(start.elapsed().as_secs_f64());
+            }
+        }
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+        let report = serde_json::json!({"callsPerSample": cases.len()*100, "samples": 8,
+            "uncachedMilliseconds": mean(&times[0])*1000.0, "cachedMilliseconds": mean(&times[1])*1000.0,
+            "speedup": mean(&times[0])/mean(&times[1])});
+        fs::write(std::env::temp_dir().join("model203-decline-likelihood-timing.json"), report.to_string()).unwrap();
+        println!("{report}");
     }
 
     #[test]

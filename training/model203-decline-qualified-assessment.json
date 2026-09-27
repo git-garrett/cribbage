@@ -1,0 +1,255 @@
+{
+  "assetOrder": [
+    "historicalFactorsWith203SoftFloor",
+    "broadCohort",
+    "qualifiedCohort"
+  ],
+  "assets": [
+    "rust/cribbage-shadow-engine/assets/model1322-decline-factors.json",
+    "training/model203-decline-broad-factors.json",
+    "rust/cribbage-shadow-engine/assets/model203-decline-factors.json"
+  ],
+  "declinePrediction": {
+    "broad:13": {
+      "delta95": [
+        [
+          -0.0006645177545192408,
+          0.0002789274946764633
+        ],
+        [
+          -0.005228696503536063,
+          -0.002388435563114682
+        ]
+      ],
+      "nll": [
+        0.26963563845861405,
+        0.27323038914044584,
+        0.26944997162886863
+      ],
+      "opportunities": 30790
+    },
+    "broad:20": {
+      "delta95": [
+        [
+          -0.004586863192380623,
+          -0.0012772682986066483
+        ],
+        [
+          -0.009273303948539714,
+          -0.005027460969069184
+        ]
+      ],
+      "nll": [
+        0.29772842504537,
+        0.30207256675752575,
+        0.2950092902786638
+      ],
+      "opportunities": 13201
+    },
+    "broad:all": {
+      "delta95": [
+        [
+          -0.0016800166377249446,
+          -0.00037328967041748337
+        ],
+        [
+          -0.006064084885534927,
+          -0.0036034450942771037
+        ]
+      ],
+      "nll": [
+        0.2780658372659105,
+        0.28188546828670424,
+        0.2771199169698688
+      ],
+      "opportunities": 43991
+    },
+    "original:13": {
+      "delta95": [
+        [
+          -0.003780575768996883,
+          -0.00041898181670370295
+        ],
+        [
+          -0.014859184643505077,
+          -0.007274900897949764
+        ]
+      ],
+      "nll": [
+        0.31729541114679594,
+        0.3261846064681162,
+        0.3152737844454821
+      ],
+      "opportunities": 3722
+    },
+    "original:all": {
+      "delta95": [
+        [
+          -0.003780575768996883,
+          -0.00041898181670370295
+        ],
+        [
+          -0.014859184643505077,
+          -0.007274900897949764
+        ]
+      ],
+      "nll": [
+        0.31729541114679594,
+        0.3261846064681162,
+        0.3152737844454821
+      ],
+      "opportunities": 3722
+    }
+  },
+  "hashes": [
+    "4dfb1b8c20f612153a6b0d57496fd77c5219a8a2ba7e01acb8909b862d5418dc",
+    "73a7481fe16bae2e8890f857a81483f32444dd2cec463e45e2e31d3c327af229",
+    "e17ec347f76a7671f460fe95ef18d5e9a693a80320588866357362dbe8e5c0c0"
+  ],
+  "inputHashes": {
+    "/private/tmp/model203-decline-qualified-20260927-v1/assessment-counts.json": "bfea7f23e352943da4c79de7f8184fecbd1974c7a5a8c67ae5bfee5916a81099",
+    "/private/tmp/model203-decline-qualified-20260927-v1/observations.jsonl": "d54e04e9b472e9649334ab9cd80d831371882623a53ce194a56d6c4ea1c98e40",
+    "/private/tmp/model203-decline-qualified-20260927-v1/posteriors.jsonl": "33403d80280ff9df74f871da9b5575deb7fafc136f77f50fe8c23a4c344d4b53"
+  },
+  "posteriorPrediction": {
+    "broad:13": {
+      "affectedPositions": 20928,
+      "brier": [
+        0.9180478747704646,
+        0.9181170718045693,
+        0.9180247325259496
+      ],
+      "delta95": [
+        [
+          -0.0013777202472077144,
+          -0.000750431213227533
+        ],
+        [
+          -0.0065832386142708026,
+          -0.004227267409678393
+        ]
+      ],
+      "nll": [
+        3.5566862083270356,
+        3.5609962081468995,
+        3.5556284026463523
+      ],
+      "positions": 32155,
+      "seedClusters": 361,
+      "zeroProbabilityObservations": 0
+    },
+    "broad:20": {
+      "affectedPositions": 8774,
+      "brier": [
+        0.919268037727059,
+        0.9193259517399275,
+        0.9192477963579578
+      ],
+      "delta95": [
+        [
+          -0.002893084053599307,
+          -0.0011236107742280616
+        ],
+        [
+          -0.008043173516241236,
+          -0.004520242788803149
+        ]
+      ],
+      "nll": [
+        3.586808386973434,
+        3.5910405363616875,
+        3.5848548414209627
+      ],
+      "positions": 13540,
+      "seedClusters": 134,
+      "zeroProbabilityObservations": 0
+    },
+    "broad:all": {
+      "affectedPositions": 29702,
+      "brier": [
+        0.9184094243148865,
+        0.9184752780486802,
+        0.9183871416360282
+      ],
+      "delta95": [
+        [
+          -0.0016694325521275834,
+          -0.0009934233385947822
+        ],
+        [
+          -0.006635092722102793,
+          -0.00461426941104083
+        ]
+      ],
+      "nll": [
+        3.5656117865932275,
+        3.569898718356523,
+        3.5642885619856775
+      ],
+      "positions": 45695,
+      "seedClusters": 439,
+      "zeroProbabilityObservations": 0
+    },
+    "original:13": {
+      "affectedPositions": 20328,
+      "brier": [
+        0.9195412604557845,
+        0.9196216394418872,
+        0.9195159996517526
+      ],
+      "delta95": [
+        [
+          -0.0015527614411678617,
+          -0.0008129399494098857
+        ],
+        [
+          -0.006366428292380826,
+          -0.004461745470394304
+        ]
+      ],
+      "nll": [
+        3.5855375043171676,
+        3.5897290891415405,
+        3.584367012220938
+      ],
+      "positions": 31420,
+      "seedClusters": 500,
+      "zeroProbabilityObservations": 0
+    },
+    "original:all": {
+      "affectedPositions": 20328,
+      "brier": [
+        0.9195412604557845,
+        0.9196216394418872,
+        0.9195159996517526
+      ],
+      "delta95": [
+        [
+          -0.0015527614411678617,
+          -0.0008129399494098857
+        ],
+        [
+          -0.006366428292380826,
+          -0.004461745470394304
+        ]
+      ],
+      "nll": [
+        3.5855375043171676,
+        3.5897290891415405,
+        3.584367012220938
+      ],
+      "positions": 31420,
+      "seedClusters": 500,
+      "zeroProbabilityObservations": 0
+    }
+  },
+  "qualifiedHeldOpportunities": 355818,
+  "qualifiedTrainingGames": 64131,
+  "scope": "Decline-factor ablation in Model 20.3; all other assets fixed. Entire seeds excluded from decline fitting. Additional audit seeds were not excluded from every other historical asset. No playing-strength claim.",
+  "selectionPolicy": "strategic-pegging-v1",
+  "stats": {
+    "invalidHands": 158,
+    "posteriorCases": 77115,
+    "validHands": 76016
+  }
+}

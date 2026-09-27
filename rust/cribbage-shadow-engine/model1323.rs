@@ -38,6 +38,7 @@ pub const CORRECTION_INPUT_CHECKSUMS: [u64; 5] = [
 /// comparisons through the explicit forecast interface.
 pub const LIVE_WORLD_BUDGET: usize = usize::MAX;
 const MODEL203_HOLD_SHA256: &str = "625d64c2856d58e981b5771395efc2a9e5d1fde5cd96755d32b002a0b20f8c99";
+const MODEL203_DECLINE_SHA256: &str = "e17ec347f76a7671f460fe95ef18d5e9a693a80320588866357362dbe8e5c0c0";
 
 /// One actor's current-hand card population and conditioned discard prior,
 /// scoped to its asset fingerprint. History-dependent weights and solves stay fresh.
@@ -131,7 +132,52 @@ pub struct PolicyAssets {
     pub(crate) wp_board: Option<Arc<crate::board_matrix::BoardWinMatrix>>,
 }
 
+/// One immutable live observation, its posterior, and decision-local solve caches.
+/// Counting and pegging borrow the same posterior; later simulated observations
+/// still obtain their own beliefs through the executable policy.
+pub(crate) struct PreparedDecision<'a> {
+    assets: &'a PolicyAssets,
+    observation: &'a Model132Observation,
+    policy: Model911Policy,
+    hands: Vec<([u8; 13], f64)>,
+}
+
+impl PreparedDecision<'_> {
+    pub(crate) fn opponent_hands(&self) -> &[([u8; 13], f64)] {
+        &self.hands
+    }
+
+    pub(crate) fn forecast(&self, world_budget: usize) -> Result<Vec<PegCandidateForecast>, String> {
+        let worlds = self.assets.worlds_for_hand_with_posterior(
+            self.observation, &self.policy, None, Some(&self.hands),
+        )?;
+        self.assets.forecast_population(self.observation, world_budget, &self.policy, worlds)
+    }
+
+    pub(crate) fn forecast_for_choice(
+        &self,
+        cache: Option<&HandCache>,
+        win_probability: &mut impl FnMut(u8, u8) -> f64,
+    ) -> Result<Vec<PegCandidateForecast>, String> {
+        let worlds = self.assets.worlds_for_hand_with_posterior(
+            self.observation, &self.policy, cache, Some(&self.hands),
+        )?;
+        let count = worlds.len();
+        let worlds = sample_worlds(worlds, LIVE_WORLD_BUDGET, observation_seed(self.observation))?;
+        forecast_worlds_for_choice(self.observation, &self.policy, &worlds, count, win_probability)
+    }
+}
+
 impl PolicyAssets {
+    pub(crate) fn prepare_decision<'a>(
+        &'a self,
+        observation: &'a Model132Observation,
+    ) -> Result<PreparedDecision<'a>, String> {
+        let policy = self.decision_policy()?;
+        let hands = policy.opponent_hands(observation)?;
+        Ok(PreparedDecision { assets: self, observation, policy, hands })
+    }
+
     pub(crate) fn opening_keep_weights(
         &self,
         opponent_role: Role,
@@ -250,10 +296,10 @@ impl PolicyAssets {
         if format!("{:x}", Sha256::digest(&bytes)) != MODEL203_HOLD_SHA256 {
             return Err("Model 20.3 hold asset differs from its verified snapshot".into());
         }
-        let factor_path = directory.join("model1322-decline-factors.json");
+        let factor_path = directory.join("model203-decline-factors.json");
         let factor_bytes = fs::read(&factor_path).map_err(|e| format!("read decline factors: {e}"))?;
-        if format!("{:x}", Sha256::digest(factor_bytes)) != "4dfb1b8c20f612153a6b0d57496fd77c5219a8a2ba7e01acb8909b862d5418dc" {
-            return Err("Model 20.3 inherited decline factors changed".into());
+        if format!("{:x}", Sha256::digest(&factor_bytes)) != MODEL203_DECLINE_SHA256 {
+            return Err("Model 20.3 decline factors differ from the verified snapshot".into());
         }
         let packed = Model20DiscardAsset::load(&directory.join(crate::model20_discards::ASSET_NAME))?;
         // Conditioned-discard fallback behavior differs as well; a shared hand
@@ -261,9 +307,10 @@ impl PolicyAssets {
         let mut fingerprint = Sha256::new();
         fingerprint.update(packed.fingerprint);
         fingerprint.update(bytes);
+        fingerprint.update(factor_bytes);
         Ok(Self {
             beliefs: Model91EmpiricalBeliefs::load_model203(&path)?,
-            factors: Model1322DeclineFactors::load(factor_path)?,
+            factors: Model1322DeclineFactors::load_model203(&factor_path)?,
             discards: OpponentDiscardPrior { by_role_keep: packed.discards },
             discard_asset_sha256: fingerprint.finalize().into(),
             suit_rates: Some(packed.suits),
@@ -330,7 +377,7 @@ impl PolicyAssets {
             policy.use_empirical_depletion();
         }
         let policy = if self.complete_hold_support {
-            policy.with_positive_soft_evidence()
+            policy.with_positive_soft_evidence().with_likelihood_cache()
         } else { policy };
         Ok(if let Some(board) = &self.wp_board {
             policy.with_win_probability(Arc::clone(board))
@@ -343,6 +390,16 @@ impl PolicyAssets {
         policy: &Model911Policy,
         cache: Option<&HandCache>,
     ) -> Result<Vec<World>, String> {
+        self.worlds_for_hand_with_posterior(observation, policy, cache, None)
+    }
+
+    fn worlds_for_hand_with_posterior(
+        &self,
+        observation: &Model132Observation,
+        policy: &Model911Policy,
+        cache: Option<&HandCache>,
+        hands: Option<&[([u8; 13], f64)]>,
+    ) -> Result<Vec<World>, String> {
         if let Some(cache) = cache {
             // Release the hand cache before the expensive decision-local solve.
             let mut population = cache.0.lock().unwrap_or_else(|error| error.into_inner());
@@ -351,9 +408,9 @@ impl PolicyAssets {
             if population.as_ref().is_none_or(|p| p.identity != identity) {
                 *population = Some(HandPopulation::new(identity));
             }
-            self.worlds_with_cache(observation, policy, population.as_mut())
+            self.worlds_with_cache(observation, policy, population.as_mut(), hands)
         } else {
-            self.worlds(observation, policy)
+            self.worlds_with_cache(observation, policy, None, hands)
         }
     }
 
@@ -388,12 +445,13 @@ impl PolicyAssets {
         forecast_worlds(observation, policy, &worlds, count)
     }
 
+    #[cfg(test)]
     fn worlds(
         &self,
         observation: &Model132Observation,
         policy: &Model911Policy,
     ) -> Result<Vec<World>, String> {
-        self.worlds_with_cache(observation, policy, None)
+        self.worlds_with_cache(observation, policy, None, None)
     }
 
     fn worlds_with_cache(
@@ -401,6 +459,7 @@ impl PolicyAssets {
         observation: &Model132Observation,
         policy: &Model911Policy,
         mut population: Option<&mut HandPopulation>,
+        hands: Option<&[([u8; 13], f64)]>,
     ) -> Result<Vec<World>, String> {
         observation.validate()?;
         if rank_count_total(&observation.own_discards) != 2 {
@@ -420,10 +479,16 @@ impl PolicyAssets {
         // Keep the finite initial-keep conditioning results until hand end.
         // Current posterior support below filters newly impossible worlds;
         // rescanning the whole conditioning cache would add work each turn.
-        let mut hands = policy.opponent_hands_with_cache(
-            observation,
-            population.as_deref_mut().map(|p| &mut p.opponent_hands),
-        )?;
+        let mut generated;
+        let mut hands = if let Some(hands) = hands {
+            hands
+        } else {
+            generated = policy.opponent_hands_with_cache(
+                observation,
+                population.as_deref_mut().map(|p| &mut p.opponent_hands),
+            )?;
+            &generated
+        };
         if hands.is_empty() {
             // A sparse empirical row can contain only hands excluded by the
             // actor's known cards or public history. Missing empirical support
@@ -431,12 +496,13 @@ impl PolicyAssets {
             // weighting with a physical prior only at these undefined roots;
             // successful roots and the frozen continuation policy stay exact.
             let physical = Model911Policy::new(None, self.factors, 0, 0)?;
-            hands = physical.opponent_hands_with_cache(
+            generated = physical.opponent_hands_with_cache(
                 observation,
                 population.as_deref_mut().map(|p| &mut p.opponent_hands),
             )?;
+            hands = &generated;
         }
-        for (remaining, hand_weight) in hands {
+        for &(remaining, hand_weight) in hands {
             let initial =
                 std::array::from_fn(|rank| remaining[rank] + observation.opponent_played[rank]);
             let condition = || -> Result<DiscardSupport, String> {
@@ -945,6 +1011,180 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    #[ignore = "release-only held-out posterior diagnostic; fixtures and output paths supplied by environment"]
+    fn model203_decline_posterior_assessment() {
+        use std::io::{BufRead, BufReader, BufWriter, Write};
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Case {
+            id: String, group: String, seed: String, opponent: String, dealer: bool,
+            own_remaining: [u8; 13], own_played: [u8; 13], opponent_played: [u8; 13],
+            own_discards: [u8; 13], turn_rank: u8, series: Vec<u8>, count: u8,
+            go: Option<u8>, last: Option<u8>, history: Vec<u8>, truth: [u8; 13],
+        }
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let mut assets = PolicyAssets::load_model203(&directory).unwrap();
+        let paths: Vec<String> = serde_json::from_str(&std::env::var("DECLINE_ASSESSMENT_FACTORS").unwrap()).unwrap();
+        let factors: Vec<_> = paths.iter().map(|p| {
+            let path = Path::new(p);
+            let raw: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+            if raw["schemaVersion"].as_u64() == Some(3) {
+                Model1322DeclineFactors::load(path).unwrap()
+            } else { Model1322DeclineFactors::load_model203(path).unwrap() }
+        }).collect();
+        let reader = BufReader::new(fs::File::open(std::env::var("DECLINE_ASSESSMENT_CASES").unwrap()).unwrap());
+        let mut writer = BufWriter::new(fs::File::create(std::env::var("DECLINE_ASSESSMENT_OUTPUT").unwrap()).unwrap());
+        let relative = |actor| match actor { Some(0) => Some(InfoActor::SelfPlayer),
+            Some(1) => Some(InfoActor::Opponent), None => None, _ => panic!("invalid relative actor") };
+        let mut count = 0;
+        for line in reader.lines() {
+            let case: Case = serde_json::from_str(&line.unwrap()).unwrap();
+            let history = case.history.iter().map(|code| match *code {
+                0..=12 => PublicPegEvent::SelfPlay(*code),
+                13..=25 => PublicPegEvent::OpponentPlay(*code - 13),
+                26 => PublicPegEvent::SelfGo, 27 => PublicPegEvent::OpponentGo,
+                28 => PublicPegEvent::Reset, _ => panic!("invalid event"),
+            }).collect();
+            let observation = Model132Observation {
+                role: if case.dealer { Role::Dealer } else { Role::Pone },
+                // Scores are not used in this posterior; future-choice utilities are not evaluated.
+                my_score: 0, opponent_score: 0, own_remaining: case.own_remaining,
+                own_played: case.own_played, opponent_played: case.opponent_played,
+                own_discards: case.own_discards, turn_rank: case.turn_rank,
+                current_series: case.series, count: case.count, go_player: relative(case.go),
+                last_player: relative(case.last), public_history: history,
+            };
+            observation.validate().unwrap();
+            let mut probabilities = Vec::new();
+            let mut brier = Vec::new();
+            for factor in &factors {
+                assets.factors = *factor;
+                // The production posterior path, including depletion, go exclusions,
+                // positive soft support, and decision-local policy/cache construction.
+                let hands = assets.opponent_keep_weights(&observation).unwrap();
+                let total: f64 = hands.iter().map(|(_, w)| w).sum();
+                let truth: f64 = hands.iter().filter(|(h, _)| *h == case.truth).map(|(_, w)| w).sum();
+                let p = truth / total;
+                assert!(p > 0.0 && p <= 1.0, "excluded actual hand {}", case.id);
+                probabilities.push(p);
+                brier.push(1.0 - 2.0 * p + hands.iter().map(|(_, w)| (w / total).powi(2)).sum::<f64>());
+            }
+            writeln!(writer, "{}", serde_json::json!({"id":case.id,"group":case.group,"seed":case.seed,
+                "opponent":case.opponent,"prefix":case.opponent_played.iter().sum::<u8>(),
+                "probabilities":probabilities,"brier":brier})).unwrap();
+            count += 1;
+        }
+        writer.flush().unwrap();
+        assert!(count > 0);
+    }
+
+    #[test]
+    fn model203_uses_verified_smoothed_declines_without_the_legacy_file() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let directory = std::env::temp_dir().join(format!("model203-smoothed-declines-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        for name in ["model203-hold.bin", "model203-decline-factors.json", "model202-board-win-matrix.bin",
+                     crate::model20_discards::ASSET_NAME] {
+            fs::copy(source.join(name), directory.join(name)).unwrap();
+        }
+        assert!(!directory.join("model1322-decline-factors.json").exists());
+        let refreshed = PolicyAssets::load_model203(&directory).unwrap();
+        assert!(refreshed.factors.four_of_a_kind_after_pair_royal_ppm.iter().all(|p| *p > 0));
+        let frozen = PolicyAssets::load_model202(&source).unwrap();
+        assert_eq!(frozen.factors.four_of_a_kind_after_pair_royal_ppm, [0; 3]);
+        assert_ne!(refreshed.factors, frozen.factors);
+        fs::write(directory.join("model203-decline-factors.json"), b"{}").unwrap();
+        assert!(PolicyAssets::load_model203(&directory).err().unwrap().contains("verified snapshot"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn model203_likelihood_cache_preserves_live_forecast_weights() {
+        let assets = PolicyAssets::load_model203(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let (observation, world) = opening();
+        let mut state = world_state(&observation, &world).unwrap();
+        for _ in 0..5 {
+            let observation = Model132Observation::from_state(&state, state.current).unwrap();
+            let reference = assets.decision_policy().unwrap().without_likelihood_cache();
+            let optimized = assets.decision_policy().unwrap();
+            let expected = assets.forecast_using(&observation, 32, &reference).unwrap();
+            let actual = assets.forecast_using(&observation, 32, &optimized).unwrap();
+            assert_identical_forecasts(&actual, &expected);
+            state.apply(state.legal_actions()[0]).unwrap();
+        }
+    }
+
+    #[test]
+    #[ignore = "release-only paired forecast timing; fixed sampled diagnostic worlds"]
+    fn model203_decline_forecast_timing() {
+        let assets = PolicyAssets::load_model203(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let (observation, world) = opening();
+        let mut state = world_state(&observation, &world).unwrap();
+        let mut cases = Vec::new();
+        for _ in 0..3 {
+            let observation = Model132Observation::from_state(&state, state.current).unwrap();
+            let worlds = assets.worlds(&observation, &assets.decision_policy().unwrap()).unwrap();
+            let worlds = sample_worlds(worlds, 256, observation_seed(&observation)).unwrap();
+            cases.push((observation, worlds));
+            state.apply(state.legal_actions()[0]).unwrap();
+        }
+        let mut times = [Vec::new(), Vec::new()];
+        for sample in 0..6 {
+            for mode in [sample % 2, 1 - sample % 2] {
+                let start = std::time::Instant::now();
+                for (observation, worlds) in &cases {
+                    let policy = assets.decision_policy().unwrap();
+                    let policy = if mode == 0 { policy.without_likelihood_cache() } else { policy };
+                    std::hint::black_box(forecast_worlds(observation, &policy, worlds, worlds.len()).unwrap());
+                }
+                times[mode].push(start.elapsed().as_secs_f64());
+            }
+        }
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+        let report = serde_json::json!({"samples": 6, "positions": cases.len(), "worldsPerPosition": 256,
+            "uncachedMilliseconds": mean(&times[0])*1000.0, "cachedMilliseconds": mean(&times[1])*1000.0,
+            "speedup": mean(&times[0])/mean(&times[1]), "samplesSeconds": times});
+        fs::write(std::env::temp_dir().join("model203-decline-forecast-timing.json"), report.to_string()).unwrap();
+        println!("{report}");
+    }
+
+    #[test]
+    fn model203_prepared_posterior_preserves_worlds_and_forecasts_through_a_hand() {
+        let assets = PolicyAssets::load_model203(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let (opening, world) = opening();
+        let mut state = world_state(&opening, &world).unwrap();
+        let caches = [HandCache::default(), HandCache::default()];
+        let mut compared_forecasts = 0;
+        while !state.complete {
+            let observation = Model132Observation::from_state(&state, state.current).unwrap();
+            let prepared = assets.prepare_decision(&observation).unwrap();
+            assert_eq!(prepared.opponent_hands(), assets.opponent_keep_weights(&observation).unwrap());
+            let expected = assets.worlds(&observation, &assets.decision_policy().unwrap()).unwrap();
+            let requests = prepared.policy.stats().posterior_requests;
+            for cache in [None, Some(&caches[state.current.index()])] {
+                let actual = assets.worlds_for_hand_with_posterior(
+                    &observation, &prepared.policy, cache, Some(prepared.opponent_hands()),
+                ).unwrap();
+                assert_eq!(actual, expected);
+            }
+            assert_eq!(prepared.policy.stats().posterior_requests, requests,
+                "assembling worlds must reuse the already computed posterior");
+            if state.hands.iter().map(rank_count_total).sum::<u8>() <= 4 {
+                let expected = assets.forecast(&observation, LIVE_WORLD_BUDGET).unwrap();
+                assert_identical_forecasts(&prepared.forecast(LIVE_WORLD_BUDGET).unwrap(), &expected);
+                let mut utility = |own: u8, opponent: u8| (16.0 + f64::from(own))
+                    / (32.0 + f64::from(own) + f64::from(opponent));
+                let expected = assets.forecast_for_choice(&observation, None, &mut utility).unwrap();
+                let actual = prepared.forecast_for_choice(Some(&caches[state.current.index()]), &mut utility).unwrap();
+                assert_identical_forecasts(&actual, &expected);
+                compared_forecasts += 1;
+            }
+            state.apply(state.legal_actions()[0]).unwrap();
+        }
+        assert!(compared_forecasts >= 4);
     }
 
     #[test]

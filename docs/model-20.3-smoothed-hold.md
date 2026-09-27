@@ -17,15 +17,12 @@ and 945,770 bytes. All 1,820 four-card rank patterns have positive opening
 probability for each role, including the eight absent from the old dictionary.
 Every conditional row includes every physically possible remaining rank hand.
 
-Model 20.3 also drops the runtime dependency on
-`crib-rank-score-by-discard-cut.json`. Its fallback rank means are derived from
-the existing `crib-score-histogram-by-discard-cut.json` contributors, preserving
-all 2,366 historical values exactly at their original five-decimal precision.
-Discard recommendations, decision reviews, and live pegging use this
-histogram-only loader. The crib probabilities and fallback scoring behavior are
-unchanged; this removes a redundant input, not the separate conditioning
-weaknesses identified in the crib forecast. Older models, including 20.2, retain
-the original loader and file. Frozen benchmark copies are unaffected.
+Model 20.3 also replaces both historical crib JSON inputs with
+`model203-crib.bin`: indexed exact rank scores, refreshed empirical discard
+frequencies and calibrated smoothing. The live pegging evaluator constructs its
+suited crib forecast once. See [the crib asset description](model-20.3-crib.md)
+for evidence, format, validation and remaining conditioning limitations.
+Older models, including 20.2, retain the original JSON loader and files.
 
 For role/prefix context c and remaining hand h, the builder uses
 
@@ -63,6 +60,27 @@ holes or shifting IDs remain. Positive probabilities are quantized at scale
 provenance. Packed weights are never used as raw evidence counts. The engine
 pins the asset SHA-256, validates all legal support, and includes its identity
 in hand-cache invalidation.
+
+## Runtime cost
+
+Loaded belief rows are shared through an immutable reference-counted allocation;
+creating a decision policy no longer clones the complete table. A dense array
+indexes the 1,120 role/prefix contexts, and borrowed row iterators apply
+availability, depletion and behavioral weights without intermediate hand vectors.
+Missing rows remain distinct from populated rows with no compatible hands, so
+the historical fallback rules are preserved.
+
+Model 20.3 computes the current opponent posterior once per live recommendation
+or saved-position review and borrows it for both pegging worlds and counting
+forecasts. The prepared decision is tied to that observation; future simulated
+observations still calculate their own posteriors. Solve memoization remains
+decision-local. No asset weights, arithmetic order or smoothing strengths change.
+
+Differential checks compare every packed row in both belief assets, including
+availability filtering, and compare world order/weights through a complete hand.
+They also check exact late forecast bins, counting histograms, WP values and
+selected actions against the separate-posterior path. These are behavioral
+equivalence checks, not an estimate of overall gameplay speedup.
 
 ## Evidence and eligibility
 
@@ -106,8 +124,8 @@ because some historical experiments reused run/game IDs after changing models. T
 include 3,377 games per orientation (the original 3,209 plus 168 later games),
 with their exact indices recorded;
 later snapshots can add completed gaps and later games. The stopped 20.1 versus
-20.0 run contributes 3,332 and 3,292 games respectively. The current 20.2 benchmark
-was not imported or changed.
+20.0 run contributes 3,332 and 3,292 games respectively. The hold-table refresh did not import or change the current 20.2 benchmark;
+the subsequent crib-table refresh imported completed games from read-only snapshots.
 
 ## Calibration and checks
 
@@ -166,6 +184,8 @@ version/checksum before use; never overwrite a frozen benchmark's inputs.
 
 The counting histogram still marginalizes counting and pegging outcomes
 separately, and assumes uniform legal suits within each rank pattern. This
-change does not implement their full joint outcome distribution. The existing
-decline-factor calibration and nonempty conditional-discard rows are also
-unchanged; their broader refreshes remain separate asset work.
+change does not implement their full joint outcome distribution. Nonempty
+conditional-discard rows remain unchanged. A subsequent 20.3 refresh replaces
+the inherited decline factors with clean, smoothed evidence and optimizes the
+runtime likelihood calculation; see [decline factors](model-20.3-decline-factors.md)
+for the priors, validation results and remaining modeling limitations.

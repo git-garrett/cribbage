@@ -1,0 +1,44 @@
+{
+  "baseline": {
+    "asset": "crib-score-histogram-by-discard-cut.json",
+    "builderCommit": "71486d9eafa00d357fe2565b568870ee22d98c56",
+    "models": [
+      "7.0",
+      "8.0",
+      "9.0",
+      "10.0"
+    ],
+    "observations": 717352,
+    "reportedSourceGames": 135679,
+    "sha256": "2aaff0c74543750618555d40daedd2d0f1eecdc2f728c6e9da14d7a77c06dbc0"
+  },
+  "calibrationSha256": "56b2a8c8caff551b81afa1b286890fcb6ef0758ee8cbbecd216616c05028ebab",
+  "evidenceSha256": "44e6659b61942bf89c4e6418e559eb1e00971abc4387e34b7a4594ce4064dd4d",
+  "importedGames": 121386,
+  "modelVersion": "20.3",
+  "observationsByModel": {
+    "schell_table-peg_table-13.0": 481181,
+    "schell_table-peg_table-13.1": 196025,
+    "schell_table-peg_table-13.215": 72273,
+    "schell_table-peg_table-13.23": 133438,
+    "schell_table-peg_table-20.0": 182418,
+    "schell_table-peg_table-20.1": 60033,
+    "schell_table-peg_table-20.2": 61220,
+    "schell_table-peg_table-9.0": 265535,
+    "schell_table-peg_table-9.1": 183116,
+    "schell_table-peg_table-9.11": 90358
+  },
+  "observationsByRole": {
+    "dealer": 1221902,
+    "pone": 1221047
+  },
+  "pairOrder": "lexicographic thirteen-rank count keys",
+  "probabilities": "Dirichlet posterior mean with physical two-card prior; raw counts retained separately",
+  "roleSemantics": "Empirical pair weights indexed by discarding actor role; use opposite of own role.",
+  "schemaVersion": 1,
+  "scoreOrder": "ownPair,cutRank,opponentPair; 255 means impossible",
+  "smoothing": {
+    "dealer": 1000,
+    "pone": 10000
+  }
+}

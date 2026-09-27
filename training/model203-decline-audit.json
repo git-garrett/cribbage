@@ -1,0 +1,977 @@
+{
+  "auditCountsSha256": "465cd110efec65124328aa212bcbd97408cce262e11cb82a7c1605e89a8db0d9",
+  "bootstrap": {
+    "family": {
+      "deltaNll95Percentile": [
+        -0.012848264823533502,
+        -0.010522652696630368
+      ],
+      "scope": "all families",
+      "seedClusters": 5046
+    },
+    "model": {
+      "deltaNll95Percentile": [
+        -0.013460399416557607,
+        -0.010989084938106863
+      ],
+      "scope": "all families",
+      "seedClusters": 5046
+    },
+    "modernTable": {
+      "deltaNll95Percentile": [
+        -0.011433128475484002,
+        -0.00579499883617227
+      ],
+      "scope": "20 family",
+      "seedClusters": 1054
+    }
+  },
+  "chosen": {
+    "family": {
+      "strength": 10,
+      "validation": {
+        "equalFamilyNll": 0.21737198270812522,
+        "families": {
+          "13": {
+            "nll": 0.26244272938371893,
+            "opportunities": 35288
+          },
+          "20": {
+            "nll": 0.29381856157779207,
+            "opportunities": 13201
+          },
+          "9": {
+            "nll": 0.09585465716286468,
+            "opportunities": 20171
+          }
+        },
+        "nll": 0.21953484059879477
+      }
+    },
+    "model": {
+      "strength": 10,
+      "validation": {
+        "equalFamilyNll": 0.21704051376223396,
+        "families": {
+          "13": {
+            "nll": 0.26128065438396914,
+            "opportunities": 35288
+          },
+          "20": {
+            "nll": 0.2939180698978835,
+            "opportunities": 13201
+          },
+          "9": {
+            "nll": 0.09592281700484921,
+            "opportunities": 20171
+          }
+        },
+        "nll": 0.21897674503973602
+      }
+    },
+    "modernTable": {
+      "strength": 0,
+      "validation": {
+        "equalFamilyNll": 0.23772963613535292,
+        "families": {
+          "13": {
+            "nll": 0.26551296299405586,
+            "opportunities": 35288
+          },
+          "20": {
+            "nll": 0.2938056818171351,
+            "opportunities": 13201
+          },
+          "9": {
+            "nll": 0.15387026359486777,
+            "opportunities": 20171
+          }
+        },
+        "nll": 0.23815419939956775
+      }
+    },
+    "pooled": {
+      "strength": 0,
+      "validation": {
+        "equalFamilyNll": 0.2309106333265181,
+        "families": {
+          "13": {
+            "nll": 0.26520941843441326,
+            "opportunities": 35288
+          },
+          "20": {
+            "nll": 0.302369359395408,
+            "opportunities": 13201
+          },
+          "9": {
+            "nll": 0.12515312214973306,
+            "opportunities": 20171
+          }
+        },
+        "nll": 0.2312081488199042
+      }
+    }
+  },
+  "diagnostics": {
+    "categoryParityHands": 11119,
+    "heldPairRoyalOpportunities": 4517,
+    "invalidHands": 884,
+    "privateOnlySafe": 49,
+    "privateSafe": 1068,
+    "publicOnlySafe": 0,
+    "publicSafe": 1019,
+    "validHands": 220794
+  },
+  "evidenceSha256": "b1a144766a4a8e4eadce07e1189ed682fec667ef8ca29417386afa3cc542088a",
+  "options": [
+    {
+      "mode": "pooled",
+      "strength": 0,
+      "tuning": {
+        "equalFamilyNll": 0.23653705332988073,
+        "families": {
+          "13": {
+            "nll": 0.27193316088004776,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.3151738987162469,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.12250410039334761,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.23656692238699628
+      }
+    },
+    {
+      "mode": "family",
+      "strength": 0,
+      "tuning": {
+        "equalFamilyNll": 0.2229139417630229,
+        "families": {
+          "13": {
+            "nll": 0.2692550729776562,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.30477629117742683,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.09471046113398562,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.22517924562029737
+      }
+    },
+    {
+      "mode": "family",
+      "strength": 1,
+      "tuning": {
+        "equalFamilyNll": 0.22291393920584582,
+        "families": {
+          "13": {
+            "nll": 0.26925499833985755,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.3047763148686297,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.09471050440905024,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.22517922332830836
+      }
+    },
+    {
+      "mode": "family",
+      "strength": 10,
+      "tuning": {
+        "equalFamilyNll": 0.2229139080074185,
+        "families": {
+          "13": {
+            "nll": 0.2692546855892658,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.3047765598438256,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.0947104785891641,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.22517909671494546
+      }
+    },
+    {
+      "mode": "family",
+      "strength": 100,
+      "tuning": {
+        "equalFamilyNll": 0.22291883898648787,
+        "families": {
+          "13": {
+            "nll": 0.269252786501735,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.3047894962717375,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.09471423418599108,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.22518157521835835
+      }
+    },
+    {
+      "mode": "family",
+      "strength": 1000,
+      "tuning": {
+        "equalFamilyNll": 0.22311640045824874,
+        "families": {
+          "13": {
+            "nll": 0.2692663887815472,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.30505086572736795,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.09503194686583112,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.22532910667137704
+      }
+    },
+    {
+      "mode": "family",
+      "strength": 10000,
+      "tuning": {
+        "equalFamilyNll": 0.22658276149798962,
+        "families": {
+          "13": {
+            "nll": 0.26969625167999345,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.3080830087943633,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.10196902401961205,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.22812666365235792
+      }
+    },
+    {
+      "mode": "model",
+      "strength": 0,
+      "tuning": {
+        "equalFamilyNll": 0.22206280431590178,
+        "families": {
+          "13": {
+            "nll": 0.266440224318798,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.30494386231132015,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.09480432631758726,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.2237584189394792
+      }
+    },
+    {
+      "mode": "model",
+      "strength": 1,
+      "tuning": {
+        "equalFamilyNll": 0.22206236582806524,
+        "families": {
+          "13": {
+            "nll": 0.2664404621691805,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.3049425665493323,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.09480406876568297,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.2237582301179061
+      }
+    },
+    {
+      "mode": "model",
+      "strength": 10,
+      "tuning": {
+        "equalFamilyNll": 0.22205985182021748,
+        "families": {
+          "13": {
+            "nll": 0.266442721576547,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.3049350174432719,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.09480181644083345,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.22375737101561044
+      }
+    },
+    {
+      "mode": "model",
+      "strength": 100,
+      "tuning": {
+        "equalFamilyNll": 0.22207361308099852,
+        "families": {
+          "13": {
+            "nll": 0.266462494762439,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.3049454905908037,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.09481285388975288,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.2237728942599708
+      }
+    },
+    {
+      "mode": "model",
+      "strength": 1000,
+      "tuning": {
+        "equalFamilyNll": 0.2226961567057919,
+        "families": {
+          "13": {
+            "nll": 0.26666277550783934,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.30552734323015124,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.09589835137938506,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.22430035369851592
+      }
+    },
+    {
+      "mode": "model",
+      "strength": 10000,
+      "tuning": {
+        "equalFamilyNll": 0.2283309015793211,
+        "families": {
+          "13": {
+            "nll": 0.2684816556449297,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.30973048641714024,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.10678056267589332,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.2291881507595813
+      }
+    },
+    {
+      "mode": "modernTable",
+      "strength": 0,
+      "tuning": {
+        "equalFamilyNll": 0.24243384877607968,
+        "families": {
+          "13": {
+            "nll": 0.27136992903106133,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.30477629117742683,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.15115532611975097,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.2426633248848224
+      }
+    },
+    {
+      "mode": "modernTable",
+      "strength": 1,
+      "tuning": {
+        "equalFamilyNll": 0.24243217742108578,
+        "families": {
+          "13": {
+            "nll": 0.2713688079112755,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.3047763148686297,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.15115140948335207,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.24266160410519044
+      }
+    },
+    {
+      "mode": "modernTable",
+      "strength": 10,
+      "tuning": {
+        "equalFamilyNll": 0.24241832295319607,
+        "families": {
+          "13": {
+            "nll": 0.27135932280341984,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.3047765598438256,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.15111908621234274,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.24264728968382637
+      }
+    },
+    {
+      "mode": "modernTable",
+      "strength": 100,
+      "tuning": {
+        "equalFamilyNll": 0.2423001385387642,
+        "families": {
+          "13": {
+            "nll": 0.2712806089345002,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.3047894962717375,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.15083031041005482,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.24252455405685602
+      }
+    },
+    {
+      "mode": "modernTable",
+      "strength": 1000,
+      "tuning": {
+        "equalFamilyNll": 0.2414283878200518,
+        "families": {
+          "13": {
+            "nll": 0.2707204664506463,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.30505086572736795,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.1485138312821411,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.24160653259833936
+      }
+    },
+    {
+      "mode": "modernTable",
+      "strength": 10000,
+      "tuning": {
+        "equalFamilyNll": 0.23814807347385072,
+        "families": {
+          "13": {
+            "nll": 0.2694853635188149,
+            "opportunities": 36267
+          },
+          "20": {
+            "nll": 0.3080830087943633,
+            "opportunities": 12736
+          },
+          "9": {
+            "nll": 0.13687584810837405,
+            "opportunities": 20022
+          }
+        },
+        "nll": 0.23814124026900016
+      }
+    }
+  ],
+  "originalSplit": {
+    "ablations": {
+      "current20Profile": {
+        "tuningNll": 0.3270097885528966,
+        "validationNll": 0.31489724912844275
+      },
+      "oldFloored": {
+        "tuningNll": 0.32829621940259274,
+        "validationNll": 0.3172954111467961
+      },
+      "refreshedJeffreys": {
+        "tuningNll": 0.3386847081039509,
+        "validationNll": 0.3261846064681164
+      },
+      "refreshedUnsmoothed": {
+        "tuningNll": 0.33868994343393943,
+        "validationNll": 0.32618895055833425
+      }
+    },
+    "candidateFamilyProfiles": {
+      "13": {
+        "fourOfAKindAfterPairRoyal": [
+          3996,
+          1568,
+          2322
+        ],
+        "fourPlusCardRun": [
+          24518,
+          43640,
+          27722
+        ],
+        "pair": [
+          144675,
+          101014,
+          93160
+        ],
+        "pairRoyalAfterPair": [
+          9573,
+          21909,
+          14945
+        ],
+        "safePair": [
+          7812,
+          27847,
+          7803
+        ],
+        "safePairRoyal": [
+          5651,
+          2739,
+          958
+        ],
+        "threeCardRun": [
+          53027,
+          71948,
+          50940
+        ]
+      },
+      "20": {
+        "fourOfAKindAfterPairRoyal": [
+          815,
+          3650,
+          35814
+        ],
+        "fourPlusCardRun": [
+          25425,
+          51844,
+          44059
+        ],
+        "pair": [
+          167262,
+          114783,
+          89948
+        ],
+        "pairRoyalAfterPair": [
+          16001,
+          16694,
+          22553
+        ],
+        "safePair": [
+          25409,
+          54947,
+          8197
+        ],
+        "safePairRoyal": [
+          1790,
+          15190,
+          2424
+        ],
+        "threeCardRun": [
+          49045,
+          124476,
+          64209
+        ]
+      },
+      "9": {
+        "fourOfAKindAfterPairRoyal": [
+          3239,
+          1364,
+          2197
+        ],
+        "fourPlusCardRun": [
+          38360,
+          8254,
+          4229
+        ],
+        "pair": [
+          8382,
+          38288,
+          48278
+        ],
+        "pairRoyalAfterPair": [
+          20159,
+          2553,
+          1936
+        ],
+        "safePair": [
+          1673,
+          12116,
+          809
+        ],
+        "safePairRoyal": [
+          4955,
+          119,
+          421
+        ],
+        "threeCardRun": [
+          75775,
+          15333,
+          24664
+        ]
+      }
+    },
+    "decomposition": [
+      {
+        "category": "threeCardRun",
+        "declines": 32,
+        "extraTotalNll": 1.2000009344743,
+        "observedProbability": 0.08791208791208792,
+        "oldProbability": 0.085559,
+        "opportunities": 364,
+        "ordinal": "second",
+        "refreshedProbability": 0.066625
+      },
+      {
+        "category": "threeCardRun",
+        "declines": 13,
+        "extraTotalNll": 1.3605468255534066,
+        "observedProbability": 0.08441558441558442,
+        "oldProbability": 0.058097,
+        "opportunities": 154,
+        "ordinal": "third",
+        "refreshedProbability": 0.045094
+      },
+      {
+        "category": "fourPlusCardRun",
+        "declines": 11,
+        "extraTotalNll": 2.2929273000444805,
+        "observedProbability": 0.09565217391304348,
+        "oldProbability": 0.052072,
+        "opportunities": 115,
+        "ordinal": "second",
+        "refreshedProbability": 0.036095
+      },
+      {
+        "category": "fourPlusCardRun",
+        "declines": 6,
+        "extraTotalNll": 0.7677432556096957,
+        "observedProbability": 0.046153846153846156,
+        "oldProbability": 0.036691,
+        "opportunities": 130,
+        "ordinal": "third",
+        "refreshedProbability": 0.025345
+      },
+      {
+        "category": "pair",
+        "declines": 152,
+        "extraTotalNll": 26.637342997635535,
+        "observedProbability": 0.2040268456375839,
+        "oldProbability": 0.162491,
+        "opportunities": 745,
+        "ordinal": "first",
+        "refreshedProbability": 0.105467
+      },
+      {
+        "category": "pair",
+        "declines": 94,
+        "extraTotalNll": 2.26188711413778,
+        "observedProbability": 0.11959287531806616,
+        "oldProbability": 0.092175,
+        "opportunities": 786,
+        "ordinal": "second",
+        "refreshedProbability": 0.084738
+      },
+      {
+        "category": "pair",
+        "declines": 54,
+        "extraTotalNll": 1.23120620289132,
+        "observedProbability": 0.10384615384615385,
+        "oldProbability": 0.088008,
+        "opportunities": 520,
+        "ordinal": "third",
+        "refreshedProbability": 0.07911
+      },
+      {
+        "category": "pairRoyalAfterPair",
+        "declines": 8,
+        "extraTotalNll": 0.398398303148764,
+        "observedProbability": 0.027303754266211604,
+        "oldProbability": 0.019553,
+        "opportunities": 293,
+        "ordinal": "second",
+        "refreshedProbability": 0.016889
+      },
+      {
+        "category": "pairRoyalAfterPair",
+        "declines": 0,
+        "extraTotalNll": -0.16622790682392533,
+        "observedProbability": 0.0,
+        "oldProbability": 0.016447,
+        "opportunities": 36,
+        "ordinal": "third",
+        "refreshedProbability": 0.011895
+      },
+      {
+        "category": "fourOfAKindAfterPairRoyal",
+        "declines": 0,
+        "extraTotalNll": 0.01010129488652809,
+        "observedProbability": 0.0,
+        "oldProbability": 1e-06,
+        "opportunities": 7,
+        "ordinal": "second",
+        "refreshedProbability": 0.001443
+      },
+      {
+        "category": "fourOfAKindAfterPairRoyal",
+        "declines": 0,
+        "extraTotalNll": 0.017547235165634535,
+        "observedProbability": 0.0,
+        "oldProbability": 1e-06,
+        "opportunities": 3,
+        "ordinal": "third",
+        "refreshedProbability": 0.005833
+      },
+      {
+        "category": "safePair",
+        "declines": 0,
+        "extraTotalNll": 0.013619419341504641,
+        "observedProbability": 0.0,
+        "oldProbability": 0.003205,
+        "opportunities": 3,
+        "ordinal": "first",
+        "refreshedProbability": 0.00772
+      },
+      {
+        "category": "safePair",
+        "declines": 15,
+        "extraTotalNll": -1.8066814064840433,
+        "observedProbability": 0.06172839506172839,
+        "oldProbability": 0.023646,
+        "opportunities": 243,
+        "ordinal": "second",
+        "refreshedProbability": 0.028996
+      },
+      {
+        "category": "safePair",
+        "declines": 1,
+        "extraTotalNll": -0.0626809341829237,
+        "observedProbability": 0.005780346820809248,
+        "oldProbability": 0.008085,
+        "opportunities": 173,
+        "ordinal": "third",
+        "refreshedProbability": 0.005534
+      },
+      {
+        "category": "safePairRoyal",
+        "declines": 2,
+        "extraTotalNll": -1.0637178064727988,
+        "observedProbability": 0.015267175572519083,
+        "oldProbability": 0.002201,
+        "opportunities": 131,
+        "ordinal": "second",
+        "refreshedProbability": 0.004288
+      },
+      {
+        "category": "safePairRoyal",
+        "declines": 0,
+        "extraTotalNll": -0.006427842970513292,
+        "observedProbability": 0.0,
+        "oldProbability": 0.001078,
+        "opportunities": 19,
+        "ordinal": "third",
+        "refreshedProbability": 0.00074
+      }
+    ],
+    "firstPairRatesByModel": [
+      {
+        "declines": 8,
+        "model": "human",
+        "opportunities": 53,
+        "rate": 0.1509433962264151
+      },
+      {
+        "declines": 5801,
+        "model": "schell_table-peg_table-13.0",
+        "opportunities": 41619,
+        "rate": 0.13938345467214494
+      },
+      {
+        "declines": 1558,
+        "model": "schell_table-peg_table-13.1",
+        "opportunities": 15880,
+        "rate": 0.09811083123425693
+      },
+      {
+        "declines": 962,
+        "model": "schell_table-peg_table-13.215",
+        "opportunities": 5962,
+        "rate": 0.16135524991613553
+      },
+      {
+        "declines": 2460,
+        "model": "schell_table-peg_table-13.23",
+        "opportunities": 11055,
+        "rate": 0.2225237449118046
+      },
+      {
+        "declines": 2811,
+        "model": "schell_table-peg_table-20.0",
+        "opportunities": 15986,
+        "rate": 0.17584136119104216
+      },
+      {
+        "declines": 799,
+        "model": "schell_table-peg_table-20.1",
+        "opportunities": 5148,
+        "rate": 0.15520590520590521
+      },
+      {
+        "declines": 859,
+        "model": "schell_table-peg_table-20.2",
+        "opportunities": 5582,
+        "rate": 0.15388749552131853
+      },
+      {
+        "declines": 183,
+        "model": "schell_table-peg_table-9.0",
+        "opportunities": 22220,
+        "rate": 0.008235823582358236
+      },
+      {
+        "declines": 133,
+        "model": "schell_table-peg_table-9.1",
+        "opportunities": 16926,
+        "rate": 0.007857733664185277
+      },
+      {
+        "declines": 77,
+        "model": "schell_table-peg_table-9.11",
+        "opportunities": 7970,
+        "rate": 0.009661229611041405
+      }
+    ],
+    "symmetricPriorGrid": [
+      {
+        "alpha": 0,
+        "beta": 0,
+        "tuningNll": 0.33868994343393943,
+        "validationNll": 0.32618895055833425
+      },
+      {
+        "alpha": 0.01,
+        "beta": 0.01,
+        "tuningNll": 0.3386899262100242,
+        "validationNll": 0.3261888387212516
+      },
+      {
+        "alpha": 0.1,
+        "beta": 0.1,
+        "tuningNll": 0.33868873519419535,
+        "validationNll": 0.3261878869569543
+      },
+      {
+        "alpha": 0.5,
+        "beta": 0.5,
+        "tuningNll": 0.3386847081039509,
+        "validationNll": 0.3261846064681164
+      },
+      {
+        "alpha": 1,
+        "beta": 1,
+        "tuningNll": 0.33867968335916315,
+        "validationNll": 0.3261803186951968
+      },
+      {
+        "alpha": 5,
+        "beta": 5,
+        "tuningNll": 0.3386403061062755,
+        "validationNll": 0.326147408279143
+      },
+      {
+        "alpha": 50,
+        "beta": 50,
+        "tuningNll": 0.3382905518764049,
+        "validationNll": 0.3258399455297723
+      },
+      {
+        "alpha": 500,
+        "beta": 500,
+        "tuningNll": 0.3375087828333471,
+        "validationNll": 0.32499337596217487
+      }
+    ],
+    "validationOpportunities": 3722
+  },
+  "scope": "Research only; known-family conditioning is not implemented in the runtime. No asset replacement or playing-strength claim.",
+  "split": {
+    "modulo": 10,
+    "salt": "model203-decline-audit-v1:",
+    "seedsAndGames": [
+      {
+        "games": 12266,
+        "seeds": 5082
+      },
+      {
+        "games": 12190,
+        "seeds": 5077
+      }
+    ],
+    "tuningBucket": 0,
+    "validationBucket": 1
+  }
+}

@@ -6,12 +6,21 @@ runtime data, not independently selectable browser models. In particular,
 directory; keeping it here preserves the 13.0 Rust evaluator without retaining
 any pre-13.0 model surface.
 
-Model 20.3 needs only `crib-score-histogram-by-discard-cut.json` for its crib
-rank forecasts. It derives the historical five-decimal fallback means from
-that file's weighted contributors instead of loading the redundant
-`crib-rank-score-by-discard-cut.json`. The latter remains packaged for older
-models, including Model 20.2. This dependency removal preserves the existing
-probabilities and scoring behavior.
+Model 20.3 uses `model203-crib.bin` instead of both historical crib JSON files.
+It stores exact rank scores in a 91 × 13 × 91 byte array, plus raw counts and
+smoothed probabilities for all 91 discard rank pairs by the discarding actor's
+role. Runtime uses indexed arrays and suit bitmasks, without expanding JSON
+records or allocating candidate card vectors. Older models retain the original
+JSON assets. See [Model 20.3 crib forecasts](../../../docs/model-20.3-crib.md).
+
+Model 20.3 also uses `model203-decline-factors.json`: 21 positive, Beta-smoothed
+behavioral rates from verified strategic 13.x/20.x pegging policies. This asset
+excludes 9.x, 13.22, 15.x/16.x, unverified historical policies and unclassified
+human aggregates. It replaces this version's inherited decline-factor input;
+the legacy JSON remains for earlier models. Raw evidence and per-game ingestion
+records live in `training/model203-decline-qualified-evidence.json.gz`. See
+[the decline-factor report](../../../docs/model-20.3-decline-factors.md) for
+priors, calibration, performance checks and the qualified nonregression assessment.
 
 `board-win-matrix.bin` (`BWM2`) contains the four pooled phase-seam matrices
 used by Model 13.215: discard, after discard, after pegging, and after pone's

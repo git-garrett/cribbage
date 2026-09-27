@@ -213,15 +213,41 @@ impl Model91Observation {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-struct BeliefKey {
-    opponent_role: Role,
-    played: [u8; RANKS],
+type BeliefRow = Vec<([u8; RANKS], u64)>;
+const BELIEF_CONTEXTS_PER_ROLE: usize = 1 + 13 + 91 + 455;
+
+// Rank a multiset of zero through three played cards in a dense context array.
+// Adding each card's position turns repeated ranks into a strict combination;
+// its combinatorial rank is sum(C(rank + position, position + 1)).
+fn belief_context_index(role: Role, played: &[u8; RANKS]) -> Option<usize> {
+    let mut size = 0;
+    let mut index = 0;
+    for (rank, copies) in played.iter().enumerate() {
+        for _ in 0..*copies {
+            size += 1;
+            index += match size {
+                1 => rank,
+                2 => rank * (rank + 1) / 2,
+                3 => rank * (rank + 1) * (rank + 2) / 6,
+                _ => return None,
+            };
+        }
+    }
+    let role_offset = if role == Role::Dealer { 0 } else { BELIEF_CONTEXTS_PER_ROLE };
+    Some(role_offset + [0, 1, 14, 105][size] + index)
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Model91EmpiricalBeliefs {
-    entries: HashMap<BeliefKey, Vec<([u8; RANKS], u64)>>,
+    // Policies share immutable data; fixture/prior insertion uses copy-on-write.
+    // None remains distinct from an existing row with no compatible hands.
+    entries: Arc<Vec<Option<BeliefRow>>>,
+}
+
+impl Default for Model91EmpiricalBeliefs {
+    fn default() -> Self {
+        Self { entries: Arc::new(vec![None; 2 * BELIEF_CONTEXTS_PER_ROLE]) }
+    }
 }
 
 impl Model91EmpiricalBeliefs {
@@ -273,13 +299,7 @@ impl Model91EmpiricalBeliefs {
                     Ok((hand, *weight))
                 })
                 .collect::<Result<Vec<_>, String>>()?;
-            self.entries.insert(
-                BeliefKey {
-                    opponent_role,
-                    played: [0; RANKS],
-                },
-                hands,
-            );
+            self.replace_row(opponent_role, [0; RANKS], hands);
         }
         Ok(())
     }
@@ -369,7 +389,7 @@ impl Model91EmpiricalBeliefs {
                 if actual != expected || actual.len() != rows.len() || rows.iter().any(|(_, w)| *w == 0) {
                     return Err("Model 20.3 row lacks complete positive legal support".into());
                 }
-                if result.entries.insert(BeliefKey { opponent_role: role, played }, rows).is_some() {
+                if result.replace_row(role, played, rows).is_some() {
                     return Err("duplicate Model 20.3 prefix".into());
                 }
             } else {
@@ -380,7 +400,7 @@ impl Model91EmpiricalBeliefs {
         if expected_first_record != record_count {
             return Err("Model 9.1 belief directory does not cover all records".to_string());
         }
-        if complete_support && result.entries.len() != 1120 {
+        if complete_support && result.entries.iter().any(Option::is_none) {
             return Err("Model 20.3 requires every role/prefix context".into());
         }
         Ok(result)
@@ -405,14 +425,15 @@ impl Model91EmpiricalBeliefs {
                 "Model 9.1 empirical remaining hand has invalid maximum size or weight".to_string(),
             );
         }
-        let key = BeliefKey {
-            opponent_role,
-            played,
-        };
-        if self.entries.insert(key, remaining_hands).is_some() {
+        if self.replace_row(opponent_role, played, remaining_hands).is_some() {
             return Err("duplicate Model 9.1 empirical belief prefix".to_string());
         }
         Ok(())
+    }
+
+    fn replace_row(&mut self, role: Role, played: [u8; RANKS], row: BeliefRow) -> Option<BeliefRow> {
+        let index = belief_context_index(role, &played).expect("validated empirical prefix");
+        Arc::make_mut(&mut self.entries)[index].replace(row)
     }
 
     fn hands(
@@ -421,22 +442,19 @@ impl Model91EmpiricalBeliefs {
         played: [u8; RANKS],
         available: &[u8; RANKS],
         size: u8,
-    ) -> Option<Vec<([u8; RANKS], f64)>> {
-        let rows = self.entries.get(&BeliefKey {
-            opponent_role,
-            played,
-        })?;
+    ) -> Option<impl Iterator<Item = ([u8; RANKS], f64)> + '_> {
+        let rows = self.entries[belief_context_index(opponent_role, &played)?].as_ref()?;
+        let available = *available;
         Some(
             rows.iter()
-                .filter(|(hand, _)| {
+                .filter(move |(hand, _)| {
                     rank_count_total(hand) == size
                         && hand
                             .iter()
-                            .zip(available)
+                            .zip(&available)
                             .all(|(needed, remaining)| needed <= remaining)
                 })
-                .map(|(hand, weight)| (*hand, *weight as f64))
-                .collect(),
+                .map(|(hand, weight)| (*hand, *weight as f64)),
         )
     }
 }
@@ -902,7 +920,7 @@ impl Model91Policy {
                     beliefs.hands(role, observation.opponent_played, &available, size)
                 }) {
                 (
-                    hands,
+                    hands.map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight)).collect::<Vec<_>>(),
                     if self.empirical_depletion {
                         Model91EvidenceWeightMode::DepletedEmpirical(empirical_baseline(
                             observation,
@@ -913,14 +931,11 @@ impl Model91Policy {
                 )
             } else {
                 (
-                    RankHandIndex::shared().compatible_hands(&available, size)?,
+                    RankHandIndex::shared().compatible_hands(&available, size)?
+                        .into_iter().map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight)).collect(),
                     Model91EvidenceWeightMode::Physical,
                 )
             };
-            let hands: Vec<_> = hands
-                .into_iter()
-                .map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight))
-                .collect();
             let mut outcomes = Vec::with_capacity(legal.len() * hands.len());
             for rank in legal {
                 for hand in &hands {
@@ -1246,17 +1261,14 @@ impl Model91Policy {
             } else {
                 Model91EvidenceWeightMode::Empirical
             };
-            (hands, mode)
+            (hands.map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight)).collect::<Vec<_>>(), mode)
         } else {
             (
-                RankHandIndex::shared().compatible_hands(&available, size)?,
+                RankHandIndex::shared().compatible_hands(&available, size)?
+                    .into_iter().map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight)).collect(),
                 Model91EvidenceWeightMode::Physical,
             )
         };
-        let hands = hands
-            .into_iter()
-            .map(|(ranks, base_weight)| Model91EvidenceHand::new(ranks, base_weight))
-            .collect::<Vec<_>>();
         let mut local_memo = ContinuationMemo::default();
         let memo = if self.future_cache_limit == 0 {
             &mut local_memo
@@ -1391,24 +1403,22 @@ impl Model91Policy {
         let empirical = self.empirical.as_ref().and_then(|beliefs| {
             beliefs.hands(opponent_role, observation.opponent_played, &available, size)
         });
-        let base = match (empirical, cache) {
-            (Some(hands), _) if self.empirical_depletion => {
-                let baseline = empirical_baseline(observation);
-                hands
-                    .into_iter()
-                    .map(|(hand, weight)| {
-                        (
-                            hand,
-                            depleted_empirical_weight(weight, &hand, &available, &baseline),
-                        )
-                    })
-                    .collect()
-            }
-            (Some(hands), _) => hands,
-            (None, Some(cache)) => cache.physical_hands(observation, &available, size)?,
-            (None, None) => RankHandIndex::shared().compatible_hands(&available, size)?,
+        let hands = if let Some(hands) = empirical {
+            let baseline = empirical_baseline(observation);
+            reweight_opponent_hands(hands.map(|(hand, weight)| {
+                let weight = if self.empirical_depletion {
+                    depleted_empirical_weight(weight, &hand, &available, &baseline)
+                } else { weight };
+                (hand, weight)
+            }), opponent_rank_likelihood_ppm)
+        } else {
+            let physical = if let Some(cache) = cache {
+                cache.physical_hands(observation, &available, size)?
+            } else {
+                RankHandIndex::shared().compatible_hands(&available, size)?
+            };
+            reweight_opponent_hands(physical, opponent_rank_likelihood_ppm)
         };
-        let hands = reweight_opponent_hands(base, opponent_rank_likelihood_ppm);
         self.stats.posterior_hands_generated = self
             .stats
             .posterior_hands_generated
@@ -1503,7 +1513,7 @@ fn depleted_empirical_weight(
 }
 
 fn reweight_opponent_hands(
-    hands: Vec<([u8; RANKS], f64)>,
+    hands: impl IntoIterator<Item = ([u8; RANKS], f64)>,
     rank_likelihood_ppm: &[u32; RANKS],
 ) -> Vec<([u8; RANKS], f64)> {
     hands
@@ -2357,11 +2367,9 @@ mod tests {
             baseline.opponent_played = played;
             let size = baseline.opponent_remaining_count().unwrap();
             let mut beliefs = Model91EmpiricalBeliefs::default();
-            beliefs.entries.insert(
-                BeliefKey {
-                    opponent_role: Role::Dealer,
-                    played,
-                },
+            beliefs.replace_row(
+                Role::Dealer,
+                played,
                 vec![
                     (hand(&[(4, 2), (12, size - 2)]), 60),
                     (hand(&[(4, 1), (12, size - 1)]), 60),
@@ -2444,6 +2452,55 @@ mod tests {
     }
 
     #[test]
+    fn indexed_beliefs_preserve_every_packed_row_and_compatibility_filter() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        for (name, complete) in [("model91-pegging-beliefs.bin", false), ("model203-hold.bin", true)] {
+            let path = directory.join(name);
+            let beliefs = Model91EmpiricalBeliefs::load_binary(&path, complete).unwrap();
+            let bytes = fs::read(path).unwrap();
+            let count = read_u32(&bytes, 12).unwrap() as usize;
+            let start = BELIEF_HEADER_BYTES + count * BELIEF_ENTRY_BYTES;
+            for entry in 0..count {
+                let offset = BELIEF_HEADER_BYTES + entry * BELIEF_ENTRY_BYTES;
+                let role = if bytes[offset] == 0 { Role::Dealer } else { Role::Pone };
+                let played: [u8; RANKS] = bytes[offset + 1..offset + 14].try_into().unwrap();
+                let first = read_u32(&bytes, offset + 14).unwrap() as usize;
+                let rows = read_u32(&bytes, offset + 18).unwrap() as usize;
+                let size = 4 - rank_count_total(&played);
+                let raw: Vec<_> = (first..first + rows).map(|record| {
+                    let at = start + record * BELIEF_RECORD_BYTES;
+                    let hand: [u8; RANKS] = bytes[at..at + RANKS].try_into().unwrap();
+                    (hand, read_u64(&bytes, at + RANKS).unwrap() as f64)
+                }).collect();
+                for available in [[4; RANKS], std::array::from_fn(|r| (r % 5) as u8)] {
+                    let expected: Vec<_> = raw.iter().copied().filter(|(h, _)| {
+                        rank_count_total(h) == size && h.iter().zip(available).all(|(n, a)| *n <= a)
+                    }).collect();
+                    let actual: Vec<_> = beliefs.hands(role, played, &available, size).unwrap().collect();
+                    assert_eq!(actual, expected, "{name}, context {entry}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn belief_clones_share_rows_but_later_insertion_is_isolated() {
+        let mut original = Model91EmpiricalBeliefs::default();
+        let first = hand(&[(0, 1)]);
+        let second = hand(&[(1, 1)]);
+        original.insert(Role::Dealer, first, vec![(hand(&[(4, 3)]), 7)]).unwrap();
+        let mut cloned = original.clone();
+        assert!(Arc::ptr_eq(&original.entries, &cloned.entries));
+        cloned.insert(Role::Dealer, second, Vec::new()).unwrap();
+        assert!(!Arc::ptr_eq(&original.entries, &cloned.entries));
+        assert!(original.hands(Role::Dealer, second, &[4; RANKS], 3).is_none());
+        assert_eq!(cloned.hands(Role::Dealer, second, &[4; RANKS], 3).unwrap().count(), 0);
+        assert!(original.hands(Role::Dealer, [4; RANKS], &[4; RANKS], 0).is_none());
+        assert_eq!(original.hands(Role::Dealer, first, &[4; RANKS], 3).unwrap().collect::<Vec<_>>(),
+            cloned.hands(Role::Dealer, first, &[4; RANKS], 3).unwrap().collect::<Vec<_>>());
+    }
+
+    #[test]
     fn empirical_belief_filters_impossible_hidden_hands() {
         let mut beliefs = Model91EmpiricalBeliefs::default();
         beliefs
@@ -2456,7 +2513,7 @@ mod tests {
         let available = hand(&[(4, 2), (12, 4)]);
         let hands = beliefs
             .hands(Role::Dealer, hand(&[(0, 1)]), &available, 3)
-            .unwrap();
+            .unwrap().collect::<Vec<_>>();
         assert_eq!(hands, vec![(hand(&[(12, 3)]), 11.0)]);
     }
 
@@ -2483,7 +2540,7 @@ mod tests {
         let beliefs = Model91EmpiricalBeliefs::load(&path).unwrap();
         let rows = beliefs
             .hands(Role::Dealer, played, &[4_u8; RANKS], 3)
-            .unwrap();
+            .unwrap().collect::<Vec<_>>();
         assert_eq!(rows, vec![(remaining, 17.0)]);
         fs::remove_file(path).unwrap();
     }

@@ -35,6 +35,10 @@ impl SuitedDiscardRates {
         debug_assert!(cards.next().is_none());
         // Lexicographic order of the thirteen-count rank keys: KK, QK, QQ, ...
         let index = (12 - first) * (13 - first) / 2 + 12 - second;
+        self.rate_at(index)
+    }
+
+    pub(crate) fn rate_at(&self, index: usize) -> f64 {
         let evidence = self.pairs[index];
         if evidence.observations > 0 {
             evidence.rate

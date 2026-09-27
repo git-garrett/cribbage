@@ -398,6 +398,7 @@ pub struct CribRankHistogramEntry {
 pub struct CribRankDiscardTables {
     pub rank_scores: HashMap<(u8, String, u8), f64>,
     pub histograms: HashMap<(u8, String, u8), CribRankHistogramEntry>,
+    pub(crate) indexed: Option<crate::model203_crib::Model203CribTable>,
 }
 
 #[derive(Clone, Debug)]
@@ -1978,32 +1979,11 @@ impl Model13HoldTable {
 }
 
 impl CribRankDiscardTables {
-    /// The histogram contributors contain all information in the separate
-    /// rank-mean asset. Preserve its five-decimal means for fallback callers.
-    pub fn load_histograms(histogram_path: impl AsRef<Path>) -> Result<Self, String> {
-        let histograms = parse_crib_histograms(
-            &fs::read_to_string(histogram_path.as_ref())
-                .map_err(|error| format!("read crib histogram table failed: {}", error))?,
-        )?;
-        let mut rank_scores = HashMap::with_capacity(histograms.len());
-        for (key, entry) in &histograms {
-            let total_weight: f64 = entry.opponent_discards.iter().map(|d| d.weight).sum();
-            let total_points: f64 = entry
-                .opponent_discards
-                .iter()
-                .map(|d| d.weight * f64::from(d.rank_score))
-                .sum();
-            if total_weight <= 0.0 || !total_weight.is_finite() || !total_points.is_finite() {
-                return Err("crib histogram has no finite positive weight".into());
-            }
-            rank_scores.insert(
-                key.clone(),
-                (total_points / total_weight * 100_000.0).round() / 100_000.0,
-            );
-        }
+    pub(crate) fn load_model203(path: impl AsRef<Path>) -> Result<Self, String> {
         Ok(Self {
-            rank_scores,
-            histograms,
+            rank_scores: HashMap::new(),
+            histograms: HashMap::new(),
+            indexed: Some(crate::model203_crib::Model203CribTable::load(path.as_ref())?),
         })
     }
 
@@ -2012,6 +1992,7 @@ impl CribRankDiscardTables {
         histogram_path: impl AsRef<Path>,
     ) -> Result<CribRankDiscardTables, String> {
         Ok(CribRankDiscardTables {
+            indexed: None,
             rank_scores: parse_crib_rank_scores(
                 &fs::read_to_string(rank_score_path.as_ref())
                     .map_err(|error| format!("read crib rank score table failed: {}", error))?,
@@ -2024,6 +2005,9 @@ impl CribRankDiscardTables {
     }
 
     pub fn rank_score(&self, role: u8, discard_key: &str, cut_rank: u8) -> Option<f64> {
+        if let Some(table) = &self.indexed {
+            return table.rank_mean(role, &rank_counts_from_key(discard_key).ok()?, cut_rank);
+        }
         self.rank_scores
             .get(&(role, discard_key.to_string(), cut_rank))
             .copied()
