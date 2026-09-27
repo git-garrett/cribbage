@@ -48,9 +48,10 @@ observed prefix*, then go exclusions and the existing behavioral likelihoods.
 Empirical soft zeros and integer underflow are floored at one part per million
 for this version only; a hard exclusion from go remains zero. The same updated
 remaining-hand distribution feeds the exact suit-enumerated counting histogram.
-If all empirical discard variants for a keep disappear after conditioning,
-20.3 uses legal physical discard pairs for that keep rather than deleting it.
-Nonempty discard rows are otherwise unchanged.
+The subsequent conditional-discard refresh supplies positive probability for
+every physically possible discard pair within every keep. Conditioning therefore
+retains compatible keeps without depending on observed discard support; see
+[opponent discards](model-20.3-opponent-discards.md).
 
 The file uses magic `M203HB01`, followed by the 28-byte header, 22-byte context
 directory records, and 21-byte remaining-hand/weight records used by the native
@@ -184,8 +185,9 @@ version/checksum before use; never overwrite a frozen benchmark's inputs.
 
 The counting histogram still marginalizes counting and pegging outcomes
 separately, and assumes uniform legal suits within each rank pattern. This
-change does not implement their full joint outcome distribution. Nonempty
-conditional-discard rows remain unchanged. A subsequent 20.3 refresh replaces
+change does not implement their full joint outcome distribution. A subsequent
+20.3 refresh completes and smooths the conditional-discard rows; see
+[opponent discards](model-20.3-opponent-discards.md). Another 20.3 refresh replaces
 the inherited decline factors with clean, smoothed evidence and optimizes the
 runtime likelihood calculation; see [decline factors](model-20.3-decline-factors.md)
 for the priors, validation results and remaining modeling limitations.

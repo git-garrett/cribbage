@@ -221,3 +221,10 @@ including public go/behavior evidence. Raw evidence and the incremental builder
 remain separate from packed probability weights. See
 [`docs/model-20.3-smoothed-hold.md`](../../../docs/model-20.3-smoothed-hold.md)
 for provenance, validation, and the next-generation update procedure.
+
+It also uses `model203-opponent-discards.bin` (`M203OD01`) for complete Bayesian
+conditional-discard support with indexed f64 rows and updated strong-model
+evidence. The suited section remains identical to `model20-opponent-discards.bin`.
+Earlier models retain their frozen assets. See
+[`conditional discard assessment`](../../../docs/model-20.3-opponent-discards.md)
+for data, priors, prediction tradeoffs, runtime assessment and reproduction.

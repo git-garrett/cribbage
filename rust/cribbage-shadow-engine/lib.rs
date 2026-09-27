@@ -11,6 +11,7 @@ pub mod model;
 pub mod model132;
 pub mod model1323;
 mod model20_discards;
+mod model203_discards;
 mod model203_crib;
 pub mod model162;
 pub mod model90;

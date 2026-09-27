@@ -263,7 +263,7 @@ impl PolicyAssets {
             beliefs,
             factors,
             discard_asset_sha256: packed.fingerprint,
-            discards: OpponentDiscardPrior {
+            discards: OpponentDiscardPrior::Legacy {
                 by_role_keep: packed.discards,
             },
             suit_rates: Some(packed.suits),
@@ -301,7 +301,9 @@ impl PolicyAssets {
         if format!("{:x}", Sha256::digest(&factor_bytes)) != MODEL203_DECLINE_SHA256 {
             return Err("Model 20.3 decline factors differ from the verified snapshot".into());
         }
-        let packed = Model20DiscardAsset::load(&directory.join(crate::model20_discards::ASSET_NAME))?;
+        let packed = crate::model203_discards::Model203DiscardAsset::load(
+            &directory.join(crate::model203_discards::ASSET_NAME))?;
+        let suit_rates = packed.suits.clone();
         // Conditioned-discard fallback behavior differs as well; a shared hand
         // cache must not transfer it to frozen 20.0–20.2 decisions.
         let mut fingerprint = Sha256::new();
@@ -311,9 +313,9 @@ impl PolicyAssets {
         Ok(Self {
             beliefs: Model91EmpiricalBeliefs::load_model203(&path)?,
             factors: Model1322DeclineFactors::load_model203(&factor_path)?,
-            discards: OpponentDiscardPrior { by_role_keep: packed.discards },
+            discards: OpponentDiscardPrior::Smoothed(packed),
             discard_asset_sha256: fingerprint.finalize().into(),
-            suit_rates: Some(packed.suits),
+            suit_rates: Some(suit_rates),
             empirical_depletion: true,
             complete_hold_support: true,
             wp_board: Some(Arc::new(crate::board_matrix::BoardWinMatrix::load_verified_model202(
@@ -607,8 +609,9 @@ struct DiscardPriorFile {
     fallback_by_role: BTreeMap<String, BTreeMap<String, u64>>,
 }
 
-struct OpponentDiscardPrior {
-    by_role_keep: HashMap<(Role, [u8; 13]), Vec<([u8; 13], u64)>>,
+enum OpponentDiscardPrior {
+    Legacy { by_role_keep: HashMap<(Role, [u8; 13]), Vec<([u8; 13], u64)>> },
+    Smoothed(crate::model203_discards::Model203DiscardAsset),
 }
 
 impl OpponentDiscardPrior {
@@ -650,7 +653,7 @@ impl OpponentDiscardPrior {
                 by_role_keep.insert((role, keep), variants);
             }
         }
-        Ok(Self { by_role_keep })
+        Ok(Self::Legacy { by_role_keep })
     }
 
     fn conditioned(
@@ -660,8 +663,11 @@ impl OpponentDiscardPrior {
         own_six: &[u8; 13],
         cut: u8,
     ) -> Result<Vec<([u8; 13], f64)>, String> {
-        let variants = self
-            .by_role_keep
+        let by_role_keep = match self {
+            Self::Smoothed(asset) => return asset.conditioned(role, keep, own_six, cut),
+            Self::Legacy { by_role_keep } => by_role_keep,
+        };
+        let variants = by_role_keep
             .get(&(role, *keep))
             .ok_or("missing opponent keep prior")?;
         let mut baseline = [0; 13];
@@ -1087,7 +1093,7 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("model203-smoothed-declines-{}", std::process::id()));
         fs::create_dir_all(&directory).unwrap();
         for name in ["model203-hold.bin", "model203-decline-factors.json", "model202-board-win-matrix.bin",
-                     crate::model20_discards::ASSET_NAME] {
+                     crate::model203_discards::ASSET_NAME] {
             fs::copy(source.join(name), directory.join(name)).unwrap();
         }
         assert!(!directory.join("model1322-decline-factors.json").exists());
@@ -1099,6 +1105,49 @@ mod tests {
         fs::write(directory.join("model203-decline-factors.json"), b"{}").unwrap();
         assert!(PolicyAssets::load_model203(&directory).err().unwrap().contains("verified snapshot"));
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    #[ignore = "release-only complete forecast comparison; no world sampling"]
+    fn model203_discard_full_forecast_assessment() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let current = PolicyAssets::load_model203(&directory).unwrap();
+        let mut previous = PolicyAssets::load_model203(&directory).unwrap();
+        previous.discards = OpponentDiscardPrior::Legacy {
+            by_role_keep: Model20DiscardAsset::load(&directory.join(crate::model20_discards::ASSET_NAME)).unwrap().discards,
+        };
+        let (observation, world) = opening();
+        let mut state = world_state(&observation, &world).unwrap();
+        let mut cases = Vec::new();
+        for turn in 0..7 {
+            if [0, 1, 4, 6].contains(&turn) {
+                cases.push((format!("turn-{turn}"), Model132Observation::from_state(&state, state.current).unwrap()));
+            }
+            state.apply(state.legal_actions()[0]).unwrap();
+        }
+        let mut finish = observation;
+        finish.my_score = 120; finish.opponent_score = 119;
+        cases.push(("count-out".into(), finish));
+        let mut report = Vec::new();
+        for repeat in 0..2 {
+            for (label, observation) in &cases {
+                for mode in [repeat % 2, 1-repeat % 2] {
+                    let assets = if mode == 0 { &previous } else { &current };
+                    let start = std::time::Instant::now();
+                    let forecasts = assets.forecast(observation, LIVE_WORLD_BUDGET).unwrap();
+                    let seconds = start.elapsed().as_secs_f64();
+                    for f in &forecasts {
+                        assert_eq!(f.posterior_worlds, f.evaluated_worlds);
+                        assert!((f.outcomes.iter().map(|(_,_,w)| w).sum::<f64>() - 1.0).abs() < 1e-10);
+                    }
+                    report.push(serde_json::json!({"fixture":label,"repeat":repeat,"variant":if mode==0 {"old"} else {"smoothed"},
+                        "seconds":seconds,"worlds":forecasts[0].posterior_worlds,
+                        "forecasts":forecasts.iter().map(|f| serde_json::json!({"action":format!("{:?}",f.action),"outcomes":f.outcomes})).collect::<Vec<_>>()}));
+                    fs::write(std::env::temp_dir().join("model203-discard-full-forecasts.json"), serde_json::to_vec(&report).unwrap()).unwrap();
+                    println!("{label} repeat={repeat} variant={mode} seconds={seconds:.3} worlds={}", forecasts[0].posterior_worlds);
+                }
+            }
+        }
     }
 
     #[test]
@@ -1188,9 +1237,9 @@ mod tests {
     }
 
     #[test]
-    fn model203_complete_beliefs_keep_hard_exclusions_and_survive_empty_discard_rows() {
+    fn model203_complete_discard_support_preserves_keep_marginals_and_hard_exclusions() {
         let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
-        let mut assets = PolicyAssets::load_model203(&directory).unwrap();
+        let assets = PolicyAssets::load_model203(&directory).unwrap();
         for role in [Role::Dealer, Role::Pone] {
             let hands = assets.opening_keep_weights(role, &[4; 13]).unwrap();
             assert_eq!(hands.len(), 1820);
@@ -1203,9 +1252,8 @@ mod tests {
         let mut observation = opening().0;
         let before = assets.opponent_keep_weights(&observation).unwrap();
         assert!(!before.is_empty());
-        // Every old discard variant eliminated: the new version retains each
-        // compatible keep using legal physical two-card support.
-        for row in assets.discards.by_role_keep.values_mut() { row.clear(); }
+        // Expanding conditional discard support must preserve the probability
+        // of every compatible opponent keep, not overweight dense rows.
         let policy = assets.decision_policy().unwrap();
         let worlds = assets.worlds_for_hand(&observation, &policy, None).unwrap();
         let mut marginal = HashMap::<[u8; 13], f64>::new();
@@ -1237,7 +1285,7 @@ mod tests {
             fs::copy(source.join(name), directory.join(name)).unwrap();
         }
         let assets = PolicyAssets::load_model20(&directory).unwrap();
-        assert_eq!(assets.discards.by_role_keep.len(), 3640);
+        assert!(matches!(&assets.discards, OpponentDiscardPrior::Legacy { by_role_keep } if by_role_keep.len() == 3640));
         for role in [Role::Dealer, Role::Pone] {
             assert!(assets.suited_discard_rates(role).is_ok());
         }
@@ -1939,7 +1987,7 @@ mod tests {
         let own_six = hand(&[4, 4, 4, 5, 6, 7]);
         let impossible_with_cut = hand(&[4, 8]);
         let possible = hand(&[9, 10]);
-        let prior = OpponentDiscardPrior {
+        let prior = OpponentDiscardPrior::Legacy {
             by_role_keep: HashMap::from([(
                 (Role::Dealer, keep),
                 vec![(impossible_with_cut, 100), (possible, 100)],

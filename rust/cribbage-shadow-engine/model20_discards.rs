@@ -18,6 +18,7 @@ pub(crate) struct SuitEvidence {
     pub rate: f64,
 }
 
+#[derive(Clone)]
 pub(crate) struct SuitedDiscardRates {
     pub pairs: [SuitEvidence; 91],
     pub overall_rate: f64,
