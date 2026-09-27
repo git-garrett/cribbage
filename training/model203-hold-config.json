@@ -1,0 +1,12 @@
+{
+  "calibrationReport": "training/model203-hold-calibration.json",
+  "calibrationReportSha256": "6480f1806fb426bb39cb7262b761117249beabc021b4543a93664b6c8e088f23",
+  "physicalPriorMixture": 0.001,
+  "schemaVersion": 1,
+  "smoothingStrengthByPrefixLength": [
+    100000,
+    1000000,
+    100000,
+    10000
+  ]
+}

@@ -37,6 +37,7 @@ pub const CORRECTION_INPUT_CHECKSUMS: [u64; 5] = [
 /// Production never samples. Finite budgets are retained only for diagnostic
 /// comparisons through the explicit forecast interface.
 pub const LIVE_WORLD_BUDGET: usize = usize::MAX;
+const MODEL203_HOLD_SHA256: &str = "625d64c2856d58e981b5771395efc2a9e5d1fde5cd96755d32b002a0b20f8c99";
 
 /// One actor's current-hand card population and conditioned discard prior,
 /// scoped to its asset fingerprint. History-dependent weights and solves stay fresh.
@@ -126,6 +127,7 @@ pub struct PolicyAssets {
     discard_asset_sha256: [u8; 32],
     suit_rates: Option<[SuitedDiscardRates; 2]>,
     empirical_depletion: bool,
+    complete_hold_support: bool,
     pub(crate) wp_board: Option<Arc<crate::board_matrix::BoardWinMatrix>>,
 }
 
@@ -177,6 +179,7 @@ impl PolicyAssets {
         }
         Ok(Self {
             empirical_depletion: false,
+            complete_hold_support: false,
             wp_board: None,
             beliefs,
             factors,
@@ -219,6 +222,7 @@ impl PolicyAssets {
             },
             suit_rates: Some(packed.suits),
             empirical_depletion: true,
+            complete_hold_support: false,
             wp_board: None,
         })
     }
@@ -237,6 +241,44 @@ impl PolicyAssets {
             crate::board_matrix::BoardWinMatrix::load_verified_model202(
                 directory.join("model202-board-win-matrix.bin"))?));
         Ok(assets)
+    }
+
+    pub(crate) fn load_model203(directory: &Path) -> Result<Self, String> {
+        let path = directory.join("model203-hold.bin");
+        let bytes = fs::read(&path).map_err(|e| format!("read Model 20.3 hold: {e}"))?;
+        // A model version identifies an immutable learning snapshot.
+        if format!("{:x}", Sha256::digest(&bytes)) != MODEL203_HOLD_SHA256 {
+            return Err("Model 20.3 hold asset differs from its verified snapshot".into());
+        }
+        let factor_path = directory.join("model1322-decline-factors.json");
+        let factor_bytes = fs::read(&factor_path).map_err(|e| format!("read decline factors: {e}"))?;
+        if format!("{:x}", Sha256::digest(factor_bytes)) != "4dfb1b8c20f612153a6b0d57496fd77c5219a8a2ba7e01acb8909b862d5418dc" {
+            return Err("Model 20.3 inherited decline factors changed".into());
+        }
+        let packed = Model20DiscardAsset::load(&directory.join(crate::model20_discards::ASSET_NAME))?;
+        // Conditioned-discard fallback behavior differs as well; a shared hand
+        // cache must not transfer it to frozen 20.0–20.2 decisions.
+        let mut fingerprint = Sha256::new();
+        fingerprint.update(packed.fingerprint);
+        fingerprint.update(bytes);
+        Ok(Self {
+            beliefs: Model91EmpiricalBeliefs::load_model203(&path)?,
+            factors: Model1322DeclineFactors::load(factor_path)?,
+            discards: OpponentDiscardPrior { by_role_keep: packed.discards },
+            discard_asset_sha256: fingerprint.finalize().into(),
+            suit_rates: Some(packed.suits),
+            empirical_depletion: true,
+            complete_hold_support: true,
+            wp_board: Some(Arc::new(crate::board_matrix::BoardWinMatrix::load_verified_model202(
+                directory.join("model202-board-win-matrix.bin"))?)),
+        })
+    }
+
+    pub(crate) fn opponent_keep_weights(
+        &self,
+        observation: &Model132Observation,
+    ) -> Result<Vec<([u8; 13], f64)>, String> {
+        self.decision_policy()?.opponent_hands(observation)
     }
 
     pub(crate) fn suited_discard_rates(&self, role: Role) -> Result<&SuitedDiscardRates, String> {
@@ -287,6 +329,9 @@ impl PolicyAssets {
         if self.empirical_depletion {
             policy.use_empirical_depletion();
         }
+        let policy = if self.complete_hold_support {
+            policy.with_positive_soft_evidence()
+        } else { policy };
         Ok(if let Some(board) = &self.wp_board {
             policy.with_win_probability(Arc::clone(board))
         } else { policy })
@@ -395,12 +440,21 @@ impl PolicyAssets {
             let initial =
                 std::array::from_fn(|rank| remaining[rank] + observation.opponent_played[rank]);
             let condition = || -> Result<DiscardSupport, String> {
-                let variants = self.discards.conditioned(
+                let mut variants = self.discards.conditioned(
                     opponent_role,
                     &initial,
                     &own_six,
                     observation.turn_rank,
                 )?;
+                if variants.is_empty() && self.complete_hold_support {
+                    // Missing discard evidence cannot erase a legally possible keep.
+                    // This only repairs empty conditional roots, not every unseen
+                    // discard cell in the independently versioned discard asset.
+                    let available = std::array::from_fn(|r| {
+                        4 - initial[r] - own_six[r] - u8::from(r == observation.turn_rank as usize)
+                    });
+                    variants = crate::cards::enumerate_rank_hands(&available, 2);
+                }
                 let total = variants.iter().map(|(_, weight)| weight).sum();
                 Ok(DiscardSupport { variants, total })
             };
@@ -891,6 +945,41 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn model203_complete_beliefs_keep_hard_exclusions_and_survive_empty_discard_rows() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let mut assets = PolicyAssets::load_model203(&directory).unwrap();
+        for role in [Role::Dealer, Role::Pone] {
+            let hands = assets.opening_keep_weights(role, &[4; 13]).unwrap();
+            assert_eq!(hands.len(), 1820);
+            for key in ["0000020000011", "0000020001001", "0000201010000", "0010010002000",
+                        "0010200100000", "0100010000020", "0100010002000", "1010200000000"] {
+                let omitted = rank_counts_from_key(key).unwrap();
+                assert!(hands.iter().any(|(h, w)| *h == omitted && *w > 0.0));
+            }
+        }
+        let mut observation = opening().0;
+        let before = assets.opponent_keep_weights(&observation).unwrap();
+        assert!(!before.is_empty());
+        // Every old discard variant eliminated: the new version retains each
+        // compatible keep using legal physical two-card support.
+        for row in assets.discards.by_role_keep.values_mut() { row.clear(); }
+        let policy = assets.decision_policy().unwrap();
+        let worlds = assets.worlds_for_hand(&observation, &policy, None).unwrap();
+        let mut marginal = HashMap::<[u8; 13], f64>::new();
+        for world in worlds { *marginal.entry(world.remaining).or_default() += world.weight; }
+        assert_eq!(before.len(), marginal.len());
+        for (hand, weight) in before {
+            assert!((marginal[&hand] / weight - 1.0).abs() < 1e-12);
+        }
+        // A go at count 25 rules out values 1..6 while admitting higher ranks.
+        observation.public_history = vec![PublicPegEvent::SelfPlay(9), PublicPegEvent::SelfPlay(10),
+            PublicPegEvent::SelfPlay(4), PublicPegEvent::OpponentGo];
+        let after = assets.opponent_keep_weights(&observation).unwrap();
+        assert!(!after.is_empty());
+        assert!(after.iter().all(|(h, _)| h[..6].iter().all(|n| *n == 0)));
     }
 
     #[test]

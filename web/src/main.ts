@@ -999,6 +999,8 @@ const SIMPLE_NETWORK_LOCAL_OPPONENTS = new Set<string>([
   ...SIMPLE_NETWORK_PUBLIC_OPPONENTS,
   "schell_table-peg_table-20.0",
   "schell_table-peg_table-20.1",
+  "schell_table-peg_table-20.2",
+  "schell_table-peg_table-20.3",
   "schell_table-peg_table-16.3",
   "schell_table-peg_table-16.1",
   "schell_table-peg_table-16.0",
@@ -1823,7 +1825,9 @@ function refreshAceProgress(): void {
     state.aiThinking && !els.thinkingOverlay.hidden &&
     (currentSnapshot?.opponent === "schell_table-peg_table-13.23" ||
       currentSnapshot?.opponent === "schell_table-peg_table-20.0" ||
-      currentSnapshot?.opponent === "schell_table-peg_table-20.1") && currentSnapshot.gameId
+      currentSnapshot?.opponent === "schell_table-peg_table-20.1" ||
+      currentSnapshot?.opponent === "schell_table-peg_table-20.2" ||
+      currentSnapshot?.opponent === "schell_table-peg_table-20.3") && currentSnapshot.gameId
     ? { gameId: currentSnapshot.gameId, handNumber: state.game.handNumber, played: state.game.plays.length }
     : null);
 }
@@ -9433,6 +9437,8 @@ function analyticsEngineSortKey(engine: Opponent): number {
     ...ACE_OPPONENTS,
     "schell_table-peg_table-20.0",
     "schell_table-peg_table-20.1",
+    "schell_table-peg_table-20.2",
+    "schell_table-peg_table-20.3",
     "schell_table-peg_table-16.3",
     "schell_table-peg_table-16.1",
     "schell_table-peg_table-16.0",

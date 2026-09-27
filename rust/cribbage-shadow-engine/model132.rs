@@ -584,6 +584,7 @@ pub struct Model911Policy {
     inner: Arc<Mutex<Model91Policy>>,
     factors: Model1322DeclineFactors,
     include_owned_dead_cards: bool,
+    preserve_soft_support: bool,
     wp_board: Option<Arc<crate::board_matrix::BoardWinMatrix>>,
 }
 
@@ -843,6 +844,7 @@ impl Model911Policy {
             ))),
             factors,
             include_owned_dead_cards: true,
+            preserve_soft_support: false,
             wp_board: None,
         })
     }
@@ -855,6 +857,7 @@ impl Model911Policy {
             inner: Arc::clone(&self.inner),
             factors: self.factors,
             include_owned_dead_cards: false,
+            preserve_soft_support: self.preserve_soft_support,
             wp_board: None,
         }
     }
@@ -869,6 +872,11 @@ impl Model911Policy {
 
     pub(crate) fn use_empirical_depletion(&self) {
         self.lock_inner().use_empirical_depletion();
+    }
+
+    pub(crate) fn with_positive_soft_evidence(mut self) -> Self {
+        self.preserve_soft_support = true;
+        self
     }
 
     /// The live Model 20.1 adapter changes the executable chooser's utility;
@@ -925,10 +933,11 @@ impl Model911Policy {
         opponent_hands: Vec<([u8; RANKS], f64)>,
     ) -> Result<RankPegAction, String> {
         let model91_observation = self.model91_observation(observation)?;
-        let likelihoods = model1322_opponent_rank_likelihoods_with_known_cut(
+        let likelihoods = opponent_rank_likelihoods(
             observation,
             self.factors,
             self.include_owned_dead_cards,
+            self.preserve_soft_support,
         )?;
         self.lock_inner().choose_action_for_weighted_opponent_hands(
             &model91_observation,
@@ -942,10 +951,11 @@ impl Model911Policy {
         observation: &Model132Observation,
     ) -> Result<Model91Choice, String> {
         let model91_observation = self.model91_observation(observation)?;
-        let likelihoods = model1322_opponent_rank_likelihoods_with_known_cut(
+        let likelihoods = opponent_rank_likelihoods(
             observation,
             self.factors,
             self.include_owned_dead_cards,
+            self.preserve_soft_support,
         )?;
         self.lock_inner()
             .choose_action_with_opponent_likelihood_and_net_ev(&model91_observation, &likelihoods)
@@ -967,10 +977,11 @@ impl Model911Policy {
     ) -> Result<Vec<([u8; RANKS], f64)>, String> {
         observation.validate()?;
         let model91_observation = self.model91_observation(observation)?;
-        let likelihoods = model1322_opponent_rank_likelihoods_with_known_cut(
+        let likelihoods = opponent_rank_likelihoods(
             observation,
             self.factors,
             self.include_owned_dead_cards,
+            self.preserve_soft_support,
         )?;
         self.lock_inner()
             .opponent_hands_with_cache(&model91_observation, &likelihoods, cache)
@@ -981,10 +992,11 @@ impl Model132PeggingPolicy for Model911Policy {
     fn choose_action(&self, observation: &Model132Observation) -> Result<RankPegAction, String> {
         observation.validate()?;
         let model91_observation = self.model91_observation(observation)?;
-        let likelihoods = model1322_opponent_rank_likelihoods_with_known_cut(
+        let likelihoods = opponent_rank_likelihoods(
             observation,
             self.factors,
             self.include_owned_dead_cards,
+            self.preserve_soft_support,
         )?;
         if let Some(board) = &self.wp_board {
             self.lock_inner().choose_action_by_wp(
@@ -1089,6 +1101,15 @@ fn model1322_opponent_rank_likelihoods_with_known_cut(
     factors: Model1322DeclineFactors,
     include_known_cut: bool,
 ) -> Result<[u32; RANKS], String> {
+    opponent_rank_likelihoods(observation, factors, include_known_cut, false)
+}
+
+fn opponent_rank_likelihoods(
+    observation: &Model132Observation,
+    factors: Model1322DeclineFactors,
+    include_known_cut: bool,
+    preserve_soft_support: bool,
+) -> Result<[u32; RANKS], String> {
     factors.validate()?;
     let mut likelihoods = [1_000_000_u32; RANKS];
     let mut series = Vec::<u8>::new();
@@ -1125,9 +1146,14 @@ fn model1322_opponent_rank_likelihoods_with_known_cut(
                                 retaliation_impossible,
                                 opponent_card_ordinal,
                             );
-                            likelihoods[candidate as usize] =
-                                ((u64::from(likelihoods[candidate as usize]) * u64::from(factor))
-                                    / 1_000_000) as u32;
+                            let previous = likelihoods[candidate as usize];
+                            let updated = ((u64::from(previous) * u64::from(factor))
+                                / 1_000_000) as u32;
+                            // An empirical behavioral zero (or integer underflow)
+                            // must not become a hard exclusion. A prior go remains zero.
+                            likelihoods[candidate as usize] = if preserve_soft_support && previous > 0 {
+                                updated.max(1)
+                            } else { updated };
                         }
                     }
                 }
@@ -2169,6 +2195,24 @@ mod tests {
             model1322_opponent_rank_likelihoods(&observation, decline_factors()).unwrap();
 
         assert_eq!(likelihoods[4], 0);
+    }
+
+    #[test]
+    fn model203_soft_zeros_and_underflow_preserve_support_but_go_does_not() {
+        let mut observation = Model132Observation::from_state(
+            &state(hand(&[(1, 1), (5, 1), (9, 1), (11, 1)]), hand(&[(6, 1), (10, 1)])),
+            PegSeat::Zero,
+        ).unwrap();
+        let mut factors = decline_factors();
+        factors.pair_ppm = [0; 3];
+        observation.public_history = vec![PublicPegEvent::SelfPlay(4), PublicPegEvent::OpponentPlay(0)];
+        assert_eq!(opponent_rank_likelihoods(&observation, factors, true, false).unwrap()[4], 0);
+        assert_eq!(opponent_rank_likelihoods(&observation, factors, true, true).unwrap()[4], 1);
+        factors.pair_ppm = [1; 3];
+        observation.public_history.extend([PublicPegEvent::Reset, PublicPegEvent::SelfPlay(4), PublicPegEvent::OpponentPlay(1)]);
+        assert_eq!(opponent_rank_likelihoods(&observation, factors, true, true).unwrap()[4], 1);
+        observation.public_history.insert(0, PublicPegEvent::OpponentGo);
+        assert_eq!(opponent_rank_likelihoods(&observation, factors, true, true).unwrap()[4], 0);
     }
 
     #[test]

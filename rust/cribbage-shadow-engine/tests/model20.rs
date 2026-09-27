@@ -2,7 +2,36 @@ use cribbage_shadow_engine::model::{
     evaluate_decision, evaluate_decision_with_caches, evaluate_selected_decision,
     parse_decision_input, Decision, Model13HandCache,
 };
-use cribbage_shadow_engine::model_id::{MODEL_13_23, MODEL_20_0, MODEL_20_1, MODEL_20_2};
+use cribbage_shadow_engine::model_id::{MODEL_13_23, MODEL_20_0, MODEL_20_1, MODEL_20_2, MODEL_20_3};
+
+#[test]
+fn model203_live_cached_and_review_paths_agree_without_changing_model202() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = root.to_str().unwrap();
+    for role in ["dealer", "pone"] {
+        for fields in [
+            format!("kind=peg;turnCard=10;role={role};ownDiscards=1,6;aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore=110;humanScore=109;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"),
+            format!("kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore=110;humanScore=109"),
+        ] {
+            let old = parse_decision_input(&format!("model={MODEL_20_2};{fields}")).unwrap();
+            let new = parse_decision_input(&format!("model={MODEL_20_3};{fields}")).unwrap();
+            let before = evaluate_decision(&old, root).unwrap();
+            let actual = evaluate_decision(&new, root).unwrap();
+            let cache = Model13HandCache::new();
+            for input in [&old, &new, &old, &new] {
+                let cached = evaluate_decision_with_caches(input, root, None, Some(&cache)).unwrap();
+                let expected = if input.model == MODEL_20_3 { &actual } else { &before };
+                assert_eq!(format!("{cached:?}"), format!("{expected:?}"));
+            }
+            let cards = match &actual {
+                Decision::Discard { card_ids, .. } => card_ids.clone(),
+                Decision::Peg { card_id, .. } => card_id.iter().copied().collect(),
+            };
+            let review = evaluate_selected_decision(&new, &cards, root).unwrap();
+            assert_eq!(format!("{actual:?}"), format!("{review:?}"));
+        }
+    }
+}
 
 fn assert_discard_cache_and_review(fields: &str) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

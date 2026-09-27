@@ -285,7 +285,14 @@ impl Model91EmpiricalBeliefs {
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
-        let path = path.as_ref();
+        Self::load_binary(path.as_ref(), false)
+    }
+
+    pub(crate) fn load_model203(path: &Path) -> Result<Self, String> {
+        Self::load_binary(path, true)
+    }
+
+    fn load_binary(path: &Path, complete_support: bool) -> Result<Self, String> {
         let bytes = fs::read(path).map_err(|error| {
             format!(
                 "read Model 9.1 belief asset {} failed: {}",
@@ -293,7 +300,8 @@ impl Model91EmpiricalBeliefs {
                 error
             )
         })?;
-        if bytes.len() < BELIEF_HEADER_BYTES || &bytes[..8] != BELIEF_MAGIC {
+        let magic = if complete_support { b"M203HB01" } else { BELIEF_MAGIC };
+        if bytes.len() < BELIEF_HEADER_BYTES || &bytes[..8] != magic {
             return Err("invalid Model 9.1 belief asset header".to_string());
         }
         let version = read_u32(&bytes, 8)?;
@@ -346,11 +354,34 @@ impl Model91EmpiricalBeliefs {
                 let weight = read_u64(&bytes, record_offset + RANKS)?;
                 rows.push((remaining, weight));
             }
-            result.insert(role, played, rows)?;
+            if complete_support {
+                if played.iter().any(|n| *n > 4) {
+                    return Err("invalid Model 20.3 prefix".into());
+                }
+                let size = rank_count_total(&played);
+                if size > 3 {
+                    return Err("invalid Model 20.3 prefix".into());
+                }
+                let available = std::array::from_fn(|r| 4 - played[r]);
+                let expected: std::collections::HashSet<_> = enumerate_rank_hands(&available, 4 - size)
+                    .into_iter().map(|(h, _)| h).collect();
+                let actual: std::collections::HashSet<_> = rows.iter().map(|(h, _)| *h).collect();
+                if actual != expected || actual.len() != rows.len() || rows.iter().any(|(_, w)| *w == 0) {
+                    return Err("Model 20.3 row lacks complete positive legal support".into());
+                }
+                if result.entries.insert(BeliefKey { opponent_role: role, played }, rows).is_some() {
+                    return Err("duplicate Model 20.3 prefix".into());
+                }
+            } else {
+                result.insert(role, played, rows)?;
+            }
             expected_first_record += count;
         }
         if expected_first_record != record_count {
             return Err("Model 9.1 belief directory does not cover all records".to_string());
+        }
+        if complete_support && result.entries.len() != 1120 {
+            return Err("Model 20.3 requires every role/prefix context".into());
         }
         Ok(result)
     }

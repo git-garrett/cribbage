@@ -196,3 +196,12 @@ possible opponent hands. The cache belongs to that game session rather than an
 HTTP worker thread, so reconnecting requests resume the same analysis. It is
 cleared when pegging ends and contains no observation-to-action table or
 durable pegging-path graph.
+
+Model 20.3 replaces the three separate runtime hand-belief inputs with
+`model203-hold.bin` (`M203HB01`): complete legal support, calibrated smoothing,
+retained historical evidence, and deduplicated updates from approved strong
+models. It feeds both the executable pegging policy and the counting forecast,
+including public go/behavior evidence. Raw evidence and the incremental builder
+remain separate from packed probability weights. See
+[`docs/model-20.3-smoothed-hold.md`](../../../docs/model-20.3-smoothed-hold.md)
+for provenance, validation, and the next-generation update procedure.
