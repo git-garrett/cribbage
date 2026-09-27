@@ -54,6 +54,8 @@ pub const MODEL_16_3: &str = "schell_table-peg_table-16.3";
 pub const MODEL_20_0: &str = "schell_table-peg_table-20.0";
 /// Model 20.1 uses WP-selected live continuation moves for both actors.
 pub const MODEL_20_1: &str = "schell_table-peg_table-20.1";
+/// Model 20.2 retains 20.1 continuation semantics with a rebuilt board matrix.
+pub const MODEL_20_2: &str = "schell_table-peg_table-20.2";
 /// Five-sample Myrmidon agent from the Moulton cribbage RL framework. Strong
 /// Cribbage exposes it as the Easy opponent and also retains it for benchmarks.
 pub const MYRMIDON_5: &str = "myrmidon-5";
@@ -84,6 +86,7 @@ pub enum ModelId {
     Schell163,
     Schell200,
     Schell201,
+    Schell202,
     Myrmidon5,
     Dynamic,
 }
@@ -114,6 +117,7 @@ impl ModelId {
             ModelId::Schell163 => MODEL_16_3,
             ModelId::Schell200 => MODEL_20_0,
             ModelId::Schell201 => MODEL_20_1,
+            ModelId::Schell202 => MODEL_20_2,
             ModelId::Myrmidon5 => MYRMIDON_5,
             ModelId::Dynamic => DYNAMIC,
         }
@@ -142,6 +146,7 @@ impl ModelId {
             ModelId::Schell163 => "Schell Table + Peg Table 16.3",
             ModelId::Schell200 => "Schell Table + Peg Table 20.0",
             ModelId::Schell201 => "Schell Table + Peg Table 20.1",
+            ModelId::Schell202 => "Schell Table + Peg Table 20.2",
             ModelId::Myrmidon5 => "Myrmidon (5 simulations)",
             ModelId::Dynamic => "Dynamic",
         }
@@ -171,6 +176,7 @@ impl ModelId {
                 | ModelId::Schell163
                 | ModelId::Schell200
                 | ModelId::Schell201
+                | ModelId::Schell202
                 | ModelId::Myrmidon5
         )
     }
@@ -224,6 +230,7 @@ impl FromStr for ModelId {
             MODEL_16_3 => Ok(ModelId::Schell163),
             MODEL_20_0 => Ok(ModelId::Schell200),
             MODEL_20_1 => Ok(ModelId::Schell201),
+            MODEL_20_2 => Ok(ModelId::Schell202),
             MYRMIDON_5 => Ok(ModelId::Myrmidon5),
             DYNAMIC => Ok(ModelId::Dynamic),
             other => Err(format!("unsupported model id: {}", other)),
@@ -270,6 +277,10 @@ mod tests {
         assert_eq!(MODEL_20_0.parse::<ModelId>().unwrap(), ModelId::Schell200);
         assert_eq!(MODEL_20_1.parse::<ModelId>().unwrap(), ModelId::Schell201);
         assert!(ModelId::Schell201.has_native_rust_decisions());
+        assert_eq!(MODEL_20_2.parse::<ModelId>().unwrap(), ModelId::Schell202);
+        assert_eq!(ModelId::Schell202.as_str(), MODEL_20_2);
+        assert!(ModelId::Schell202.has_native_rust_decisions());
+        assert!(!ModelId::Schell202.is_ace());
         assert!(!ModelId::Schell201.is_ace());
         assert_eq!(ModelId::Schell200.as_str(), MODEL_20_0);
         assert!(ModelId::Schell200.has_native_rust_decisions());

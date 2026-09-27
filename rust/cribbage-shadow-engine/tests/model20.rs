@@ -2,7 +2,7 @@ use cribbage_shadow_engine::model::{
     evaluate_decision, evaluate_decision_with_caches, evaluate_selected_decision,
     parse_decision_input, Decision, Model13HandCache,
 };
-use cribbage_shadow_engine::model_id::{MODEL_13_23, MODEL_20_0, MODEL_20_1};
+use cribbage_shadow_engine::model_id::{MODEL_13_23, MODEL_20_0, MODEL_20_1, MODEL_20_2};
 
 fn assert_discard_cache_and_review(fields: &str) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -96,5 +96,34 @@ fn model201_live_wp_continuations_match_cache_and_review_in_both_roles() {
         assert_eq!(format!("{fresh:?}"), format!("{review:?}"));
         let old_after = evaluate_decision_with_caches(&old, root.to_str().unwrap(), None, Some(&cache)).unwrap();
         assert_eq!(format!("{old_before:?}"), format!("{old_after:?}"));
+    }
+}
+
+#[test]
+fn model202_rebuilt_board_is_used_consistently_for_play_and_review() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = root.to_str().unwrap();
+    for role in ["dealer", "pone"] {
+        for fields in [
+            format!("kind=peg;turnCard=10;role={role};ownDiscards=1,6;aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore=55;humanScore=58;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"),
+            format!("kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore=55;humanScore=58"),
+        ] {
+            let old = parse_decision_input(&format!("model={MODEL_20_1};{fields}")).unwrap();
+            let new = parse_decision_input(&format!("model={MODEL_20_2};{fields}")).unwrap();
+            let before = evaluate_decision(&old, root).unwrap();
+            let actual = evaluate_decision(&new, root).unwrap();
+            assert_ne!(format!("{before:?}"), format!("{actual:?}"));
+            let cache = Model13HandCache::new();
+            let cached = evaluate_decision_with_caches(&new, root, None, Some(&cache)).unwrap();
+            assert_eq!(format!("{actual:?}"), format!("{cached:?}"));
+            let cards = match &actual {
+                Decision::Discard { card_ids, .. } => card_ids.clone(),
+                Decision::Peg { card_id, .. } => card_id.iter().copied().collect(),
+            };
+            let review = evaluate_selected_decision(&new, &cards, root).unwrap();
+            assert_eq!(format!("{actual:?}"), format!("{review:?}"));
+            let after = evaluate_decision_with_caches(&old, root, None, Some(&cache)).unwrap();
+            assert_eq!(format!("{before:?}"), format!("{after:?}"));
+        }
     }
 }

@@ -1,0 +1,3964 @@
+{
+  "status": "complete",
+  "bytes": 468528,
+  "sha256": "9e658a77bd98d59ada0c363a0c27e68b01c1f5865a850896d790fe68367c696c",
+  "observedCells": 58321,
+  "unsupportedCells": [
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 0,
+      "observations": 0,
+      "probability": 0.6785714285714286,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 0,
+          "wins": 38,
+          "observations": 56
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 1,
+      "observations": 0,
+      "probability": 0.546233649075327,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 1,
+          "wins": 1211,
+          "observations": 2217
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 2,
+      "observations": 0,
+      "probability": 0.5228721929581369,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 2,
+          "wins": 1886,
+          "observations": 3607
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 3,
+      "observations": 0,
+      "probability": 0.4932898773006135,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 3,
+          "wins": 2573,
+          "observations": 5216
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 4,
+      "observations": 0,
+      "probability": 0.4799122214719784,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 4,
+          "wins": 2843,
+          "observations": 5924
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 5,
+      "observations": 0,
+      "probability": 0.4574835268277377,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 5,
+          "wins": 2916,
+          "observations": 6374
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 6,
+      "observations": 0,
+      "probability": 0.4411180693447381,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 6,
+          "wins": 2888,
+          "observations": 6547
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 7,
+      "observations": 0,
+      "probability": 0.41805513480763407,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 7,
+          "wins": 2760,
+          "observations": 6602
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 8,
+      "observations": 0,
+      "probability": 0.40099909173478654,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 8,
+          "wins": 2649,
+          "observations": 6606
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 9,
+      "observations": 0,
+      "probability": 0.38070758996068943,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 9,
+          "wins": 2518,
+          "observations": 6614
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 10,
+      "observations": 0,
+      "probability": 0.36211067432718475,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 10,
+          "wins": 2395,
+          "observations": 6614
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 11,
+      "observations": 0,
+      "probability": 0.342503022974607,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 11,
+          "wins": 2266,
+          "observations": 6616
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 12,
+      "observations": 0,
+      "probability": 0.3208887545344619,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 12,
+          "wins": 2123,
+          "observations": 6616
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 13,
+      "observations": 0,
+      "probability": 0.30819226118500603,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 13,
+          "wins": 2039,
+          "observations": 6616
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 14,
+      "observations": 0,
+      "probability": 0.29069767441860467,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 14,
+          "wins": 1925,
+          "observations": 6622
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 15,
+      "observations": 0,
+      "probability": 0.27389400573758116,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 15,
+          "wins": 1814,
+          "observations": 6623
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 16,
+      "observations": 0,
+      "probability": 0.2583421410237053,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 16,
+          "wins": 1711,
+          "observations": 6623
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 17,
+      "observations": 0,
+      "probability": 0.24112939755397855,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 17,
+          "wins": 1597,
+          "observations": 6623
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 18,
+      "observations": 0,
+      "probability": 0.22920126830741355,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 18,
+          "wins": 1518,
+          "observations": 6623
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 19,
+      "observations": 0,
+      "probability": 0.21666918314963007,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 19,
+          "wins": 1435,
+          "observations": 6623
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 20,
+      "observations": 0,
+      "probability": 0.19918515165233136,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 20,
+          "wins": 1320,
+          "observations": 6627
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 21,
+      "observations": 0,
+      "probability": 0.18756601780594537,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 21,
+          "wins": 1243,
+          "observations": 6627
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 22,
+      "observations": 0,
+      "probability": 0.17529039070749736,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 22,
+          "wins": 1162,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 23,
+      "observations": 0,
+      "probability": 0.16201538693618947,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 23,
+          "wins": 1074,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 24,
+      "observations": 0,
+      "probability": 0.15130487252979333,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 24,
+          "wins": 1003,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 25,
+      "observations": 0,
+      "probability": 0.1378790164429024,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 25,
+          "wins": 914,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 26,
+      "observations": 0,
+      "probability": 0.12656509277417408,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 26,
+          "wins": 839,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 27,
+      "observations": 0,
+      "probability": 0.11992759088852013,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 27,
+          "wins": 795,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 28,
+      "observations": 0,
+      "probability": 0.10816111027304269,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 28,
+          "wins": 717,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 29,
+      "observations": 0,
+      "probability": 0.10137275607180571,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 29,
+          "wins": 672,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 30,
+      "observations": 0,
+      "probability": 0.08734349072258259,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 30,
+          "wins": 579,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 31,
+      "observations": 0,
+      "probability": 0.07783979484085081,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 31,
+          "wins": 516,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 32,
+      "observations": 0,
+      "probability": 0.06803439432795294,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 32,
+          "wins": 451,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 33,
+      "observations": 0,
+      "probability": 0.05747473223713984,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 33,
+          "wins": 381,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 34,
+      "observations": 0,
+      "probability": 0.05083723035148589,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 34,
+          "wins": 337,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 35,
+      "observations": 0,
+      "probability": 0.0467642178307437,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 35,
+          "wins": 310,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 36,
+      "observations": 0,
+      "probability": 0.042238648363252376,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 36,
+          "wins": 280,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 37,
+      "observations": 0,
+      "probability": 0.03529944184643234,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 37,
+          "wins": 234,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 38,
+      "observations": 0,
+      "probability": 0.031377281641273194,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 38,
+          "wins": 208,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 39,
+      "observations": 0,
+      "probability": 0.028209383014029265,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 39,
+          "wins": 187,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 40,
+      "observations": 0,
+      "probability": 0.024890632071202293,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 40,
+          "wins": 165,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 41,
+      "observations": 0,
+      "probability": 0.020666767234877054,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 41,
+          "wins": 137,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 42,
+      "observations": 0,
+      "probability": 0.01764972092321617,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 42,
+          "wins": 117,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 43,
+      "observations": 0,
+      "probability": 0.01659375471413486,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 43,
+          "wins": 110,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 44,
+      "observations": 0,
+      "probability": 0.014029265349223111,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 44,
+          "wins": 93,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 45,
+      "observations": 0,
+      "probability": 0.01221903756222658,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 45,
+          "wins": 81,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 46,
+      "observations": 0,
+      "probability": 0.01146477598431136,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 46,
+          "wins": 76,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 47,
+      "observations": 0,
+      "probability": 0.00935284356614874,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 47,
+          "wins": 62,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 48,
+      "observations": 0,
+      "probability": 0.00754261577915221,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 48,
+          "wins": 50,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 49,
+      "observations": 0,
+      "probability": 0.006637501885653945,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 49,
+          "wins": 44,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 50,
+      "observations": 0,
+      "probability": 0.005581535676572635,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 50,
+          "wins": 37,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 51,
+      "observations": 0,
+      "probability": 0.00467642178307437,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 51,
+          "wins": 31,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 52,
+      "observations": 0,
+      "probability": 0.003922160205159149,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 52,
+          "wins": 26,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 53,
+      "observations": 0,
+      "probability": 0.00286619399607784,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 53,
+          "wins": 19,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 54,
+      "observations": 0,
+      "probability": 0.00286619399607784,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 54,
+          "wins": 19,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 55,
+      "observations": 0,
+      "probability": 0.0025644893649117515,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 55,
+          "wins": 17,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 56,
+      "observations": 0,
+      "probability": 0.0013576708402473978,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 56,
+          "wins": 9,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 57,
+      "observations": 0,
+      "probability": 0.000754261577915221,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 57,
+          "wins": 5,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 58,
+      "observations": 0,
+      "probability": 0.000754261577915221,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 58,
+          "wins": 5,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 59,
+      "observations": 0,
+      "probability": 0.0003017046311660884,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 59,
+          "wins": 2,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 60,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 60,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 61,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 61,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 62,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 62,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 63,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 63,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 64,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 64,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 65,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 65,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 66,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 66,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 67,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 67,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 68,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 68,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 69,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 69,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 70,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 70,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 71,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 71,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 72,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 72,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 73,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 73,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 74,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 74,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 75,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 75,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 76,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 76,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 77,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 77,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 78,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 78,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 79,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 79,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 80,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 80,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 81,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 81,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 82,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 82,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 83,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 83,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 84,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 84,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 85,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 85,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 86,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 86,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 87,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 87,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 88,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 88,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 89,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 89,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 90,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 90,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 91,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 91,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 92,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 92,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 93,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 93,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 94,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 94,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 95,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 95,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 96,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 96,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 97,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 97,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 98,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 98,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 99,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 99,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 100,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 100,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 101,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 101,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 102,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 102,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 103,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 103,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 104,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 104,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 105,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 105,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 106,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 106,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 107,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 107,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 108,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 108,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 109,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 109,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 110,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 110,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 111,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 111,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 112,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 112,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 113,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 113,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 114,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 114,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 115,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 115,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 116,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 116,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 117,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 117,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 118,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 118,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 119,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 119,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pegging",
+      "dealerScore": 0,
+      "poneScore": 120,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 120,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 0,
+      "observations": 0,
+      "probability": 0.875,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 1,
+          "wins": 12,
+          "observations": 14
+        },
+        {
+          "dealerScore": 2,
+          "poneScore": 0,
+          "wins": 2,
+          "observations": 2
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 1,
+      "observations": 0,
+      "probability": 0.8571428571428571,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 1,
+          "wins": 12,
+          "observations": 14
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 2,
+      "observations": 0,
+      "probability": 0.8518518518518519,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 2,
+          "wins": 23,
+          "observations": 27
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 3,
+      "observations": 0,
+      "probability": 0.5116279069767442,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 3,
+          "wins": 66,
+          "observations": 129
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 4,
+      "observations": 0,
+      "probability": 0.5671641791044776,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 4,
+          "wins": 114,
+          "observations": 201
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 5,
+      "observations": 0,
+      "probability": 0.5737179487179487,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 5,
+          "wins": 358,
+          "observations": 624
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 6,
+      "observations": 0,
+      "probability": 0.5812236286919831,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 6,
+          "wins": 551,
+          "observations": 948
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 7,
+      "observations": 0,
+      "probability": 0.5909090909090909,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 7,
+          "wins": 949,
+          "observations": 1606
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 8,
+      "observations": 0,
+      "probability": 0.5796418473138548,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 8,
+          "wins": 1230,
+          "observations": 2122
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 9,
+      "observations": 0,
+      "probability": 0.540876389797253,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 9,
+          "wins": 1654,
+          "observations": 3058
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 10,
+      "observations": 0,
+      "probability": 0.5248455546602202,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 10,
+          "wins": 1954,
+          "observations": 3723
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 11,
+      "observations": 0,
+      "probability": 0.48845714285714287,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 11,
+          "wins": 2137,
+          "observations": 4375
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 12,
+      "observations": 0,
+      "probability": 0.47413612565445024,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 12,
+          "wins": 2264,
+          "observations": 4775
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 13,
+      "observations": 0,
+      "probability": 0.45489833641404803,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 13,
+          "wins": 2461,
+          "observations": 5410
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 14,
+      "observations": 0,
+      "probability": 0.44063647490820074,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 14,
+          "wins": 2520,
+          "observations": 5719
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 15,
+      "observations": 0,
+      "probability": 0.4148883374689826,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 15,
+          "wins": 2508,
+          "observations": 6045
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 16,
+      "observations": 0,
+      "probability": 0.3917095115681234,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 16,
+          "wins": 2438,
+          "observations": 6224
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 17,
+      "observations": 0,
+      "probability": 0.3730471832097207,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 17,
+          "wins": 2364,
+          "observations": 6337
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 18,
+      "observations": 0,
+      "probability": 0.35515471932825377,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 18,
+          "wins": 2284,
+          "observations": 6431
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 19,
+      "observations": 0,
+      "probability": 0.3384330088085304,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 19,
+          "wins": 2190,
+          "observations": 6471
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 20,
+      "observations": 0,
+      "probability": 0.3192928516525749,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 20,
+          "wins": 2077,
+          "observations": 6505
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 21,
+      "observations": 0,
+      "probability": 0.306847643739515,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 21,
+          "wins": 2012,
+          "observations": 6557
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 22,
+      "observations": 0,
+      "probability": 0.2908620951801733,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 22,
+          "wins": 1913,
+          "observations": 6577
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 23,
+      "observations": 0,
+      "probability": 0.27366348629410875,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 23,
+          "wins": 1807,
+          "observations": 6603
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 24,
+      "observations": 0,
+      "probability": 0.25502949629405536,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 24,
+          "wins": 1686,
+          "observations": 6611
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 25,
+      "observations": 0,
+      "probability": 0.24241051200724967,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 25,
+          "wins": 1605,
+          "observations": 6621
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 26,
+      "observations": 0,
+      "probability": 0.2276361442148137,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 26,
+          "wins": 1509,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 27,
+      "observations": 0,
+      "probability": 0.21390858349675668,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 27,
+          "wins": 1418,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 28,
+      "observations": 0,
+      "probability": 0.19927590888520139,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 28,
+          "wins": 1321,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 29,
+      "observations": 0,
+      "probability": 0.18766028058530698,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 29,
+          "wins": 1244,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 30,
+      "observations": 0,
+      "probability": 0.1730276059737517,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 30,
+          "wins": 1147,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 31,
+      "observations": 0,
+      "probability": 0.15794237441544728,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 31,
+          "wins": 1047,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 32,
+      "observations": 0,
+      "probability": 0.1443656660129733,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 32,
+          "wins": 957,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 33,
+      "observations": 0,
+      "probability": 0.12852617287675366,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 33,
+          "wins": 852,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 34,
+      "observations": 0,
+      "probability": 0.1146477598431136,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 34,
+          "wins": 760,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 35,
+      "observations": 0,
+      "probability": 0.10469150701463267,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 35,
+          "wins": 694,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 36,
+      "observations": 0,
+      "probability": 0.09579122039523306,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 36,
+          "wins": 635,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 37,
+      "observations": 0,
+      "probability": 0.08990798008749434,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 37,
+          "wins": 596,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 38,
+      "observations": 0,
+      "probability": 0.0791974656810982,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 38,
+          "wins": 525,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 39,
+      "observations": 0,
+      "probability": 0.06592246190979031,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 39,
+          "wins": 437,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 40,
+      "observations": 0,
+      "probability": 0.05928496002413637,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 40,
+          "wins": 393,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 41,
+      "observations": 0,
+      "probability": 0.05249660582289938,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 41,
+          "wins": 348,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 42,
+      "observations": 0,
+      "probability": 0.045708251621662394,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 42,
+          "wins": 303,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 43,
+      "observations": 0,
+      "probability": 0.04208779604766933,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 43,
+          "wins": 279,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 44,
+      "observations": 0,
+      "probability": 0.03710966963342887,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 44,
+          "wins": 246,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 45,
+      "observations": 0,
+      "probability": 0.03454518026851712,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 45,
+          "wins": 229,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 46,
+      "observations": 0,
+      "probability": 0.03017046311660884,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 46,
+          "wins": 200,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 47,
+      "observations": 0,
+      "probability": 0.024890632071202293,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 47,
+          "wins": 165,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 48,
+      "observations": 0,
+      "probability": 0.020666767234877054,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 48,
+          "wins": 137,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 49,
+      "observations": 0,
+      "probability": 0.019309096394629657,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 49,
+          "wins": 128,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 50,
+      "observations": 0,
+      "probability": 0.015990345451802685,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 50,
+          "wins": 106,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 51,
+      "observations": 0,
+      "probability": 0.014180117664806155,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 51,
+          "wins": 94,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 52,
+      "observations": 0,
+      "probability": 0.01146477598431136,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 52,
+          "wins": 76,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 53,
+      "observations": 0,
+      "probability": 0.010257957459647006,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 53,
+          "wins": 68,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 54,
+      "observations": 0,
+      "probability": 0.008598581988233519,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 54,
+          "wins": 57,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 55,
+      "observations": 0,
+      "probability": 0.007090058832403078,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 55,
+          "wins": 47,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 56,
+      "observations": 0,
+      "probability": 0.006637501885653945,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 56,
+          "wins": 44,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 57,
+      "observations": 0,
+      "probability": 0.005581535676572635,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 57,
+          "wins": 37,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 58,
+      "observations": 0,
+      "probability": 0.005128978729823503,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 58,
+          "wins": 34,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 59,
+      "observations": 0,
+      "probability": 0.0034696032584100164,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 59,
+          "wins": 23,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 60,
+      "observations": 0,
+      "probability": 0.0034696032584100164,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 60,
+          "wins": 23,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 61,
+      "observations": 0,
+      "probability": 0.00286619399607784,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 61,
+          "wins": 19,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 62,
+      "observations": 0,
+      "probability": 0.0019610801025795746,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 62,
+          "wins": 13,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 63,
+      "observations": 0,
+      "probability": 0.0018102277869965304,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 63,
+          "wins": 12,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 64,
+      "observations": 0,
+      "probability": 0.0018102277869965304,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 64,
+          "wins": 12,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 65,
+      "observations": 0,
+      "probability": 0.0018102277869965304,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 65,
+          "wins": 12,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 66,
+      "observations": 0,
+      "probability": 0.0006034092623321768,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 66,
+          "wins": 4,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 67,
+      "observations": 0,
+      "probability": 0.0003017046311660884,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 67,
+          "wins": 2,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 68,
+      "observations": 0,
+      "probability": 0.0003017046311660884,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 68,
+          "wins": 2,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 69,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 69,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 70,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 70,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 71,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 71,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 72,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 72,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 73,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 73,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 74,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 74,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 75,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 75,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 76,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 76,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 77,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 77,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 78,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 78,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 79,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 79,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 80,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 80,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 81,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 81,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 82,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 82,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 83,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 83,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 84,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 84,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 85,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 85,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 86,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 86,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 87,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 87,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 88,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 88,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 89,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 89,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 90,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 90,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 91,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 91,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 92,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 92,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 93,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 93,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 94,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 94,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 95,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 95,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 96,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 96,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 97,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 97,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 98,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 98,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 99,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 99,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 100,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 100,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 101,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 101,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 102,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 102,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 103,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 103,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 104,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 104,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 105,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 105,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 106,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 106,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 107,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 107,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 108,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 108,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 109,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 109,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 110,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 110,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 111,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 111,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 112,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 112,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 113,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 113,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 114,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 114,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 115,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 115,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 116,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 116,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 117,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 117,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 118,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 118,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 119,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 119,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 0,
+      "poneScore": 120,
+      "observations": 0,
+      "probability": 0.0,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 120,
+          "wins": 0,
+          "observations": 6629
+        }
+      ]
+    },
+    {
+      "seam": "after_pone",
+      "dealerScore": 1,
+      "poneScore": 0,
+      "observations": 0,
+      "probability": 0.875,
+      "rule": "nearest supported Manhattan ring, weighted by observation count",
+      "neighbors": [
+        {
+          "dealerScore": 1,
+          "poneScore": 1,
+          "wins": 12,
+          "observations": 14
+        },
+        {
+          "dealerScore": 2,
+          "poneScore": 0,
+          "wins": 2,
+          "observations": 2
+        }
+      ]
+    }
+  ],
+  "missingEvidenceIsNotZero": true,
+  "source": {
+    "status": "complete",
+    "games": 40000,
+    "clusters": 10000,
+    "cohorts": {
+      "model9-round-robin": 30000,
+      "model911-vs-model91": 10000
+    },
+    "unresolvedFirstPhaseStarts": {
+      "discard": 0,
+      "after_discard": 0,
+      "after_pegging": 1583,
+      "after_pone": 5861
+    },
+    "outputSha256": "43adc3b2bb8a0481a5d6f089fc4ab7e2911219d092910e4e4b7fc84fb98396e5",
+    "inputs": [
+      {
+        "cohort": "model9-round-robin",
+        "source": "/private/tmp/cribbage-model202-board-build-20260926/inputs/forward.db",
+        "sourceSha256": "7546e1ecaa299f95495d9e22ed495f3c385e8179506897660e8c7e849bce962f",
+        "trajectory": "/private/tmp/cribbage-model202-board-build-20260926/inputs/legacy-forward.sqlite",
+        "trajectorySha256": "c6dde18833fd870d059466812a29cde588152cead4f38aafab47ba395207580b"
+      },
+      {
+        "cohort": "model9-round-robin",
+        "source": "/private/tmp/cribbage-model202-board-build-20260926/inputs/reverse.db",
+        "sourceSha256": "f7a81ad9fe13e0f479fa2547f056f7a9f7d1578f77aea0b989e83dd2254e83fd",
+        "trajectory": "/private/tmp/cribbage-model202-board-build-20260926/inputs/legacy-reverse.sqlite",
+        "trajectorySha256": "acc8cb8337c733a6077ec631345924b41defbe978de4d97589f636b313c99c3f"
+      },
+      {
+        "cohort": "model911-vs-model91",
+        "source": "/private/tmp/cribbage-model202-board-build-20260926/inputs/model91-left.db",
+        "sourceSha256": "9cc0fc8daf350a2d215e19205637039b189c69c445308e63b259bd816b615623",
+        "trajectory": "/private/tmp/cribbage-model202-board-build-20260926/inputs/model91-left.sqlite",
+        "trajectorySha256": "40f862ae26c39b9de3265cf203476a412cab703acda0a3b917bead6109505783"
+      },
+      {
+        "cohort": "model911-vs-model91",
+        "source": "/private/tmp/cribbage-model202-board-build-20260926/inputs/model911-left.db",
+        "sourceSha256": "f5e8e47202145a76fe0aa9ba4ef20f2f3d09b86feaa65954a18acfd11da36406",
+        "trajectory": "/private/tmp/cribbage-model202-board-build-20260926/inputs/model911-left.sqlite",
+        "trajectorySha256": "078b3d294f2aacb387d95633bc8b24239a42de45fa548f696d5f9e0268a257f2"
+      }
+    ]
+  },
+  "sampling": "Replay each complete trajectory once from discard at every 0..120 score pair; first crossing determines winner; count all preterminal phase visits in current-dealer orientation.",
+  "counterfactualReplays": 585640000,
+  "independentSeedClusters": 10000,
+  "newExtensionsUsed": false,
+  "limitations": [
+    "Recorded decisions are fixed, not reoptimized for each hypothetical score.",
+    "Phase cells condition on different visited histories; adjacent-cell reversals alone do not prove a counting bug.",
+    "Sparse observed cells retain raw frequencies; uncertainty and unsupported cells remain in the source database and this provenance."
+  ]
+}

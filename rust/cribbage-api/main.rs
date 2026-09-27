@@ -2154,7 +2154,7 @@ fn apply_action_with_peg_decision(
                 None,
                 model_root,
                 Some(&session.model911_hand_cache),
-                matches!(decision_model, ModelId::Schell1323 | ModelId::Schell200 | ModelId::Schell201)
+                matches!(decision_model, ModelId::Schell1323 | ModelId::Schell200 | ModelId::Schell201 | ModelId::Schell202)
                     .then_some(&session.model1323_hand_cache),
             ))?;
             let (reason, cards, score_components) = match decision {

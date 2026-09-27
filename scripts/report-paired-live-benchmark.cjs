@@ -216,7 +216,7 @@ function modelName(model) {
   return model;
 }
 
-function combineRows(analyses, rowsFor, fields) {
+function combineRows(analyses, rowsFor, fields, totals = []) {
   const groups = new Map();
   for (const analysis of analyses) {
     for (const row of rowsFor(analysis)) {
@@ -224,12 +224,12 @@ function combineRows(analyses, rowsFor, fields) {
       const group = groups.get(key) || { kind: row.kind || row.label, role: row.role || null, model: row.model || null, rows: 0 };
       const weight = row.rows;
       group.rows += weight;
-      for (const field of fields) group[field] = (group[field] || 0) + row[field] * weight;
+      for (const field of fields) group[field] = (group[field] || 0) + row[field] * (totals.includes(field) ? 1 : weight);
       groups.set(key, group);
     }
   }
   return [...groups.values()].map((group) => {
-    for (const field of fields) group[field] /= group.rows;
+    for (const field of fields) if (!totals.includes(field)) group[field] /= group.rows;
     return group;
   });
 }
@@ -294,7 +294,7 @@ function buildReport(options) {
       evCalibration: combineRows(analyses, (analysis) => analysis.ev.rows, ["avgEv", "avgRealized", "avgError", "meanAbsError"]),
       evTelemetry: { legacyImmediatePegModels, excluded: evExcluded },
       winProbabilityCalibration: combineRows(analyses, (analysis) => analysis.winProbability.rows, ["avgPredicted", "actualWinRate", "miss", "brier", "meanAbsError"]),
-      timing: combineRows(analyses, (analysis) => analysis.timing.rows, ["avgMs", "totalSeconds"]),
+      timing: combineRows(analyses, (analysis) => analysis.timing.rows, ["avgMs", "totalSeconds"], ["totalSeconds"]),
       orientationAnalysis: { [options.candidateLeft]: candidateAnalysis, [options.opponentLeft]: opponentAnalysis },
       integrity: { errors: [], warnings: [], invalidEngineIndexes: games.invalidEngines, pairedSeedMismatchIndexes: games.paired.seedMismatches },
     };
@@ -422,4 +422,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { buildReport, parseArgs, summarizeGames, summarizeProgress, renderMarkdown };
+module.exports = { combineRows, buildReport, parseArgs, summarizeGames, summarizeProgress, renderMarkdown };

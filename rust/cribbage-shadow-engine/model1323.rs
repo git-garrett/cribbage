@@ -126,7 +126,7 @@ pub struct PolicyAssets {
     discard_asset_sha256: [u8; 32],
     suit_rates: Option<[SuitedDiscardRates; 2]>,
     empirical_depletion: bool,
-    wp_board: Option<Arc<crate::board_matrix::BoardWinMatrix>>,
+    pub(crate) wp_board: Option<Arc<crate::board_matrix::BoardWinMatrix>>,
 }
 
 impl PolicyAssets {
@@ -228,6 +228,14 @@ impl PolicyAssets {
         assets.wp_board = Some(Arc::new(
             crate::board_matrix::BoardWinMatrix::load_verified_model13215(
                 directory.join("board-win-matrix.bin"))?));
+        Ok(assets)
+    }
+
+    pub(crate) fn load_model202(directory: &Path) -> Result<Self, String> {
+        let mut assets = Self::load_model20(directory)?;
+        assets.wp_board = Some(Arc::new(
+            crate::board_matrix::BoardWinMatrix::load_verified_model202(
+                directory.join("model202-board-win-matrix.bin"))?));
         Ok(assets)
     }
 

@@ -5,6 +5,8 @@ use std::path::Path;
 pub const MODEL13215_BOARD_SHA256: &str =
     "099715bc3aed5b296c39fb3edfd8fa30e0dad13239dede1c8963e344dfe8d679";
 
+pub const MODEL202_BOARD_SHA256: &str = "9e658a77bd98d59ada0c363a0c27e68b01c1f5865a850896d790fe68367c696c";
+
 pub const BOARD_MATRIX_SCORE_COUNT: usize = 121;
 const BOARD_MATRIX_MAGIC: &[u8; 4] = b"BWM2";
 const BOARD_MATRIX_VERSION: u32 = 2;
@@ -38,6 +40,15 @@ impl BoardWinMatrix {
             .map_err(|error| format!("read {} failed: {error}", path.as_ref().display()))?;
         if format!("{:x}", Sha256::digest(&bytes)) != MODEL13215_BOARD_SHA256 {
             return Err("Model 13.23 requires the verified Model 13.215 BWM2 asset".into());
+        }
+        Self::decode(&bytes)
+    }
+
+    pub fn load_verified_model202(path: impl AsRef<Path>) -> Result<Self, String> {
+        let bytes = fs::read(path.as_ref())
+            .map_err(|error| format!("read {} failed: {error}", path.as_ref().display()))?;
+        if format!("{:x}", Sha256::digest(&bytes)) != MODEL202_BOARD_SHA256 {
+            return Err("Model 20.2 requires its verified rebuilt BWM2 asset".into());
         }
         Self::decode(&bytes)
     }
@@ -140,6 +151,14 @@ mod tests {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         bytes
+    }
+
+    #[test]
+    fn model202_pins_its_own_asset_and_preserves_the_legacy_loader() {
+        let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        assert!(BoardWinMatrix::load_verified_model202(assets.join("model202-board-win-matrix.bin")).is_ok());
+        assert!(BoardWinMatrix::load_verified_model202(assets.join("board-win-matrix.bin")).is_err());
+        assert!(BoardWinMatrix::load_verified_model13215(assets.join("model202-board-win-matrix.bin")).is_err());
     }
 
     #[test]
