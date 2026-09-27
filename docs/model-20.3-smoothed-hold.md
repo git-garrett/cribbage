@@ -17,6 +17,16 @@ and 945,770 bytes. All 1,820 four-card rank patterns have positive opening
 probability for each role, including the eight absent from the old dictionary.
 Every conditional row includes every physically possible remaining rank hand.
 
+Model 20.3 also drops the runtime dependency on
+`crib-rank-score-by-discard-cut.json`. Its fallback rank means are derived from
+the existing `crib-score-histogram-by-discard-cut.json` contributors, preserving
+all 2,366 historical values exactly at their original five-decimal precision.
+Discard recommendations, decision reviews, and live pegging use this
+histogram-only loader. The crib probabilities and fallback scoring behavior are
+unchanged; this removes a redundant input, not the separate conditioning
+weaknesses identified in the crib forecast. Older models, including 20.2, retain
+the original loader and file. Frozen benchmark copies are unaffected.
+
 For role/prefix context c and remaining hand h, the builder uses
 
 `p(h|c) = (observed_count(h,c) + strength[c] * backoff(h,c)) / (N[c] + strength[c])`.

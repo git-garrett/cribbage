@@ -1978,6 +1978,35 @@ impl Model13HoldTable {
 }
 
 impl CribRankDiscardTables {
+    /// The histogram contributors contain all information in the separate
+    /// rank-mean asset. Preserve its five-decimal means for fallback callers.
+    pub fn load_histograms(histogram_path: impl AsRef<Path>) -> Result<Self, String> {
+        let histograms = parse_crib_histograms(
+            &fs::read_to_string(histogram_path.as_ref())
+                .map_err(|error| format!("read crib histogram table failed: {}", error))?,
+        )?;
+        let mut rank_scores = HashMap::with_capacity(histograms.len());
+        for (key, entry) in &histograms {
+            let total_weight: f64 = entry.opponent_discards.iter().map(|d| d.weight).sum();
+            let total_points: f64 = entry
+                .opponent_discards
+                .iter()
+                .map(|d| d.weight * f64::from(d.rank_score))
+                .sum();
+            if total_weight <= 0.0 || !total_weight.is_finite() || !total_points.is_finite() {
+                return Err("crib histogram has no finite positive weight".into());
+            }
+            rank_scores.insert(
+                key.clone(),
+                (total_points / total_weight * 100_000.0).round() / 100_000.0,
+            );
+        }
+        Ok(Self {
+            rank_scores,
+            histograms,
+        })
+    }
+
     pub fn load(
         rank_score_path: impl AsRef<Path>,
         histogram_path: impl AsRef<Path>,

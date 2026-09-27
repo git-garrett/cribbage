@@ -248,6 +248,7 @@ struct RuntimeTables {
     pairwise14: OnceLock<PairwiseTable>,
     hold: OnceLock<Model13HoldTable>,
     crib_rank: OnceLock<CribRankDiscardTables>,
+    crib_rank203: OnceLock<CribRankDiscardTables>,
     crib_tripolicy14: OnceLock<CribTripolicyTable>,
     policy16: OnceLock<Option<PolicyArtifact>>,
     scorer163: OnceLock<Option<Model162ActionScorer>>,
@@ -1905,7 +1906,7 @@ fn recommend_discard_model1323(
 ) -> Result<Decision, String> {
     let histogram = tables.corrections1323()?;
     let mut board = BoardModel::from_board_matrix(Arc::clone(tables.board_for_model1323(input)?));
-    let crib_rank = tables.crib_rank()?;
+    let crib_rank = tables.crib_for_model(input)?;
     let show = model20_discard_context(input, tables)?;
     recommend_discard_model1323_with_assets(
         input,
@@ -2471,7 +2472,7 @@ fn review_discard_model13(
         return recommend_discard_model1323_with_assets(
             input,
             tables.corrections1323()?,
-            tables.crib_rank()?,
+            tables.crib_for_model(input)?,
             &mut board,
             Some(selected_card_ids),
             show.as_ref(),
@@ -5868,6 +5869,7 @@ fn model1323_pegging_win_evaluator(
     tables: &RuntimeTables,
 ) -> Result<PeggingWinEvaluator, String> {
     let board = BoardModel::from_board_matrix(Arc::clone(tables.board_for_model1323(input)?));
+    let crib_rank = tables.crib_for_model(input)?;
     let mut context = if input.model == MODEL_20_3 {
         let hands = tables.pegging_policy_assets(input)?
             .opponent_keep_weights(&model1323_observation(input))?
@@ -5887,11 +5889,11 @@ fn model1323_pegging_win_evaluator(
             pone_is_perspective: input.role == Role::Pone,
             dealer_is_perspective: input.role == Role::Dealer,
             pone_hand, dealer_hand,
-            crib: upcoming_crib_score_distribution(input, Some(tables.crib_rank()?)),
+            crib: upcoming_crib_score_distribution(input, Some(crib_rank)),
             memo: HashMap::new(), board,
         }
     } else {
-        post_pegging_win_context(input, tables.hold()?, board, Some(tables.crib_rank()?))
+        post_pegging_win_context(input, tables.hold()?, board, Some(crib_rank))
     };
     if matches!(input.model.as_str(), MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3) && input.own_discards.len() == 2 {
         let known = known_cards_for_pegging(input);
@@ -5900,7 +5902,7 @@ fn model1323_pegging_win_evaluator(
             input.turn_card,
             input.role,
             &known,
-            tables.crib_rank()?,
+            crib_rank,
             Some(
                 tables
                     .pegging_policy_assets(input)?
@@ -6368,6 +6370,7 @@ impl RuntimeTables {
             pairwise14: OnceLock::new(),
             hold: OnceLock::new(),
             crib_rank: OnceLock::new(),
+            crib_rank203: OnceLock::new(),
             crib_tripolicy14: OnceLock::new(),
             policy16: OnceLock::new(),
             scorer163: OnceLock::new(),
@@ -6550,6 +6553,18 @@ impl RuntimeTables {
         load_cached(&self.hold, "hold", || {
             Model13HoldTable::load_p13h(self.asset_path("model13-hold.bin"))
         })
+    }
+
+    fn crib_for_model(&self, input: &DecisionInput) -> Result<&CribRankDiscardTables, String> {
+        if input.model == MODEL_20_3 {
+            load_cached(&self.crib_rank203, "crib_rank203", || {
+                CribRankDiscardTables::load_histograms(
+                    self.asset_path("crib-score-histogram-by-discard-cut.json"),
+                )
+            })
+        } else {
+            self.crib_rank()
+        }
     }
 
     fn crib_rank(&self) -> Result<&CribRankDiscardTables, String> {
@@ -7005,6 +7020,61 @@ mod tests {
     }
 
     #[test]
+    fn model203_crib_loads_without_mean_asset_and_preserves_every_value() {
+        let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let root = std::env::temp_dir().join(format!(
+            "cribbage-model203-crib-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+        ));
+        let isolated_assets = root.join("rust/cribbage-shadow-engine/assets");
+        std::fs::create_dir_all(&isolated_assets).unwrap();
+        let histogram_name = "crib-score-histogram-by-discard-cut.json";
+        let mean_name = "crib-rank-score-by-discard-cut.json";
+        std::fs::copy(assets.join(histogram_name), isolated_assets.join(histogram_name)).unwrap();
+        assert!(!isolated_assets.join(mean_name).exists());
+        let tables = RuntimeTables::new(root.to_str().unwrap());
+        let mut input = model16_peg_input();
+        input.model = MODEL_20_3.into();
+        let actual = tables.crib_for_model(&input).unwrap();
+        let legacy = CribRankDiscardTables::load(assets.join(mean_name), assets.join(histogram_name)).unwrap();
+        assert_eq!(actual.rank_scores.len(), 2366);
+        assert_eq!(actual.histograms.len(), legacy.histograms.len());
+        for (key, expected) in &legacy.rank_scores {
+            assert_eq!(actual.rank_scores[key].to_bits(), expected.to_bits(), "{key:?}");
+        }
+        for (key, expected) in &legacy.histograms {
+            let entries = &actual.histograms[key].opponent_discards;
+            assert_eq!(entries.len(), expected.opponent_discards.len());
+            for (a, b) in entries.iter().zip(&expected.opponent_discards) {
+                assert_eq!((a.ranks, a.weight.to_bits(), a.rank_score),
+                    (b.ranks, b.weight.to_bits(), b.rank_score));
+            }
+        }
+        assert!(tables.crib_rank.get().is_none());
+        input.model = MODEL_20_2.into();
+        assert!(tables.crib_for_model(&input).is_err(), "20.2 retains its original dependency");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn model203_discard_uses_histogram_only_crib_loader() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+        let tables = RuntimeTables::new(root.to_str().unwrap());
+        let input = parse_decision_input(&format!(
+            "kind=discard;model={MODEL_20_3};role=dealer;aiHand=0,4,8,12,16,20;aiScore=119;humanScore=118"
+        )).unwrap();
+        let rows = crate::cards::combinations_indices(6, 2).into_iter().map(|indices| {
+            let discard = vec![input.ai_hand[indices[0]], input.ai_hand[indices[1]]];
+            (rank_counts(&input.ai_hand), rank_counts(&discard), input.role, vec![(1, 1, 1)])
+        }).collect::<Vec<_>>();
+        assert!(tables.corrections1323.set(Ok(Model1323CorrectionTable::fixture(&rows))).is_ok());
+        assert!(matches!(recommend_discard_model1323(&input, &tables).unwrap(), Decision::Discard { .. }));
+        assert!(tables.crib_rank203.get().is_some());
+        assert!(tables.crib_rank.get().is_none());
+    }
+
+    #[test]
     fn model203_show_forecast_uses_go_evidence_and_does_not_load_legacy_hold() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
         let tables = RuntimeTables::new(root.to_str().unwrap());
@@ -7018,6 +7088,8 @@ mod tests {
         assert_eq!(before.pone_hand, after.pone_hand);
         assert!((after.dealer_hand.iter().map(|(_, w)| w).sum::<f64>() - 1.0).abs() < 1e-12);
         assert!(tables.hold.get().is_none());
+        assert!(tables.crib_rank.get().is_none());
+        assert!(tables.crib_rank203.get().is_some());
         let posterior = tables.pegging_policy_assets(&input).unwrap()
             .opponent_keep_weights(&model1323_observation(&input)).unwrap();
         assert!(posterior.iter().all(|(h, _)| h[..6].iter().all(|n| *n == 0)));

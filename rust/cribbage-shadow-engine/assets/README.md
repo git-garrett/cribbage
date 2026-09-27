@@ -6,6 +6,13 @@ runtime data, not independently selectable browser models. In particular,
 directory; keeping it here preserves the 13.0 Rust evaluator without retaining
 any pre-13.0 model surface.
 
+Model 20.3 needs only `crib-score-histogram-by-discard-cut.json` for its crib
+rank forecasts. It derives the historical five-decimal fallback means from
+that file's weighted contributors instead of loading the redundant
+`crib-rank-score-by-discard-cut.json`. The latter remains packaged for older
+models, including Model 20.2. This dependency removal preserves the existing
+probabilities and scoring behavior.
+
 `board-win-matrix.bin` (`BWM2`) contains the four pooled phase-seam matrices
 used by Model 13.215: discard, after discard, after pegging, and after pone's
 count. The after-discard seam is after starter reveal and any heels points.
