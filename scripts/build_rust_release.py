@@ -173,9 +173,11 @@ def build(options):
                                 root / 'rust/Cargo.toml', '-p', 'cribbage-api', '--target', target]
                 if options.offline:
                     test_command.append('--offline')
-                test_command.extend(['--', '--include-ignored', '--test-threads=1'])
-                run(test_command, cwd=root,
-                    env=compiler_env(os.environ, flags + extra, directory))
+                # Keep the full-asset suite in a separate process, as predeploy QA
+                # does, so model tables from unrelated tests are not retained.
+                for selection in [[], ['--ignored']]:
+                    run(test_command + ['--', '--test-threads=1'] + selection, cwd=root,
+                        env=compiler_env(os.environ, flags + extra, directory))
                 record['apiTestsPassed'] = True
             if options.compact:
                 preserved = run_dir / name

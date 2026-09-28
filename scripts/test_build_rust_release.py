@@ -114,7 +114,9 @@ class ReleaseBuildTests(unittest.TestCase):
             self.assertTrue(record['apiTestsPassed'])
             self.assertTrue(record['compact'])
             self.assertEqual((p/'target/release/cribbage-api').read_text(), 'cargo')
-            self.assertEqual(len([a for a, _ in calls if a[:2] == ['cargo', 'test']]), 1)
+            tests = [a for a, _ in calls if a[:2] == ['cargo', 'test']]
+            self.assertEqual(len(tests), 2)
+            self.assertEqual(sum('--ignored' in a for a in tests), 1)
             self.assertFalse(any((p/'target/pgo/api').glob('run-*/cargo')))
 
     def test_requested_pgo_rejects_cross_compilation(self):
