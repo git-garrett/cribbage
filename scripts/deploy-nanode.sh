@@ -174,7 +174,7 @@ deploy() {
         --unit='cribbage-build-${GIT_COMMIT}' \
         -p MemoryHigh=512M -p MemoryMax=640M -p MemorySwapMax=256M \
         -p CPUWeight=10 -p IOWeight=10 -p Nice=10 -p OOMScoreAdjust=500 \
-        -p RuntimeMaxSec=3h -p Restart=no \
+        -p RuntimeMaxSec=3h -p Restart=no -p UMask=0022 \
         /usr/bin/python3 '$incoming_dir/scripts/build_production_release.py' \
         '$incoming_dir' '$REMOTE_BUILD_DIR/pgo-target' '$GIT_COMMIT' && \
       chown -R root:root '$incoming_dir' && \
