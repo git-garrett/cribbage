@@ -139,7 +139,7 @@ start_runtime() {
   assert_ports_free
   bootstrap_data
   echo "Building the current web client and Rust API..."
-  (cd "$ROOT_DIR" && npm run build && cargo build --manifest-path rust/cribbage-api/Cargo.toml --release)
+  (cd "$ROOT_DIR" && npm run build && python3 scripts/build_rust_release.py api)
   mkdir -p "${RUNTIME_DIR}/dist" "${RUNTIME_DIR}/rust/cribbage-shadow-engine/assets"
   rsync -a --delete "${ROOT_DIR}/dist/" "${RUNTIME_DIR}/dist/"
   rsync -a --delete "${ROOT_DIR}/rust/cribbage-shadow-engine/assets/" "${RUNTIME_DIR}/rust/cribbage-shadow-engine/assets/"

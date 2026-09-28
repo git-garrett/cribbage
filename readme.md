@@ -85,3 +85,10 @@ PYTHONPATH=src python3 webapp.py
 
 Then open http://127.0.0.1:8765. Select two cards to discard, then click cards
 to peg. The board shows both scores with peg dots.
+
+Rust release and benchmark builds
+-------------------------------
+
+Native Mac builds automatically generate and validate PGO profiles through
+`npm run build:deploy` and `npm run build:benchmark`. See
+[Mac PGO builds](docs/mac-pgo-builds.md) for training models and build tooling.

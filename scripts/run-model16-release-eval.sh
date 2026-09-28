@@ -13,7 +13,7 @@ POLICY="${ROOT_DIR}/rust/cribbage-shadow-engine/assets/model16-pegging-policy.bi
 
 if [[ ! -x "$RUNNER" ]]; then
   echo "Missing release runner: $RUNNER" >&2
-  echo "Run: cargo build --manifest-path rust/Cargo.toml --release" >&2
+  echo "Run: npm run build:benchmark -- --model schell_table-peg_table-16.0 --model schell_table-peg_table-13.0 --model schell_table-peg_table-15.2" >&2
   exit 1
 fi
 if [[ ! -f "$POLICY" ]]; then

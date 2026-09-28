@@ -1,0 +1,214 @@
+[
+  {
+    "id": "20.1-left-g0-h1-s1",
+    "suite": "train",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=dealer;aiScore=0;humanScore=0;aiHand=13,27,15,2;aiTable=;humanTable=26;humanHandCount=3;ownDiscards=38,25;turnCard=4;count=1;turn=ai;go=-;last=human;plays=26;pegHistory=o0;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.1-left-g0-h1-s3",
+    "suite": "train",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=dealer;aiScore=2;humanScore=0;aiHand=27,15,2;aiTable=13;humanTable=26,44;humanHandCount=2;ownDiscards=38,25;turnCard=4;count=8;turn=ai;go=-;last=human;plays=26,13,44;pegHistory=o0,s0,o5;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.1-left-g0-h7-s1",
+    "suite": "train",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=dealer;aiScore=101;humanScore=88;aiHand=4,31,24,6;aiTable=;humanTable=19;humanHandCount=3;ownDiscards=0,41;turnCard=5;count=7;turn=ai;go=-;last=human;plays=19;pegHistory=o6;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.0-left-g0-h1-s0",
+    "suite": "train",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=pone;aiScore=0;humanScore=0;aiHand=44,26,16,30;aiTable=;humanTable=;humanHandCount=4;ownDiscards=24,46;turnCard=4;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.0-left-g0-h1-s4",
+    "suite": "train",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=pone;aiScore=2;humanScore=0;aiHand=44,16;aiTable=30,26;humanTable=13,15;humanHandCount=2;ownDiscards=24,46;turnCard=4;count=10;turn=ai;go=-;last=human;plays=30,13,26,15;pegHistory=s4,o0,s0,o2;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.0-left-g0-h7-s0",
+    "suite": "train",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=pone;aiScore=80;humanScore=84;aiHand=32,17,38,51;aiTable=;humanTable=;humanHandCount=4;ownDiscards=19,42;turnCard=5;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.1-left-g1-h1-s0",
+    "suite": "validate",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=pone;aiScore=0;humanScore=0;aiHand=17,10,4,48;aiTable=;humanTable=;humanHandCount=4;ownDiscards=50,32;turnCard=6;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.1-left-g1-h1-s2",
+    "suite": "validate",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=pone;aiScore=0;humanScore=2;aiHand=17,4,48;aiTable=10;humanTable=30;humanHandCount=3;ownDiscards=50,32;turnCard=6;count=15;turn=ai;go=-;last=human;plays=10,30;pegHistory=s10,o4;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.1-left-g1-h1-s7",
+    "suite": "validate",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=pone;aiScore=2;humanScore=3;aiHand=4,48;aiTable=10,17;humanTable=30,22;humanHandCount=2;ownDiscards=50,32;turnCard=6;count=0;turn=ai;go=-;last=-;plays=;pegHistory=s10,o4,s4,o9,sg,og,r;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.1-left-g1-h6-s1",
+    "suite": "validate",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=dealer;aiScore=61;humanScore=82;aiHand=36,27,41,24;aiTable=;humanTable=26;humanHandCount=3;ownDiscards=34,33;turnCard=48;count=1;turn=ai;go=-;last=human;plays=26;pegHistory=o0;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.1-left-g1-h6-s3",
+    "suite": "validate",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=dealer;aiScore=61;humanScore=84;aiHand=36,27,24;aiTable=41;humanTable=26,2;humanHandCount=2;ownDiscards=34,33;turnCard=48;count=7;turn=ai;go=-;last=human;plays=26,41,2;pegHistory=o0,s2,o2;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.1-left-g1-h6-s5",
+    "suite": "validate",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=dealer;aiScore=61;humanScore=87;aiHand=36,24;aiTable=41,27;humanTable=26,2,0;humanHandCount=1;ownDiscards=34,33;turnCard=48;count=10;turn=ai;go=-;last=human;plays=26,41,2,27,0;pegHistory=o0,s2,o2,s1,o0;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.0-left-g1-h1-s1",
+    "suite": "validate",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=dealer;aiScore=0;humanScore=0;aiHand=30,22,49,9;aiTable=;humanTable=17;humanHandCount=3;ownDiscards=1,7;turnCard=6;count=5;turn=ai;go=-;last=human;plays=17;pegHistory=o4;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.0-left-g1-h1-s3",
+    "suite": "validate",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=dealer;aiScore=2;humanScore=8;aiHand=22,49,9;aiTable=30;humanTable=17,4;humanHandCount=2;ownDiscards=1,7;turnCard=6;count=15;turn=ai;go=-;last=human;plays=17,30,4;pegHistory=o4,s4,o4;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.0-left-g1-h1-s8",
+    "suite": "validate",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=dealer;aiScore=3;humanScore=8;aiHand=49,9;aiTable=30,22;humanTable=17,4,48;humanHandCount=1;ownDiscards=1,7;turnCard=6;count=10;turn=ai;go=-;last=human;plays=48;pegHistory=o4,s4,o4,s9,og,sg,r,o9;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.0-left-g1-h6-s0",
+    "suite": "validate",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=pone;aiScore=80;humanScore=67;aiHand=26,0,2,15;aiTable=;humanTable=;humanHandCount=4;ownDiscards=35,46;turnCard=48;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.0-left-g1-h6-s2",
+    "suite": "validate",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=pone;aiScore=80;humanScore=67;aiHand=0,2,15;aiTable=26;humanTable=41;humanHandCount=3;ownDiscards=35,46;turnCard=48;count=4;turn=ai;go=-;last=human;plays=26,41;pegHistory=s0,o2;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "20.0-left-g1-h6-s4",
+    "suite": "validate",
+    "mode": "play",
+    "inputText": "kind=peg;model={model};player=ai;role=pone;aiScore=82;humanScore=67;aiHand=0,15;aiTable=26,2;humanTable=41,27;humanHandCount=2;ownDiscards=35,46;turnCard=48;count=9;turn=ai;go=-;last=human;plays=26,41,2,27;pegHistory=s0,o2,s2,o1;pegLead=-;decisionSeed=0"
+  },
+  {
+    "id": "discard-pone-(0, 0)",
+    "suite": "train",
+    "mode": "play",
+    "inputText": "kind=discard;model={model};role=pone;aiHand=0,4,8,12,40,41;aiScore=0;humanScore=0"
+  },
+  {
+    "id": "discard-pone-(115, 118)",
+    "suite": "train",
+    "mode": "play",
+    "inputText": "kind=discard;model={model};role=pone;aiHand=0,4,8,12,40,41;aiScore=115;humanScore=118"
+  },
+  {
+    "id": "discard-dealer-(0, 0)",
+    "suite": "train",
+    "mode": "play",
+    "inputText": "kind=discard;model={model};role=dealer;aiHand=0,4,8,12,40,41;aiScore=0;humanScore=0"
+  },
+  {
+    "id": "discard-dealer-(115, 118)",
+    "suite": "train",
+    "mode": "play",
+    "inputText": "kind=discard;model={model};role=dealer;aiHand=0,4,8,12,40,41;aiScore=115;humanScore=118"
+  },
+  {
+    "id": "discard-held-out-0",
+    "suite": "validate",
+    "mode": "play",
+    "inputText": "kind=discard;model={model};role=pone;aiHand=1,7,16,25,38,47;aiScore=84;humanScore=93"
+  },
+  {
+    "id": "discard-held-out-1",
+    "suite": "validate",
+    "mode": "play",
+    "inputText": "kind=discard;model={model};role=dealer;aiHand=3,8,19,22,32,45;aiScore=112;humanScore=109"
+  },
+  {
+    "id": "full-hand-20260928",
+    "suite": "validate",
+    "mode": "hand",
+    "seed": 20260928
+  },
+  {
+    "id": "full-hand-20260929",
+    "suite": "validate",
+    "mode": "hand",
+    "seed": 20260929
+  },
+  {
+    "id": "20.0-left-g0-h1-s0-selected",
+    "suite": "train",
+    "mode": "selected",
+    "inputText": "kind=peg;model={model};player=ai;role=pone;aiScore=0;humanScore=0;aiHand=44,26,16,30;aiTable=;humanTable=;humanHandCount=4;ownDiscards=24,46;turnCard=4;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=0",
+    "selected": 30
+  },
+  {
+    "id": "20.0-left-g0-h1-s0-review",
+    "suite": "train",
+    "mode": "review",
+    "inputText": "kind=peg;model={model};player=ai;role=pone;aiScore=0;humanScore=0;aiHand=44,26,16,30;aiTable=;humanTable=;humanHandCount=4;ownDiscards=24,46;turnCard=4;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=0",
+    "selected": 30
+  },
+  {
+    "id": "20.1-left-g0-h1-s1-selected",
+    "suite": "train",
+    "mode": "selected",
+    "inputText": "kind=peg;model={model};player=ai;role=dealer;aiScore=0;humanScore=0;aiHand=13,27,15,2;aiTable=;humanTable=26;humanHandCount=3;ownDiscards=38,25;turnCard=4;count=1;turn=ai;go=-;last=human;plays=26;pegHistory=o0;pegLead=-;decisionSeed=0",
+    "selected": 2
+  },
+  {
+    "id": "20.1-left-g0-h1-s1-review",
+    "suite": "train",
+    "mode": "review",
+    "inputText": "kind=peg;model={model};player=ai;role=dealer;aiScore=0;humanScore=0;aiHand=13,27,15,2;aiTable=;humanTable=26;humanHandCount=3;ownDiscards=38,25;turnCard=4;count=1;turn=ai;go=-;last=human;plays=26;pegHistory=o0;pegLead=-;decisionSeed=0",
+    "selected": 2
+  },
+  {
+    "id": "20.1-left-g1-h1-s0-selected",
+    "suite": "validate",
+    "mode": "selected",
+    "inputText": "kind=peg;model={model};player=ai;role=pone;aiScore=0;humanScore=0;aiHand=17,10,4,48;aiTable=;humanTable=;humanHandCount=4;ownDiscards=50,32;turnCard=6;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=0",
+    "selected": 48
+  },
+  {
+    "id": "20.1-left-g1-h1-s0-review",
+    "suite": "validate",
+    "mode": "review",
+    "inputText": "kind=peg;model={model};player=ai;role=pone;aiScore=0;humanScore=0;aiHand=17,10,4,48;aiTable=;humanTable=;humanHandCount=4;ownDiscards=50,32;turnCard=6;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=0",
+    "selected": 48
+  },
+  {
+    "id": "20.1-left-g1-h6-s1-selected",
+    "suite": "validate",
+    "mode": "selected",
+    "inputText": "kind=peg;model={model};player=ai;role=dealer;aiScore=61;humanScore=82;aiHand=36,27,41,24;aiTable=;humanTable=26;humanHandCount=3;ownDiscards=34,33;turnCard=48;count=1;turn=ai;go=-;last=human;plays=26;pegHistory=o0;pegLead=-;decisionSeed=0",
+    "selected": 24
+  },
+  {
+    "id": "20.1-left-g1-h6-s1-review",
+    "suite": "validate",
+    "mode": "review",
+    "inputText": "kind=peg;model={model};player=ai;role=dealer;aiScore=61;humanScore=82;aiHand=36,27,41,24;aiTable=;humanTable=26;humanHandCount=3;ownDiscards=34,33;turnCard=48;count=1;turn=ai;go=-;last=human;plays=26;pegHistory=o0;pegLead=-;decisionSeed=0",
+    "selected": 24
+  }
+]
