@@ -37,7 +37,7 @@ pub const CORRECTION_INPUT_CHECKSUMS: [u64; 5] = [
 /// Production never samples. Finite budgets are retained only for diagnostic
 /// comparisons through the explicit forecast interface.
 pub const LIVE_WORLD_BUDGET: usize = usize::MAX;
-const MODEL203_HOLD_SHA256: &str = "625d64c2856d58e981b5771395efc2a9e5d1fde5cd96755d32b002a0b20f8c99";
+const MODEL203_HOLD_SHA256: &str = "192d43b7712e1f16bf0ba0991df14aaf646c2a44cd43f7e917d6ac8689cc375e";
 const MODEL203_DECLINE_SHA256: &str = "e17ec347f76a7671f460fe95ef18d5e9a693a80320588866357362dbe8e5c0c0";
 
 /// One actor's current-hand card population and conditioned discard prior,

@@ -1,7 +1,11 @@
 {
   "calibrationReport": "training/model203-hold-calibration.json",
   "calibrationReportSha256": "6480f1806fb426bb39cb7262b761117249beabc021b4543a93664b6c8e088f23",
+  "olderModelEvidenceWeight": 1.0,
+  "openingBackoffSha256": "ce5f9e6fc81854d5a6cab52a539906298e65c70861afa54ddfaf94eb4c09b4a4",
   "physicalPriorMixture": 0.001,
+  "refreshAssessment": "training/model203-hold-refresh-assessment.json",
+  "refreshAssessmentSha256": "70c0db8d4570925614ce49a94c9fb60a6ed1ec7a87406cb93bdc7c8ea77fbc74",
   "schemaVersion": 1,
   "smoothingStrengthByPrefixLength": [
     100000,

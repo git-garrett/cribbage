@@ -28,19 +28,19 @@
   "contexts": 1120,
   "evidenceObservationsByRoleAndPrefixLength": {
     "dealer": {
-      "0": 2068194,
-      "1": 2022360,
-      "2": 2019255,
-      "3": 2016239
+      "0": 2329127,
+      "1": 2283193,
+      "2": 2278961,
+      "3": 2274951
     },
     "pone": {
-      "0": 2070549,
-      "1": 2024695,
-      "2": 2023613,
-      "3": 2019660
+      "0": 2331583,
+      "1": 2285629,
+      "2": 2284137,
+      "3": 2278879
     }
   },
-  "evidenceSha256": "d9d7f17236060f196e3db8b7a0f77a68e334a4d318e0d044d324eee2c544ea0e",
+  "evidenceSha256": "0fe217bee05937762279a047d09227c7ae8655a193b87e998e9ab791a9647a1c",
   "legacySource": {
     "excludedWrongHandSizeObservations": {
       "dealer": 73633,
@@ -315,20 +315,22 @@
       ]
     }
   },
-  "maximumPackingProbabilityError": 2.3314683517128287e-15,
+  "maximumPackingProbabilityError": 2.1094237467877974e-15,
   "model": "20.3",
   "newActorHandsByModel": {
-    "schell_table-peg_table-13.0": 375481,
-    "schell_table-peg_table-13.1": 90325,
+    "schell_table-peg_table-13.0": 485244,
+    "schell_table-peg_table-13.1": 200088,
     "schell_table-peg_table-13.215": 72273,
     "schell_table-peg_table-13.23": 133438,
-    "schell_table-peg_table-20.0": 121198,
-    "schell_table-peg_table-20.1": 60033,
-    "schell_table-peg_table-9.0": 88496,
+    "schell_table-peg_table-20.0": 183899,
+    "schell_table-peg_table-20.1": 60051,
+    "schell_table-peg_table-20.2": 62683,
+    "schell_table-peg_table-9.0": 265535,
     "schell_table-peg_table-9.1": 183116,
     "schell_table-peg_table-9.11": 90358
   },
-  "newCompletedGames": 82922,
+  "newCompletedGames": 121996,
+  "olderModelEvidenceWeight": 1.0,
   "openingBackoffSha256": "ce5f9e6fc81854d5a6cab52a539906298e65c70861afa54ddfaf94eb4c09b4a4",
   "openingSupportPerRole": {
     "dealer": 1820,
@@ -339,7 +341,7 @@
   "recencyWeighting": "none; retained raw counts accumulate once",
   "records": 43862,
   "schemaVersion": 1,
-  "sha256": "625d64c2856d58e981b5771395efc2a9e5d1fde5cd96755d32b002a0b20f8c99",
+  "sha256": "192d43b7712e1f16bf0ba0991df14aaf646c2a44cd43f7e917d6ac8689cc375e",
   "smoothingStrengthByPrefixLength": [
     100000,
     1000000,

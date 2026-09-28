@@ -272,12 +272,20 @@ def import_database(value, path, limit=0):
                              "includedGames": imported, "limit": limit})
 
 
-def merged_counts(value):
+def merged_counts(value, older_model_weight=1.0):
     result = {role: defaultdict(Counter) for role in ROLES}
-    for roles in [value["baseline"], *value["updatesByModel"].values()]:
+    groups = [(value["baseline"], older_model_weight)]
+    for engine, roles in value["updatesByModel"].items():
+        version = model_version(engine)
+        weight = older_model_weight if version and int(version.split('.')[0]) < 13 else 1.0
+        groups.append((roles, weight))
+    for roles, weight in groups:
         for role, rows in roles.items():
             for prefix, row in rows.items():
-                result[role][prefix].update(row)
+                if weight == 1.0:
+                    result[role][prefix].update(row)
+                else:
+                    result[role][prefix].update({h: n * weight for h, n in row.items()})
     return result
 
 
@@ -291,9 +299,11 @@ def smooth(row, prior, strength):
     return {h: (row.get(h, 0) + strength * q) / (total + strength) for h, q in prior.items()}
 
 
-def distributions(value, keep_prior, strengths, physical_mix=0.001):
+def distributions(value, keep_prior, strengths, physical_mix=0.001, older_model_weight=1.0):
     """Uninformative play-order backoff; observed prefix rows learn play selection."""
-    evidence = merged_counts(value)
+    if not math.isfinite(older_model_weight) or not 0 < older_model_weight <= 1:
+        raise ValueError("older model weight must be positive and at most one")
+    evidence = merged_counts(value, older_model_weight)
     physical = normalized({h: math.prod(math.comb(4, n) for n in counts(h)) for h in keys(4)})
     result = {}
     for role in ROLES:
@@ -342,9 +352,11 @@ def main():
     parser.add_argument("--database", action="append", type=Path, default=[])
     parser.add_argument("--output", type=Path, default=OUTPUT)
     parser.add_argument("--strengths", help="override the calibrated comma-separated strengths")
+    parser.add_argument("--config", type=Path, default=CONFIG)
+    parser.add_argument("--keep-prior", type=Path, default=ASSETS / "model132-keep-prior.json")
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    config = json.loads(CONFIG.read_text())
+    config = json.loads(args.config.read_text())
     strengths = ([float(s) for s in args.strengths.split(",")] if args.strengths else
                  config["smoothingStrengthByPrefixLength"])
     physical_mix = config["physicalPriorMixture"]
@@ -364,14 +376,15 @@ def main():
     for path in args.database:
         import_database(value, path)
     validate_evidence(value)
-    prior_bytes = (ASSETS / "model132-keep-prior.json").read_bytes()
-    if digest(prior_bytes) != KEEP_SHA:
+    prior_bytes = args.keep_prior.read_bytes()
+    if digest(prior_bytes) != config.get("openingBackoffSha256", KEEP_SHA):
         raise ValueError("opening backoff source changed; audit and version it explicitly")
-    rows = distributions(value, json.loads(prior_bytes), strengths, physical_mix)
+    older_weight = config.get("olderModelEvidenceWeight", 1.0)
+    rows = distributions(value, json.loads(prior_bytes), strengths, physical_mix, older_weight)
     binary, error = pack(rows)
     evidence_bytes = gzip.compress(canonical(value), mtime=0)
     report = {"schemaVersion": 1, "model": "20.3", "sha256": digest(binary),
-              "evidenceSha256": digest(evidence_bytes), "openingBackoffSha256": KEEP_SHA,
+              "evidenceSha256": digest(evidence_bytes), "openingBackoffSha256": digest(prior_bytes),
               "smoothingStrengthByPrefixLength": strengths, "physicalPriorMixture": physical_mix,
               "probabilityWeightScale": SCALE, "maximumPackingProbabilityError": error,
               "contexts": len(rows), "records": sum(map(len, rows.values())), "bytes": len(binary),
@@ -385,6 +398,8 @@ def main():
                                    if sum(counts(p)) == n) for n in range(4)} for r in ROLES},
               "legacySource": value["sources"][0],
               "recencyWeighting": "none; retained raw counts accumulate once"}
+    if "olderModelEvidenceWeight" in config:
+        report["olderModelEvidenceWeight"] = older_weight
     report_path = args.output.with_suffix(".json")
     report_bytes = json.dumps(report, sort_keys=True, indent=2).encode() + b"\n"
     if args.check:

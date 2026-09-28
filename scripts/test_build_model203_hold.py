@@ -28,6 +28,27 @@ def add_game(db, name, index, left="13.23", right="20.0", complete=True, seed=No
 
 
 class HoldTests(unittest.TestCase):
+    def test_cohort_weighting_retains_raw_counts_and_positive_support(self):
+        value = builder.empty_evidence()
+        keep = '0000000000004'
+        other = '0000000000013'
+        value['baseline'] = {r: {builder.ZERO: {keep: 10}} for r in builder.ROLES}
+        value['updatesByModel'] = {
+            'schell_table-peg_table-9.1': {r: {builder.ZERO: {keep: 20}} for r in builder.ROLES},
+            'schell_table-peg_table-20.2': {r: {builder.ZERO: {other: 40}} for r in builder.ROLES},
+        }
+        original = copy.deepcopy(value)
+        weighted = builder.merged_counts(value, .25)
+        self.assertEqual(weighted['dealer'][builder.ZERO], {keep: 7.5, other: 40})
+        self.assertEqual(value, original)
+        prior = {'roles': {r: {keep: 1, other: 1} for r in builder.ROLES}}
+        rows = builder.distributions(value, prior, [10]*4, older_model_weight=.25)
+        self.assertEqual(len(rows['dealer', builder.ZERO]), 1820)
+        self.assertTrue(all(p > 0 for row in rows.values() for p in row.values()))
+        for bad in (0, -1, float('nan'), 2):
+            with self.assertRaises(ValueError):
+                builder.distributions(value, prior, [10]*4, older_model_weight=bad)
+
     def test_smoothing_uses_evidence_without_creating_impossibility(self):
         prior = {"seen": 0.98, "unseen": 0.02}
         self.assertEqual(builder.smooth({}, prior, 100), prior)

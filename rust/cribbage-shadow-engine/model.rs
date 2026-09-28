@@ -1932,6 +1932,20 @@ fn model20_discard_context<'a>(
     input: &DecisionInput,
     tables: &'a RuntimeTables,
 ) -> Result<Option<Model20DiscardContext<'a>>, String> {
+    model20_discard_context_with_scores(input, tables, |ranks, cut| {
+        if input.model == MODEL_20_3 {
+            crate::cards::score_four_rank_counts(ranks, cut.rank) as i32
+        } else {
+            score_hand_rank_only(&cards_for_rank_counts_for_scoring(ranks), cut) as i32
+        }
+    })
+}
+
+fn model20_discard_context_with_scores<'a>(
+    input: &DecisionInput,
+    tables: &'a RuntimeTables,
+    rank_score: impl Fn(&[u8; 13], Card) -> i32,
+) -> Result<Option<Model20DiscardContext<'a>>, String> {
     if !matches!(input.model.as_str(), MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3) {
         return Ok(None);
     }
@@ -1957,9 +1971,7 @@ fn model20_discard_context<'a>(
                     .opening_keep_weights(opponent_role, &rank_totals)?
                     .into_iter()
                     .map(|(ranks, weight)| {
-                        let score =
-                            score_hand_rank_only(&cards_for_rank_counts_for_scoring(&ranks), *cut)
-                                as i32;
+                        let score = rank_score(&ranks, *cut);
                         (ranks, weight, score)
                     })
                     .collect(),
@@ -6047,6 +6059,15 @@ fn opponent_show_score_outcomes(
     available_cards: &[Card],
     opponent_hands: impl IntoIterator<Item = WeightedRankHand>,
 ) -> Vec<(i32, f64)> {
+    opponent_show_score_outcomes_with_scores(input, available_cards, opponent_hands, input.model == MODEL_20_3)
+}
+
+fn opponent_show_score_outcomes_with_scores(
+    input: &DecisionInput,
+    available_cards: &[Card],
+    opponent_hands: impl IntoIterator<Item = WeightedRankHand>,
+    precomputed: bool,
+) -> Vec<(i32, f64)> {
     let mut outcomes: BTreeMap<i32, f64> = BTreeMap::new();
     let mut total_weight = 0.0;
     for hand in opponent_hands {
@@ -6054,11 +6075,19 @@ fn opponent_show_score_outcomes(
         if suited_hands.is_empty() {
             continue;
         }
+        let rank_score = if precomputed {
+            let mut full = hand.ranks;
+            for card in &input.human_table { full[card.rank as usize] += 1; }
+            Some(crate::cards::score_four_rank_counts(&full, input.turn_card.rank))
+        } else { None };
         let suited_weight = hand.weight / suited_hands.len() as f64;
         for suited_hand in suited_hands {
             let mut cards = input.human_table.clone();
             cards.extend(suited_hand);
-            let score = score_hand(&cards, input.turn_card, false) as i32;
+            let score = match rank_score {
+                Some(rank_score) => rank_score + crate::cards::score_flush_and_right_jack(&cards, input.turn_card, false),
+                None => score_hand(&cards, input.turn_card, false),
+            } as i32;
             *outcomes.entry(score).or_insert(0.0) += suited_weight;
             total_weight += suited_weight;
         }
@@ -7145,6 +7174,67 @@ mod tests {
             cases.len()*2, mean(&times[0])*1000.0, mean(&times[1])*1000.0, mean(&times[0])/mean(&times[1]));
         println!("{report}");
         std::fs::write(std::env::temp_dir().join("model203-crib-timing.json"), report).unwrap();
+    }
+
+    #[test]
+    fn model203_precomputed_scores_preserve_suited_pegging_show_histograms() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+        let tables = RuntimeTables::new(root.to_str().unwrap());
+        for state in [
+            "aiHand=0,3,4,9;humanHandCount=4",
+            "aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5",
+            "aiHand=9;aiTable=0,3,4;humanTable=2,5,7;humanHandCount=1;plays=0,2,3,5,4,7;count=27;last=human;pegHistory=s0,o2,s3,o5,s4,o7",
+        ] {
+            let input = parse_decision_input(&format!("model={MODEL_20_3};kind=peg;role=pone;ownDiscards=1,6;turnCard=10;aiScore=95;humanScore=96;{state}")).unwrap();
+            let hands = tables.pegging_policy_assets(&input).unwrap().opponent_keep_weights(&model1323_observation(&input)).unwrap();
+            let known = known_cards_for_pegging(&input);
+            let available = full_deck().into_iter().filter(|c| !known.contains(c)).collect::<Vec<_>>();
+            let forecast = |cached| opponent_show_score_outcomes_with_scores(&input,&available,
+                hands.iter().map(|&(ranks,weight)| WeightedRankHand { ranks,weight }),cached);
+            let reference = forecast(false);
+            assert!(!reference.is_empty());
+            assert_eq!(reference,forecast(true));
+        }
+    }
+
+    #[test]
+    fn model203_precomputed_rank_scores_preserve_all_cut_histograms() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+        let tables = RuntimeTables::new(root.to_str().unwrap());
+        for role in ["dealer", "pone"] {
+            for cards in ["0,4,8,12,16,20", "4,17,30,43,0,12", "0,1,2,3,4,5", "8,9,10,11,12,25"] {
+                let input = parse_decision_input(&format!("kind=discard;model={MODEL_20_3};role={role};aiHand={cards};aiScore=0;humanScore=0")).unwrap();
+                let reference = model20_discard_context_with_scores(&input, &tables, |r,c|
+                    score_hand_rank_only(&cards_for_rank_counts_for_scoring(r),c) as i32).unwrap().unwrap();
+                let cached = model20_discard_context(&input, &tables).unwrap().unwrap();
+                assert_eq!(reference.opponent_hands, cached.opponent_hands);
+                assert_eq!(cached.opponent_hands.len(),46);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "release-only paired timing of complete discard-time hand forecasts"]
+    fn model203_precomputed_rank_scores_timing() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+        let tables = RuntimeTables::new(root.to_str().unwrap());
+        let inputs = ["0,4,8,12,16,20", "4,17,30,43,0,12", "0,1,2,3,4,5", "8,9,10,11,12,25"].iter().map(|cards|
+            parse_decision_input(&format!("kind=discard;model={MODEL_20_3};role=dealer;aiHand={cards};aiScore=0;humanScore=0")).unwrap()).collect::<Vec<_>>();
+        for input in &inputs { model20_discard_context(input,&tables).unwrap(); }
+        let mut runs = Vec::new();
+        for repeat in 0..8 {
+            for mode in [repeat%2,1-repeat%2] {
+                let start = std::time::Instant::now();
+                for input in &inputs {
+                    std::hint::black_box(model20_discard_context_with_scores(input,&tables, |r,c| {
+                        if mode==0 { score_hand_rank_only(&cards_for_rank_counts_for_scoring(r),c) as i32 }
+                        else { crate::cards::score_four_rank_counts(r,c.rank) as i32 }
+                    }).unwrap());
+                }
+                runs.push(serde_json::json!({"repeat":repeat,"precomputed":mode==1,"seconds":start.elapsed().as_secs_f64()}));
+            }
+        }
+        std::fs::write(std::env::temp_dir().join("model203-hand-score-timing.json"),serde_json::to_vec(&runs).unwrap()).unwrap();
     }
 
     #[test]

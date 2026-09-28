@@ -312,6 +312,33 @@ pub fn score_hand_rank_only(hand: &[Card], turn_card: Card) -> u8 {
     score_fifteens(hand, turn_card) + score_sets(hand, turn_card) + score_runs(hand, turn_card)
 }
 
+/// Rank-only scores of every four-card multiset and cut rank, built once per
+/// process. Suits, nobs and flushes remain the caller's responsibility.
+pub(crate) fn score_four_rank_counts(ranks: &[u8; 13], cut_rank: u8) -> u8 {
+    static SCORES: std::sync::OnceLock<Vec<[u8; 13]>> = std::sync::OnceLock::new();
+    let scores = SCORES.get_or_init(|| {
+        enumerate_rank_count_keys(4).iter().map(|key| {
+            let ranks = rank_counts_from_key(key).expect("enumerated four-card ranks");
+            let cards = cards_for_rank_counts_for_scoring(&ranks);
+            std::array::from_fn(|cut| score_hand_rank_only(&cards, peg_card_for_rank(cut as u8)))
+        }).collect()
+    });
+    debug_assert_eq!(rank_count_total(ranks), 4);
+    // Combinatorial rank in lexicographically sorted thirteen-count keys.
+    let mut index = 0;
+    let mut card = 0;
+    for rank in (0..13).rev() {
+        for _ in 0..ranks[rank] {
+            card += 1;
+            let n = 12 - rank + card - 1;
+            if n >= card {
+                index += (0..card).fold(1, |v, i| v * (n - i) / (i + 1));
+            }
+        }
+    }
+    scores[index][usize::from(cut_rank)]
+}
+
 pub fn score_fifteens(hand: &[Card], turn_card: Card) -> u8 {
     let mut cards = hand.to_vec();
     cards.push(turn_card);
@@ -481,6 +508,17 @@ mod pegging_score_component_tests {
 
     fn cards(ids: &[u8]) -> Vec<Card> {
         ids.iter().map(|id| Card::new(*id).unwrap()).collect()
+    }
+
+    #[test]
+    fn precomputed_four_card_scores_match_all_23660_rank_cut_combinations() {
+        for key in enumerate_rank_count_keys(4) {
+            let ranks = rank_counts_from_key(&key).unwrap();
+            let hand = cards_for_rank_counts_for_scoring(&ranks);
+            for cut in 0..13 {
+                assert_eq!(score_four_rank_counts(&ranks,cut), score_hand_rank_only(&hand,peg_card_for_rank(cut)));
+            }
+        }
     }
 
     #[test]
