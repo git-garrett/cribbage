@@ -754,6 +754,7 @@ pub struct Model91Policy {
     empirical_depletion: bool,
     decision_cache: HashMap<Model91DecisionKey, Model91Choice>,
     wp_decisions: HashMap<(Model91DecisionKey, [u8; 2]), RankPegAction>,
+    wp_action_cache_role: Option<Role>,
     wp_future: compact::WpMemo,
     wp_evidence: HashMap<(Model91Observation, [u8; 2]), Arc<Model91ActionEvidence<f64>>>,
     wp_evidence_outcomes: usize,
@@ -777,6 +778,14 @@ impl Model91Policy {
         self.clear_evidence_cache();
     }
 
+    /// Keep reusable actions for the root player, without admitting the stream
+    /// of opponent private-hand variants. Evidence and continuation caches still
+    /// serve both roles. This changes memo admission, never policy arithmetic.
+    pub(crate) fn cache_wp_actions_for_role(&mut self, role: Role) {
+        self.wp_action_cache_role = Some(role);
+        self.wp_decisions.clear();
+    }
+
     /// Representation-only opt-in; historical models retain the reference path.
     pub(crate) fn use_compact_continuations(&mut self) {
         self.future_cache = ContinuationMemo::Compact(compact::Memo::default());
@@ -788,6 +797,7 @@ impl Model91Policy {
             empirical_depletion: false,
             decision_cache: HashMap::new(),
             wp_decisions: HashMap::new(),
+            wp_action_cache_role: None,
             wp_future: compact::WpMemo::default(),
             wp_evidence: HashMap::new(),
             wp_evidence_outcomes: 0,
@@ -847,6 +857,7 @@ impl Model91Policy {
         board: &BoardWinMatrix,
     ) -> Result<RankPegAction, String> {
         observation.validate()?;
+        let cache_action = self.wp_action_cache_role.is_none_or(|role| role == observation.role);
         let key = (
             Model91DecisionKey {
                 observation: *observation,
@@ -854,15 +865,17 @@ impl Model91Policy {
             },
             scores,
         );
-        if let Some(action) = self.wp_decisions.get(&key) {
-            return Ok(*action);
+        if cache_action {
+            if let Some(action) = self.wp_decisions.get(&key) {
+                return Ok(*action);
+            }
         }
         let legal = legal_ranks(&observation.own_remaining, observation.count);
         if legal.len() > 1 && self.evidence_cache_outcome_limit > 0 {
             if let Some(action) =
                 self.wp_choice_from_evidence(observation, &legal, likelihoods, scores, board)?
             {
-                if self.cache_limit > 0 {
+                if cache_action && self.cache_limit > 0 {
                     if self.wp_decisions.len() >= self.cache_limit {
                         self.wp_decisions.clear();
                     }
@@ -927,7 +940,7 @@ impl Model91Policy {
                 RankPegAction::Play(best.2)
             }
         };
-        if self.cache_limit > 0 {
+        if cache_action && self.cache_limit > 0 {
             if self.wp_decisions.len() >= self.cache_limit {
                 self.wp_decisions.clear();
             }
@@ -2386,6 +2399,49 @@ mod tests {
                     assert_eq!(hand.depletion_denominator.to_bits(),
                         rank_combination_count(&ranks, &baseline).to_bits());
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn wp_action_cache_preserves_root_entries_across_opponent_churn() {
+        let board = BoardWinMatrix::from_function(|_, a, b| {
+            (0.5 + (f64::from(a) - f64::from(b)) / 242.0).clamp(0.0, 1.0)
+        });
+        for root_role in [Role::Dealer, Role::Pone] {
+            let root = Model91Observation::from_public_state(
+                root_role, hand(&[(0, 1), (4, 1)]), hand(&[(2, 1), (7, 1)]),
+                hand(&[(4, 2), (12, 1)]), hand(&[(1, 2)]), Some(8),
+                &[], 0, None, None,
+            ).unwrap();
+            let likelihoods = [1_000_000; RANKS];
+            let scores = [118, 119];
+            let key = (Model91DecisionKey {
+                observation: root, opponent_rank_likelihood_ppm: likelihoods,
+            }, scores);
+            let mut policy = Model91Policy::new_with_evidence_cache(None, 4, 100_000, 0);
+            policy.cache_wp_actions_for_role(root_role);
+            let expected = Model91Policy::new(None, 0)
+                .choose_action_by_wp(&root, &likelihoods, scores, &board).unwrap();
+            assert_eq!(policy.choose_action_by_wp(&root, &likelihoods, scores, &board).unwrap(), expected);
+            for opponent_score in 90..110 {
+                let mut opponent = root;
+                opponent.role = if root_role == Role::Dealer { Role::Pone } else { Role::Dealer };
+                let scores = [opponent_score, 118];
+                let expected = Model91Policy::new(None, 0)
+                    .choose_action_by_wp(&opponent, &likelihoods, scores, &board).unwrap();
+                assert_eq!(policy.choose_action_by_wp(&opponent, &likelihoods, scores, &board).unwrap(), expected);
+                assert!(policy.wp_decisions.contains_key(&key), "opponent entries evicted the root");
+                assert_eq!(policy.wp_decisions.len(), 1, "one-use opponent actions were admitted");
+            }
+            assert_eq!(policy.choose_action_by_wp(&root, &likelihoods, scores, &board).unwrap(), expected);
+            // Root score variants keep full identity and the existing bound.
+            for own_score in 90..110 {
+                let scores = [own_score, 119];
+                let expected = Model91Policy::new(None, 0)
+                    .choose_action_by_wp(&root, &likelihoods, scores, &board).unwrap();
+                assert_eq!(policy.choose_action_by_wp(&root, &likelihoods, scores, &board).unwrap(), expected);
+                assert!(policy.wp_decisions.len() <= 4);
             }
         }
     }

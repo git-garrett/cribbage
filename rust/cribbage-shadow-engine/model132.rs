@@ -936,6 +936,10 @@ impl Model911Policy {
         self.lock_inner().use_compact_continuations();
     }
 
+    pub(crate) fn cache_wp_actions_for_role(&self, role: Role) {
+        self.lock_inner().cache_wp_actions_for_role(role);
+    }
+
     pub(crate) fn use_empirical_depletion(&self) {
         self.lock_inner().use_empirical_depletion();
     }

@@ -173,7 +173,7 @@ impl PolicyAssets {
         &'a self,
         observation: &'a Model132Observation,
     ) -> Result<PreparedDecision<'a>, String> {
-        let policy = self.decision_policy()?;
+        let policy = self.decision_policy_for_observation(observation)?;
         let hands = policy.opponent_hands(observation)?;
         Ok(PreparedDecision { assets: self, observation, policy, hands })
     }
@@ -344,7 +344,7 @@ impl PolicyAssets {
         world_budget: usize,
         cache: Option<&HandCache>,
     ) -> Result<Vec<PegCandidateForecast>, String> {
-        let policy = self.decision_policy()?;
+        let policy = self.decision_policy_for_observation(observation)?;
         let worlds = self.worlds_for_hand(observation, &policy, cache)?;
         self.forecast_population(observation, world_budget, &policy, worlds)
     }
@@ -358,11 +358,25 @@ impl PolicyAssets {
         cache: Option<&HandCache>,
         win_probability: &mut impl FnMut(u8, u8) -> f64,
     ) -> Result<Vec<PegCandidateForecast>, String> {
-        let policy = self.decision_policy()?;
+        let policy = self.decision_policy_for_observation(observation)?;
         let worlds = self.worlds_for_hand(observation, &policy, cache)?;
         let count = worlds.len();
         let worlds = sample_worlds(worlds, LIVE_WORLD_BUDGET, observation_seed(observation))?;
         forecast_worlds_for_choice(observation, &policy, &worlds, count, win_probability)
+    }
+
+    fn decision_policy_for_observation(
+        &self,
+        observation: &Model132Observation,
+    ) -> Result<Model911Policy, String> {
+        let policy = self.decision_policy()?;
+        if self.complete_hold_support {
+            // Model 20.3 streams many opponent private-hand variants through
+            // one solve. Their action keys rarely repeat before eviction; the
+            // root player's much smaller key set repeats across those worlds.
+            policy.cache_wp_actions_for_role(observation.role);
+        }
+        Ok(policy)
     }
 
     fn decision_policy(&self) -> Result<Model911Policy, String> {
@@ -1149,6 +1163,26 @@ mod tests {
                     fs::write(std::env::temp_dir().join("model203-discard-full-forecasts.json"), serde_json::to_vec(&report).unwrap()).unwrap();
                     println!("{label} repeat={repeat} variant={mode} seconds={seconds:.3} worlds={}", forecasts[0].posterior_worlds);
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn model203_root_action_cache_preserves_forecasts_through_a_hand() {
+        let assets = PolicyAssets::load_model203(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        for scores in [[0, 0], [116, 118]] {
+            let (mut observation, world) = opening();
+            observation.my_score = scores[0];
+            observation.opponent_score = scores[1];
+            let mut state = world_state(&observation, &world).unwrap();
+            while !state.complete {
+                let observation = Model132Observation::from_state(&state, state.current).unwrap();
+                let reference = assets.decision_policy().unwrap();
+                let optimized = assets.decision_policy_for_observation(&observation).unwrap();
+                let expected = assets.forecast_using(&observation, 32, &reference).unwrap();
+                let actual = assets.forecast_using(&observation, 32, &optimized).unwrap();
+                assert_identical_forecasts(&actual, &expected);
+                state.apply(state.legal_actions()[0]).unwrap();
             }
         }
     }
