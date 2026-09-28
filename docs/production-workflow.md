@@ -76,8 +76,13 @@ checkout, even when run from a linked worktree. It then enforces the branch,
 clean-tree, and remote-synchronization checks and runs the complete local QA and
 browser build. Because the development machine is macOS arm64 and production is
 Linux x86-64, the locked Rust source is compiled natively on the server in an
-isolated staging workspace while the existing release keeps serving. A shared
-Cargo target cache speeds later builds, but only the finished API binary is
+isolated staging workspace while the existing release keeps serving. The server
+automatically generates a fresh PGO profile, rebuilds the API, and
+requires exact decision/value parity plus optimized API integration tests before
+publishing the candidate. A bounded one-shot build service preserves the live
+API; temporary compiler trees are discarded between variants to limit disk
+usage. See [Production PGO](production-pgo.md) for the measured configuration,
+resource limits, and retained build receipts. Only the verified API binary is
 copied into each immutable, versioned release. Previously deployed hashed
 browser assets are carried into the candidate before the new bundle is overlaid
 so in-flight and recently opened clients keep working across the cutover.

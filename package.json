@@ -21,7 +21,8 @@
     "test:training-drills": "scripts/run-quiet.sh \"Training drill builder tests\" python3 -m unittest scripts/test_build_training_drills.py",
     "test:quiet-wrapper": "scripts/run-quiet.sh \"Quiet wrapper tests\" scripts/test-run-quiet.sh",
     "test:web": "scripts/run-quiet.sh \"Web tests\" node_modules/.bin/vitest run",
-    "typecheck": "scripts/run-quiet.sh \"TypeScript typecheck\" node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit"
+    "typecheck": "scripts/run-quiet.sh \"TypeScript typecheck\" node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit",
+    "test:release-build": "scripts/run-quiet.sh \"Release build tests\" python3 -m unittest scripts/test_build_rust_release.py scripts/test_build_production_release.py"
   },
   "dependencies": {
     "@capacitor/core": "^7.4.4"

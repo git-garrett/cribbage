@@ -43,6 +43,9 @@ COPYFILE_DISABLE=1 tar --no-xattrs -czf "$ARCHIVE" \
   rust/cribbage-policy-trainer \
   rust/cribbage-runner \
   rust/cribbage-shadow-engine \
+  scripts/build_rust_release.py \
+  scripts/build_production_release.py \
+  scripts/pgo-fixtures.json \
   scripts/migrate-legacy-leaderboard.py \
   scripts/repair_leaderboard_scores.py \
   scripts/repair_leaderboard_timestamps.py \

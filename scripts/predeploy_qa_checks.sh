@@ -14,6 +14,7 @@ fi
 scripts/run-quiet.sh "Python lint" "$PYTHON_BIN" -m flake8 src tests scripts webapp.py --count --select=E9,F63,F7,F82 --show-source --statistics
 scripts/run-quiet.sh "Python tests" "$PYTHON_BIN" -m pytest
 npm run --silent test:quiet-wrapper
+npm run --silent test:release-build
 npm run --silent typecheck
 npm run --silent test:web
 npm test --silent
