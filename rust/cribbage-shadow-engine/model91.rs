@@ -665,17 +665,30 @@ struct Model91EvidenceHand {
     ranks: [u8; RANKS],
     rank_mask: u16,
     base_weight: f64,
+    depletion_denominator: f64,
 }
 
 impl Model91EvidenceHand {
-    fn new(ranks: [u8; RANKS], base_weight: f64) -> Self {
+    fn new(ranks: [u8; RANKS], base_weight: f64, mode: Model91EvidenceWeightMode) -> Self {
         let rank_mask = ranks.iter().enumerate().fold(0, |mask, (rank, copies)| {
             mask | if *copies > 0 { 1 << rank } else { 0 }
         });
+        // Public played ranks fix this baseline for the evidence entry. Keep
+        // the denominator itself: predividing base_weight changes rounding.
+        let mut depletion_denominator = 1.0;
+        if let Model91EvidenceWeightMode::DepletedEmpirical(baseline) = mode {
+            let mut mask: u16 = rank_mask;
+            while mask != 0 {
+                let rank = mask.trailing_zeros() as usize;
+                mask &= mask - 1;
+                depletion_denominator *= evidence_choose(baseline[rank], ranks[rank]);
+            }
+        }
         Self {
             ranks,
             rank_mask,
             base_weight,
+            depletion_denominator,
         }
     }
 }
@@ -919,20 +932,19 @@ impl Model91Policy {
                 self.empirical.as_ref().and_then(|beliefs| {
                     beliefs.hands(role, observation.opponent_played, &available, size)
                 }) {
+                let mode = if self.empirical_depletion {
+                    Model91EvidenceWeightMode::DepletedEmpirical(empirical_baseline(observation))
+                } else {
+                    Model91EvidenceWeightMode::Empirical
+                };
                 (
-                    hands.map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight)).collect::<Vec<_>>(),
-                    if self.empirical_depletion {
-                        Model91EvidenceWeightMode::DepletedEmpirical(empirical_baseline(
-                            observation,
-                        ))
-                    } else {
-                        Model91EvidenceWeightMode::Empirical
-                    },
+                    hands.map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight, mode)).collect::<Vec<_>>(),
+                    mode,
                 )
             } else {
                 (
                     RankHandIndex::shared().compatible_hands(&available, size)?
-                        .into_iter().map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight)).collect(),
+                        .into_iter().map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight, Model91EvidenceWeightMode::Physical)).collect(),
                     Model91EvidenceWeightMode::Physical,
                 )
             };
@@ -1261,11 +1273,11 @@ impl Model91Policy {
             } else {
                 Model91EvidenceWeightMode::Empirical
             };
-            (hands.map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight)).collect::<Vec<_>>(), mode)
+            (hands.map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight, mode)).collect::<Vec<_>>(), mode)
         } else {
             (
                 RankHandIndex::shared().compatible_hands(&available, size)?
-                    .into_iter().map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight)).collect(),
+                    .into_iter().map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight, Model91EvidenceWeightMode::Physical)).collect(),
                 Model91EvidenceWeightMode::Physical,
             )
         };
@@ -1482,16 +1494,15 @@ fn evidence_hand_weight(
     let mut weight = match weight_mode {
         Model91EvidenceWeightMode::Physical => 1.0,
         Model91EvidenceWeightMode::Empirical => hand.base_weight,
-        Model91EvidenceWeightMode::DepletedEmpirical(baseline) => {
+        Model91EvidenceWeightMode::DepletedEmpirical(_) => {
             // Zero-copy ranks contribute exactly one. Use the evidence's
             // existing rank mask, preserving multiplication order per product.
-            let mut before = 1.0;
+            let before = hand.depletion_denominator;
             let mut after = 1.0;
             let mut mask = hand.rank_mask;
             while mask != 0 {
                 let rank = mask.trailing_zeros() as usize;
                 mask &= mask - 1;
-                before *= evidence_choose(baseline[rank], hand.ranks[rank]);
                 after *= evidence_choose(available[rank], hand.ranks[rank]);
             }
             if before == 0.0 {
@@ -2214,7 +2225,6 @@ mod tests {
         ];
         for size in 0..=4 {
             for (ranks, _) in enumerate_rank_hands(&[4; RANKS], size) {
-                let hand = Model91EvidenceHand::new(ranks, 12345.67);
                 for available in [[4; RANKS], [0, 1, 2, 3, 4, 3, 2, 1, 0, 4, 3, 2, 1]] {
                     for mode in [
                         Model91EvidenceWeightMode::Physical,
@@ -2222,6 +2232,7 @@ mod tests {
                         Model91EvidenceWeightMode::DepletedEmpirical([4; RANKS]),
                         Model91EvidenceWeightMode::DepletedEmpirical([0, 1, 2, 3, 4, 3, 2, 1, 0, 4, 3, 2, 1]),
                     ] {
+                        let hand = Model91EvidenceHand::new(ranks, 12345.67, mode);
                         let expected = if ranks.iter().zip(available).any(|(n, a)| *n > a) {
                             0.0
                         } else {
@@ -2248,6 +2259,66 @@ mod tests {
                             evidence_hand_weight(&hand, mode, &available, &likelihoods).to_bits(),
                             expected.to_bits()
                         );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cached_depletion_denominators_match_all_rank_products() {
+        for size in 0..=4 {
+            for (ranks, _) in enumerate_rank_hands(&[4; RANKS], size) {
+                let present: Vec<_> = (0..RANKS).filter(|r| ranks[*r] > 0).collect();
+                for mut encoded in 0..5_usize.pow(present.len() as u32) {
+                    let mut baseline = [4; RANKS];
+                    for rank in &present {
+                        baseline[*rank] = (encoded % 5) as u8;
+                        encoded /= 5;
+                    }
+                    let hand = Model91EvidenceHand::new(
+                        ranks, 12345.67, Model91EvidenceWeightMode::DepletedEmpirical(baseline),
+                    );
+                    assert_eq!(hand.depletion_denominator.to_bits(),
+                        rank_combination_count(&ranks, &baseline).to_bits());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cached_wp_depletion_preserves_choices_across_dead_cards_and_scores() {
+        let board = BoardWinMatrix::from_function(|_, a, b| {
+            (0.5 + (f64::from(a) - f64::from(b)) / 242.0).clamp(0.0, 1.0)
+        });
+        for role in [Role::Dealer, Role::Pone] {
+            let mut observation = Model91Observation::from_public_state(
+                role, hand(&[(0, 1), (4, 1)]), hand(&[(2, 1), (7, 1)]),
+                hand(&[(4, 2), (12, 1)]), [0; RANKS], None, &[], 0, None, None,
+            ).unwrap();
+            let mut beliefs = Model91EmpiricalBeliefs::default();
+            beliefs.replace_row(
+                if role == Role::Dealer { Role::Pone } else { Role::Dealer },
+                observation.opponent_played,
+                vec![(hand(&[(0, 1)]), 5), (hand(&[(4, 1)]), 60), (hand(&[(12, 1)]), 17)],
+            );
+            let mut cached = Model91Policy::new_with_evidence_cache(Some(beliefs.clone()), 0, 100_000, 0);
+            cached.use_empirical_depletion();
+            for scores in [[0, 0], [118, 120], [120, 118], [120, 120]] {
+                for cut in [0, 4, 12] {
+                    for discards in [hand(&[(1, 2)]), hand(&[(4, 1), (12, 1)])] {
+                        observation.own_discards = discards;
+                        observation.turn_rank = Some(cut);
+                        // Skip known-card contradictions, not posterior zeroes.
+                        if opponent_available(&observation).is_err() { continue; }
+                        for likelihoods in [[1_000_000; RANKS], [1; RANKS]] {
+                            let mut fresh = Model91Policy::new(Some(beliefs.clone()), 0);
+                            fresh.use_empirical_depletion();
+                            assert_eq!(
+                                cached.choose_action_by_wp(&observation, &likelihoods, scores, &board).unwrap(),
+                                fresh.choose_action_by_wp(&observation, &likelihoods, scores, &board).unwrap(),
+                            );
+                        }
                     }
                 }
             }
