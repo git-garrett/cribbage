@@ -44,6 +44,10 @@ const MANIFEST_FILE: &str = "manifest.json";
 const BASELINE_MAGIC: &[u8; 8] = b"M911PR01";
 const BASELINE_HEADER_BYTES: usize = 56;
 const INVALID_PAIR: u16 = u16::MAX;
+// The existing checksum slot also distinguishes generated baselines from an
+// external verification file, without changing historical binary layouts.
+const GENERATED_BASELINE_CHECKSUM: &str = "0000000000000000";
+const DEFAULT_GENERATED_VERIFY_WORLDS: usize = 32;
 
 #[derive(Debug)]
 enum Command {
@@ -58,7 +62,7 @@ struct BuildConfig {
     factors: PathBuf,
     keep_prior: PathBuf,
     discard_histograms: PathBuf,
-    baseline_pairs: PathBuf,
+    baseline_pairs: Option<PathBuf>,
     dealer_start: usize,
     dealer_count: usize,
     pone_start: usize,
@@ -239,6 +243,14 @@ impl BuildState {
     fn has_joint_distributions(&self) -> bool {
         matches!(self.model_version.as_str(), "13.23" | "20.0")
     }
+
+    fn baseline_mode(&self) -> &'static str {
+        if self.baseline_checksum == GENERATED_BASELINE_CHECKSUM {
+            "generated-inline"
+        } else {
+            "generated-inline-and-checked-against-file"
+        }
+    }
 }
 
 struct PartialAsset {
@@ -278,12 +290,15 @@ fn parse_command() -> Result<Command, String> {
         Some("--help") | Some("-h") | None => {
             println!(
                 "build_model1322_corrections build --output DIR --beliefs FILE --factors FILE \
-                 --keep-prior FILE --discard-histograms FILE --baseline-pairs FILE \
+                 --keep-prior FILE --discard-histograms FILE [--baseline-pairs FILE] \
                  --dealer-start N --dealer-count N [--pone-start N --pone-count N] [--resume] \
                  [--action-cache-limit N] [--evidence-cache-outcome-limit N] \
                  [--future-cache-limit N] [--verify-first-worlds N] [--joint-distributions] \
                  [--model20-normalized-discards]\n\
-                 build_model1322_corrections merge --shards DIR --output DIR"
+                 build_model1322_corrections merge --shards DIR --output DIR\n\
+                 Baseline traces are generated inline. --baseline-pairs adds optional historical \
+                 verification; no separate pair build is required. Without that file, \
+                 --verify-first-worlds defaults to 32 direct full replays (otherwise 0)."
             );
             process::exit(0);
         }
@@ -306,7 +321,7 @@ fn parse_build(args: &[String]) -> Result<BuildConfig, String> {
     let mut action_cache_limit = 100_000_usize;
     let mut evidence_cache_outcome_limit = 500_000_usize;
     let mut future_cache_limit = 3_000_000_usize;
-    let mut verify_first_worlds = 0_usize;
+    let mut verify_first_worlds = None;
     let mut joint_distributions = false;
     let mut normalize_discard_rows = false;
     let mut index = 0_usize;
@@ -338,7 +353,7 @@ fn parse_build(args: &[String]) -> Result<BuildConfig, String> {
             }
             "--future-cache-limit" => future_cache_limit = parse_usize(&value(&mut index)?, flag)?,
             "--verify-first-worlds" => {
-                verify_first_worlds = parse_usize(&value(&mut index)?, flag)?
+                verify_first_worlds = Some(parse_usize(&value(&mut index)?, flag)?)
             }
             "--resume" => resume = true,
             "--joint-distributions" => joint_distributions = true,
@@ -349,6 +364,11 @@ fn parse_build(args: &[String]) -> Result<BuildConfig, String> {
             other => return Err(format!("unknown Model 13.22 build argument {other}")),
         }
     }
+    let verify_first_worlds = verify_first_worlds.unwrap_or(if baseline_pairs.is_none() {
+        DEFAULT_GENERATED_VERIFY_WORLDS
+    } else {
+        0
+    });
     let config = BuildConfig {
         output: output.ok_or_else(|| "build requires --output".to_string())?,
         beliefs: beliefs.ok_or_else(|| "build requires --beliefs".to_string())?,
@@ -356,8 +376,7 @@ fn parse_build(args: &[String]) -> Result<BuildConfig, String> {
         keep_prior: keep_prior.ok_or_else(|| "build requires --keep-prior".to_string())?,
         discard_histograms: discard_histograms
             .ok_or_else(|| "build requires --discard-histograms".to_string())?,
-        baseline_pairs: baseline_pairs
-            .ok_or_else(|| "build requires --baseline-pairs".to_string())?,
+        baseline_pairs,
         dealer_start: dealer_start.ok_or_else(|| "build requires --dealer-start".to_string())?,
         dealer_count: dealer_count.ok_or_else(|| "build requires --dealer-count".to_string())?,
         pone_start,
@@ -416,7 +435,7 @@ fn build(config: &BuildConfig) -> Result<(), String> {
         checksum_string(fnv1a64_file(&config.factors)?),
         checksum_string(fnv1a64_file(&config.keep_prior)?),
         checksum_string(fnv1a64_file(&config.discard_histograms)?),
-        checksum_string(fnv1a64_file(&config.baseline_pairs)?),
+        baseline_checksum(config.baseline_pairs.as_deref())?,
     ];
     let keep_keys = enumerate_rank_count_keys(4);
     let keeps = keep_keys
@@ -437,7 +456,7 @@ fn build(config: &BuildConfig) -> Result<(), String> {
         &contexts,
         config.normalize_discard_rows,
     )?;
-    let baseline = load_baseline_pairs(&config.baseline_pairs)?;
+    let baseline = config.baseline_pairs.as_deref().map(load_baseline_pairs).transpose()?;
     let beliefs = Model91EmpiricalBeliefs::load(&config.beliefs)?;
     let factors = Model1322DeclineFactors::load(&config.factors)?;
     let policy = Model911Policy::new_with_evidence_cache(
@@ -498,11 +517,12 @@ fn build(config: &BuildConfig) -> Result<(), String> {
                 continue;
             }
             let trace = trace_model911_pair(keeps[dealer_id], keeps[pone_id], &policy)?;
-            let expected = baseline_outcome(&baseline, dealer_id, pone_id)?;
-            if trace.outcome() != expected {
-                return Err(format!(
-                    "Model 9.11 trace differs from baseline cell {dealer_id},{pone_id}"
-                ));
+            if let Some(reference) = &baseline {
+                if trace.outcome() != baseline_outcome(reference, dealer_id, pone_id)? {
+                    return Err(format!(
+                        "Model 9.11 trace differs from baseline cell {dealer_id},{pone_id}"
+                    ));
+                }
             }
             let mut pair = PairWork {
                 trace: &trace,
@@ -550,6 +570,8 @@ fn build(config: &BuildConfig) -> Result<(), String> {
             "modelVersion": partial.state.model_version,
             "status": "complete",
             "architecture": "pair-oriented Model 9.11 trace plus factorized actor dead-card screens and changed-suffix replay",
+            "baselineMode": partial.state.baseline_mode(),
+            "baselineChecksumSemantics": "zero means no external baseline; traces use the recorded belief and factor inputs",
             "durableOutput": if config.joint_distributions { "exact joint own/opponent terminal pegging distributions, first moments, and diagnostic pone lead masks" } else { "weighted terminal six-card/discard summaries and pone lead cut masks only" },
             "offlineObjective": "net pegging points; executable Model911Policy with legal-information dead-card and decline inference",
             "boardConditioning": false,
@@ -1107,6 +1129,15 @@ fn adjusted_discard_variants(
         .collect())
 }
 
+fn baseline_checksum(path: Option<&Path>) -> Result<String, String> {
+    let Some(path) = path else { return Ok(GENERATED_BASELINE_CHECKSUM.into()) };
+    let checksum = checksum_string(fnv1a64_file(path)?);
+    if checksum == GENERATED_BASELINE_CHECKSUM {
+        return Err("external baseline checksum collides with the generated-baseline marker".into());
+    }
+    Ok(checksum)
+}
+
 fn load_baseline_pairs(path: &Path) -> Result<Vec<u16>, String> {
     let bytes =
         fs::read(path).map_err(|error| format!("read {} failed: {error}", path.display()))?;
@@ -1222,6 +1253,7 @@ fn write_checkpoint(
             "schemaVersion": 1,
             "modelVersion": state.model_version,
             "status": state.state,
+            "baselineMode": state.baseline_mode(),
             "dealerStart": state.dealer_start,
             "dealerCount": state.dealer_count,
             "completedDealerKeeps": state.completed_dealer_keeps,
@@ -1541,6 +1573,9 @@ fn merge(config: &MergeConfig) -> Result<(), String> {
             "schemaVersion": 1,
             "modelVersion": merged.state.model_version,
             "status": "complete",
+            "baselineMode": merged.state.baseline_mode(),
+            "baselineChecksum": merged.state.baseline_checksum,
+            "baselineChecksumSemantics": "zero means no external baseline; traces use the recorded belief and factor inputs",
             "shards": shards.len(),
             "dealerKeeps": KEEP_COUNT,
             "poneKeeps": KEEP_COUNT,
@@ -1801,6 +1836,127 @@ fn read_f64(bytes: &[u8], offset: usize) -> Result<f64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inline_baseline_build_matches_reference_mode_and_resumes() {
+        let root = env::temp_dir().join(format!("inline-correction-test-{}", process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let assets = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../cribbage-shadow-engine/assets");
+        let keys = enumerate_rank_count_keys(4);
+        // KKKK versus QQQQ has forced actions, keeping this full builder test
+        // small while exercising both roles, dead-card contexts and packing.
+        let dealer_id = 0;
+        let pone_id = 4;
+        let hands = [
+            rank_counts_from_key(&keys[dealer_id]).unwrap(),
+            rank_counts_from_key(&keys[pone_id]).unwrap(),
+        ];
+        let prior = BTreeMap::from([(keys[dealer_id].clone(), 1), (keys[pone_id].clone(), 1)]);
+        atomic_json(&root.join("keeps.json"), &json!({
+            "version": 1, "roles": {"dealer": prior, "pone": prior}
+        })).unwrap();
+        let fallback = json!({"1100000000000": 1, "0011000000000": 1, "0000110000000": 1});
+        atomic_json(&root.join("discards.json"), &json!({
+            "schemaVersion": 1, "modelVersion": "20.0",
+            "roles": {"dealer": {}, "pone": {}},
+            "fallbackByRole": {"dealer": fallback, "pone": fallback}
+        })).unwrap();
+        let ordinal = json!({"observedDeclines": 0, "declinesWithCardHeld": 0,
+            "declinesWithoutCardHeld": 0, "heldGivenDeclinePpm": null});
+        let factor_row = json!({"multiplierPpm": 500000,
+            "byCardOrdinal": {"first": ordinal, "second": ordinal, "third": ordinal}});
+        let factors = ["threeCardRun", "fourPlusCardRun", "pair", "pairRoyalAfterPair",
+            "fourOfAKindAfterPairRoyal", "safePair", "safePairRoyal"]
+            .into_iter().map(|name| (name, factor_row.clone())).collect::<BTreeMap<_, _>>();
+        atomic_json(&root.join("factors.json"), &json!({
+            "schemaVersion": 3, "modelVersion": "13.22", "testOnlySynthetic": true,
+            "modelCohort": {"includedModels": ["schell_table-peg_table-13.23"]},
+            "factors": factors
+        })).unwrap();
+        let args = vec![
+            "--output".into(), root.join("inline").display().to_string(),
+            "--beliefs".into(), assets.join("model91-pegging-beliefs.bin").display().to_string(),
+            "--factors".into(), root.join("factors.json").display().to_string(),
+            "--keep-prior".into(), root.join("keeps.json").display().to_string(),
+            "--discard-histograms".into(), root.join("discards.json").display().to_string(),
+            "--dealer-start".into(), dealer_id.to_string(), "--dealer-count".into(), "1".into(),
+            "--pone-start".into(), pone_id.to_string(), "--pone-count".into(), "1".into(),
+            "--model20-normalized-discards".into(),
+        ];
+        let mut config = parse_build(&args).unwrap();
+        assert!(config.baseline_pairs.is_none());
+        assert_eq!(config.verify_first_worlds, DEFAULT_GENERATED_VERIFY_WORLDS);
+        build(&config).unwrap();
+        let initial_bytes = fs::read(config.output.join(PARTIAL_FILE)).unwrap();
+        let checkpoint: BuildState = serde_json::from_slice(
+            &fs::read(config.output.join(CHECKPOINT_FILE)).unwrap()
+        ).unwrap();
+        assert_eq!(checkpoint.compatible_pairs, 1);
+        assert_eq!(checkpoint.baseline_checksum, GENERATED_BASELINE_CHECKSUM);
+        assert_eq!(checkpoint.verified_worlds, DEFAULT_GENERATED_VERIFY_WORLDS as u64);
+        let result = read_partial(&config.output.join(PARTIAL_FILE)).unwrap();
+        assert!(result.dealer.iter().any(|row| row.weight > 0));
+        assert!(result.pone.iter().any(|row| row.weight > 0));
+        drop(result);
+        config.resume = true;
+        build(&config).unwrap();
+        assert_eq!(&initial_bytes[HEADER_BYTES..], &fs::read(config.output.join(PARTIAL_FILE)).unwrap()[HEADER_BYTES..]);
+
+        // Obtain the verification cell through a direct complete replay, not
+        // the trace/screen/suffix optimization under test.
+        let policy = Model911Policy::new(
+            Some(Model91EmpiricalBeliefs::load(&config.beliefs).unwrap()),
+            Model1322DeclineFactors::load(&config.factors).unwrap(), 0, 0,
+        ).unwrap();
+        let expected = rollout_model132_world(
+            hands, [[0; RANKS]; 2], None, PegSeat::Zero, &policy.context_free_baseline(),
+        ).unwrap();
+        let mut reference = vec![0xff; BASELINE_HEADER_BYTES + KEEP_COUNT * KEEP_COUNT * 2];
+        reference[..8].copy_from_slice(BASELINE_MAGIC);
+        for (index, value) in [1_u32, KEEP_COUNT as u32, 0, KEEP_COUNT as u32, 0, KEEP_COUNT as u32, 2, 0].iter().enumerate() {
+            reference[8 + index * 4..12 + index * 4].copy_from_slice(&value.to_le_bytes());
+        }
+        let cell = BASELINE_HEADER_BYTES + (dealer_id * KEEP_COUNT + pone_id) * 2;
+        let packed = u16::from(expected.0) | (u16::from(expected.1) << 5);
+        reference[cell..cell + 2].copy_from_slice(&packed.to_le_bytes());
+        let reference_path = root.join("pairs.bin");
+        fs::write(&reference_path, &reference).unwrap();
+        config.baseline_pairs = Some(reference_path.clone());
+        assert!(build(&config).unwrap_err().contains("resume configuration"));
+        config.output = root.join("checked");
+        config.resume = false;
+        build(&config).unwrap();
+        assert_eq!(&initial_bytes[HEADER_BYTES..], &fs::read(config.output.join(PARTIAL_FILE)).unwrap()[HEADER_BYTES..]);
+        reference[cell] ^= 1;
+        fs::write(reference_path, reference).unwrap();
+        config.output = root.join("wrong-reference");
+        assert!(build(&config).unwrap_err().contains("differs from baseline cell"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn baseline_modes_cannot_be_mixed_during_merge() {
+        let args = ["--output", "out", "--beliefs", "b", "--factors", "f",
+            "--keep-prior", "p", "--discard-histograms", "d",
+            "--dealer-start", "0", "--dealer-count", "1"];
+        let mut args = args.into_iter().map(str::to_string).collect::<Vec<_>>();
+        let config = parse_build(&args).unwrap();
+        assert_eq!(config.verify_first_worlds, DEFAULT_GENERATED_VERIFY_WORLDS);
+        let checksums = std::array::from_fn(|_| GENERATED_BASELINE_CHECKSUM.into());
+        let mut inline = new_state(&config, &checksums);
+        inline.state = "complete".into();
+        inline.completed_dealer_keeps = 1;
+        let mut checked = inline.clone();
+        checked.baseline_checksum = "1457241478e3d307".into();
+        validate_merge_shard(&inline, &inline, 0).unwrap();
+        assert!(validate_merge_shard(&checked, &inline, 0).is_err());
+        assert!(validate_merge_shard(&inline, &checked, 0).is_err());
+        args.extend(["--baseline-pairs".into(), "pairs".into()]);
+        assert_eq!(parse_build(&args).unwrap().verify_first_worlds, 0);
+        args.extend(["--verify-first-worlds".into(), "7".into()]);
+        assert_eq!(parse_build(&args).unwrap().verify_first_worlds, 7);
+    }
 
     #[test]
     fn normalized_discard_weights_are_invariant_to_cohort_scale() {

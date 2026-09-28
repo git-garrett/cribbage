@@ -71,12 +71,47 @@ The planned batched rebuild must first audit its inherited evidence under
 the frozen decline factors contain excluded 15.x evidence. The new mode rejects
 missing or ineligible decline-factor model attribution before starting work;
 that metadata check does not replace an audit of the underlying observations.
-Cleaning factors or changing the continuation policy also requires a compatible
-Model 9.11 keep-pair baseline. Freeze the audited inputs, run the baseline and
-correction builds through the job supervisor, verify the new distributions and
-their own moments, and only then activate the replacement for Model 20. The
+Cleaning factors or changing the continuation policy also changes the compatible
+keep-pair baseline. The correction builder now generates that baseline inline:
+freeze the audited inputs, run the single correction build through the job
+supervisor, verify the new distributions and their own moments, and only then
+activate the replacement for Model 20. The
 historical correction build took roughly four days on six workers, excluding
 prerequisite work. No replacement build has been queued for this fix yet.
+
+### Single-pass baseline and corrections
+
+`build_model1322_corrections build` no longer requires `--baseline-pairs`.
+It generates each compatible keep pair's context-free trace once, then immediately
+uses that trace for the actor-specific dead-card screens and changed-suffix
+replays. The trace is temporary and is not written as an observation/action asset.
+There is no preliminary `build_model911_pairs` run or intermediate pair file.
+Both historical aggregation modes and `--model20-normalized-discards` support
+this flow; it changes build orchestration, not the policy or weighted results.
+
+Without a reference pair file, the builder defaults `--verify-first-worlds` to
+32. These corrected worlds are checked against direct complete replays through
+a separate policy instance, bypassing the trace/screen/suffix optimization.
+That is a sampled verification, not an exhaustive proof. Existing tests also
+exercise the optimized path against full replay. An explicit verification limit
+overrides the default.
+
+For historical reproduction or an extra comparison, `--baseline-pairs FILE`
+still checks every generated baseline outcome against that file and fails on
+any difference. This option retains the old default verification limit of zero;
+pass `--verify-first-worlds 32` to enable the additional direct checks too.
+`scripts/model1323-correction.py` deliberately retains its pinned historical
+reference as part of its frozen 13.23 reproduction workflow.
+
+The general parallel launchers omit the reference by default. Set
+`MODEL1322_CORRECTION_BASELINE_PAIRS` explicitly to use one, including when
+resuming an old reference-based build. New jobs use a fresh output directory.
+The binary header's existing baseline-checksum field is zero when no external
+file was used; all other input checksums still identify the actual policy and
+aggregation inputs. Status and manifests name the baseline mode explicitly.
+Resume and merge reject mixed inline/reference provenance and changed references.
+Historical files and currently running benchmarks remain frozen. This builder
+change does not rebuild or activate any gameplay asset.
 
 Model 20.0 discard and pegging selection maximize board win probability. Discards
 break WP ties by total EV; pegging breaks them by immediate points and rank.
