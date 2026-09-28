@@ -70,6 +70,24 @@ class ProductionBuildTests(unittest.TestCase):
                     PRODUCTION.build_release(Path(d), Path(d) / 'target', COMMIT)
                 build.assert_not_called()
 
+    def test_publication_sets_service_executable_permissions(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            record = self.fixture(root)
+            target = root / 'build'
+            (target / 'release').mkdir(parents=True)
+            binary = target / 'release/cribbage-api'
+            binary.write_bytes(b'api')
+            binary.chmod(0o700)
+            (target / 'pgo/api').mkdir(parents=True)
+            PRODUCTION.save(target / 'pgo/api/latest.json', record)
+            with patch.object(PRODUCTION.sys, 'platform', 'linux'), \
+                    patch.object(PRODUCTION, 'build'), \
+                    patch.dict(PRODUCTION.os.environ, {}, clear=True):
+                PRODUCTION.build_release(root, target, COMMIT)
+            self.assertEqual((root / 'rust/target/release/cribbage-api').stat().st_mode & 0o777,
+                             0o755)
+
 
 if __name__ == '__main__':
     unittest.main()

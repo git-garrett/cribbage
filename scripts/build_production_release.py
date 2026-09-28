@@ -46,6 +46,7 @@ def build_release(root, target_dir, commit):
     record = json.loads((target_dir / 'pgo/api/latest.json').read_text())
     publish({'cribbage-api': target_dir / 'release/cribbage-api'},
             root / 'rust/target/release')
+    (root / 'rust/target/release/cribbage-api').chmod(0o755)
     save(root / 'pgo-build.json', record)
     verify(root, commit)
 
