@@ -19,6 +19,7 @@ const required = [
   "rust/cribbage-runner/src/main.rs",
   "rust/cribbage-shadow-engine/Cargo.toml",
   "rust/cribbage-shadow-engine/lib.rs",
+  "rust/cribbage-shadow-engine/bin/pgo-workload.rs",
   "rust/cribbage-shadow-engine/assets/model13-pairwise.bin",
   "rust/cribbage-shadow-engine/assets/model13-hold.bin",
   "rust/cribbage-shadow-engine/assets/model1323-corrections.bin",
@@ -34,6 +35,9 @@ const required = [
   "rust/cribbage-shadow-engine/assets/crib-rank-score-by-discard-cut.json",
   "rust/cribbage-shadow-engine/assets/crib-score-histogram-by-discard-cut.json",
   "scripts/migrate-legacy-leaderboard.py",
+  "scripts/build_rust_release.py",
+  "scripts/build_production_release.py",
+  "scripts/pgo-fixtures.json",
   "scripts/repair_leaderboard_scores.py",
   "scripts/repair_leaderboard_timestamps.py",
 ];

@@ -169,15 +169,20 @@ deploy() {
       tar -xzf '$remote_archive' -C '$incoming_dir' && \
       find '$incoming_dir/rust/cribbage-shadow-engine/assets' -type d -exec chmod 755 {} + && \
       find '$incoming_dir/rust/cribbage-shadow-engine/assets' -type f -exec chmod 644 {} + && \
-      cd '$incoming_dir/rust' && \
-      CRIBBAGE_BUILD_GIT_COMMIT='$GIT_COMMIT' CARGO_TARGET_DIR='$REMOTE_BUILD_DIR/target' cargo build --locked --release --manifest-path cribbage-api/Cargo.toml && \
-      install -d -m 755 '$incoming_dir/rust/target/release' && \
-      install -m 755 '$REMOTE_BUILD_DIR/target/release/cribbage-api' '$incoming_dir/rust/target/release/cribbage-api' && \
+      cd '$incoming_dir' && \
+      systemd-run --quiet --wait --pipe --collect --service-type=exec \
+        --unit='cribbage-build-${GIT_COMMIT}' \
+        -p MemoryHigh=512M -p MemoryMax=640M -p MemorySwapMax=256M \
+        -p CPUWeight=10 -p IOWeight=10 -p Nice=10 -p OOMScoreAdjust=500 \
+        -p RuntimeMaxSec=3h -p Restart=no -p UMask=0022 \
+        /usr/bin/python3 '$incoming_dir/scripts/build_production_release.py' \
+        '$incoming_dir' '$REMOTE_BUILD_DIR/pgo-target' '$GIT_COMMIT' && \
       chown -R root:root '$incoming_dir' && \
       chmod 755 '$incoming_dir' && \
       mv '$incoming_dir' '$release_dir'; \
     fi && \
-    test -x '$release_dir/rust/target/release/cribbage-api'"
+    python3 '$release_dir/scripts/build_production_release.py' \
+      '$release_dir' '$REMOTE_BUILD_DIR/pgo-target' '$GIT_COMMIT' --verify-only"
 
   echo "Preparing systemd and Caddy configuration..."
   "${SSH_BASE[@]}" "$REMOTE" "cat > '$unit_candidate'" <<SERVICE
