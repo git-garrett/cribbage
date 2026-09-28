@@ -815,6 +815,11 @@ fn game_action(
                 return Err(error);
             }
         }
+        if action == "forfeit" {
+            // Cancel only after persistence succeeds; a rolled-back forfeit
+            // must leave the still-valid opening available to its waiters.
+            server.pegging_work.cancel(&session.id);
+        }
         let mut handicap_updated = false;
         if action == "continue-scoring" {
             if let Some(user) = authenticated_user {

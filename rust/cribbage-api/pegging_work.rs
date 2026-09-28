@@ -31,6 +31,14 @@ pub(super) struct Work {
 }
 
 impl Work {
+    fn cancel(&self) {
+        let mut result = self.result.lock().unwrap_or_else(|e| e.into_inner());
+        self.progress.cancel();
+        *result = Some(Err(cribbage_shadow_engine::progress::CANCELLED_ERROR.into()));
+        drop(result);
+        self.changed.notify_all();
+    }
+
     fn wait(&self) -> Result<PegAction, String> {
         let result = self.result.lock().unwrap_or_else(|e| e.into_inner());
         let result = self
@@ -59,6 +67,12 @@ impl Work {
 }
 
 impl Registry {
+    pub(super) fn cancel(&self, session_id: &str) {
+        if let Some(job) = self.0.lock().unwrap_or_else(|e| e.into_inner()).remove(session_id) {
+            job.cancel();
+        }
+    }
+
     fn start(
         &self,
         session: &Session,
@@ -70,6 +84,7 @@ impl Registry {
             if job.key == key && job.owner == session.owner_user_id && !job.failed() {
                 return Arc::clone(job);
             }
+            if !job.finished.load(Ordering::Acquire) { job.cancel(); }
         }
         // Completed abandoned games need no long-lived cache. Never evict running work.
         jobs.retain(|_, job| {
@@ -93,11 +108,14 @@ impl Registry {
             .name("ace-opening".into())
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    worker.progress.check_cancelled()?;
                     with_progress(Arc::clone(&worker.progress), solve)
                 }))
                 .unwrap_or_else(|_| Err("Ace calculation failed; please retry.".into()));
                 let mut saved = worker.result.lock().unwrap_or_else(|e| e.into_inner());
-                *saved = Some(result);
+                // Cancellation and publication share this lock, so a late
+                // successful solve cannot overwrite the cancellation result.
+                *saved = Some(worker.progress.check_cancelled().and(result));
                 worker.finished.store(true, Ordering::Release);
                 drop(saved);
                 worker.changed.notify_all();
@@ -483,6 +501,146 @@ mod tests {
             }
         }
         assert!(heels_cases > 0, "cover heels scores in the projection");
+    }
+
+
+    #[test]
+    fn forfeiting_an_opening_cancels_work_and_releases_waiters() {
+        let session = opening();
+        let id = session.id.clone();
+        let data_dir = std::env::temp_dir().join(format!(
+            "ace-forfeit-work-{}-{}", std::process::id(), crate::unix_millis(),
+        ));
+        crate::initialize_game_database(&data_dir).unwrap();
+        let server = Server {
+            pegging_work: Registry::default(),
+            state: Mutex::new(AppState::default()),
+            model_root: String::new(), data_dir: data_dir.clone(),
+        };
+        server.state.lock().unwrap().sessions.insert(id.clone(), session.clone());
+        let (started_tx, started_rx) = mpsc::channel();
+        let (finish_tx, finish_rx) = mpsc::channel();
+        let job = server.pegging_work.start(&session, opening_key(&session).unwrap(), move || {
+            started_tx.send(()).unwrap();
+            finish_rx.recv().unwrap();
+            Ok(PegAction::Go)
+        });
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let other_user = auth::test_user(999, "other", "other@example.invalid");
+        let denied = crate::game_action(
+            &server, &json!({"gameId":id,"action":"forfeit"}).to_string(), Some(&other_user),
+        );
+        assert_eq!(denied.status, 400);
+        assert!(job.result.lock().unwrap().is_none());
+        let response = crate::game_action(
+            &server, &json!({"gameId":id,"action":"forfeit"}).to_string(), None,
+        );
+        let released = job.result.lock().unwrap().as_ref().is_some_and(Result::is_err);
+        let removed = !server.pegging_work.0.lock().unwrap().contains_key(&id);
+        // Always release the diagnostic worker, including on the old behavior.
+        finish_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !job.finished.load(Ordering::Acquire) && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        std::fs::remove_dir_all(data_dir).unwrap();
+        assert_eq!(response.status, 200, "{}", response.body);
+        assert!(released, "normal forfeit left the obsolete opening and its waiters running");
+        assert!(removed, "forfeited work must leave the registry");
+        assert!(job.wait().is_err(), "a late result must not replace cancellation");
+    }
+
+
+    #[test]
+    fn replacing_work_cancels_only_the_obsolete_job() {
+        let session = opening();
+        let registry = Registry::default();
+        let (finish_tx, finish_rx) = mpsc::channel();
+        let job = registry.start(&session, opening_key(&session).unwrap(), move || {
+            finish_rx.recv().unwrap();
+            Ok(PegAction::Go)
+        });
+        let same = registry.start(&session, opening_key(&session).unwrap(), || panic!("duplicate solve"));
+        assert!(Arc::ptr_eq(&job, &same));
+        assert!(job.progress.check_cancelled().is_ok());
+        let mut changed = session.clone();
+        changed.game.player_mut(AI).score += 1;
+        let replacement = registry.start(&changed, opening_key(&changed).unwrap(), || Ok(PegAction::Go));
+        assert!(job.wait().is_err());
+        assert!(job.progress.check_cancelled().is_err());
+        // The old thread may not have started yet; cancellation also handles
+        // that case without invoking its solve closure.
+        let _ = finish_tx.send(());
+        assert_eq!(replacement.wait(), Ok(PegAction::Go));
+        assert!(replacement.progress.check_cancelled().is_ok());
+    }
+
+    #[test]
+    fn a_failed_forfeit_keeps_the_opening_usable() {
+        let session = opening();
+        let id = session.id.clone();
+        let invalid_dir = std::env::temp_dir().join(format!(
+            "ace-forfeit-invalid-dir-{}-{}", std::process::id(), crate::unix_millis(),
+        ));
+        std::fs::write(&invalid_dir, b"not a directory").unwrap();
+        let server = Server {
+            pegging_work: Registry::default(), state: Mutex::new(AppState::default()),
+            model_root: String::new(), data_dir: invalid_dir.clone(),
+        };
+        server.state.lock().unwrap().sessions.insert(id.clone(), session.clone());
+        let (finish_tx, finish_rx) = mpsc::channel();
+        let job = server.pegging_work.start(&session, opening_key(&session).unwrap(), move || {
+            finish_rx.recv().unwrap(); Ok(PegAction::Go)
+        });
+        let response = crate::game_action(
+            &server, &json!({"gameId":id,"action":"forfeit"}).to_string(), None,
+        );
+        finish_tx.send(()).unwrap();
+        assert_eq!(response.status, 400);
+        assert!(!server.state.lock().unwrap().sessions[&id].forfeited);
+        assert!(job.progress.check_cancelled().is_ok());
+        assert_eq!(job.wait(), Ok(PegAction::Go));
+        std::fs::remove_file(invalid_dir).unwrap();
+    }
+
+    #[test]
+    #[ignore = "release-only real Ace opening cancellation latency"]
+    fn real_opening_stops_after_normal_forfeit() {
+        let session = opening();
+        let id = session.id.clone();
+        let data_dir = std::env::temp_dir().join(format!(
+            "ace-forfeit-real-{}-{}", std::process::id(), crate::unix_millis(),
+        ));
+        crate::initialize_game_database(&data_dir).unwrap();
+        let server = Server {
+            pegging_work: Registry::default(), state: Mutex::new(AppState::default()),
+            model_root: std::env::var("CRIBBAGE_RUST_MODEL_ROOT").unwrap(), data_dir: data_dir.clone(),
+        };
+        server.state.lock().unwrap().sessions.insert(id.clone(), session.clone());
+        let job = prepare(&server, &session).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while job.progress.snapshot().0 < 256 && !job.finished.load(Ordering::Acquire) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let before = job.progress.snapshot();
+        assert!(!job.finished.load(Ordering::Acquire), "fixture must still be calculating");
+        assert!(before.0 >= 256);
+        let start = Instant::now();
+        let response = crate::game_action(
+            &server, &json!({"gameId":id,"action":"forfeit"}).to_string(), None,
+        );
+        assert_eq!(response.status, 200, "{}", response.body);
+        assert!(job.wait().is_err());
+        while !job.finished.load(Ordering::Acquire) && start.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(job.finished.load(Ordering::Acquire), "obsolete engine work did not stop");
+        let report = json!({"stopMilliseconds":start.elapsed().as_secs_f64()*1000.0,"before":before,"after":job.progress.snapshot(),"cancelled":job.wait().is_err()});
+        if let Ok(path) = std::env::var("CRIBBAGE_CANCELLATION_REPORT") {
+            std::fs::write(path, report.to_string()).unwrap();
+        }
+        println!("{report}");
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[test]

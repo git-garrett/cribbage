@@ -477,6 +477,8 @@ impl PolicyAssets {
         mut population: Option<&mut HandPopulation>,
         hands: Option<&[([u8; 13], f64)]>,
     ) -> Result<Vec<World>, String> {
+        let progress = crate::progress::current();
+        if let Some(progress) = &progress { progress.check_cancelled()?; }
         observation.validate()?;
         if rank_count_total(&observation.own_discards) != 2 {
             return Err("13.23 requires the actor's two known crib discards".into());
@@ -519,6 +521,7 @@ impl PolicyAssets {
             hands = &generated;
         }
         for &(remaining, hand_weight) in hands {
+            if let Some(progress) = &progress { progress.check_cancelled()?; }
             let initial =
                 std::array::from_fn(|rank| remaining[rank] + observation.opponent_played[rank]);
             let condition = || -> Result<DiscardSupport, String> {
@@ -841,11 +844,15 @@ fn forecast_worlds(
     worlds: &[World],
     posterior_worlds: usize,
 ) -> Result<Vec<PegCandidateForecast>, String> {
+    let progress = crate::progress::current();
     let mut forecasts = Vec::new();
     let mut observation_scratch = Model132ObservationScratch::default();
     for action in observation.legal_actions() {
         let mut outcomes = BTreeMap::new();
-        for world in worlds {
+        for (index, world) in worlds.iter().enumerate() {
+            if index % 256 == 0 {
+                if let Some(progress) = &progress { progress.check_cancelled()?; }
+            }
             let (own, opponent) = rollout_candidate(observation, policy, world, action, &mut observation_scratch)?;
             *outcomes.entry((own, opponent)).or_insert(0.0) += world.weight;
         }
@@ -876,6 +883,7 @@ fn forecast_worlds_for_choice(
     let mut observation_scratch = Model132ObservationScratch::default();
     let actions = observation.legal_actions();
     if let Some(progress) = &progress {
+        progress.check_cancelled()?;
         progress.begin(worlds.len() * actions.len());
     }
     let mut remaining = vec![0.0; worlds.len() + 1];
@@ -903,6 +911,7 @@ fn forecast_worlds_for_choice(
         for (index, world) in worlds.iter().enumerate() {
             if index % 256 == 0 {
                 if let Some(progress) = &progress {
+                    progress.check_cancelled()?;
                     progress.complete(action_index * worlds.len() + index);
                 }
             }
@@ -1788,6 +1797,37 @@ mod tests {
         assert!(forecasts
             .iter()
             .all(|f| f.evaluated_worlds == f.posterior_worlds));
+    }
+
+
+    #[test]
+    fn cancelled_forecasts_never_return_partial_candidates() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct CancelDuringRollout {
+            progress: Arc<crate::progress::DecisionProgress>, calls: AtomicUsize,
+        }
+        impl Model132PeggingPolicy for CancelDuringRollout {
+            fn choose_action(&self, observation: &Model132Observation) -> Result<RankPegAction, String> {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                self.progress.cancel();
+                FirstLegal.choose_action(observation)
+            }
+        }
+        let (observation, world) = opening();
+        let worlds = vec![world; 513];
+        for bounded in [false, true] {
+            let progress = Arc::new(crate::progress::DecisionProgress::default());
+            let policy = CancelDuringRollout { progress: Arc::clone(&progress), calls: AtomicUsize::new(0) };
+            let result = crate::progress::with_progress(progress, || {
+                if bounded {
+                    forecast_worlds_for_choice(&observation, &policy, &worlds, worlds.len(), &mut |_, _| 0.5)
+                } else {
+                    forecast_worlds(&observation, &policy, &worlds, worlds.len())
+                }
+            });
+            assert_eq!(result.err().as_deref(), Some(crate::progress::CANCELLED_ERROR));
+            assert!(policy.calls.load(Ordering::Relaxed) > 0);
+        }
     }
 
     #[test]
