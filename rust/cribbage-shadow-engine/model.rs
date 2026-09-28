@@ -674,6 +674,23 @@ pub fn review_decision(
     selected_card_ids: &[u8],
     root: &str,
 ) -> Result<DecisionReview, String> {
+    if input.kind == DecisionKind::Peg
+        && input.player == PlayerKey::Ai
+        && input.turn == PlayerKey::Ai
+        && matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3)
+    {
+        let (selected_card, legal) = selected_peg_for_review(input, selected_card_ids)?;
+        if legal.len() > 1 {
+            // Without a saved recommendation, value all ranks once and share
+            // the posterior, policy caches, histograms, and counting evaluator.
+            let tables = runtime_tables(root)?;
+            let actions = model1323_observation(input).legal_actions();
+            let (forecasts, mut evaluator) = forecast_peg_review(input, tables, &actions)?;
+            let selected = select_reviewed_peg(input, selected_card, &forecasts, &mut evaluator)?;
+            let recommended = select_peg_model1323(input, &legal, &forecasts, &mut evaluator)?;
+            return Ok(DecisionReview { selected, recommended });
+        }
+    }
     let selected = evaluate_selected_decision(input, selected_card_ids, root)?;
     let recommended = evaluate_decision(input, root)?;
     Ok(DecisionReview {
@@ -2890,11 +2907,10 @@ fn recommend_peg_model13_with_analysis(
     }
 }
 
-fn review_peg_model13(
+fn selected_peg_for_review(
     input: &DecisionInput,
     selected_card_ids: &[u8],
-    root: &str,
-) -> Result<Decision, String> {
+) -> Result<(Card, Vec<Card>), String> {
     if selected_card_ids.len() != 1 {
         return Err("pegging review requires one selected card".to_string());
     }
@@ -2910,6 +2926,47 @@ fn review_peg_model13(
         .copied()
         .find(|card| card.id == selected_id)
         .ok_or_else(|| "selected peg is not legal in the saved position".to_string())?;
+    Ok((selected, legal))
+}
+
+fn forecast_peg_review(
+    input: &DecisionInput,
+    tables: &RuntimeTables,
+    actions: &[RankPegAction],
+) -> Result<(Vec<crate::model1323::PegCandidateForecast>, PeggingWinEvaluator), String> {
+    let observation = model1323_observation(input);
+    let assets = tables.pegging_policy_assets(input)?;
+    let prepared = (input.model == MODEL_20_3)
+        .then(|| assets.prepare_decision(&observation)).transpose()?;
+    let forecasts = if let Some(prepared) = &prepared {
+        prepared.forecast_actions(actions)?
+    } else {
+        assets.forecast_actions(&observation, actions)?
+    };
+    let evaluator = model1323_pegging_win_evaluator(
+        input, tables, prepared.as_ref().map(|decision| decision.opponent_hands()),
+    )?;
+    Ok((forecasts, evaluator))
+}
+
+fn select_reviewed_peg(
+    input: &DecisionInput,
+    selected: Card,
+    forecasts: &[crate::model1323::PegCandidateForecast],
+    evaluator: &mut PeggingWinEvaluator,
+) -> Result<Decision, String> {
+    let forecast = forecasts.iter()
+        .find(|forecast| forecast.action == RankPegAction::Play(selected.rank))
+        .ok_or("selected peg has no forecast")?;
+    select_peg_model1323(input, &[selected], std::slice::from_ref(forecast), evaluator)
+}
+
+fn review_peg_model13(
+    input: &DecisionInput,
+    selected_card_ids: &[u8],
+    root: &str,
+) -> Result<Decision, String> {
+    let (selected, legal) = selected_peg_for_review(input, selected_card_ids)?;
     if legal.len() == 1 {
         let mut plays = input.plays.clone();
         plays.push(selected);
@@ -2923,24 +2980,10 @@ fn review_peg_model13(
     }
     let tables = runtime_tables(root)?;
     if matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3) {
-        // Review the selected rank without choice pruning: even an inferior
-        // action needs its complete distribution to report its true value.
-        let observation = model1323_observation(input);
-        let assets = tables.pegging_policy_assets(input)?;
-        let prepared = (input.model == MODEL_20_3)
-            .then(|| assets.prepare_decision(&observation)).transpose()?;
-        let forecasts = if let Some(prepared) = &prepared {
-            prepared.forecast(usize::MAX)?
-        } else {
-            assets.forecast(&observation, usize::MAX)?
-        };
-        let selected_forecasts: Vec<_> = forecasts.into_iter()
-            .filter(|forecast| forecast.action == RankPegAction::Play(selected.rank))
-            .collect();
-        let mut evaluator = model1323_pegging_win_evaluator(
-            input, tables, prepared.as_ref().map(|decision| decision.opponent_hands()),
+        let (forecasts, mut evaluator) = forecast_peg_review(
+            input, tables, &[RankPegAction::Play(selected.rank)],
         )?;
-        return select_peg_model1323(input, &[selected], &selected_forecasts, &mut evaluator);
+        return select_reviewed_peg(input, selected, &forecasts, &mut evaluator);
     }
     let hold = tables.hold()?;
     let opponent_role = other_role(input.role);
@@ -6924,6 +6967,64 @@ mod tests {
             serde_json::to_vec_pretty(&report).unwrap(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn shared_pegging_reviews_preserve_selected_and_recommended_values() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = root.to_str().unwrap();
+        let bits = |decision: &Decision| match decision {
+            Decision::Peg { action, card_id, ev, win_probability, .. } =>
+                (action.clone(), *card_id, ev.map(f64::to_bits), win_probability.map(f64::to_bits)),
+            _ => panic!("expected pegging decision"),
+        };
+        for model in [MODEL_13_23, MODEL_20_3] {
+            for (role, hand, own_score, opponent_score) in [
+                ("pone", "4,9", 95, 96),
+                ("dealer", "4,9", 119, 120),
+                ("pone", "17,4", 95, 96), // One legal rank; preserve physical card identity.
+            ] {
+                let input = parse_decision_input(&format!(
+                    "kind=peg;model={model};turnCard=10;role={role};ownDiscards=1,6;aiHand={hand};aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore={own_score};humanScore={opponent_score};plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"
+                )).unwrap();
+                let recommended = evaluate_decision(&input, root).unwrap();
+                // The original review valued every rank, then filtered to the
+                // selected one. Keep that independent reference here.
+                let observation = model1323_observation(&input);
+                let tables = runtime_tables(root).unwrap();
+                let forecasts = tables.pegging_policy_assets(&input).unwrap()
+                    .forecast(&observation, usize::MAX).unwrap();
+                let mut evaluator = model1323_pegging_win_evaluator(&input, tables, None).unwrap();
+                for card in &input.ai_hand {
+                    let expected = select_reviewed_peg(&input, *card, &forecasts, &mut evaluator).unwrap();
+                    let selected = evaluate_selected_decision(&input, &[card.id], root).unwrap();
+                    let review = review_decision(&input, &[card.id], root).unwrap();
+                    assert_eq!(bits(&selected), bits(&expected));
+                    assert_eq!(bits(&review.selected), bits(&expected));
+                    assert_eq!(bits(&review.recommended), bits(&recommended));
+                }
+                for selected in [vec![], vec![51], vec![4, 9]] {
+                    assert_eq!(
+                        review_decision(&input, &selected, root).unwrap_err(),
+                        evaluate_selected_decision(&input, &selected, root).unwrap_err(),
+                    );
+                }
+                if model == MODEL_20_3 && role == "dealer" {
+                    for (player, turn) in [
+                        (PlayerKey::Human, PlayerKey::Ai),
+                        (PlayerKey::Ai, PlayerKey::Human),
+                    ] {
+                        let mut invalid = input.clone();
+                        invalid.player = player;
+                        invalid.turn = turn;
+                        assert_eq!(
+                            review_decision(&invalid, &[4], root).unwrap_err(),
+                            evaluate_decision(&invalid, root).unwrap_err(),
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
