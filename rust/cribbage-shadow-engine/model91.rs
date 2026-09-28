@@ -1442,6 +1442,37 @@ fn opponent_available(observation: &Model91Observation) -> Result<[u8; RANKS], S
     Ok(available)
 }
 
+// Evidence counts describe a standard deck: these binomial coefficients are
+// exact integers. Keep the general path for out-of-domain callers.
+#[inline]
+fn evidence_choose(n: u8, k: u8) -> f64 {
+    if k == 1 {
+        return f64::from(n);
+    }
+    if n <= 4 {
+        if k > n {
+            return 0.0;
+        }
+        if k == 0 || k == n {
+            return 1.0;
+        }
+        if n == 4 && k == 2 {
+            return 6.0;
+        }
+        return f64::from(n);
+    }
+    choose(n, k)
+}
+
+#[test]
+fn evidence_combinations_match_general_arithmetic_exactly() {
+    for n in 0..=u8::MAX {
+        for k in 0..=u8::MAX {
+            assert_eq!(evidence_choose(n, k).to_bits(), choose(n, k).to_bits());
+        }
+    }
+}
+
 fn evidence_hand_weight(
     hand: &Model91EvidenceHand,
     weight_mode: Model91EvidenceWeightMode,
@@ -1460,8 +1491,8 @@ fn evidence_hand_weight(
             while mask != 0 {
                 let rank = mask.trailing_zeros() as usize;
                 mask &= mask - 1;
-                before *= choose(baseline[rank], hand.ranks[rank]);
-                after *= choose(available[rank], hand.ranks[rank]);
+                before *= evidence_choose(baseline[rank], hand.ranks[rank]);
+                after *= evidence_choose(available[rank], hand.ranks[rank]);
             }
             if before == 0.0 {
                 return 0.0;
@@ -1479,7 +1510,7 @@ fn evidence_hand_weight(
             return 0.0;
         }
         if matches!(weight_mode, Model91EvidenceWeightMode::Physical) {
-            weight *= choose(available[rank], hand.ranks[rank]);
+            weight *= evidence_choose(available[rank], hand.ranks[rank]);
         }
     }
     let mut mask = hand.rank_mask;
