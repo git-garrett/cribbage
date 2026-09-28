@@ -14,10 +14,12 @@ use cribbage_shadow_engine::cards::{
     PeggingScoreComponents, RANKS, SUIT_NAMES, VALUES,
 };
 use cribbage_shadow_engine::decision::{
-    recommend_discard_for_side, recommend_peg_for_side, recommend_peg_for_side_with_caches,
+    choose_peg_for_side_with_caches, recommend_discard_for_side, recommend_peg_for_side,
     review_discard_for_side_with_recommendation, review_peg_for_side_with_recommendation,
-    DecisionReview as EngineDecisionReview, PegDecision, ReviewedDecisionValue,
+    DecisionReview as EngineDecisionReview, PegAction, PegDecision, ReviewedDecisionValue,
 };
+#[cfg(test)]
+use cribbage_shadow_engine::decision::recommend_peg_for_side_with_caches;
 use cribbage_shadow_engine::dynamic::{
     DynamicCycleSample, DynamicProfile, DynamicState, DYNAMIC_EVALUATOR_VERSION,
     MIN_COMPLETE_CYCLES,
@@ -1939,7 +1941,7 @@ fn apply_action_with_peg_decision(
     action: &str,
     body: &str,
     model_root: &str,
-    prepared_peg: Option<PegDecision>,
+    prepared_peg: Option<PegAction>,
 ) -> Result<(), String> {
     if matches!(
         action,
@@ -2147,7 +2149,7 @@ fn apply_action_with_peg_decision(
             }
             let score_before = score_snapshot(&session.game);
             let decision_model = session.decision_model();
-            let decision = prepared_peg.map(Ok).unwrap_or_else(|| recommend_peg_for_side_with_caches(
+            let decision = prepared_peg.map(Ok).unwrap_or_else(|| choose_peg_for_side_with_caches(
                 &session.game,
                 AI,
                 decision_model,
@@ -2158,11 +2160,11 @@ fn apply_action_with_peg_decision(
                     .then_some(&session.model1323_hand_cache),
             ))?;
             let (reason, cards, score_components) = match decision {
-                PegDecision::Go => {
+                PegAction::Go => {
                     session.game.say_go(AI)?;
                     ("Go", Vec::new(), None)
                 }
-                PegDecision::Play { card_id, .. } => {
+                PegAction::Play { card_id } => {
                     session.game.play_card(AI, card_id)?;
                     (
                         "Pegging play",

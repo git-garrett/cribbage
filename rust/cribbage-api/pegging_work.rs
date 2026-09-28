@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use cribbage_shadow_engine::decision::{recommend_peg_for_side_with_caches, PegDecision};
+use cribbage_shadow_engine::decision::{choose_peg_for_side_with_caches, PegAction};
 use cribbage_shadow_engine::game::CribbageGame;
 use cribbage_shadow_engine::game::Phase;
 use cribbage_shadow_engine::model_id::ModelId;
@@ -26,12 +26,12 @@ pub(super) struct Work {
     created: Instant,
     progress: Arc<DecisionProgress>,
     finished: AtomicBool,
-    result: Mutex<Option<Result<PegDecision, String>>>,
+    result: Mutex<Option<Result<PegAction, String>>>,
     changed: Condvar,
 }
 
 impl Work {
-    fn wait(&self) -> Result<PegDecision, String> {
+    fn wait(&self) -> Result<PegAction, String> {
         let result = self.result.lock().unwrap_or_else(|e| e.into_inner());
         let result = self
             .changed
@@ -63,7 +63,7 @@ impl Registry {
         &self,
         session: &Session,
         key: String,
-        solve: impl FnOnce() -> Result<PegDecision, String> + Send + 'static,
+        solve: impl FnOnce() -> Result<PegAction, String> + Send + 'static,
     ) -> Arc<Work> {
         let mut jobs = self.0.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(job) = jobs.get(&session.id) {
@@ -161,7 +161,7 @@ pub(super) fn prepare(server: &Server, session: &Session) -> Option<Arc<Work>> {
     let cache91 = session.model911_hand_cache.clone();
     let cache13 = session.model1323_hand_cache.clone();
     Some(server.pegging_work.start(session, key, move || {
-        recommend_peg_for_side_with_caches(
+        choose_peg_for_side_with_caches(
             &game,
             AI,
             model,
@@ -216,7 +216,7 @@ pub(super) fn prepare_after_discard(
 
 pub(super) struct PreparedDecision {
     key: String,
-    pub decision: PegDecision,
+    pub decision: PegAction,
 }
 
 impl PreparedDecision {
@@ -301,6 +301,58 @@ mod tests {
     }
 
     #[test]
+    fn model203_forced_rank_live_and_prepared_play_need_no_valuation_assets() {
+        let mut session = opening();
+        session.model = ModelId::Schell203;
+        session.game = CribbageGame::new_with_seed(42, HUMAN);
+        session.game.player_mut(AI).hand =
+            cribbage_shadow_engine::cards::cards_from_ids(&[26, 0, 13, 39, 8, 9]).unwrap();
+        session.game.player_mut(HUMAN).hand =
+            cribbage_shadow_engine::cards::cards_from_ids(&[1, 2, 3, 4, 5, 6]).unwrap();
+        session.game.turn_card = crate::Card::new(7).unwrap();
+        session.game.discard(AI, [8, 9]).unwrap();
+        session.game.discard(HUMAN, [5, 6]).unwrap();
+        let server = Server {
+            pegging_work: Registry::default(),
+            state: Mutex::new(AppState::default()),
+            model_root: "/nonexistent-model203-forced-choice-assets".into(),
+            data_dir: std::env::temp_dir(),
+        };
+        let prepared = prepare(&server, &session).unwrap().wait().unwrap();
+        assert_eq!(prepared, PegAction::Play { card_id: 26 });
+        let mut direct = session.clone();
+        crate::apply_action_with_peg_decision(
+            &mut session,
+            "advance-pegging",
+            "{}",
+            &server.model_root,
+            Some(prepared),
+        )
+        .unwrap();
+        crate::apply_action(&mut direct, "advance-pegging", "{}", &server.model_root).unwrap();
+        assert_eq!(
+            serde_json::to_value(&session.game).unwrap(),
+            serde_json::to_value(&direct.game).unwrap()
+        );
+        assert_eq!(session.game.player(AI).table[0].id, 26);
+        // Later duplicate-rank turns use the direct path after preparation no
+        // longer applies, and still preserve the next physical card's identity.
+        session.game.play_card(HUMAN, 1).unwrap();
+        assert!(prepare(&server, &session).is_none());
+        crate::apply_action(&mut session, "advance-pegging", "{}", &server.model_root).unwrap();
+        assert_eq!(
+            session
+                .game
+                .player(AI)
+                .table
+                .iter()
+                .map(|c| c.id)
+                .collect::<Vec<_>>(),
+            vec![26, 0]
+        );
+    }
+
+    #[test]
     fn legal_observation_gates_preparation_and_invalidates_stale_results() {
         let mut session = opening();
         let key = opening_key(&session).unwrap();
@@ -337,10 +389,8 @@ mod tests {
     fn preparation_and_advance_share_work_without_holding_the_session_lock() {
         let session = opening();
         let card_id = session.game.player(AI).hand[0].id;
-        let expected = PegDecision::Play {
+        let expected = PegAction::Play {
             card_id,
-            ev: Some(0.0),
-            win_probability: Some(0.5),
         };
         let server = Arc::new(Server {
             pegging_work: Registry::default(),
@@ -442,9 +492,9 @@ mod tests {
         let key = opening_key(&session).unwrap();
         let failed = registry.start(&session, key.clone(), || Err("first request failed".into()));
         assert!(failed.wait().is_err());
-        let retry = registry.start(&session, key, || Ok(PegDecision::Go));
+        let retry = registry.start(&session, key, || Ok(PegAction::Go));
         assert!(!Arc::ptr_eq(&failed, &retry));
-        assert_eq!(retry.wait().unwrap(), PegDecision::Go);
+        assert_eq!(retry.wait().unwrap(), PegAction::Go);
     }
     #[test]
     #[ignore = "full production Ace opening; run in release mode with assets"]
@@ -528,7 +578,7 @@ mod tests {
             Arc::ptr_eq(&job, &same),
             "the prepared solve must be reused"
         );
-        let PegDecision::Play { card_id, .. } = expected else {
+        let PegAction::Play { card_id, .. } = expected else {
             panic!("opening must be a play")
         };
         let app = server.state.lock().unwrap();

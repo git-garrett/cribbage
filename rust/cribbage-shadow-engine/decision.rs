@@ -25,6 +25,65 @@ pub enum PegDecision {
     },
 }
 
+/// A play without valuation. Keep this separate from recommendations consumed
+/// by review, calibration, and benchmark reporting.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PegAction {
+    Go,
+    Play { card_id: u8 },
+}
+
+impl From<PegDecision> for PegAction {
+    fn from(decision: PegDecision) -> Self {
+        match decision {
+            PegDecision::Go => Self::Go,
+            PegDecision::Play { card_id, .. } => Self::Play { card_id },
+        }
+    }
+}
+
+/// Choose a live play when the caller does not need EV or win probability.
+/// Model 20.3 skips forecasting for a forced rank; other choices retain the
+/// existing recommendation path. Valuation callers must use that path directly.
+pub fn choose_peg_for_side_with_caches(
+    game: &CribbageGame,
+    side: Side,
+    model_id: ModelId,
+    peg_lead: Option<u8>,
+    root: &str,
+    model911_cache: Option<&Model911HandCache>,
+    model13_cache: Option<&Model13HandCache>,
+) -> Result<PegAction, String> {
+    ensure_native_model(model_id)?;
+    if model_id == ModelId::Schell203 {
+        if let Some(action) = forced_rank_action(&game.player(side).hand, game.count) {
+            return Ok(action);
+        }
+    }
+    recommend_peg_for_side_with_caches(
+        game,
+        side,
+        model_id,
+        peg_lead,
+        root,
+        model911_cache,
+        model13_cache,
+    )
+    .map(PegAction::from)
+}
+
+fn forced_rank_action(hand: &[crate::cards::Card], count: u8) -> Option<PegAction> {
+    let mut legal = hand.iter().filter(|card| count + card.value <= 31);
+    let Some(first) = legal.next() else {
+        return Some(PegAction::Go);
+    };
+    // Suits cannot change a rank policy's choice. Keep the same first physical
+    // card as select_peg_model1323; equal values alone do not imply equal ranks.
+    legal
+        .all(|card| card.rank == first.rank)
+        .then_some(PegAction::Play { card_id: first.id })
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReviewedDecisionValue {
     pub card_ids: Vec<u8>,
@@ -326,6 +385,91 @@ fn mapped_player(player: Option<Side>, perspective: Side) -> Option<PlayerKey> {
 mod tests {
     use super::*;
     use crate::model_id::ModelId;
+
+    #[test]
+    fn model203_forced_rank_choice_needs_no_forecast_assets() {
+        let mut game = CribbageGame::new_with_seed(42, Side::Right);
+        // Two fives are playable; the king is not. Preserve hand order across
+        // suits, exactly as select_peg_model1323's first rank match does.
+        game.player_mut(Side::Left).hand = crate::cards::cards_from_ids(&[17, 4, 12]).unwrap();
+        game.count = 26;
+        assert_eq!(
+            choose_peg_for_side_with_caches(
+                &game,
+                Side::Left,
+                ModelId::Schell203,
+                None,
+                "/nonexistent-model203-forced-choice-assets",
+                None,
+                None,
+            )
+            .unwrap(),
+            PegAction::Play { card_id: 17 },
+        );
+    }
+
+    #[test]
+    fn forced_rank_choice_preserves_suits_legality_and_go() {
+        use crate::cards::cards_from_ids;
+        for rank in 0..13 {
+            let mut cards = cards_from_ids(&[rank + 26, rank, rank + 39, rank + 13]).unwrap();
+            for length in 1..=4 {
+                for _ in 0..length {
+                    cards[..length].rotate_left(1);
+                    let hand = &cards[..length];
+                    for count in 0..=31 {
+                        let expected = if count + hand[0].value <= 31 {
+                            PegAction::Play {
+                                card_id: hand[0].id,
+                            }
+                        } else {
+                            PegAction::Go
+                        };
+                        assert_eq!(forced_rank_action(hand, count), Some(expected));
+                    }
+                }
+            }
+        }
+        assert_eq!(forced_rank_action(&[], 0), Some(PegAction::Go));
+        assert_eq!(
+            forced_rank_action(&cards_from_ids(&[12, 17, 4]).unwrap(), 26),
+            Some(PegAction::Play { card_id: 17 })
+        );
+        assert_eq!(
+            forced_rank_action(&cards_from_ids(&[9, 10, 11, 12]).unwrap(), 21),
+            None,
+            "ten-valued ranks are distinct strategic choices"
+        );
+        assert_eq!(
+            forced_rank_action(&cards_from_ids(&[4, 17, 5]).unwrap(), 0),
+            None
+        );
+    }
+
+    #[test]
+    fn model203_forced_rank_choice_ignores_opponent_private_cards() {
+        let mut game = CribbageGame::new_with_seed(42, Side::Right);
+        game.player_mut(Side::Left).hand = crate::cards::cards_from_ids(&[26, 0, 39, 13]).unwrap();
+        game.count = 0;
+        for ids in [[1, 2, 3, 4], [8, 9, 10, 11]] {
+            game.player_mut(Side::Right).hand = crate::cards::cards_from_ids(&ids).unwrap();
+            game.player_mut(Side::Right).discarded_to_crib =
+                crate::cards::cards_from_ids(&ids[..2]).unwrap();
+            assert_eq!(
+                choose_peg_for_side_with_caches(
+                    &game,
+                    Side::Left,
+                    ModelId::Schell203,
+                    None,
+                    "/nonexistent-model203-forced-choice-assets",
+                    None,
+                    None,
+                )
+                .unwrap(),
+                PegAction::Play { card_id: 26 }
+            );
+        }
+    }
 
     #[test]
     #[ignore = "bounded release-mode engine-played hand cost comparison"]
