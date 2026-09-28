@@ -210,7 +210,7 @@ def pack(p, suits, metadata):
         raise ValueError('incomplete or unnormalized discard probabilities')
     meta = canonical(metadata)
     payload = meta + suits + p.astype('<f8').tobytes()
-    return struct.pack('<8s6I', MAGIC, 1, len(meta), 2, 1820, 91, len(payload)) + bytes.fromhex(digest(payload)) + payload
+    return struct.pack('<8s6I', MAGIC, metadata['schemaVersion'], len(meta), 2, 1820, 91, len(payload)) + bytes.fromhex(digest(payload)) + payload
 
 
 def historical_train_only(value):
@@ -298,6 +298,7 @@ def main():
     parser.add_argument('--evidence', type=Path, required=True)
     parser.add_argument('--legacy', type=Path, required=True)
     parser.add_argument('--baseline-evidence', type=Path, required=True)
+    parser.add_argument('--suit-evidence', type=Path, default=Path(__file__).resolve().parents[1] / 'training/model203-suit-evidence.json.gz')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--report', type=Path, required=True)
     parser.add_argument('--check', action='store_true')
@@ -330,6 +331,12 @@ def main():
         observationsBySplit=report['observationsBySplit'], calibration=calibration['selected'],
         prior='99% role marginal + 1% physical; conditioned on keep; raw-count Dirichlet update',
         suitedSection='unchanged from legacySha256', splitRule=SPLIT_RULE)
+    # A conditional-rank rebuild must preserve the independently refreshed suit
+    # evidence rather than silently restoring the historical suit section.
+    from build_model203_suit_evidence import section
+    suits, suit_metadata = section(json.loads(gzip.decompress(args.suit_evidence.read_bytes())))
+    metadata.update(schemaVersion=2, suitedSection=suit_metadata)
+    report['suitedSection'] = suit_metadata
     data = pack(p,suits,metadata)
     report['assetSha256'] = digest(data)
     report['assetBytes'] = len(data)

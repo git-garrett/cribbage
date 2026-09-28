@@ -56,7 +56,7 @@ class ConditionalDiscardTests(unittest.TestCase):
     def test_packer_rejects_recreated_empirical_zeros(self):
         n = b.np.ones((1820,91))*b.LEGAL
         p = b.np.array([b.probabilities(n,10.)]*2)
-        self.assertTrue(b.pack(p,b'',{})[:8] == b.MAGIC)
+        self.assertTrue(b.pack(p,b'',{'schemaVersion': 1})[:8] == b.MAGIC)
         p[0,0,2] = 0
         with self.assertRaises(ValueError): b.pack(p,b'',{})
 

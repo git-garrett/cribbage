@@ -6,7 +6,7 @@ use crate::model20_discards::{SuitEvidence, SuitedDiscardRates};
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
 
-const SHA256: &str = "56dfd79e5614656165b48847831a56394fb0f3d92475b76c9991e5e78fa222f9";
+const SHA256: &str = "efd7a4594a8c42fc0e332726d44e8ababf541b3eb80c4cbf8140b9629389dbad";
 pub(crate) const ASSET_NAME: &str = "model203-opponent-discards.bin";
 
 pub(crate) struct Model203DiscardAsset {
@@ -49,9 +49,11 @@ impl Model203DiscardAsset {
 
     fn decode(bytes: &[u8]) -> Result<Self, String> {
         let mut reader = Reader { bytes, position: 0 };
-        if reader.take(8)? != b"M203OD01" || reader.u32()? != 1 {
+        if reader.take(8)? != b"M203OD01" {
             return Err("unsupported Model 20.3 discard asset".into());
         }
+        let version = reader.u32()?;
+        if ![1, 2].contains(&version) { return Err("unsupported Model 20.3 discard asset version".into()); }
         let metadata_len = reader.u32()? as usize;
         if reader.u32()? != 2 || reader.u32()? != 1820 || reader.u32()? != 91 {
             return Err("invalid Model 20.3 discard dimensions".into());
@@ -62,7 +64,7 @@ impl Model203DiscardAsset {
             return Err("Model 20.3 discard payload checksum/length mismatch".into());
         }
         let metadata: serde_json::Value = serde_json::from_slice(reader.take(metadata_len)?).map_err(|e| e.to_string())?;
-        if metadata["schemaVersion"] != 1 || metadata["modelVersion"] != "20.3" {
+        if metadata["schemaVersion"] != version || metadata["modelVersion"] != "20.3" {
             return Err("invalid Model 20.3 discard provenance".into());
         }
         let pairs = enumerate_rank_count_keys(2).iter().map(|key| {
@@ -71,17 +73,37 @@ impl Model203DiscardAsset {
             Ok((ranks, cards.next().unwrap(), cards.next().unwrap()))
         }).collect::<Result<Vec<_>, String>>()?;
         let mut suits = Vec::new();
-        for _ in 0..2 {
+        for role in 0..2 {
             let overall_rate = reader.probability()?;
             let distinct_rate = reader.probability()?;
+            let (strength, prior) = if version == 2 {
+                let calibration = &metadata["suitedSection"]["calibration"][role];
+                let strength = calibration["strength"].as_f64().ok_or("missing suit prior strength")?;
+                let prior = calibration["priorMean"].as_f64().ok_or("missing suit prior mean")?;
+                if !strength.is_finite() || strength < 0.0 || !prior.is_finite() || !(0.0..1.0).contains(&prior) || prior == 0.0 {
+                    return Err("invalid Model 20.3 suit prior".into());
+                }
+                (strength, prior)
+            } else { (0.0, distinct_rate) };
             let mut evidence = [SuitEvidence::default(); 91];
             for ((_, a, b), entry) in pairs.iter().zip(&mut evidence) {
                 entry.observations = reader.u64()?;
                 entry.same_suit = reader.u64()?;
                 entry.rate = reader.probability()?;
+                let expected = if a == b { 0.0 } else if entry.observations as f64 + strength > 0.0 {
+                    (entry.same_suit as f64 + strength * prior) / (entry.observations as f64 + strength)
+                } else { prior };
                 if entry.same_suit > entry.observations || (a == b && (entry.same_suit != 0 || entry.rate != 0.0))
-                    || (entry.observations > 0 && (entry.rate-entry.same_suit as f64/entry.observations as f64).abs() > 5.1e-9) {
+                    || ((version == 2 || entry.observations > 0) && (entry.rate-expected).abs() > if version == 2 { 1e-12 } else { 5.1e-9 }) {
                     return Err("invalid Model 20.3 suit evidence".into());
+                }
+            }
+            if version == 2 {
+                let n: f64 = evidence.iter().map(|e| e.observations as f64).sum();
+                let same: f64 = evidence.iter().map(|e| e.same_suit as f64).sum();
+                let distinct_n: f64 = pairs.iter().zip(&evidence).filter(|((_,a,b),_)| a != b).map(|(_,e)| e.observations as f64).sum();
+                if n <= 0.0 || (overall_rate - same/n).abs() > 1e-12 || (prior - (same+1.0)/(distinct_n+4.0)).abs() > 1e-12 || (distinct_rate-prior).abs() > 1e-12 {
+                    return Err("inconsistent Model 20.3 suit prior/counts".into());
                 }
             }
             suits.push(SuitedDiscardRates { pairs: evidence, overall_rate, distinct_rate });
@@ -195,5 +217,28 @@ mod tests {
         *corrupt.last_mut().unwrap() ^= 1;
         assert!(Model203DiscardAsset::decode(&corrupt).is_err());
         assert!(Model203DiscardAsset::decode(&bytes[..bytes.len()-1]).is_err());
+    }
+
+    #[test]
+    fn refreshed_suit_rates_must_match_raw_counts_and_beta_prior() {
+        let original = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join(ASSET_NAME)).unwrap();
+        assert_eq!(u32::from_le_bytes(original[8..12].try_into().unwrap()), 2);
+        let metadata_len = u32::from_le_bytes(original[12..16].try_into().unwrap()) as usize;
+        // QK is the first distinct-rank row. Recompute the checksum so this
+        // exercises posterior/count validation, not the checksum guard.
+        let row = 64 + metadata_len + 16 + 24;
+        for offset in [row, row + 16] {
+            let mut changed = original.clone();
+            if offset == row {
+                let n = u64::from_le_bytes(changed[offset..offset+8].try_into().unwrap());
+                changed[offset..offset+8].copy_from_slice(&(n+100).to_le_bytes());
+            } else {
+                let p = f64::from_le_bytes(changed[offset..offset+8].try_into().unwrap());
+                changed[offset..offset+8].copy_from_slice(&(p+0.001).to_le_bytes());
+            }
+            let hash: [u8;32] = Sha256::digest(&changed[64..]).into();
+            changed[32..64].copy_from_slice(&hash);
+            assert!(Model203DiscardAsset::decode(&changed).err().unwrap().contains("suit evidence"));
+        }
     }
 }

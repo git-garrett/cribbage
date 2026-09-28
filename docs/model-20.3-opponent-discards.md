@@ -2,6 +2,9 @@
 
 The 20.3 runtime now loads `model203-opponent-discards.bin`. It replaces the
 conditional section of `model20-opponent-discards.bin` for this version only.
+Its subsequently refreshed suited section is documented in
+[Model 20.3 suit evidence](model-20.3-suit-evidence.md); the conditional counts
+and probabilities described below are unchanged by that update.
 The original binary and all 20.0–20.2 loaders remain frozen. The historical
 `model1322-opponent-discard-histograms.json` is still needed for older models.
 
@@ -49,6 +52,7 @@ The builder requires NumPy. Reproduce the installed snapshot:
 python3 scripts/build_model203_opponent_discards.py \
   --evidence training/model203-opponent-discard-evidence.json.gz \
   --baseline-evidence training/model20-opponent-discard-evidence.json.gz \
+  --suit-evidence training/model203-suit-evidence.json.gz \
   --legacy rust/cribbage-shadow-engine/assets/model20-opponent-discards.bin \
   --output rust/cribbage-shadow-engine/assets/model203-opponent-discards.bin \
   --report training/model203-opponent-discard-assessment.json --check
@@ -126,13 +130,15 @@ These are prediction checks, not proof of a win-rate improvement.
 
 `M203OD01`, little-endian: the 64-byte header contains magic, version, metadata
 length, dimensions (2 × 1,820 × 91), payload length and SHA-256. The payload is
-JSON provenance, two historical suited-discard sections (2,200 bytes each),
+JSON provenance, two suited-discard sections (2,200 bytes each),
 then dense f64 probabilities in role/keep/pair order. Rank keys are sorted
-lexicographically. The 14.8 suited counts/rates are copied bit-for-bit from the
-previous consolidated binary; this refresh changes conditional discards only.
+lexicographically. Format version 2 retains the same layout, updates the suited
+counts/rates, and records their independently calibrated prior in the metadata.
+The full builder requires the retained suit evidence, preventing a later rank
+rebuild from silently reverting to historical suit rates.
 
-The asset is 2,655,081 bytes. Its SHA-256 is
-`56dfd79e5614656165b48847831a56394fb0f3d92475b76c9991e5e78fa222f9`.
+The current asset is 2,656,126 bytes. Its SHA-256 is
+`efd7a4594a8c42fc0e332726d44e8ababf541b3eb80c4cbf8140b9629389dbad`.
 The runtime pins that checksum, validates every row, uses a direct combinatorial
 keep index and precomputes each pair's fixed physical denominator. Conditioning
 uses two rank lookups instead of scanning thirteen ranks per pair and retains

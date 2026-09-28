@@ -2011,7 +2011,12 @@ fn recommend_discard_model1323_with_assets(
         .into_iter()
         .filter(|card| !input.ai_hand.contains(card))
         .collect();
-    let flush_bonuses = crib_flush_bonuses_by_suit(&input.ai_hand);
+    // Modern suited forecasts already include exact crib flush scoring.
+    let flush_bonuses = if model20.is_none() {
+        crib_flush_bonuses_by_suit(&input.ai_hand)
+    } else {
+        [0.0; 4]
+    };
     let mut best: Option<(Vec<Card>, CandidateEvaluation)> = None;
     for indices in crate::cards::combinations_indices(input.ai_hand.len(), 2) {
         let discard: Vec<Card> = indices.iter().map(|index| input.ai_hand[*index]).collect();
