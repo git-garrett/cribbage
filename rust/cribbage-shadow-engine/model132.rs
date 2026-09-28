@@ -315,13 +315,23 @@ pub struct Model132Observation {
 
 impl Model132Observation {
     pub fn from_state(state: &RankPegState, actor: PegSeat) -> Result<Self, String> {
+        Self::from_state_with_buffers(state, actor, Vec::new(), Vec::new())
+    }
+
+    fn from_state_with_buffers(
+        state: &RankPegState,
+        actor: PegSeat,
+        mut current_series: Vec<u8>,
+        mut public_history: Vec<PublicPegEvent>,
+    ) -> Result<Self, String> {
         if state.current != actor {
             return Err("Model 13.2 observation actor is not the current player".to_string());
         }
 
         let mut own_played = [0_u8; RANKS];
         let mut opponent_played = [0_u8; RANKS];
-        let mut public_history = Vec::with_capacity(state.history.len());
+        public_history.clear();
+        public_history.reserve(state.history.len());
         for event in &state.history {
             match *event {
                 RankPegEvent::Play { seat, rank } if seat == actor => {
@@ -342,6 +352,8 @@ impl Model132Observation {
             }
         }
 
+        current_series.clear();
+        current_series.extend_from_slice(&state.plays);
         let observation = Model132Observation {
             role: if actor == state.dealer {
                 Role::Dealer
@@ -355,7 +367,7 @@ impl Model132Observation {
             opponent_played,
             own_discards: state.own_discards[actor.index()],
             turn_rank: state.turn_rank,
-            current_series: state.plays.clone(),
+            current_series,
             count: state.count,
             go_player: relative_actor(state.go_player, actor),
             last_player: relative_actor(state.last_player, actor),
@@ -1882,7 +1894,42 @@ pub fn choose_for_state(
     actor: PegSeat,
 ) -> Result<RankPegAction, String> {
     let observation = Model132Observation::from_state(state, actor)?;
-    let action = policy.choose_action(&observation)?;
+    choose_for_observation(policy, &observation)
+}
+
+/// Allocation storage only, local to one forecast. Every public observation is
+/// rebuilt and validated, including when the actor or simulated world changes.
+#[derive(Default)]
+pub(crate) struct Model132ObservationScratch {
+    current_series: Vec<u8>,
+    public_history: Vec<PublicPegEvent>,
+}
+
+impl Model132ObservationScratch {
+    pub(crate) fn choose_for_state(
+        &mut self,
+        policy: &impl Model132PeggingPolicy,
+        state: &RankPegState,
+        actor: PegSeat,
+    ) -> Result<RankPegAction, String> {
+        let observation = Model132Observation::from_state_with_buffers(
+            state,
+            actor,
+            std::mem::take(&mut self.current_series),
+            std::mem::take(&mut self.public_history),
+        )?;
+        let result = choose_for_observation(policy, &observation);
+        self.current_series = observation.current_series;
+        self.public_history = observation.public_history;
+        result
+    }
+}
+
+fn choose_for_observation(
+    policy: &impl Model132PeggingPolicy,
+    observation: &Model132Observation,
+) -> Result<RankPegAction, String> {
+    let action = policy.choose_action(observation)?;
     if !observation.legal_actions().contains(&action) {
         return Err(format!(
             "Model 13.2 policy returned illegal action {action:?}"
@@ -1925,6 +1972,57 @@ fn model91_actor(actor: Option<InfoActor>) -> Option<Model91Actor> {
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    #[test]
+    fn reusable_observations_match_fresh_across_actors_worlds_resets_and_errors() {
+        struct CheckObservation(Model132Observation);
+        impl Model132PeggingPolicy for CheckObservation {
+            fn choose_action(&self, observation: &Model132Observation) -> Result<RankPegAction, String> {
+                assert_eq!(observation, &self.0);
+                HighestLegalRank.choose_action(observation)
+            }
+        }
+        let mut scratch = Model132ObservationScratch::default();
+        let mut saw_go = false;
+        let mut saw_reset = false;
+        for dealer in [PegSeat::Zero, PegSeat::One] {
+            for scores in [[0, 0], [118, 119], [71, 69]] {
+                for opponent in [hand(&[(1, 1), (5, 1), (9, 1), (11, 1)]), hand(&[(9, 4)])] {
+                    let mut position = state(opponent, hand(&[(6, 1), (10, 1)]));
+                    position.dealer = dealer;
+                    position.scores = scores;
+                    let mut steps = 0;
+                    while !position.complete && position.winner.is_none() {
+                        let observation = Model132Observation::from_state(&position, position.current).unwrap();
+                        let policy = CheckObservation(observation);
+                        let expected = choose_for_state(&policy, &position, position.current).unwrap();
+                        assert_eq!(scratch.choose_for_state(&policy, &position, position.current).unwrap(), expected);
+                        saw_go |= expected == RankPegAction::Go;
+                        position.apply(expected).unwrap();
+                        saw_reset |= position.history.contains(&RankPegEvent::Reset);
+                        steps += 1;
+                        assert!(steps <= 32);
+                    }
+                }
+            }
+        }
+        assert!(saw_go && saw_reset);
+        let valid = state(hand(&[(1, 1), (5, 1), (9, 1), (11, 1)]), hand(&[(6, 1), (10, 1)]));
+        for kind in 0..4 {
+            let mut invalid = valid.clone();
+            match kind {
+                0 => invalid.current = PegSeat::One,
+                1 => invalid.history.push(RankPegEvent::Play { seat: PegSeat::Zero, rank: 13 }),
+                2 => invalid.count = 32,
+                _ => invalid.scores[0] = 122,
+            }
+            assert_eq!(scratch.choose_for_state(&HighestLegalRank, &invalid, PegSeat::Zero),
+                choose_for_state(&HighestLegalRank, &invalid, PegSeat::Zero));
+            let policy = CheckObservation(Model132Observation::from_state(&valid, PegSeat::Zero).unwrap());
+            assert_eq!(scratch.choose_for_state(&policy, &valid, PegSeat::Zero),
+                choose_for_state(&policy, &valid, PegSeat::Zero));
+        }
+    }
 
     fn hand(entries: &[(u8, u8)]) -> [u8; RANKS] {
         let mut result = [0_u8; RANKS];

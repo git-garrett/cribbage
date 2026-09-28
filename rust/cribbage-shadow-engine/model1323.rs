@@ -12,8 +12,8 @@ use crate::information_set::{
     InfoActor, PegSeat, PublicPegEvent, RankPegAction, RankPegEvent, RankPegState,
 };
 use crate::model132::{
-    choose_for_state, Model1322DeclineFactors, Model132Observation, Model132PeggingPolicy,
-    Model911Policy,
+    Model1322DeclineFactors, Model132Observation, Model132ObservationScratch,
+    Model132PeggingPolicy, Model911Policy,
 };
 use crate::model20_discards::{Model20DiscardAsset, SuitedDiscardRates};
 use crate::model91::{Model91EmpiricalBeliefs, OpponentHandCache};
@@ -828,10 +828,11 @@ fn forecast_worlds(
     posterior_worlds: usize,
 ) -> Result<Vec<PegCandidateForecast>, String> {
     let mut forecasts = Vec::new();
+    let mut observation_scratch = Model132ObservationScratch::default();
     for action in observation.legal_actions() {
         let mut outcomes = BTreeMap::new();
         for world in worlds {
-            let (own, opponent) = rollout_candidate(observation, policy, world, action)?;
+            let (own, opponent) = rollout_candidate(observation, policy, world, action, &mut observation_scratch)?;
             *outcomes.entry((own, opponent)).or_insert(0.0) += world.weight;
         }
         forecasts.push(PegCandidateForecast {
@@ -858,6 +859,7 @@ fn forecast_worlds_for_choice(
     win_probability: &mut impl FnMut(u8, u8) -> f64,
 ) -> Result<Vec<PegCandidateForecast>, String> {
     let progress = crate::progress::current();
+    let mut observation_scratch = Model132ObservationScratch::default();
     let actions = observation.legal_actions();
     if let Some(progress) = &progress {
         progress.begin(worlds.len() * actions.len());
@@ -890,7 +892,7 @@ fn forecast_worlds_for_choice(
                     progress.complete(action_index * worlds.len() + index);
                 }
             }
-            let score = rollout_candidate(observation, policy, world, action)?;
+            let score = rollout_candidate(observation, policy, world, action, &mut observation_scratch)?;
             *outcomes.entry(score).or_insert(0.0) += world.weight;
             let utility = *utilities
                 .entry(score)
@@ -932,6 +934,7 @@ fn rollout_candidate(
     policy: &impl Model132PeggingPolicy,
     world: &World,
     action: RankPegAction,
+    observation_scratch: &mut Model132ObservationScratch,
 ) -> Result<(u8, u8), String> {
     let mut state = world_state(observation, world)?;
     state.apply(action)?;
@@ -941,7 +944,7 @@ fn rollout_candidate(
         let next = match legal.as_slice() {
             [] => return Err("13.23 forecast has no action before completion".into()),
             [forced] => *forced,
-            _ => choose_for_state(policy, &state, state.current)?,
+            _ => observation_scratch.choose_for_state(policy, &state, state.current)?,
         };
         state.apply(next)?;
         steps += 1;
@@ -958,7 +961,7 @@ fn rollout_candidate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model132::rollout_model132_world;
+    use crate::model132::{choose_for_state, rollout_model132_world};
 
     fn assert_identical_forecasts(
         actual: &[PegCandidateForecast],

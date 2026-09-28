@@ -18,6 +18,7 @@ use crate::cards::{
 use crate::information_set::{PegSeat, RankPegAction, RankPegEvent, RankPegState};
 use std::collections::HashMap;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
@@ -39,7 +40,7 @@ pub enum Model91Actor {
     Opponent,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Model91Observation {
     pub role: Role,
     pub own_remaining: [u8; RANKS],
@@ -52,6 +53,38 @@ pub struct Model91Observation {
     pub count: u8,
     pub go_player: Option<Model91Actor>,
     pub last_player: Option<Model91Actor>,
+}
+
+impl Hash for Model91Observation {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // One fixed-length write avoids repeated small hasher writes. Encode
+        // every equality field, including inactive series bytes; never hash
+        // struct padding or use a digest as the cache's equality key.
+        let Self {
+            role, own_remaining, own_played, opponent_played, own_discards,
+            turn_rank, current_series, current_series_len, count, go_player, last_player,
+        } = self;
+        let mut bytes = [0_u8; 4 * RANKS + MAX_SERIES + 7];
+        bytes[..RANKS].copy_from_slice(own_remaining);
+        bytes[RANKS..2 * RANKS].copy_from_slice(own_played);
+        bytes[2 * RANKS..3 * RANKS].copy_from_slice(opponent_played);
+        bytes[3 * RANKS..4 * RANKS].copy_from_slice(own_discards);
+        bytes[4 * RANKS..4 * RANKS + MAX_SERIES].copy_from_slice(current_series);
+        let flags = &mut bytes[4 * RANKS + MAX_SERIES..];
+        flags[0] = match role { Role::Dealer => 0, Role::Pone => 1 };
+        flags[1] = u8::from(turn_rank.is_some());
+        flags[2] = turn_rank.unwrap_or(0);
+        flags[3] = *current_series_len;
+        flags[4] = *count;
+        let actor = |value| match value {
+            None => 0,
+            Some(Model91Actor::SelfPlayer) => 1,
+            Some(Model91Actor::Opponent) => 2,
+        };
+        flags[5] = actor(*go_player);
+        flags[6] = actor(*last_player);
+        state.write(&bytes);
+    }
 }
 
 impl Model91Observation {
@@ -1946,6 +1979,77 @@ mod tests {
     use super::*;
     use std::env;
     use std::process;
+
+    #[test]
+    fn observation_hash_includes_every_equality_field_and_option_tag() {
+        #[derive(Default)]
+        struct Transcript(Vec<u8>);
+        impl Hasher for Transcript {
+            fn finish(&self) -> u64 { 0 }
+            fn write(&mut self, bytes: &[u8]) { self.0.extend_from_slice(bytes); }
+        }
+        let base = Model91Observation::from_public_state(
+            Role::Dealer, hand(&[(0, 1), (4, 1), (7, 1), (12, 1)]),
+            [0; RANKS], [0; RANKS], [0; RANKS], None, &[], 0, None, None,
+        ).unwrap();
+        let mut variants = vec![base];
+        for field in 0..4 {
+            for rank in 0..RANKS {
+                for value in 0..=u8::MAX {
+                    let mut other = base;
+                    let ranks = match field {
+                        0 => &mut other.own_remaining,
+                        1 => &mut other.own_played,
+                        2 => &mut other.opponent_played,
+                        _ => &mut other.own_discards,
+                    };
+                    if ranks[rank] == value { continue; }
+                    ranks[rank] = value;
+                    variants.push(other);
+                }
+            }
+        }
+        for value in 0..=u8::MAX {
+            let mut other = base;
+            other.turn_rank = Some(value);
+            variants.push(other);
+            if value == 0 { continue; }
+            for index in 0..MAX_SERIES + 2 {
+                let mut other = base;
+                match index {
+                    MAX_SERIES => other.current_series_len = value,
+                    i if i == MAX_SERIES + 1 => other.count = value,
+                    i => other.current_series[i] = value,
+                }
+                variants.push(other);
+            }
+        }
+        let mut other = base;
+        other.role = Role::Pone;
+        variants.push(other);
+        for actor in [Model91Actor::SelfPlayer, Model91Actor::Opponent] {
+            let mut other = base;
+            other.go_player = Some(actor);
+            variants.push(other);
+            let mut other = base;
+            other.last_player = Some(actor);
+            variants.push(other);
+        }
+        let mut transcripts = std::collections::HashSet::new();
+        for value in &variants {
+            let mut hash = Transcript::default();
+            value.hash(&mut hash);
+            assert!(transcripts.insert(hash.0), "an equality field was lost");
+        }
+        // Even a deliberately constant digest cannot merge distinct keys.
+        let mut colliding = HashMap::<_, _, std::hash::BuildHasherDefault<Transcript>>::default();
+        for (index, value) in variants.iter().step_by(503).enumerate() {
+            colliding.insert(*value, index);
+        }
+        for (index, value) in variants.iter().step_by(503).enumerate() {
+            assert_eq!(colliding.get(value), Some(&index));
+        }
+    }
 
     #[test]
     fn wp_chooser_disagrees_with_ev_and_caches_board_scores_separately() {
