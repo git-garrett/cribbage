@@ -38,7 +38,7 @@ pub const CORRECTION_INPUT_CHECKSUMS: [u64; 5] = [
 /// comparisons through the explicit forecast interface.
 pub const LIVE_WORLD_BUDGET: usize = usize::MAX;
 const MODEL203_HOLD_SHA256: &str = "192d43b7712e1f16bf0ba0991df14aaf646c2a44cd43f7e917d6ac8689cc375e";
-const MODEL203_DECLINE_SHA256: &str = "e17ec347f76a7671f460fe95ef18d5e9a693a80320588866357362dbe8e5c0c0";
+const MODEL203_DECLINE_SHA256: &str = "36fc42ab1dd5696236b534fccdda6d21be0deda5193da2ceafa3f1ead3e0a92a";
 
 /// One actor's current-hand card population and conditioned discard prior,
 /// scoped to its asset fingerprint. History-dependent weights and solves stay fresh.

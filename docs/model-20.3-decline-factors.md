@@ -6,12 +6,24 @@ same rates has been replaced. Other 20.3 assets, the frozen 20.0–20.2 versions
 and the running 20.2-versus-20.0 benchmark are unchanged by this revision.
 `model1323-corrections.bin` has not been rebuilt.
 
-The runtime JSON is **795 bytes**, containing seven categories by three opponent
-card ordinals. Gameplay uses 21 indexed `u32` values (84 bytes); no JSON is parsed
-inside the decision loop. Its SHA-256 is
-`e17ec347f76a7671f460fe95ef18d5e9a693a80320588866357362dbe8e5c0c0`.
+The runtime JSON is **732 bytes**, containing 16 learned values across seven
+categories. Schema 2 retains first/second/third-card values for pair and safe
+pair; the other five rows contain second/third-card values only. Completing a
+run, three-of-a-kind or four-of-a-kind is impossible on the player's first card,
+so those former placeholder estimates are omitted. Fourth-card estimates were
+already absent. Card ordinals count across pegging resets within the same hand.
+
+The shared historical policy still uses 21 indexed `u32` slots (84 bytes); the
+loader fills omitted, unreachable slots with neutral multipliers, not learned
+probabilities. No JSON is parsed inside the decision loop. The new SHA-256 is
+`36fc42ab1dd5696236b534fccdda6d21be0deda5193da2ceafa3f1ead3e0a92a`.
 The loader verifies that checksum and positive probabilities; hand-cache asset
-fingerprints include the factors.
+fingerprints include the factors. Diagnostic loading also supports historical
+schema-1 assets. Truncation preserves every usable multiplier, raw observation,
+calibration result, smoothing setting and category definition. First-card safe
+pair observations remain meaningful under the actor's private-information
+definition and are retained. Differential legal-history checks verify unchanged
+likelihoods; this is a representation cleanup, not a playing-strength change.
 
 ## Training selection and provenance
 
@@ -73,9 +85,9 @@ using the original 500 tuning games. It selects strength **1**, giving:
 `p = (d + 0.5 + q) / (a + d + 2)`
 
 where `q` is the category-wide Beta-smoothed rate. Strength 0 and 1 are nearly
-indistinguishable; the meaningful change is data qualification. Empty ordinal
-cells use `q`; the empty first-card run/royal/four-kind cells are structurally
-unreachable. Rates are rounded to ppm and bounded strictly between zero and one.
+indistinguishable; the meaningful change is data qualification. Empty applicable
+ordinal cells use `q`; structurally unreachable first-card run/royal/four-kind
+cells are not exported. Rates are rounded to ppm and bounded strictly between zero and one.
 The runtime keeps soft likelihoods positive while retaining exact go exclusions.
 
 The new four-kind evidence contains one decline in 968 second-card opportunities
@@ -122,7 +134,7 @@ intervals are [-0.001553, -0.000813] on the original set and
 The additional posterior sample selects one eighth of broad-audit validation
 seeds by a fixed hash, retaining paired/matchup observations within each seed.
 
-The full metrics, intervals, checksums and scope are retained in
+The full metrics, intervals, pre-truncation checksums and scope are retained in
 `training/model203-decline-qualified-assessment.json`. The broader seeds are
 excluded from decline fitting, but were not excluded from every unchanged
 historical asset; this is a controlled decline-factor ablation, not an entirely
@@ -139,10 +151,12 @@ decision-local cache of likelihood arrays keyed by public history and cut.
 The previous timing experiment found a 1.55× kernel speedup but essentially no
 change in full forecast time. This dataset change adds no decision-time work.
 
-The builder/runtime safe-category mismatch, overlapping safe/general categories,
-competing-score conditioning approximation, correlated decline evidence, and
-pooled roles/board positions are unchanged. This isolates the authorized dataset
-restriction; it does not claim those modeling limitations are resolved.
+Training labels a safe play using the acting player's private information;
+runtime inference recognizes safety from the observer's available public facts.
+The user confirmed that this distinction is appropriate and must be retained;
+aligning those two definitions is not a requested correction. Safe/general
+category overlap is also unchanged. Competing-score conditioning, correlated
+decline evidence, and pooled roles/board positions remain modeling approximations.
 
 ## Reproduction
 

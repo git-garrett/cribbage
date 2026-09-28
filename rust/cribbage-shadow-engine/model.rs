@@ -3028,12 +3028,16 @@ fn model13_discard_candidate_win_probability(
 ) -> f64 {
     let opponent_role = other_role(role);
     let next_role = other_role(role);
-    let opponent_hand_distribution =
+    // Card-conditioned forecasts replace the legacy normal prior entirely.
+    let opponent_hand_distribution = if model20.is_none() {
         score_phase_distribution_for_phase(if opponent_role == Role::Dealer {
             ScorePhase::HandDealer
         } else {
             ScorePhase::HandPone
-        });
+        })
+    } else {
+        Vec::new()
+    };
     let pegging_weight_total = pegging.total_weight.max(1.0);
     let mut base_outcomes = WeightedPairI32::default();
     let mut ordered_outcomes: BTreeMap<(i32, i32, i32, i32), f64> = BTreeMap::new();
@@ -3041,12 +3045,12 @@ fn model13_discard_candidate_win_probability(
         let own_hand_score = score_hand_rank_only(keep, *cut) as i32
             + score_flush_and_right_jack(keep, *cut, false) as i32;
         let dealer_heels = if cut.rank == 10 { 2 } else { 0 };
-        let mut seen_cards = full_hand.to_vec();
-        seen_cards.push(*cut);
         let historical_crib;
         let (crib_outcomes, opponent_hand_distribution) = if let Some(show) = model20 {
             (&show.cribs[cut_index], &show.opponent_hands[cut_index])
         } else {
+            let mut seen_cards = full_hand.to_vec();
+            seen_cards.push(*cut);
             historical_crib =
                 model13_crib_score_outcomes_for_cut(discard, *cut, role, &seen_cards, crib_rank);
             (&historical_crib, &opponent_hand_distribution)

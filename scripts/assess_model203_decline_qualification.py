@@ -99,7 +99,7 @@ def score(records, assets):
         data=json.loads(path.read_text());old=data['schemaVersion']==3
         factors.append([max(1,min(999999,data['factors'][c]['byCardOrdinal'][o]['multiplierPpm']
             if data['factors'][c]['byCardOrdinal'][o]['multiplierPpm'] is not None else data['factors'][c]['multiplierPpm']))
-            for c in b.CATEGORIES for o in b.ORDINALS] if old else [p for c in b.CATEGORIES for p in data['factors'][c]])
+            for c in b.CATEGORIES for o in b.ORDINALS] if old else b.factor_values(data))
     totals={};clusters=defaultdict(list)
     for key,record in sorted(records.items()):
         by_family=defaultdict(b.empty_counts)

@@ -20,6 +20,10 @@ LEGACY_SHA = '4dfb1b8c20f612153a6b0d57496fd77c5219a8a2ba7e01acb8909b862d5418dc'
 CATEGORIES = ('threeCardRun', 'fourPlusCardRun', 'pair', 'pairRoyalAfterPair',
               'fourOfAKindAfterPairRoyal', 'safePair', 'safePairRoyal')
 ORDINALS = ('first', 'second', 'third')
+# Among these categories, only pairing can score on a player's first card. The
+# private-information
+# definition of a safe pair remains intentional, including its first-card data.
+FIRST_CARD_CATEGORIES = frozenset(('pair', 'safePair'))
 VALUES = tuple(min(r + 1, 10) for r in range(13))
 IDENTITY = 'run,matchup,index,id,left_engine,right_engine'
 SOURCE_POLICIES = json.loads((ROOT / 'training/model203-decline-source-policies.json').read_text())['sources']
@@ -120,8 +124,8 @@ def hand_events(hand):
                 else:
                     continue
                 events.append((actor, engine, category * 3 + ordinal, outcome))
-                # Preserve the frozen builder's safe-pair definition. Aligning
-                # this with runtime public-only categories is a separate change.
+                # Safe labels use the actor's private information. The inference
+                # engine's public-information test is intentionally distinct.
                 safe = (go == 1 - actor or known[actor][candidate] + public[1 - actor][candidate] >= 4
                         or before + 2 * VALUES[candidate] > 31)
                 if safe and category in (2, 3):
@@ -304,14 +308,39 @@ def probabilities(rows, strength):
 
 def loss(rows, ppm):
     n = sum(r[0] + r[1] for r in rows)
+    if any(a + d and p is None for (a, d, _), p in zip(rows, ppm)):
+        raise ValueError('observations in a structurally unavailable decline slot')
     return sum(-a * math.log1p(-p / 1_000_000) - d * math.log(p / 1_000_000)
-               for (a, d, _), p in zip(rows, ppm)) / n if n else None
+               for (a, d, _), p in zip(rows, ppm) if a + d) / n if n else None
+
+
+def runtime_factors(ppm):
+    """Schema 2: pair/safe-pair use cards 1–3; other rows use cards 2–3."""
+    return {c: ppm[i * 3 + (c not in FIRST_CARD_CATEGORIES):i * 3 + 3]
+            for i, c in enumerate(CATEGORIES)}
+
+
+def factor_values(asset):
+    """Restore diagnostic indexing; None is inapplicable, not zero probability."""
+    version = asset['schemaVersion']
+    if version not in (1, 2) or asset['modelVersion'] != '20.3' or set(asset['factors']) != set(CATEGORIES):
+        raise ValueError('unsupported decline asset')
+    values = []
+    for category in CATEGORIES:
+        row = asset['factors'][category]
+        truncated = version == 2 and category not in FIRST_CARD_CATEGORIES
+        if len(row) != 3 - truncated or any(not isinstance(p, int) or not 0 < p < 1000000 for p in row):
+            raise ValueError('invalid decline factor row: ' + category)
+        values.extend(([None] if truncated else []) + row)
+    return values
 
 
 def output(value, splits, games, database, legacy):
     rows = empty_counts()
     for counts in value['countsByModel'].values():
         add_counts(rows, counts)
+    if any(any(rows[i * 3]) for i, c in enumerate(CATEGORIES) if c not in FIRST_CARD_CATEGORIES):
+        raise ValueError('first-card run/royal/four-kind observations are impossible')
     options = [{'strength': s, 'tuningNll': loss(splits[0], probabilities(rows, s))}
                for s in (0, 1, 10, 100, 1000, 10000)]
     strength = min(options, key=lambda r: r['tuningNll'])['strength']
@@ -328,10 +357,10 @@ def output(value, splits, games, database, legacy):
                   'smoothedNll': loss(splits[1], ppm)},
               'scope': 'Conditional held-card decline prediction, not posterior-hand calibration or playing strength. '
                        'Both paired orientations of reserved seeds excluded from model training.'}
-    asset = {'schemaVersion': 1, 'modelVersion': '20.3', 'smoothing': {'baseAlpha': .5, 'baseBeta': .5,
+    asset = {'schemaVersion': 2, 'modelVersion': '20.3', 'smoothing': {'baseAlpha': .5, 'baseBeta': .5,
              'categoryPriorStrength': strength, 'minimumPpm': 1}, 'evidenceSha256': digest(canonical(value)),
              'selectionPolicy': value['selectionPolicy']['id'],
-             'factors': {c: ppm[i * 3:i * 3 + 3] for i, c in enumerate(CATEGORIES)}}
+             'factors': runtime_factors(ppm)}
     return asset, report
 
 

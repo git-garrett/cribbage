@@ -85,7 +85,27 @@ class DeclineTests(unittest.TestCase):
         rows = b.empty_counts()
         for counts in value['countsByModel'].values():b.add_counts(rows, counts)
         expected = b.probabilities(rows, report['strength'])
-        self.assertEqual(expected, [p for c in b.CATEGORIES for p in asset['factors'][c]])
+        self.assertEqual(asset['schemaVersion'], 2)
+        self.assertEqual(b.runtime_factors(expected), asset['factors'])
+        self.assertEqual(sum(map(len, asset['factors'].values())), 16)
+        expanded = b.factor_values(asset)
+        self.assertEqual(b.loss(rows, expected), b.loss(rows, expanded))
+        for i, category in enumerate(b.CATEGORIES):
+            if category in b.FIRST_CARD_CATEGORIES:
+                self.assertEqual(expected[i * 3], expanded[i * 3])
+            else:
+                self.assertIsNone(expanded[i * 3])
+                self.assertEqual(rows[i * 3], [0, 0, 0])
+
+    def test_truncated_slots_are_inapplicable_not_zero_probability(self):
+        asset = json.loads((b.ASSETS / 'model203-decline-factors.json').read_text())
+        values = b.factor_values(asset)
+        rows = b.empty_counts();rows[0] = [1, 0, 0]
+        with self.assertRaisesRegex(ValueError, 'structurally unavailable'):
+            b.loss(rows, values)
+        asset['factors']['pair'].pop(0)
+        with self.assertRaisesRegex(ValueError, 'invalid decline factor row'):
+            b.factor_values(asset)
 
     def test_import_is_actor_specific_deduplicated_and_reserves_seeds(self):
         with tempfile.TemporaryDirectory() as directory:

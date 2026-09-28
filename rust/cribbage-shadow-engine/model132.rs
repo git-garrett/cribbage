@@ -485,16 +485,27 @@ impl Model1322DeclineFactors {
         struct Asset {
             schema_version: u32,
             model_version: String,
-            factors: BTreeMap<String, [u32; 3]>,
+            factors: BTreeMap<String, Vec<u32>>,
         }
         let asset: Asset = serde_json::from_slice(
             &fs::read(path).map_err(|e| format!("read Model 20.3 decline factors: {e}"))?,
         ).map_err(|e| format!("parse Model 20.3 decline factors: {e}"))?;
-        if asset.schema_version != 1 || asset.model_version != "20.3" || asset.factors.len() != 7 {
+        if !matches!(asset.schema_version, 1 | 2) || asset.model_version != "20.3" || asset.factors.len() != 7 {
             return Err("unsupported Model 20.3 decline-factor asset".into());
         }
-        let row = |name: &str| asset.factors.get(name).copied()
-            .ok_or_else(|| format!("Model 20.3 decline factors missing {name}"));
+        let row = |name: &str| -> Result<[u32; 3], String> {
+            let values = asset.factors.get(name)
+                .ok_or_else(|| format!("Model 20.3 decline factors missing {name}"))?;
+            let first = usize::from(asset.schema_version == 2 && !matches!(name, "pair" | "safePair"));
+            if values.len() != 3 - first {
+                return Err(format!("Model 20.3 decline factors have invalid card ordinals for {name}"));
+            }
+            // Retain the shared historical policy's indexing. An unreachable
+            // first-card slot is neutral padding, not a learned probability.
+            let mut result = [1_000_000; 3];
+            result[first..].copy_from_slice(values);
+            Ok(result)
+        };
         if asset.factors.values().flatten().any(|p| *p == 0 || *p >= 1_000_000) {
             return Err("Model 20.3 behavioral probabilities must lie strictly between zero and one".into());
         }
@@ -2081,6 +2092,45 @@ mod tests {
         }
         policy.clear_edit_evidence_cache();
         assert_eq!(policy.likelihood_cache.as_ref().unwrap().lock().unwrap().entries, 0);
+    }
+
+    #[test]
+    fn model203_truncated_decline_rows_preserve_reachable_likelihoods() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/model203-decline-factors.json");
+        let truncated = Model1322DeclineFactors::load_model203(&path).unwrap();
+        let mut historical: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert_eq!(historical["schemaVersion"], 2);
+        historical["schemaVersion"] = 1.into();
+        for row in historical["factors"].as_object_mut().unwrap().values_mut() {
+            let values = row.as_array_mut().unwrap();
+            if values.len() == 2 {
+                // Any placeholder would have been immaterial to legal play.
+                values.insert(0, 12345.into());
+            }
+        }
+        let reference_path = std::env::temp_dir().join(format!("model203-decline-ordinals-{}.json", std::process::id()));
+        fs::write(&reference_path, serde_json::to_vec(&historical).unwrap()).unwrap();
+        let reference = Model1322DeclineFactors::load_model203(&reference_path).unwrap();
+        assert_eq!(truncated.three_card_run_ppm, [1_000_000, reference.three_card_run_ppm[1], reference.three_card_run_ppm[2]]);
+        assert_eq!(truncated.pair_ppm, reference.pair_ppm);
+        assert_eq!(truncated.safe_pair_ppm, reference.safe_pair_ppm);
+        for observation in decline_history_cases() {
+            for cut_known in [false, true] {
+                assert_eq!(
+                    opponent_rank_likelihoods(&observation, truncated, cut_known, true).unwrap(),
+                    opponent_rank_likelihoods(&observation, reference, cut_known, true).unwrap(),
+                );
+            }
+        }
+        // In schema 2, pair/safe-pair retain all three slots. Accepting a
+        // shortened pair row would shift the first-card multiplier silently.
+        historical["schemaVersion"] = 2.into();
+        for (name, row) in historical["factors"].as_object_mut().unwrap() {
+            if name != "safePair" { row.as_array_mut().unwrap().remove(0); }
+        }
+        fs::write(&reference_path, serde_json::to_vec(&historical).unwrap()).unwrap();
+        assert!(Model1322DeclineFactors::load_model203(&reference_path).is_err());
+        fs::remove_file(reference_path).unwrap();
     }
 
     #[test]

@@ -4,6 +4,12 @@ The subsequent [qualified refresh](../model-20.3-decline-factors.md) installed a
 restricted-policy asset and checked the actual runtime posterior. The results
 below describe the preceding broad-cohort investigation.
 
+The user subsequently confirmed that the different actor-private training and
+observer-public inference definitions of safety are appropriate. The earlier
+proposal to align them is withdrawn; preserve both definitions. The later
+ordinal truncation only removes impossible first-card run/royal/four-kind
+placeholders, retaining first-card pair and safe-pair statistics.
+
 2026-09-27. This investigation leaves the installed runtime asset, engine, and
 running benchmark unchanged. It evaluates `model203-decline-factors.json`.
 
@@ -121,7 +127,7 @@ The refreshed extractor and frozen scoring-category function agreed on all
 **11,119 sampled valid hands**. This check uses identical decoded histories; it
 tests category semantics rather than certifying every historical raw decoder.
 
-The builder/runtime safe-category mismatch is real. Among 4,517 sampled held
+The builder/runtime safe-category definitions differ. Among 4,517 sampled held
 pair/royal opportunities, the builder classified 1,068 as safe, the runtime's
 public-information definition classified 1,019 as safe, and **49** were safe
 only under the builder's definition (1.1% of opportunities, 4.6% of builder-safe
@@ -130,9 +136,9 @@ because the actor can know about private copies/discards that the forecaster
 cannot observe. General pair/royal rows also include safe observations even
 though runtime selects the specific safe factor instead of the general one.
 
-Aligning the builder with runtime's available information and using mutually
-exclusive categories should precede further fine tuning. This audit measures
-the discrepancy; it does not claim a measured gain from correcting it.
+These measurements describe different information available to the actor and
+the observer. Per the subsequent user instruction, retain that distinction;
+the measurements do not establish a defect or a gain from changing the rules.
 
 ## Recommended next change
 
@@ -145,7 +151,7 @@ in [Stan's binary-trial case study](https://mc-stan.org/learn-stan/case-studies/
 
 Before installing a replacement:
 
-1. Align the safe/general category definitions with runtime public information.
+1. Preserve the intentional actor-private/public-inference safety definitions.
 2. Choose the prediction target explicitly: known model profile, or a validated
    mixture/default for unknown humans. Retain old Ace evidence as shared prior
    information; eligibility alone should not determine its weight.

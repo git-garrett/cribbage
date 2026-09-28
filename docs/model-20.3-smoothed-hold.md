@@ -64,6 +64,22 @@ in hand-cache invalidation.
 
 ## Runtime cost
 
+The historical pone/dealer normal hand-score priors and their generated bins
+are not inputs to Model 20.3's forecasts. Discard evaluation now creates those
+priors, and the old crib forecast's temporary known-card vector, only when no
+card-conditioned Model 20 forecast is supplied. Matrix-based board evaluation
+also defers standard phase-prior initialization until an unmapped phase actually
+needs it; Model 20.3 uses the supported matrix seams. Historical models retain
+the same prior values and fallback calculations. This removes unused setup,
+not probabilities from the current opponent-hand forecast. It is separate from
+the earlier cleanup of the redundant unsuited crib forecast during pegging.
+
+A pre/post release comparison of 40 decisions across Models 13.215, 13.23,
+20.0, 20.2 and 20.3 retained identical serialized choices, EV and WP. The cases
+cover both roles, discard and pegging, and midgame and near-finish scores.
+The board tests also compare lazy and eager historical evaluation at phases
+without a matrix seam. No whole-game speedup is claimed for this cleanup.
+
 Loaded belief rows are shared through an immutable reference-counted allocation;
 creating a decision policy no longer clones the complete table. A dense array
 indexes the 1,120 role/prefix contexts, and borrowed row iterators apply
