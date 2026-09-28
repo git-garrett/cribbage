@@ -25,3 +25,9 @@ The two initially concerning short positions were repeated 20 times each with th
 Release evidence tests pass, including the exhaustive coefficient test and posterior-weight parity test. The wider Model 9.1 policy tests passed for the initial bit-equivalent table candidate. Builds emit only the existing unused `WeightedEntry` fields warning. The diagnostic adapter was restored; only the arithmetic helper and its call sites/test remain changed.
 
 This is an incremental throughput improvement, not a solution to the roughly fourfold increase in supported joint keep/discard worlds. Private opponent discards can alter their legal-information posterior and decisions; those worlds cannot simply be collapsed by matching the retained hand. Further grouping must prove policy equivalence and preserve terminal outcomes and floating-point accumulation order.
+
+## Applied benchmark restart
+
+Committed and pushed as `7414667926de984eefb90fda79e2f3238e7b915a`. The replacement runner and its tests were built with the one-shot supervisor, then the original job was stopped before resuming under `model203-vs-model202-10k-20260927-v3`. Retained 143 completed games: 71 in 20.3-left and 72 in 20.2-left. The former had a hole at index 70 with index 71 already present; resume runs `[70,71)` then `[72,5000)`. The latter resumes `[72,5000)`. Seeds, assets, opponent binary, six-worker selection, and the 10,000-game total remain unchanged.
+
+The runtime `benchmark/speed-v3-restart.json` preserves old metadata, exact retained index sets, hashes of retained game/hand/discard/pegging rows, and the new source/binary identity. The final verification stage rechecks those hashes and complete index intervals before reporting and durable sync. Old and new timing samples remain distinguishable through the retained index sets.
