@@ -298,14 +298,59 @@ impl Hash for WpKey {
     }
 }
 
+// A bounded, decision-local memo of pure scoring results. A collision replaces
+// an entry only after full-key comparison; it never substitutes another score.
+// 131,072 packed entries (1 MiB); see docs/research/model203-series-scoring.md.
+const SCORE_CACHE_BITS: u32 = 17;
+const SCORE_KEY_BITS: u32 = CURRENT - SERIES;
+const SCORE_KEY_MASK: u64 = (1_u64 << SCORE_KEY_BITS) - 1;
+
+#[derive(Default)]
+struct SeriesScoreMemo {
+    entries: Vec<u64>,
+}
+
+impl SeriesScoreMemo {
+    fn index(key: u64) -> usize {
+        (key.wrapping_mul(0x9e3779b97f4a7c15) >> (64 - SCORE_CACHE_BITS)) as usize
+    }
+
+    fn score(&mut self, state: State) -> u8 {
+        // Tiny sequences cost less to calculate than to look up.
+        if state.len() < 3 {
+            return state.score();
+        }
+        if self.entries.is_empty() {
+            self.entries.resize(1 << SCORE_CACHE_BITS, 0);
+        }
+        // All eight rank slots, the active length, and count. Hand contents,
+        // turn, go, last player, scores, and role do not affect this pure score.
+        let key = ((state.0 >> SERIES) as u64) & SCORE_KEY_MASK;
+        let entry = &mut self.entries[Self::index(key)];
+        if *entry & SCORE_KEY_MASK == key {
+            return (*entry >> SCORE_KEY_BITS) as u8;
+        }
+        let score = state.score();
+        // The nonzero length makes a valid key distinct from an empty entry.
+        *entry = key | (u64::from(score) << SCORE_KEY_BITS);
+        score
+    }
+
+    fn clear(&mut self) {
+        self.entries.fill(0);
+    }
+}
+
 #[derive(Default)]
 pub(super) struct WpMemo {
     outcomes: HashMap<WpKey, f64, BuildHasherDefault<StateHasher>>,
+    series_scores: SeriesScoreMemo,
 }
 
 impl WpMemo {
     pub(super) fn clear(&mut self) {
         self.outcomes.clear();
+        self.series_scores.clear();
     }
 
     pub(super) fn forced_play(
@@ -440,7 +485,7 @@ impl WpMemo {
         next.peg.set(SERIES + state.peg.len() as u32 * 4, 15, rank);
         next.peg.set(LENGTH, 15, state.peg.len() as u8 + 1);
         next.peg.set(COUNT, 31, count);
-        next.scores[current as usize] += next.peg.score();
+        next.scores[current as usize] += self.series_scores.score(next.peg);
         if count == 31 {
             next.peg.reset(1 - current);
         } else {
@@ -457,6 +502,71 @@ impl WpMemo {
 mod tests {
     use super::*;
     use crate::information_set::{PegSeat, RankPegState};
+
+    #[test]
+    fn series_score_memo_checks_collisions_and_survives_clear() {
+        let mut seen = vec![None; 1 << SCORE_CACHE_BITS];
+        let mut collision = None;
+        for mut encoded in 0..13_usize.pow(4) {
+            let mut series = [0; 4];
+            for rank in &mut series {
+                *rank = (encoded % 13) as u8;
+                encoded /= 13;
+            }
+            let count: u8 = series.iter().map(|r| VALUES[*r as usize]).sum();
+            if count > 31 { continue; }
+            let state = State::from_reference(
+                &AverageState::new([[0; RANKS]; 2], &series, count, 0, None, None).unwrap(),
+            );
+            let score = super::super::score_count_for_ranks(&series);
+            let key = ((state.0 >> SERIES) as u64) & SCORE_KEY_MASK;
+            let index = SeriesScoreMemo::index(key);
+            if let Some((other, other_score)) = seen[index] {
+                if other_score != score {
+                    collision = Some((other, other_score, state, score));
+                    break;
+                }
+            } else {
+                seen[index] = Some((state, score));
+            }
+        }
+        let (a, a_score, b, b_score) = collision.expect("find a real score-key collision");
+        let mut memo = SeriesScoreMemo::default();
+        for _ in 0..3 {
+            for (state, score) in [(a, a_score), (b, b_score), (a, a_score)] {
+                assert_eq!(memo.score(state), score);
+                assert_eq!(memo.score(state), score);
+            }
+            memo.clear();
+        }
+        let mut changed_context = a;
+        changed_context.set(0, 7, 4);
+        changed_context.set(CURRENT, 1, 1);
+        changed_context.set(GO, 3, 2);
+        changed_context.set(LAST, 3, 1);
+        assert_eq!(memo.score(changed_context), a_score);
+    }
+
+    #[test]
+    fn series_score_memo_keys_length_and_count_and_skips_tiny_sequences() {
+        let make = |series: &[u8], count| State::from_reference(
+            &AverageState::new([[0; RANKS]; 2], series, count, 0, None, None).unwrap(),
+        );
+        let mut memo = SeriesScoreMemo::default();
+        assert_eq!(memo.score(make(&[4], 5)), 0);
+        assert_eq!(memo.score(make(&[4, 4], 10)), 2);
+        assert!(memo.entries.is_empty());
+        let a = make(&[1, 2, 3], 9);
+        // Trailing rank zero leaves the rank bits unchanged; length still matters.
+        let mut b = make(&[1, 2, 3, 0], 10);
+        b.set(COUNT, 31, 9); // Isolate length: only the active length now differs.
+        assert_eq!(memo.score(a), 3);
+        assert_eq!(memo.score(b), 4);
+        let mut different_count = a;
+        different_count.set(COUNT, 31, 15);
+        assert_eq!(memo.score(different_count), a.score() + 2);
+        assert_eq!(memo.score(a), 3);
+    }
 
     #[test]
     fn wp_checked_entry_and_recursive_series_guard_reject_invalid_plays() {
@@ -715,12 +825,16 @@ mod tests {
 
     #[test]
     fn compact_scoring_matches_reference_for_all_legal_series_up_to_five_cards() {
-        fn visit(series: &mut Vec<u8>, count: u8) {
+        fn visit(series: &mut Vec<u8>, count: u8, memo: &mut SeriesScoreMemo) {
             let state = AverageState::new([[0; RANKS]; 2], series, count, 0, None, None).unwrap();
             assert_eq!(
                 State::from_reference(&state).score(),
                 super::super::score_count_for_ranks(series)
             );
+            let packed = State::from_reference(&state);
+            let expected = super::super::score_count_for_ranks(series);
+            assert_eq!(memo.score(packed), expected);
+            assert_eq!(memo.score(packed), expected);
             if series.len() == 5 {
                 return;
             }
@@ -729,12 +843,13 @@ mod tests {
                     && series.iter().filter(|r| **r == rank).count() < 4
                 {
                     series.push(rank);
-                    visit(series, count + VALUES[rank as usize]);
+                    visit(series, count + VALUES[rank as usize], memo);
                     series.pop();
                 }
             }
         }
-        visit(&mut Vec::new(), 0);
+        let mut memo = SeriesScoreMemo::default();
+        visit(&mut Vec::new(), 0, &mut memo);
         for series in [
             vec![0, 1, 2, 3, 4, 5, 6],
             vec![6, 5, 4, 3, 2, 1, 0],
@@ -748,6 +863,9 @@ mod tests {
                 State::from_reference(&state).score(),
                 super::super::score_count_for_ranks(&series)
             );
+            let expected = super::super::score_count_for_ranks(&series);
+            assert_eq!(memo.score(State::from_reference(&state)), expected);
+            assert_eq!(memo.score(State::from_reference(&state)), expected);
         }
     }
 }
