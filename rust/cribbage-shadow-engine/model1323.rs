@@ -175,6 +175,18 @@ impl PolicyAssets {
         self.forecast_population(observation, world_budget, &policy, worlds)
     }
 
+    /// Complete valuations for only the requested review actions. An inferior
+    /// selected action must retain every world; choice pruning is inappropriate.
+    pub(crate) fn forecast_actions(
+        &self,
+        observation: &Model132Observation,
+        actions: &[RankPegAction],
+    ) -> Result<Vec<PegCandidateForecast>, String> {
+        let policy = self.decision_policy()?;
+        let worlds = self.worlds_for_hand(observation, &policy, None)?;
+        self.forecast_population_actions(observation, usize::MAX, &policy, worlds, actions)
+    }
+
     /// Exhaustive production choice. Only provably inferior candidates may
     /// stop early; every returned candidate has its full, unmodified histogram.
     /// `win_probability` must return a finite probability in [0, 1].
@@ -242,6 +254,19 @@ impl PolicyAssets {
         policy: &impl Model132PeggingPolicy,
         worlds: Vec<World>,
     ) -> Result<Vec<PegCandidateForecast>, String> {
+        self.forecast_population_actions(
+            observation, world_budget, policy, worlds, &observation.legal_actions(),
+        )
+    }
+
+    fn forecast_population_actions(
+        &self,
+        observation: &Model132Observation,
+        world_budget: usize,
+        policy: &impl Model132PeggingPolicy,
+        worlds: Vec<World>,
+        actions: &[RankPegAction],
+    ) -> Result<Vec<PegCandidateForecast>, String> {
         // Late continuations are cheap enough to enumerate without sampling.
         let remaining = rank_count_total(&observation.own_remaining) + 4
             - rank_count_total(&observation.opponent_played);
@@ -252,7 +277,7 @@ impl PolicyAssets {
         };
         let count = worlds.len();
         let worlds = sample_worlds(worlds, budget, observation_seed(observation))?;
-        forecast_worlds(observation, policy, &worlds, count)
+        forecast_world_actions(observation, policy, &worlds, count, actions)
     }
 
     fn worlds(
@@ -607,14 +632,25 @@ fn world_state(observation: &Model132Observation, world: &World) -> Result<RankP
     Ok(state)
 }
 
+#[cfg(test)]
 fn forecast_worlds(
     observation: &Model132Observation,
     policy: &impl Model132PeggingPolicy,
     worlds: &[World],
     posterior_worlds: usize,
 ) -> Result<Vec<PegCandidateForecast>, String> {
+    forecast_world_actions(observation, policy, worlds, posterior_worlds, &observation.legal_actions())
+}
+
+fn forecast_world_actions(
+    observation: &Model132Observation,
+    policy: &impl Model132PeggingPolicy,
+    worlds: &[World],
+    posterior_worlds: usize,
+    actions: &[RankPegAction],
+) -> Result<Vec<PegCandidateForecast>, String> {
     let mut forecasts = Vec::new();
-    for action in observation.legal_actions() {
+    for &action in actions {
         let mut outcomes = BTreeMap::new();
         for world in worlds {
             let (own, opponent) = rollout_candidate(observation, policy, world, action)?;
@@ -1106,6 +1142,35 @@ mod tests {
         assert!(forecasts
             .iter()
             .all(|f| f.evaluated_worlds == f.posterior_worlds));
+    }
+
+    #[test]
+    fn selected_forecasts_skip_other_roots_and_preserve_all_joint_weights() {
+        use std::cell::Cell;
+        struct CountCalls(Cell<usize>);
+        impl Model132PeggingPolicy for CountCalls {
+            fn choose_action(&self, observation: &Model132Observation) -> Result<RankPegAction, String> {
+                self.0.set(self.0.get() + 1);
+                FirstLegal.choose_action(observation)
+            }
+        }
+        let (observation, world) = opening();
+        let worlds = sample_worlds(vec![world; 513], usize::MAX, 0).unwrap();
+        let policy = CountCalls(Cell::new(0));
+        let full = forecast_worlds(&observation, &policy, &worlds, worlds.len()).unwrap();
+        let full_calls = policy.0.get();
+        let mut selected_calls = 0;
+        for forecast in &full {
+            policy.0.set(0);
+            let selected = forecast_world_actions(
+                &observation, &policy, &worlds, worlds.len(), &[forecast.action],
+            ).unwrap();
+            assert_identical_forecasts(&selected, std::slice::from_ref(forecast));
+            assert_eq!(selected[0].evaluated_worlds, worlds.len());
+            assert!(policy.0.get() < full_calls, "unselected roots must not be solved");
+            selected_calls += policy.0.get();
+        }
+        assert_eq!(selected_calls, full_calls);
     }
 
     #[test]
