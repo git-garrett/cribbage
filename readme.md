@@ -92,3 +92,7 @@ Rust release and benchmark builds
 Native Mac builds automatically generate and validate PGO profiles through
 `npm run build:deploy` and `npm run build:benchmark`. See
 [Mac PGO builds](docs/mac-pgo-builds.md) for training models and build tooling.
+
+Model 20.4 contains the retained optimizations developed after the latest 20.3
+benchmark restart. Model 20.3 preserves its benchmark-era execution choices;
+production Ace remains 13.23. See [the version boundary](docs/research/model204-version-boundary.md).

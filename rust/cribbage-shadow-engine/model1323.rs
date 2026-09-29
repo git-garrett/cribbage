@@ -129,6 +129,7 @@ pub struct PolicyAssets {
     suit_rates: Option<[SuitedDiscardRates; 2]>,
     empirical_depletion: bool,
     complete_hold_support: bool,
+    optimized_queries: bool,
     pub(crate) wp_board: Option<Arc<crate::board_matrix::BoardWinMatrix>>,
 }
 
@@ -231,6 +232,7 @@ impl PolicyAssets {
         Ok(Self {
             empirical_depletion: false,
             complete_hold_support: false,
+            optimized_queries: false,
             wp_board: None,
             beliefs,
             factors,
@@ -274,6 +276,7 @@ impl PolicyAssets {
             suit_rates: Some(packed.suits),
             empirical_depletion: true,
             complete_hold_support: false,
+            optimized_queries: false,
             wp_board: None,
         })
     }
@@ -323,9 +326,17 @@ impl PolicyAssets {
             suit_rates: Some(suit_rates),
             empirical_depletion: true,
             complete_hold_support: true,
+            optimized_queries: false,
             wp_board: Some(Arc::new(crate::board_matrix::BoardWinMatrix::load_verified_model202(
                 directory.join("model202-board-win-matrix.bin"))?)),
         })
+    }
+
+    pub(crate) fn load_model204(directory: &Path) -> Result<Self, String> {
+        // Identical immutable learning snapshot; only execution strategy differs.
+        let mut assets = Self::load_model203(directory)?;
+        assets.optimized_queries = true;
+        Ok(assets)
     }
 
     pub(crate) fn opponent_keep_weights(
@@ -387,8 +398,8 @@ impl PolicyAssets {
         observation: &Model132Observation,
     ) -> Result<Model911Policy, String> {
         let policy = self.decision_policy()?;
-        if self.complete_hold_support {
-            // Model 20.3 streams many opponent private-hand variants through
+        if self.optimized_queries {
+            // Model 20.4 streams many opponent private-hand variants through
             // one solve. Their action keys rarely repeat before eviction; the
             // root player's much smaller key set repeats across those worlds.
             policy.cache_wp_actions_for_role(observation.role);
@@ -2599,9 +2610,9 @@ mod tests {
     }
 
     #[test]
-    fn model203_batches_only_first_pegging_decisions() {
+    fn model204_batches_only_first_pegging_decisions() {
         let assets =
-            PolicyAssets::load_model203(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+            PolicyAssets::load_model204(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
         let (observation, world) = opening();
         let mut state = world_state(&observation, &world).unwrap();
         while !state.complete && state.winner.is_none() {
@@ -2619,6 +2630,9 @@ mod tests {
             );
             state.apply(state.legal_actions()[0]).unwrap();
         }
+        let frozen = PolicyAssets::load_model203(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        assert!(!frozen.optimized_queries);
+        assert_eq!(frozen.decision_policy_for_observation(&observation).unwrap().rollout_batch_size(), 1);
         let historical =
             PolicyAssets::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
         assert_eq!(

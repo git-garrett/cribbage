@@ -37,7 +37,7 @@ use crate::model91_discard::model91_schell_crib_ev;
 use crate::model_id::{
     MODEL_13_0, MODEL_13_1, MODEL_13_2, MODEL_13_21, MODEL_13_215, MODEL_13_22, MODEL_13_23,
     MODEL_14_3, MODEL_14_8, MODEL_14_8_1, MODEL_15_0, MODEL_15_1, MODEL_15_2, MODEL_16_0,
-    MODEL_16_1, MODEL_16_3, MODEL_20_0, MODEL_20_1, MODEL_20_2, MODEL_20_3, MODEL_9_0, MODEL_9_1, MODEL_9_11, MYRMIDON_5,
+    MODEL_16_1, MODEL_16_3, MODEL_20_0, MODEL_20_1, MODEL_20_2, MODEL_20_3, MODEL_20_4, MODEL_9_0, MODEL_9_1, MODEL_9_11, MYRMIDON_5,
 };
 use crate::policy::PolicyArtifact;
 
@@ -239,6 +239,7 @@ struct RuntimeTables {
     policy_assets201: OnceLock<Model1323PolicyAssets>,
     policy_assets202: OnceLock<Model1323PolicyAssets>,
     policy_assets203: OnceLock<Model1323PolicyAssets>,
+    policy_assets204: OnceLock<Model1323PolicyAssets>,
     verified_board1323: OnceLock<Arc<BoardWinMatrix>>,
     beliefs91: OnceLock<Model91EmpiricalBeliefs>,
     decline_factors1322: OnceLock<Model1322DeclineFactors>,
@@ -677,7 +678,7 @@ pub fn review_decision(
     if input.kind == DecisionKind::Peg
         && input.player == PlayerKey::Ai
         && input.turn == PlayerKey::Ai
-        && matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3)
+        && matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_4)
     {
         let (selected_card, legal) = selected_peg_for_review(input, selected_card_ids)?;
         if legal.len() > 1 {
@@ -704,7 +705,7 @@ pub fn evaluate_selected_decision(
     selected_card_ids: &[u8],
     root: &str,
 ) -> Result<Decision, String> {
-    if !matches!(input.model.as_str(), MODEL_13_0 | MODEL_13_215 | MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3) {
+    if !matches!(input.model.as_str(), MODEL_13_0 | MODEL_13_215 | MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3 | MODEL_20_4) {
         return Err("saved decision review currently supports Ace models only".to_string());
     }
     let selected = match input.kind {
@@ -738,6 +739,7 @@ fn is_supported_rust_model(model: &str) -> bool {
         || model == MODEL_20_1
         || model == MODEL_20_2
         || model == MODEL_20_3
+        || model == MODEL_20_4
         || model == MYRMIDON_5
 }
 
@@ -858,7 +860,7 @@ fn recommend_discard(input: &DecisionInput, root: &str) -> Result<Decision, Stri
     if input.model == MODEL_13_22 {
         return recommend_discard_model1322(input, root);
     }
-    if matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3) {
+    if matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3 | MODEL_20_4) {
         return recommend_discard_model1323(input, runtime_tables(root)?);
     }
     if input.model == MODEL_9_0 {
@@ -1016,7 +1018,7 @@ fn recommend_peg(
     if input.model == MODEL_13_22 {
         return recommend_peg_model1322(input, &legal, tables, model911_cache);
     }
-    if matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3) {
+    if matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3 | MODEL_20_4) {
         return recommend_peg_model1323(input, &legal, tables, model13_cache);
     }
     if input.model == MYRMIDON_5 {
@@ -1950,7 +1952,7 @@ fn model20_discard_context<'a>(
     tables: &'a RuntimeTables,
 ) -> Result<Option<Model20DiscardContext<'a>>, String> {
     model20_discard_context_with_scores(input, tables, |ranks, cut| {
-        if input.model == MODEL_20_3 {
+        if matches!(input.model.as_str(), MODEL_20_3 | MODEL_20_4) {
             crate::cards::score_four_rank_counts(ranks, cut.rank) as i32
         } else {
             score_hand_rank_only(&cards_for_rank_counts_for_scoring(ranks), cut) as i32
@@ -1963,7 +1965,7 @@ fn model20_discard_context_with_scores<'a>(
     tables: &'a RuntimeTables,
     rank_score: impl Fn(&[u8; 13], Card) -> i32,
 ) -> Result<Option<Model20DiscardContext<'a>>, String> {
-    if !matches!(input.model.as_str(), MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3) {
+    if !matches!(input.model.as_str(), MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3 | MODEL_20_4) {
         return Ok(None);
     }
     let policy = tables.pegging_policy_assets(input)?;
@@ -2180,7 +2182,7 @@ fn recommend_peg_model1323(
 ) -> Result<Decision, String> {
     let observation = model1323_observation(input);
     let assets = tables.pegging_policy_assets(input)?;
-    let prepared = (input.model == MODEL_20_3)
+    let prepared = matches!(input.model.as_str(), MODEL_20_3 | MODEL_20_4)
         .then(|| assets.prepare_decision(&observation)).transpose()?;
     let mut evaluator = model1323_pegging_win_evaluator(
         input, tables, prepared.as_ref().map(|decision| decision.opponent_hands()),
@@ -2504,7 +2506,7 @@ fn review_discard_model13(
                 .ok_or_else(|| "selected discard is not in the original hand".to_string())
         })
         .collect::<Result<Vec<_>, _>>()?;
-    if matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3) {
+    if matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3 | MODEL_20_4) {
         let tables = runtime_tables(root)?;
         let mut board = BoardModel::from_board_matrix(Arc::clone(tables.board_for_model1323(input)?));
         let show = model20_discard_context(input, tables)?;
@@ -2936,7 +2938,7 @@ fn forecast_peg_review(
 ) -> Result<(Vec<crate::model1323::PegCandidateForecast>, PeggingWinEvaluator), String> {
     let observation = model1323_observation(input);
     let assets = tables.pegging_policy_assets(input)?;
-    let prepared = (input.model == MODEL_20_3)
+    let prepared = matches!(input.model.as_str(), MODEL_20_3 | MODEL_20_4)
         .then(|| assets.prepare_decision(&observation)).transpose()?;
     let forecasts = if let Some(prepared) = &prepared {
         prepared.forecast_actions(actions)?
@@ -2979,10 +2981,13 @@ fn review_peg_model13(
         });
     }
     let tables = runtime_tables(root)?;
-    if matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3) {
-        let (forecasts, mut evaluator) = forecast_peg_review(
-            input, tables, &[RankPegAction::Play(selected.rank)],
-        )?;
+    if matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3 | MODEL_20_4) {
+        let actions = if input.model == MODEL_20_3 {
+            model1323_observation(input).legal_actions()
+        } else {
+            vec![RankPegAction::Play(selected.rank)]
+        };
+        let (forecasts, mut evaluator) = forecast_peg_review(input, tables, &actions)?;
         return select_reviewed_peg(input, selected, &forecasts, &mut evaluator);
     }
     let hold = tables.hold()?;
@@ -5951,7 +5956,7 @@ fn model1323_pegging_win_evaluator(
 ) -> Result<PeggingWinEvaluator, String> {
     let board = BoardModel::from_board_matrix(Arc::clone(tables.board_for_model1323(input)?));
     let crib_rank = tables.crib_for_model(input)?;
-    let mut context = if input.model == MODEL_20_3 {
+    let mut context = if matches!(input.model.as_str(), MODEL_20_3 | MODEL_20_4) {
         let fresh;
         let hands = if let Some(hands) = opponent_hands { hands } else {
             fresh = tables.pegging_policy_assets(input)?
@@ -6111,7 +6116,7 @@ fn opponent_show_score_outcomes(
     available_cards: &[Card],
     opponent_hands: impl IntoIterator<Item = WeightedRankHand>,
 ) -> Vec<(i32, f64)> {
-    opponent_show_score_outcomes_with_scores(input, available_cards, opponent_hands, input.model == MODEL_20_3)
+    opponent_show_score_outcomes_with_scores(input, available_cards, opponent_hands, matches!(input.model.as_str(), MODEL_20_3 | MODEL_20_4))
 }
 
 fn opponent_show_score_outcomes_with_scores(
@@ -6470,6 +6475,7 @@ impl RuntimeTables {
             policy_assets201: OnceLock::new(),
             policy_assets202: OnceLock::new(),
             policy_assets203: OnceLock::new(),
+            policy_assets204: OnceLock::new(),
             verified_board1323: OnceLock::new(),
             beliefs91: OnceLock::new(),
             decline_factors1322: OnceLock::new(),
@@ -6547,7 +6553,11 @@ impl RuntimeTables {
     }
 
     fn pegging_policy_assets(&self, input: &DecisionInput) -> Result<&Model1323PolicyAssets, String> {
-        if input.model == MODEL_20_3 {
+        if input.model == MODEL_20_4 {
+            load_cached(&self.policy_assets204, "policy_assets204", || {
+                Model1323PolicyAssets::load_model204(&self.asset_path(""))
+            })
+        } else if input.model == MODEL_20_3 {
             load_cached(&self.policy_assets203, "policy_assets203", || {
                 Model1323PolicyAssets::load_model203(&self.asset_path(""))
             })
@@ -6569,7 +6579,7 @@ impl RuntimeTables {
     }
 
     fn board_for_model1323(&self, input: &DecisionInput) -> Result<&Arc<BoardWinMatrix>, String> {
-        if matches!(input.model.as_str(), MODEL_20_2 | MODEL_20_3) {
+        if matches!(input.model.as_str(), MODEL_20_2 | MODEL_20_3 | MODEL_20_4) {
             self.pegging_policy_assets(input)?
                 .wp_board
                 .as_ref()
@@ -6665,7 +6675,7 @@ impl RuntimeTables {
     }
 
     fn crib_for_model(&self, input: &DecisionInput) -> Result<&CribRankDiscardTables, String> {
-        if input.model == MODEL_20_3 {
+        if matches!(input.model.as_str(), MODEL_20_3 | MODEL_20_4) {
             load_cached(&self.crib_rank203, "crib_rank203", || {
                 CribRankDiscardTables::load_model203(
                     self.asset_path(crate::model203_crib::ASSET_NAME),
@@ -6978,7 +6988,7 @@ mod tests {
                 (action.clone(), *card_id, ev.map(f64::to_bits), win_probability.map(f64::to_bits)),
             _ => panic!("expected pegging decision"),
         };
-        for model in [MODEL_13_23, MODEL_20_3] {
+        for model in [MODEL_13_23, MODEL_20_3, MODEL_20_4] {
             for (role, hand, own_score, opponent_score) in [
                 ("pone", "4,9", 95, 96),
                 ("dealer", "4,9", 119, 120),
@@ -7009,7 +7019,7 @@ mod tests {
                         evaluate_selected_decision(&input, &selected, root).unwrap_err(),
                     );
                 }
-                if model == MODEL_20_3 && role == "dealer" {
+                if matches!(model, MODEL_20_3 | MODEL_20_4) && role == "dealer" {
                     for (player, turn) in [
                         (PlayerKey::Human, PlayerKey::Ai),
                         (PlayerKey::Ai, PlayerKey::Human),

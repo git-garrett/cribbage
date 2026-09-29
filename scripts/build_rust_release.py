@@ -132,7 +132,7 @@ def build(options):
 
     flags = rustflags(os.environ)
     merger = profile_tool(host)
-    models = options.model or (['schell_table-peg_table-20.3'] if options.kind == 'benchmark' else ['ace'])
+    models = options.model or (['schell_table-peg_table-20.4'] if options.kind == 'benchmark' else ['ace'])
     work = target_dir / 'pgo' / options.kind
     work.mkdir(parents=True, exist_ok=True)
     with (work / 'build.lock').open('w') as lock:
@@ -215,7 +215,7 @@ def main():
     parser.add_argument('--corpus', type=Path)
     parser.add_argument('--target-dir', type=Path)
     parser.add_argument('--target')
-    parser.add_argument('--model', action='append', help='Repeat to train all engines in a matchup; benchmark default: 20.3; API/shadow default: Ace')
+    parser.add_argument('--model', action='append', help='Repeat to train all engines in a matchup; benchmark default: 20.4; API/shadow default: Ace')
     parser.add_argument('--offline', action='store_true')
     parser.add_argument('--no-pgo', action='store_true', help='Explicit diagnostic escape hatch')
     try:

@@ -278,3 +278,26 @@ build receipts. The build scripts add no `target-cpu` flag.
   `/private/tmp/cribbage-ace-review-release-job`.
 - Rust's [PGO workflow](https://doc.rust-lang.org/rustc/profile-guided-optimization.html)
   and [CPU selection](https://doc.rust-lang.org/rustc/codegen-options/index.html#target-cpu).
+
+## Production integration completed (2026-09-29 UTC)
+
+Production Ace 13.23 is live at `7b0f6113fde84ea03d3a7c3f4c0d40ea9972cf4e`
+with PGO alone. The running binary hash matched the release receipt, optimized
+API tests passed, and all 14 training plus 20 held-out cases preserved exact
+decision/value parity. These deployment wall times are not a controlled speed
+comparison. The successful run needed 768 MiB memory high, 832 MiB maximum, and
+384 MiB swap while the API was stopped; systemd restored production after
+501.9 seconds. The verified receipt is retained at
+`/private/tmp/cribbage-production-pgo-retry/verified-deployment-report.json`.
+
+[Production PR #49](https://github.com/git-garrett/cribbage/pull/49), merged at
+`2829e8774565dd9172d78cdb7d8b12a974720427`, preserves the
+successful memory allowance and systemd restoration hooks for future builds.
+Harmless probe services verified restoration after success, failure, and timeout
+without interrupting the real API. This tooling follow-up needs no rebuild of
+the currently verified live binary.
+
+The research model optimizations and default Mac benchmark training target after
+the frozen benchmark restart are now versioned as 20.4; the historical 20.3
+measurements above retain their original labels. See
+[the version boundary](model204-version-boundary.md).

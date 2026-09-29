@@ -883,7 +883,7 @@ fn score_count_for_rank_series(ranks: &[u8]) -> u8 {
 }
 
 impl Model911Policy {
-    /// Model 20.3 opt-in; historical policies keep scalar rollout scheduling.
+    /// Model 20.4 opt-in; historical policies keep scalar rollout scheduling.
     pub(crate) fn with_batched_posteriors(mut self) -> Self {
         self.batch_posteriors = true;
         self

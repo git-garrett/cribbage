@@ -2,7 +2,7 @@ use cribbage_shadow_engine::model::{
     evaluate_decision, evaluate_decision_with_caches, evaluate_selected_decision,
     parse_decision_input, Decision, Model13HandCache,
 };
-use cribbage_shadow_engine::model_id::{MODEL_13_23, MODEL_20_0, MODEL_20_1, MODEL_20_2, MODEL_20_3};
+use cribbage_shadow_engine::model_id::{MODEL_13_23, MODEL_20_0, MODEL_20_1, MODEL_20_2, MODEL_20_3, MODEL_20_4};
 
 #[test]
 fn model203_live_cached_and_review_paths_agree_without_changing_model202() {
@@ -153,6 +153,33 @@ fn model202_rebuilt_board_is_used_consistently_for_play_and_review() {
             assert_eq!(format!("{actual:?}"), format!("{review:?}"));
             let after = evaluate_decision_with_caches(&old, root, None, Some(&cache)).unwrap();
             assert_eq!(format!("{before:?}"), format!("{after:?}"));
+        }
+    }
+}
+
+#[test]
+fn model204_keeps_frozen_model203_values_across_shared_cache_and_reviews() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = root.to_str().unwrap();
+    for role in ["dealer", "pone"] {
+        for fields in [
+            format!("kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore=55;humanScore=58"),
+            format!("kind=peg;role={role};aiHand=4,9;aiTable=0,3;ownDiscards=1,6;turnCard=10;humanTable=2,5;humanHandCount=2;aiScore=119;humanScore=118;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"),
+        ] {
+            let frozen = parse_decision_input(&format!("model={MODEL_20_3};{fields}")).unwrap();
+            let current = parse_decision_input(&format!("model={MODEL_20_4};{fields}")).unwrap();
+            let expected = evaluate_decision(&frozen, root).unwrap();
+            let cards = match &expected {
+                Decision::Discard { card_ids, .. } => card_ids.clone(),
+                Decision::Peg { card_id, .. } => card_id.iter().copied().collect(),
+            };
+            let cache = Model13HandCache::new();
+            for input in [&current, &frozen, &current, &frozen] {
+                let actual = evaluate_decision_with_caches(input, root, None, Some(&cache)).unwrap();
+                assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+                let review = evaluate_selected_decision(input, &cards, root).unwrap();
+                assert_eq!(format!("{review:?}"), format!("{expected:?}"));
+            }
         }
     }
 }

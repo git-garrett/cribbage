@@ -18,12 +18,12 @@ keep the ordinary release build. Direct `cargo build` bypasses this automation.
 
 API and shadow builds train the current `ACE_MODEL`; API builds also exercise
 selected-action valuations and combined reviews. Benchmark builds default to
-Model 20.3. For another model, or a binary serving both sides of a matchup, name
+Model 20.4. For another model, or a binary serving both sides of a matchup, name
 each engine explicitly:
 
 ```sh
 npm run build:benchmark -- \
-  --model schell_table-peg_table-20.3 \
+  --model schell_table-peg_table-20.4 \
   --model schell_table-peg_table-20.2
 ```
 

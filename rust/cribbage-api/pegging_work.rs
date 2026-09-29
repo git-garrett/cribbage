@@ -136,7 +136,7 @@ pub(super) fn opening_key(session: &Session) -> Option<String> {
     let game = &session.game;
     let own = game.player(AI);
     let opponent = game.player(HUMAN);
-    if !matches!(session.model, ModelId::Schell1323 | ModelId::Schell200 | ModelId::Schell201 | ModelId::Schell202 | ModelId::Schell203)
+    if !matches!(session.model, ModelId::Schell1323 | ModelId::Schell200 | ModelId::Schell201 | ModelId::Schell202 | ModelId::Schell203 | ModelId::Schell204)
         || session.forfeited
         || session.completed_at.is_some()
         || session.waiting_for_deal_cut
@@ -195,7 +195,7 @@ pub(super) fn prepare(server: &Server, session: &Session) -> Option<Arc<Work>> {
 /// fixed at deal time; only the opponent's eventual four-card count is needed.
 /// This cannot influence the already-completed discard decision or human UI.
 fn after_discard(session: &Session, cards: &[u8]) -> Option<Session> {
-    if !matches!(session.model, ModelId::Schell1323 | ModelId::Schell200 | ModelId::Schell201 | ModelId::Schell202 | ModelId::Schell203)
+    if !matches!(session.model, ModelId::Schell1323 | ModelId::Schell200 | ModelId::Schell201 | ModelId::Schell202 | ModelId::Schell203 | ModelId::Schell204)
         || session.game.dealer != HUMAN
         || session.game.phase != Phase::Discard
         || cards.len() != 2
@@ -319,9 +319,9 @@ mod tests {
     }
 
     #[test]
-    fn model203_forced_rank_live_and_prepared_play_need_no_valuation_assets() {
+    fn model204_forced_rank_live_and_prepared_play_need_no_valuation_assets() {
         let mut session = opening();
-        session.model = ModelId::Schell203;
+        session.model = ModelId::Schell204;
         session.game = CribbageGame::new_with_seed(42, HUMAN);
         session.game.player_mut(AI).hand =
             cribbage_shadow_engine::cards::cards_from_ids(&[26, 0, 13, 39, 8, 9]).unwrap();
@@ -333,7 +333,7 @@ mod tests {
         let server = Server {
             pegging_work: Registry::default(),
             state: Mutex::new(AppState::default()),
-            model_root: "/nonexistent-model203-forced-choice-assets".into(),
+            model_root: "/nonexistent-model204-forced-choice-assets".into(),
             data_dir: std::env::temp_dir(),
         };
         let prepared = prepare(&server, &session).unwrap().wait().unwrap();

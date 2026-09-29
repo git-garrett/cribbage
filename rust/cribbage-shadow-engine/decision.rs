@@ -43,7 +43,7 @@ impl From<PegDecision> for PegAction {
 }
 
 /// Choose a live play when the caller does not need EV or win probability.
-/// Model 20.3 skips forecasting for a forced rank; other choices retain the
+/// Model 20.4 skips forecasting for a forced rank; other choices retain the
 /// existing recommendation path. Valuation callers must use that path directly.
 pub fn choose_peg_for_side_with_caches(
     game: &CribbageGame,
@@ -55,7 +55,7 @@ pub fn choose_peg_for_side_with_caches(
     model13_cache: Option<&Model13HandCache>,
 ) -> Result<PegAction, String> {
     ensure_native_model(model_id)?;
-    if model_id == ModelId::Schell203 {
+    if model_id == ModelId::Schell204 {
         if let Some(action) = forced_rank_action(&game.player(side).hand, game.count) {
             return Ok(action);
         }
@@ -387,7 +387,7 @@ mod tests {
     use crate::model_id::ModelId;
 
     #[test]
-    fn model203_forced_rank_choice_needs_no_forecast_assets() {
+    fn model204_forced_rank_choice_needs_no_forecast_assets() {
         let mut game = CribbageGame::new_with_seed(42, Side::Right);
         // Two fives are playable; the king is not. Preserve hand order across
         // suits, exactly as select_peg_model1323's first rank match does.
@@ -397,9 +397,9 @@ mod tests {
             choose_peg_for_side_with_caches(
                 &game,
                 Side::Left,
-                ModelId::Schell203,
+                ModelId::Schell204,
                 None,
-                "/nonexistent-model203-forced-choice-assets",
+                "/nonexistent-model204-forced-choice-assets",
                 None,
                 None,
             )
@@ -447,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    fn model203_forced_rank_choice_ignores_opponent_private_cards() {
+    fn model204_forced_rank_choice_ignores_opponent_private_cards() {
         let mut game = CribbageGame::new_with_seed(42, Side::Right);
         game.player_mut(Side::Left).hand = crate::cards::cards_from_ids(&[26, 0, 39, 13]).unwrap();
         game.count = 0;
@@ -459,9 +459,9 @@ mod tests {
                 choose_peg_for_side_with_caches(
                     &game,
                     Side::Left,
-                    ModelId::Schell203,
+                    ModelId::Schell204,
                     None,
-                    "/nonexistent-model203-forced-choice-assets",
+                    "/nonexistent-model204-forced-choice-assets",
                     None,
                     None,
                 )

@@ -58,6 +58,9 @@ pub const MODEL_20_1: &str = "schell_table-peg_table-20.1";
 pub const MODEL_20_2: &str = "schell_table-peg_table-20.2";
 /// Model 20.3 adds complete, smoothed shared opponent-hand beliefs to 20.2.
 pub const MODEL_20_3: &str = "schell_table-peg_table-20.3";
+/// Model 20.4 retains 20.3 assets and adds the optimizations developed after
+/// the 2026-09-28 speed-v4 benchmark restart (frozen commit 567ff4f).
+pub const MODEL_20_4: &str = "schell_table-peg_table-20.4";
 /// Five-sample Myrmidon agent from the Moulton cribbage RL framework. Strong
 /// Cribbage exposes it as the Easy opponent and also retains it for benchmarks.
 pub const MYRMIDON_5: &str = "myrmidon-5";
@@ -90,6 +93,7 @@ pub enum ModelId {
     Schell201,
     Schell202,
     Schell203,
+    Schell204,
     Myrmidon5,
     Dynamic,
 }
@@ -122,6 +126,7 @@ impl ModelId {
             ModelId::Schell201 => MODEL_20_1,
             ModelId::Schell202 => MODEL_20_2,
             ModelId::Schell203 => MODEL_20_3,
+            ModelId::Schell204 => MODEL_20_4,
             ModelId::Myrmidon5 => MYRMIDON_5,
             ModelId::Dynamic => DYNAMIC,
         }
@@ -152,6 +157,7 @@ impl ModelId {
             ModelId::Schell201 => "Schell Table + Peg Table 20.1",
             ModelId::Schell202 => "Schell Table + Peg Table 20.2",
             ModelId::Schell203 => "Schell Table + Peg Table 20.3",
+            ModelId::Schell204 => "Schell Table + Peg Table 20.4",
             ModelId::Myrmidon5 => "Myrmidon (5 simulations)",
             ModelId::Dynamic => "Dynamic",
         }
@@ -183,6 +189,7 @@ impl ModelId {
                 | ModelId::Schell201
                 | ModelId::Schell202
                 | ModelId::Schell203
+                | ModelId::Schell204
                 | ModelId::Myrmidon5
         )
     }
@@ -238,6 +245,7 @@ impl FromStr for ModelId {
             MODEL_20_1 => Ok(ModelId::Schell201),
             MODEL_20_2 => Ok(ModelId::Schell202),
             MODEL_20_3 => Ok(ModelId::Schell203),
+            MODEL_20_4 => Ok(ModelId::Schell204),
             MYRMIDON_5 => Ok(ModelId::Myrmidon5),
             DYNAMIC => Ok(ModelId::Dynamic),
             other => Err(format!("unsupported model id: {}", other)),
@@ -285,6 +293,10 @@ mod tests {
         assert_eq!(MODEL_20_1.parse::<ModelId>().unwrap(), ModelId::Schell201);
         assert!(ModelId::Schell201.has_native_rust_decisions());
         assert_eq!(MODEL_20_2.parse::<ModelId>().unwrap(), ModelId::Schell202);
+        assert_eq!(MODEL_20_4.parse::<ModelId>().unwrap(), ModelId::Schell204);
+        assert_eq!(ModelId::Schell204.as_str(), MODEL_20_4);
+        assert!(ModelId::Schell204.has_native_rust_decisions());
+        assert!(!ModelId::Schell204.is_ace());
         assert_eq!(MODEL_20_3.parse::<ModelId>().unwrap(), ModelId::Schell203);
         assert_eq!(ModelId::Schell203.as_str(), MODEL_20_3);
         assert!(ModelId::Schell203.has_native_rust_decisions());
