@@ -151,7 +151,7 @@ deploy() {
   echo "Uploading $ARCHIVE to $REMOTE..."
   "${SCP_BASE[@]}" "$ARCHIVE" "$REMOTE:$remote_archive"
 
-  echo "Building an isolated Linux release on $REMOTE..."
+  echo "Building an isolated Linux PGO release on $REMOTE (API maintenance; automatic restoration)..."
   remote_exec "id cribbage >/dev/null 2>&1 || useradd --system --home-dir '$REMOTE_DATA_DIR' --shell /usr/sbin/nologin cribbage && \
     install -d -m 755 '$REMOTE_APP_DIR' '$REMOTE_RELEASES_DIR' '$REMOTE_BUILD_DIR' && \
     install -d -m 750 -o cribbage -g cribbage '$REMOTE_DATA_DIR' && \
@@ -172,7 +172,9 @@ deploy() {
       cd '$incoming_dir' && \
       systemd-run --quiet --wait --pipe --collect --service-type=exec \
         --unit='cribbage-build-${GIT_COMMIT}' \
-        -p MemoryHigh=512M -p MemoryMax=640M -p MemorySwapMax=256M \
+        -p 'ExecStartPre=/usr/bin/systemctl stop cribbage.service' \
+        -p 'ExecStopPost=/usr/bin/systemctl start cribbage.service' \
+        -p MemoryHigh=768M -p MemoryMax=832M -p MemorySwapMax=384M \
         -p CPUWeight=10 -p IOWeight=10 -p Nice=10 -p OOMScoreAdjust=500 \
         -p RuntimeMaxSec=3h -p Restart=no -p UMask=0022 \
         /usr/bin/python3 '$incoming_dir/scripts/build_production_release.py' \

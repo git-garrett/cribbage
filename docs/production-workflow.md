@@ -76,12 +76,13 @@ checkout, even when run from a linked worktree. It then enforces the branch,
 clean-tree, and remote-synchronization checks and runs the complete local QA and
 browser build. Because the development machine is macOS arm64 and production is
 Linux x86-64, the locked Rust source is compiled natively on the server in an
-isolated staging workspace while the existing release keeps serving. The server
+isolated staging workspace. The small server enters API maintenance during the
+native build; systemd restores the existing API after success, failure, timeout,
+or termination, even if SSH disconnects. The server
 automatically generates a fresh PGO profile, rebuilds the API, and
 requires exact decision/value parity plus optimized API integration tests before
-publishing the candidate. A bounded one-shot build service preserves the live
-API; temporary compiler trees are discarded between variants to limit disk
-usage. See [Production PGO](production-pgo.md) for the measured configuration,
+publishing the candidate. A bounded one-shot build service owns this maintenance window; temporary
+compiler trees are discarded between variants to limit disk usage. See [Production PGO](production-pgo.md) for the measured configuration,
 resource limits, and retained build receipts. Only the verified API binary is
 copied into each immutable, versioned release. Previously deployed hashed
 browser assets are carried into the candidate before the new bundle is overlaid
@@ -91,7 +92,6 @@ After validating the candidate Caddy configuration, deployment atomically moves
 the `/opt/cribbage/current` symlink, reloads Caddy, and restarts the API. Caddy
 retries upstream connection attempts for five seconds to bridge the short API
 restart. Failed local health, public health, or cache-contract checks restore
-the prior symlink and service configuration automatically. This is a
-near-zero-interruption cutover; a dual-process blue/green deployment is avoided
+the prior symlink and service configuration automatically. The cutover itself adds only a short restart after build maintenance; a dual-process blue/green deployment is avoided
 because active game sessions also live in process memory and overlapping API
 instances could briefly diverge.

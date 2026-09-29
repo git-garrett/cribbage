@@ -48,24 +48,47 @@ the build scripts and deterministic training corpus. Native server builds now:
 Each build generates a new profile; changing its path forces Cargo to rebuild
 against that profile. Source and asset hashes must stay unchanged during the
 build. Missing or incompatible profile tooling, a failed test, a changed input,
-or a parity mismatch aborts the candidate before the live service is changed.
+or a parity mismatch aborts the candidate before it is activated; the existing
+API is restored after build maintenance.
 `llvm-profdata` must be installed and compatible with the active Rust LLVM
 version; the deployment never silently falls back to an unprofiled binary.
 
 ## Resource and service behavior
 
 The build runs as a one-shot systemd service with one Cargo job, lower CPU/I/O
-priority, a 512 MiB memory high watermark, a 640 MiB memory limit, a 256 MiB swap
-limit, a three-hour deadline, and no automatic retry. It preserves the current
-API service while building. Each temporary Cargo tree is removed after its
-binaries are preserved, avoiding three simultaneous compiler caches. At least
-700 MiB free is required after unpacking the candidate.
+priority, a 768 MiB memory high watermark, an 832 MiB memory limit, a 384 MiB swap
+limit, a three-hour deadline, and no automatic retry. This 954 MiB server needs
+an API maintenance window to provide that headroom. Systemd stops
+`cribbage.service` before starting the compiler and starts it again in
+`ExecStopPost`, on success, failure, timeout, or termination. Restoration belongs
+to systemd and does not depend on the local SSH client staying connected. Caddy
+remains running; API requests are unavailable during the native build. Active
+in-memory sessions do not survive the API restart. The build command announces
+maintenance before it begins. No additional operator steps are required.
 
-The PGO working area is `/opt/cribbage/build/pgo-target`; receipts and profiles
-are kept below `pgo/api/`. A failed or resource-limited candidate leaves the
-current release serving. The normal atomic cutover, public exact-commit health
-check, browser cache-contract check, and rollback mechanism remain in use.
-Builds take longer, but require no extra operator steps or long maintenance pause.
+Each temporary Cargo tree is removed after its binaries are preserved, avoiding
+three simultaneous compiler caches. At least 700 MiB free is required after
+unpacking the candidate. The PGO working area is `/opt/cribbage/build/pgo-target`;
+receipts and profiles are kept below `pgo/api/`. The existing release is restored
+before any cutover; a failed build never activates its candidate. The normal
+atomic cutover, public exact-commit health check, browser cache-contract check,
+and rollback mechanism remain in use.
+
+## Verified first deployment and follow-up
+
+Release `7b0f6113fde84ea03d3a7c3f4c0d40ea9972cf4e` completed and was verified
+live on 2026-09-29 UTC. Its running API hash matched the PGO receipt, optimized
+API tests passed, and all 14 training plus 20 held-out cases retained exact
+decision/value parity. The API was restored after 501.9 seconds of maintenance.
+The build took 1749.8 seconds including the initial period of memory throttling.
+That is not an estimate for a build with these corrected settings from the start.
+
+Although skipping the unused instrumented API fixed the first stall, optimized
+API compilation also thrashed with the former 512/640/256 MiB limits. The
+successful runtime override used the limits now committed above; peak resident
+memory was about 770 MiB and there were no OOM kills. This follow-up makes that
+headroom and automatic restoration repeatable for future deployments. It does
+not require rebuilding or restarting the already verified live release.
 
 For source-level validation, run `npm run test:release-build`, `npm test`, and
 the existing complete `npm run qa:predeploy` gate. Linux PGO is explicitly enabled
