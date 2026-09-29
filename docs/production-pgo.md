@@ -48,7 +48,8 @@ the build scripts and deterministic training corpus. Native server builds now:
 Each build generates a new profile; changing its path forces Cargo to rebuild
 against that profile. Source and asset hashes must stay unchanged during the
 build. Missing or incompatible profile tooling, a failed test, a changed input,
-or a parity mismatch aborts the candidate before the live service is changed.
+or a parity mismatch aborts the candidate before it is activated; the existing
+API is restored after build maintenance.
 `llvm-profdata` must be installed and compatible with the active Rust LLVM
 version; the deployment never silently falls back to an unprofiled binary.
 
