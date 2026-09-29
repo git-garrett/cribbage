@@ -34,8 +34,7 @@ class ReleaseBuildTests(unittest.TestCase):
                 target = Path(kwargs['env']['CARGO_TARGET_DIR'])
                 output = target/'aarch64-apple-darwin/release' if '--target' in args else target/'release'
                 output.mkdir(parents=True, exist_ok=True)
-                for name in ['cribbage-runner', 'cribbage-decision-worker', 'cribbage-api',
-                             'cribbage-shadow-engine', 'pgo-workload']:
+                for name in [args[i + 1] for i, arg in enumerate(args) if arg == '--bin']:
                     (output/name).write_text(target.name)
             elif args[0] == 'merger':
                 Path(args[-1]).write_text('fresh profile')
@@ -68,6 +67,24 @@ class ReleaseBuildTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             calls=self.exercise(Path(d),kind='api')
             self.assertTrue(all(args[-1]=='reviews' for args,_ in calls if Path(args[0]).name=='pgo-workload'))
+
+    def test_pgo_builds_only_workload_until_optimized_stage(self):
+        for kind, (_, binary) in [(kind, targets[0]) for kind, targets in BUILD.TARGETS.items()]:
+            for compact in [False, True]:
+                with self.subTest(kind=kind, compact=compact), tempfile.TemporaryDirectory() as d:
+                    root = Path(d)
+                    calls = self.exercise(root, kind=kind, compact=compact)
+                    commands = [a for a, _ in calls if a[:2] == ['cargo', 'build']]
+                    binaries = [[a[i + 1] for i, arg in enumerate(a) if arg == '--bin']
+                                for a in commands]
+                    self.assertEqual(binaries[:2], [['pgo-workload'], ['pgo-workload']])
+                    self.assertEqual(set(binaries[2]), {binary, 'pgo-workload'})
+                    self.assertTrue((root / 'target/release' / binary).exists())
+                    if compact:
+                        for stage in ['baseline', 'instrumented']:
+                            paths = list((root / 'target/pgo' / kind).glob('run-*/' + stage))
+                            self.assertEqual(len(paths), 1)
+                            self.assertEqual([p.name for p in paths[0].iterdir()], ['pgo-workload'])
 
     def test_each_build_uses_a_new_profile_path(self):
         with tempfile.TemporaryDirectory() as d:

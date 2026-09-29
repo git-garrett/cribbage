@@ -125,6 +125,8 @@ def build(options):
     cargo = ['cargo', 'build', '--locked', '--release', '--manifest-path', root / 'rust/Cargo.toml']
     if options.offline:
         cargo.append('--offline')
+    workload_cargo = cargo + ['-p', 'cribbage-shadow-engine', '--bin', 'pgo-workload',
+                              '--target', target]
     selected = TARGETS[options.kind]
     for package, binary in selected:
         cargo.extend(['-p', package, '--bin', binary])
@@ -166,7 +168,12 @@ def build(options):
         def compile_variant(name, extra):
             before = time.monotonic()
             directory = run_dir / 'cargo' if options.compact else work / name
-            run(cargo, cwd=root, env=compiler_env(os.environ, flags + extra, directory))
+            # Reference and training execute only the workload. Building the unused
+            # instrumented API adds a large LTO step on memory-constrained hosts.
+            command = cargo if name == 'optimized' else workload_cargo
+            record['phase'] = name + '-compile'
+            save(run_dir / 'build.json', record)
+            run(command, cwd=root, env=compiler_env(os.environ, flags + extra, directory))
             output = directory / target / 'release'
             if name == 'optimized' and options.api_tests:
                 test_command = ['cargo', 'test', '--locked', '--release', '--manifest-path',
@@ -181,7 +188,8 @@ def build(options):
                 record['apiTestsPassed'] = True
             if options.compact:
                 preserved = run_dir / name
-                binaries = {binary: output / binary for _, binary in selected}
+                binaries = ({binary: output / binary for _, binary in selected}
+                            if name == 'optimized' else {})
                 binaries['pgo-workload'] = output / 'pgo-workload'
                 publish(binaries, preserved)
                 shutil.rmtree(directory)
