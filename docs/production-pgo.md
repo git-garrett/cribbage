@@ -33,10 +33,10 @@ The operator still runs `scripts/deploy-nanode.sh deploy` from clean, synchroniz
 `master`, after the reviewed PR and required Quality check. The archive includes
 the build scripts and deterministic training corpus. Native server builds now:
 
-1. Build a reference API and workload executable, then evaluate training and
+1. Build only the reference workload executable, then evaluate training and
    held-out cases.
-2. Build an instrumented variant, train on current Ace plays, discards, and
-   reviews, and verify its training results against the reference.
+2. Build only the instrumented workload, train on current Ace plays, discards,
+   and reviews, and verify its training results against the reference.
 3. Merge the fresh profile and build the optimized API and workload executable.
 4. Run the optimized API test suite, including the installed-asset integration
    tests, and compare all training and held-out outputs with the reference.
@@ -70,3 +70,15 @@ Builds take longer, but require no extra operator steps or long maintenance paus
 For source-level validation, run `npm run test:release-build`, `npm test`, and
 the existing complete `npm run qa:predeploy` gate. Linux PGO is explicitly enabled
 by the production wrapper; ordinary direct Cargo builds retain their defaults.
+
+## Instrumented-build memory correction
+
+The initial production attempt timed out after three hours while linking an
+instrumented API that was never executed. Its systemd memory high watermark
+caused sustained reclaim and swapping (519 MiB resident peak and 256 MiB swap
+peak). Merely extending that timeout would preserve the unnecessary work.
+Reference and instrumentation passes now compile and preserve only
+`pgo-workload`; the optimized pass still builds the complete API, runs its tests,
+and enforces the same exact decision/value parity before publication. Build
+receipts record the current compile phase. This changes no compiler settings,
+training cases, playing logic, or deployment/rollback checks.
