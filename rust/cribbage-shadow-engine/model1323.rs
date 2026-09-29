@@ -392,6 +392,9 @@ impl PolicyAssets {
             // one solve. Their action keys rarely repeat before eviction; the
             // root player's much smaller key set repeats across those worlds.
             policy.cache_wp_actions_for_role(observation.role);
+            if observation.own_played.iter().all(|copies| *copies == 0) {
+                return Ok(policy.with_batched_posteriors());
+            }
         }
         Ok(policy)
     }
@@ -888,13 +891,39 @@ fn forecast_world_actions(
     let progress = crate::progress::current();
     let mut forecasts = Vec::new();
     let mut observation_scratch = Model132ObservationScratch::default();
+    let batch_size = policy.rollout_batch_size().clamp(1, 32);
+    let mut batch_scores = Vec::new();
     for &action in actions {
         let mut outcomes = BTreeMap::new();
         for (index, world) in worlds.iter().enumerate() {
             if index % 256 == 0 {
-                if let Some(progress) = &progress { progress.check_cancelled()?; }
+                if let Some(progress) = &progress {
+                    progress.check_cancelled()?;
+                }
             }
-            let (own, opponent) = rollout_candidate(observation, policy, world, action, &mut observation_scratch)?;
+            if batch_size > 1 && index % batch_size == 0 {
+                batch_scores = match rollout_candidate_batch(
+                    observation,
+                    policy,
+                    &worlds[index..(index + batch_size).min(worlds.len())],
+                    action,
+                ) {
+                    Ok(scores) => scores,
+                    Err(_) => {
+                        if let Some(progress) = &progress {
+                            progress.check_cancelled()?;
+                        }
+                        // A speculative later world may never be needed after pruning.
+                        // Revisit this chunk in canonical scalar order before exposing errors.
+                        Vec::new()
+                    }
+                };
+            }
+            let (own, opponent) = if let Some(score) = batch_scores.get(index % batch_size) {
+                *score
+            } else {
+                rollout_candidate(observation, policy, world, action, &mut observation_scratch)?
+            };
             *outcomes.entry((own, opponent)).or_insert(0.0) += world.weight;
         }
         forecasts.push(PegCandidateForecast {
@@ -922,6 +951,8 @@ fn forecast_worlds_for_choice(
 ) -> Result<Vec<PegCandidateForecast>, String> {
     let progress = crate::progress::current();
     let mut observation_scratch = Model132ObservationScratch::default();
+    let batch_size = policy.rollout_batch_size().clamp(1, 32);
+    let mut batch_scores = Vec::new();
     let actions = observation.legal_actions();
     if let Some(progress) = &progress {
         progress.check_cancelled()?;
@@ -956,7 +987,29 @@ fn forecast_worlds_for_choice(
                     progress.complete(action_index * worlds.len() + index);
                 }
             }
-            let score = rollout_candidate(observation, policy, world, action, &mut observation_scratch)?;
+            if batch_size > 1 && index % batch_size == 0 {
+                batch_scores = match rollout_candidate_batch(
+                    observation,
+                    policy,
+                    &worlds[index..(index + batch_size).min(worlds.len())],
+                    action,
+                ) {
+                    Ok(scores) => scores,
+                    Err(_) => {
+                        if let Some(progress) = &progress {
+                            progress.check_cancelled()?;
+                        }
+                        // A speculative later world may never be needed after pruning.
+                        // Revisit this chunk in canonical scalar order before exposing errors.
+                        Vec::new()
+                    }
+                };
+            }
+            let score = if let Some(score) = batch_scores.get(index % batch_size) {
+                *score
+            } else {
+                rollout_candidate(observation, policy, world, action, &mut observation_scratch)?
+            };
             *outcomes.entry(score).or_insert(0.0) += world.weight;
             let utility = *utilities
                 .entry(score)
@@ -991,6 +1044,85 @@ fn forecast_worlds_for_choice(
         });
     }
     Ok(forecasts)
+}
+
+fn rollout_candidate_batch(
+    observation: &Model132Observation,
+    policy: &impl Model132PeggingPolicy,
+    worlds: &[World],
+    action: RankPegAction,
+) -> Result<Vec<(u8, u8)>, String> {
+    let mut states = worlds
+        .iter()
+        .map(|w| world_state(observation, w))
+        .collect::<Result<Vec<_>, _>>()?;
+    for state in &mut states {
+        state.apply(action)?;
+    }
+    let mut steps = vec![0; states.len()];
+    let mut buffers: Vec<(Vec<u8>, Vec<PublicPegEvent>)> = (0..states.len())
+        .map(|_| (Vec::new(), Vec::new()))
+        .collect();
+    let mut pending = Vec::with_capacity(states.len());
+    let mut observations = Vec::with_capacity(states.len());
+    loop {
+        if let Some(progress) = crate::progress::current() {
+            progress.check_cancelled()?;
+        }
+        for (index, state) in states.iter_mut().enumerate() {
+            while !state.complete && state.winner.is_none() {
+                let legal = state.legal_actions();
+                match legal.as_slice() {
+                    [] => return Err("batch has no legal action before completion".into()),
+                    [forced] => {
+                        state.apply(*forced)?;
+                        steps[index] += 1;
+                        if steps[index] > 32 {
+                            return Err("batch failed to finish".into());
+                        }
+                    }
+                    _ => {
+                        observations.push(Model132Observation::from_state_with_buffers(
+                            state,
+                            state.current,
+                            std::mem::take(&mut buffers[index].0),
+                            std::mem::take(&mut buffers[index].1),
+                        )?);
+                        pending.push(index);
+                        break;
+                    }
+                }
+            }
+        }
+        if pending.is_empty() {
+            break;
+        }
+        let actions = policy.choose_actions(&observations)?;
+        if actions.len() != pending.len() {
+            return Err("incorrect batch action count".into());
+        }
+        for ((index, obs), action) in pending.drain(..).zip(observations.drain(..)).zip(actions) {
+            if !obs.legal_actions().contains(&action) {
+                return Err("illegal batch action".into());
+            }
+            buffers[index] = (obs.current_series, obs.public_history);
+            states[index].apply(action)?;
+            steps[index] += 1;
+            if steps[index] > 32 {
+                return Err("batch failed to finish".into());
+            }
+        }
+    }
+    states
+        .iter()
+        .map(|state| {
+            Ok((
+                u8::try_from(state.scores[0] - observation.my_score).map_err(|e| e.to_string())?,
+                u8::try_from(state.scores[1] - observation.opponent_score)
+                    .map_err(|e| e.to_string())?,
+            ))
+        })
+        .collect()
 }
 
 fn rollout_candidate(
@@ -2369,4 +2501,133 @@ mod tests {
             .unwrap();
         }
     }
+    #[test]
+    fn batch_rollouts_preserve_histogram_bits_and_pruning() {
+        struct BatchedFirst;
+        impl Model132PeggingPolicy for BatchedFirst {
+            fn choose_action(
+                &self,
+                observation: &Model132Observation,
+            ) -> Result<RankPegAction, String> {
+                FirstLegal.choose_action(observation)
+            }
+            fn rollout_batch_size(&self) -> usize {
+                32
+            }
+        }
+        for scores in [[0, 0], [116, 118], [120, 120]] {
+            let (mut observation, world) = opening();
+            observation.my_score = scores[0];
+            observation.opponent_score = scores[1];
+            let worlds = sample_worlds(
+                (1..66)
+                    .map(|i| World {
+                        weight: i as f64,
+                        ..world.clone()
+                    })
+                    .collect(),
+                usize::MAX,
+                0,
+            )
+            .unwrap();
+            let expected = forecast_worlds(&observation, &FirstLegal, &worlds, worlds.len()).unwrap();
+            let actual = forecast_worlds(&observation, &BatchedFirst, &worlds, worlds.len()).unwrap();
+            assert_identical_forecasts(&actual, &expected);
+            let target = (expected[0].outcomes[0].0, expected[0].outcomes[0].1);
+            for difference in [0.0, f64::EPSILON, 0.25] {
+                let utility = |a, b| 0.5 + if (a, b) == target { difference } else { 0.0 };
+                let expected = forecast_worlds_for_choice(
+                    &observation,
+                    &FirstLegal,
+                    &worlds,
+                    worlds.len(),
+                    &mut |a, b| utility(a, b),
+                )
+                .unwrap();
+                let actual = forecast_worlds_for_choice(
+                    &observation,
+                    &BatchedFirst,
+                    &worlds,
+                    worlds.len(),
+                    &mut |a, b| utility(a, b),
+                )
+                .unwrap();
+                assert_identical_forecasts(&actual, &expected);
+            }
+        }
+    }
+
+    #[test]
+    fn batch_errors_fall_back_to_canonical_scalar_evaluation() {
+        struct BatchError;
+        impl Model132PeggingPolicy for BatchError {
+            fn choose_action(
+                &self,
+                observation: &Model132Observation,
+            ) -> Result<RankPegAction, String> {
+                FirstLegal.choose_action(observation)
+            }
+            fn choose_actions(&self, _: &[Model132Observation]) -> Result<Vec<RankPegAction>, String> {
+                Err("speculative batch failure".into())
+            }
+            fn rollout_batch_size(&self) -> usize {
+                32
+            }
+        }
+        let (observation, world) = opening();
+        let worlds = sample_worlds(vec![world; 65], usize::MAX, 0).unwrap();
+        let expected = forecast_worlds(&observation, &FirstLegal, &worlds, worlds.len()).unwrap();
+        let actual = forecast_worlds(&observation, &BatchError, &worlds, worlds.len()).unwrap();
+        assert_identical_forecasts(&actual, &expected);
+        let expected = forecast_worlds_for_choice(
+            &observation,
+            &FirstLegal,
+            &worlds,
+            worlds.len(),
+            &mut |a, b| if a > b { 0.9 } else { 0.1 },
+        )
+        .unwrap();
+        let actual = forecast_worlds_for_choice(
+            &observation,
+            &BatchError,
+            &worlds,
+            worlds.len(),
+            &mut |a, b| if a > b { 0.9 } else { 0.1 },
+        )
+        .unwrap();
+        assert_identical_forecasts(&actual, &expected);
+    }
+
+    #[test]
+    fn model203_batches_only_first_pegging_decisions() {
+        let assets =
+            PolicyAssets::load_model203(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let (observation, world) = opening();
+        let mut state = world_state(&observation, &world).unwrap();
+        while !state.complete && state.winner.is_none() {
+            let observation = Model132Observation::from_state(&state, state.current).unwrap();
+            let policy = assets
+                .decision_policy_for_observation(&observation)
+                .unwrap();
+            assert_eq!(
+                policy.rollout_batch_size(),
+                if observation.own_played.iter().all(|c| *c == 0) {
+                    32
+                } else {
+                    1
+                }
+            );
+            state.apply(state.legal_actions()[0]).unwrap();
+        }
+        let historical =
+            PolicyAssets::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        assert_eq!(
+            historical
+                .decision_policy_for_observation(&observation)
+                .unwrap()
+                .rollout_batch_size(),
+            1
+        );
+    }
+
 }

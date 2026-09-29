@@ -949,14 +949,13 @@ impl Model91Policy {
         Ok(action)
     }
 
-    fn wp_choice_from_evidence(
+    fn wp_action_evidence(
         &mut self,
         observation: &Model91Observation,
         legal: &[u8],
-        likelihoods: &[u32; RANKS],
         scores: [u8; 2],
         board: &BoardWinMatrix,
-    ) -> Result<Option<RankPegAction>, String> {
+    ) -> Result<Arc<Model91ActionEvidence<f64>>, String> {
         // Dead-card variants change posterior weights, not pegging outcomes.
         // Retain these finite values only for this live decision, as in the EV
         // evaluator, with board scores included in the key.
@@ -974,23 +973,31 @@ impl Model91Policy {
             } else {
                 Role::Dealer
             };
-            let (hands, weight_mode) = if let Some(hands) =
-                self.empirical.as_ref().and_then(|beliefs| {
-                    beliefs.hands(role, observation.opponent_played, &available, size)
-                }) {
+            let (hands, weight_mode) = if let Some(hands) = self
+                .empirical
+                .as_ref()
+                .and_then(|beliefs| beliefs.hands(role, observation.opponent_played, &available, size))
+            {
                 let mode = if self.empirical_depletion {
                     Model91EvidenceWeightMode::DepletedEmpirical(empirical_baseline(observation))
                 } else {
                     Model91EvidenceWeightMode::Empirical
                 };
                 (
-                    hands.map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight, mode)).collect::<Vec<_>>(),
+                    hands
+                        .map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight, mode))
+                        .collect::<Vec<_>>(),
                     mode,
                 )
             } else {
                 (
-                    RankHandIndex::shared().compatible_hands(&available, size)?
-                        .into_iter().map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight, Model91EvidenceWeightMode::Physical)).collect(),
+                    RankHandIndex::shared()
+                        .compatible_hands(&available, size)?
+                        .into_iter()
+                        .map(|(ranks, weight)| {
+                            Model91EvidenceHand::new(ranks, weight, Model91EvidenceWeightMode::Physical)
+                        })
+                        .collect(),
                     Model91EvidenceWeightMode::Physical,
                 )
             };
@@ -1031,6 +1038,165 @@ impl Model91Policy {
             }
             evidence
         };
+        Ok(evidence)
+    }
+
+    pub(crate) fn choose_actions_by_wp(
+        &mut self,
+        queries: &[(Model91Observation, [u32; RANKS], [u8; 2])],
+        board: &BoardWinMatrix,
+    ) -> Result<Vec<RankPegAction>, String> {
+        let mut results = vec![None; queries.len()];
+        let mut group_index = HashMap::new();
+        let mut pending_keys = HashMap::new();
+        let mut aliases = Vec::new();
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        for (index, (observation, likelihoods, scores)) in queries.iter().enumerate() {
+            observation.validate()?;
+            let cache_action = self
+                .wp_action_cache_role
+                .is_none_or(|role| role == observation.role);
+            let key = (
+                Model91DecisionKey {
+                    observation: *observation,
+                    opponent_rank_likelihood_ppm: *likelihoods,
+                },
+                *scores,
+            );
+            if cache_action {
+                if let Some(action) = self.wp_decisions.get(&key) {
+                    results[index] = Some(*action);
+                    continue;
+                }
+            }
+            if legal_ranks(&observation.own_remaining, observation.count).len() <= 1
+                || self.evidence_cache_outcome_limit == 0
+            {
+                results[index] =
+                    Some(self.choose_action_by_wp(observation, likelihoods, *scores, board)?);
+                continue;
+            }
+            if let Some(&prior) = pending_keys.get(&key) {
+                aliases.push((index, prior));
+                continue;
+            }
+            pending_keys.insert(key, index);
+            let mut stripped = *observation;
+            stripped.own_discards = [0; RANKS];
+            stripped.turn_rank = None;
+            let next = groups.len();
+            let group = *group_index.entry((stripped, *scores)).or_insert(next);
+            if group == next {
+                groups.push(Vec::new());
+            }
+            groups[group].push(index);
+        }
+        for indices in groups {
+            if indices.len() == 1 {
+                let i = indices[0];
+                let (o, l, scores) = &queries[i];
+                results[i] = Some(self.choose_action_by_wp(o, l, *scores, board)?);
+                continue;
+            }
+            let (first, _, scores) = &queries[indices[0]];
+            let legal = legal_ranks(&first.own_remaining, first.count);
+            let evidence = self.wp_action_evidence(first, &legal, *scores, board)?;
+            if evidence.hands.is_empty() {
+                // Match the scalar physical fallback before creating strided matrix views.
+                for index in indices {
+                    let (observation, likelihoods, scores) = &queries[index];
+                    results[index] =
+                        Some(self.choose_action_by_wp(observation, likelihoods, *scores, board)?);
+                }
+                continue;
+            }
+            let available = indices
+                .iter()
+                .map(|i| opponent_available(&queries[*i].0))
+                .collect::<Result<Vec<_>, _>>()?;
+            let lanes = indices.len();
+            let likelihoods: Vec<_> = indices.iter().map(|index| &queries[*index].1).collect();
+            let weights = batch_evidence_weights(&evidence, &available, &likelihoods);
+            let totals: Vec<f64> = (0..lanes)
+                .map(|lane| weights[lane..].iter().step_by(lanes).sum())
+                .collect();
+            for total in &totals {
+                if !total.is_finite() && !(*total <= 0.0) {
+                    return Err("non-finite Model 20.1 WP posterior".into());
+                }
+            }
+            let mut best = vec![(f64::NEG_INFINITY, 0_u8, 0_u8); indices.len()];
+            for (action_index, rank) in legal.iter().copied().enumerate() {
+                let mut utilities = vec![-0.0; indices.len()];
+                for hand in 0..evidence.hands.len() {
+                    let outcome = evidence.outcomes[action_index * evidence.hands.len() + hand];
+                    for lane in 0..indices.len() {
+                        let weight = weights[hand * lanes + lane];
+                        if weight > 0.0 {
+                            utilities[lane] += weight / totals[lane] * outcome;
+                        }
+                    }
+                }
+                let immediate = score_count_for_ranks(
+                    &first
+                        .series()
+                        .iter()
+                        .copied()
+                        .chain(std::iter::once(rank))
+                        .collect::<Vec<_>>(),
+                );
+                for lane in 0..indices.len() {
+                    let candidate = (utilities[lane], immediate, rank);
+                    if candidate > best[lane] {
+                        best[lane] = candidate;
+                    }
+                }
+            }
+            for (lane, &index) in indices.iter().enumerate() {
+                let (o, likelihoods, scores) = &queries[index];
+                if totals[lane] <= 0.0 {
+                    results[index] = Some(self.choose_action_by_wp(o, likelihoods, *scores, board)?);
+                } else {
+                    let action = RankPegAction::Play(best[lane].2);
+                    results[index] = Some(action);
+                    if self.cache_limit > 0
+                        && self.wp_action_cache_role.is_none_or(|role| role == o.role)
+                    {
+                        if self.wp_decisions.len() >= self.cache_limit {
+                            self.wp_decisions.clear();
+                        }
+                        self.wp_decisions.insert(
+                            (
+                                Model91DecisionKey {
+                                    observation: *o,
+                                    opponent_rank_likelihood_ppm: *likelihoods,
+                                },
+                                *scores,
+                            ),
+                            action,
+                        );
+                    }
+                }
+            }
+        }
+        for (index, prior) in aliases {
+            results[index] = results[prior];
+        }
+        results
+            .into_iter()
+            .map(|action| action.ok_or_else(|| "missing batched action".into()))
+            .collect()
+    }
+
+    fn wp_choice_from_evidence(
+        &mut self,
+        observation: &Model91Observation,
+        legal: &[u8],
+        likelihoods: &[u32; RANKS],
+        scores: [u8; 2],
+        board: &BoardWinMatrix,
+    ) -> Result<Option<RankPegAction>, String> {
+        let evidence = self.wp_action_evidence(observation, legal, scores, board)?;
         let available = opponent_available(observation)?;
         let weights: Vec<_> = evidence
             .hands
@@ -1529,6 +1695,65 @@ fn evidence_combinations_match_general_arithmetic_exactly() {
             assert_eq!(evidence_choose(n, k).to_bits(), choose(n, k).to_bits());
         }
     }
+}
+
+/// Each lane keeps the scalar rank multiplication order and multiply-then-divide
+/// likelihood arithmetic. Layout groups related queries only; no probabilities
+/// are reassociated or combined across legal information sets.
+fn batch_evidence_weights(
+    evidence: &Model91ActionEvidence<f64>,
+    available: &[[u8; RANKS]],
+    likelihoods: &[&[u32; RANKS]],
+) -> Vec<f64> {
+    let lanes = available.len();
+    let mut weights = vec![0.0; evidence.hands.len() * lanes];
+    let mut compatible = vec![false; lanes];
+    for (hand_index, hand) in evidence.hands.iter().enumerate() {
+        let row = &mut weights[hand_index * lanes..(hand_index + 1) * lanes];
+        if matches!(
+            evidence.weight_mode,
+            Model91EvidenceWeightMode::DepletedEmpirical(_)
+        ) && hand.depletion_denominator != 0.0
+        {
+            row.fill(1.0);
+            let mut mask = hand.rank_mask;
+            while mask != 0 {
+                let rank = mask.trailing_zeros() as usize;
+                mask &= mask - 1;
+                for lane in 0..lanes {
+                    row[lane] *= evidence_choose(available[lane][rank], hand.ranks[rank]);
+                }
+            }
+            for lane in 0..lanes {
+                compatible[lane] = row[lane] != 0.0;
+                row[lane] = hand.base_weight * (row[lane] / hand.depletion_denominator);
+            }
+            let mut mask = hand.rank_mask;
+            while mask != 0 {
+                let rank = mask.trailing_zeros() as usize;
+                mask &= mask - 1;
+                for lane in 0..lanes {
+                    row[lane] = row[lane] * f64::from(likelihoods[lane][rank]) / 1_000_000.0;
+                }
+            }
+            for lane in 0..lanes {
+                // Scalar reference returns positive zero before likelihood arithmetic for impossible hands.
+                if !compatible[lane] {
+                    row[lane] = 0.0;
+                }
+            }
+        } else {
+            for lane in 0..lanes {
+                row[lane] = evidence_hand_weight(
+                    hand,
+                    evidence.weight_mode,
+                    &available[lane],
+                    likelihoods[lane],
+                );
+            }
+        }
+    }
+    weights
 }
 
 fn evidence_hand_weight(
@@ -2806,4 +3031,197 @@ mod tests {
         assert_eq!(rows, vec![(remaining, 17.0)]);
         fs::remove_file(path).unwrap();
     }
+    #[test]
+    fn batch_weight_kernel_matches_scalar_bits() {
+        let available: Vec<_> = (0..32)
+            .map(|lane| {
+                if lane == 0 {
+                    [4; RANKS]
+                } else {
+                    std::array::from_fn(|rank| ((rank * 3 + lane) % 5) as u8)
+                }
+            })
+            .collect();
+        let factors = [0, 1, 2, 333_333, 1_000_000, 1_234_567, u32::MAX];
+        let likelihoods: Vec<[u32; RANKS]> = (0..32)
+            .map(|lane| std::array::from_fn(|rank| factors[(rank + lane) % factors.len()]))
+            .collect();
+        let references: Vec<_> = likelihoods.iter().collect();
+        let bases = [
+            0.0,
+            -0.0,
+            0.123456789,
+            f64::MIN_POSITIVE,
+            1e-200,
+            1e200,
+            1234567.0,
+        ];
+        for mode in [
+            Model91EvidenceWeightMode::Physical,
+            Model91EvidenceWeightMode::Empirical,
+            Model91EvidenceWeightMode::DepletedEmpirical([4; RANKS]),
+            Model91EvidenceWeightMode::DepletedEmpirical(std::array::from_fn(|rank| (rank % 5) as u8)),
+        ] {
+            for size in 0..=4 {
+                let hands = enumerate_rank_hands(&[4; RANKS], size)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (ranks, _))| {
+                        Model91EvidenceHand::new(ranks, bases[index % bases.len()], mode)
+                    })
+                    .collect();
+                let evidence = Model91ActionEvidence::<f64> {
+                    hands,
+                    legal: Vec::new(),
+                    outcomes: Vec::new(),
+                    weight_mode: mode,
+                };
+                let actual = batch_evidence_weights(&evidence, &available, &references);
+                for (hand_index, hand) in evidence.hands.iter().enumerate() {
+                    for lane in 0..available.len() {
+                        let expected =
+                            evidence_hand_weight(hand, mode, &available[lane], &likelihoods[lane]);
+                        assert_eq!(
+                            actual[hand_index * available.len() + lane].to_bits(),
+                            expected.to_bits(),
+                            "size={size} hand={hand_index} lane={lane} mode={mode:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn batch_choices_preserve_private_cards_likelihoods_roles_and_scores() {
+        let board = BoardWinMatrix::from_function(|_, a, b| {
+            (0.5 + (f64::from(a) - f64::from(b)) / 242.0).clamp(0.0, 1.0)
+        });
+        for role in [Role::Dealer, Role::Pone] {
+            let mut observation = Model91Observation::from_public_state(
+                role,
+                hand(&[(0, 1), (4, 1)]),
+                hand(&[(2, 1), (7, 1)]),
+                hand(&[(4, 2), (12, 1)]),
+                [0; RANKS],
+                None,
+                &[],
+                0,
+                None,
+                None,
+            )
+            .unwrap();
+            let mut beliefs = Model91EmpiricalBeliefs::default();
+            beliefs.replace_row(
+                if role == Role::Dealer {
+                    Role::Pone
+                } else {
+                    Role::Dealer
+                },
+                observation.opponent_played,
+                vec![
+                    (hand(&[(0, 1)]), 5),
+                    (hand(&[(4, 1)]), 60),
+                    (hand(&[(12, 1)]), 17),
+                ],
+            );
+            let mut queries = Vec::new();
+            for scores in [[0, 0], [118, 120], [120, 118], [120, 120]] {
+                for cut in [0, 4, 12] {
+                    for discards in [hand(&[(1, 2)]), hand(&[(4, 1), (12, 1)])] {
+                        observation.own_discards = discards;
+                        observation.turn_rank = Some(cut);
+                        if opponent_available(&observation).is_err() {
+                            continue;
+                        }
+                        for likelihoods in [[1_000_000; RANKS], [1; RANKS], [0; RANKS]] {
+                            queries.push((observation, likelihoods, scores));
+                        }
+                    }
+                }
+            }
+            // Exact duplicates exercise in-batch coalescing; each role also exercises action memo hits.
+            queries.extend(queries.clone());
+            for cache_role in [Role::Pone, Role::Dealer] {
+                let make = || {
+                    let mut p =
+                        Model91Policy::new_with_evidence_cache(Some(beliefs.clone()), 4, 100_000, 0);
+                    p.use_empirical_depletion();
+                    p.cache_wp_actions_for_role(cache_role);
+                    p
+                };
+                let mut scalar = make();
+                let mut batched = make();
+                // Zero support must remain the same error, including the physical fallback.
+                let supported: Vec<_> = queries
+                    .iter()
+                    .copied()
+                    .filter(|q| q.1 != [0; RANKS])
+                    .collect();
+                for chunk in supported.chunks(32) {
+                    let expected: Vec<_> = chunk
+                        .iter()
+                        .map(|(o, l, s)| scalar.choose_action_by_wp(o, l, *s, &board).unwrap())
+                        .collect();
+                    assert_eq!(
+                        batched.choose_actions_by_wp(chunk, &board).unwrap(),
+                        expected
+                    );
+                }
+                for query in queries.iter().filter(|q| q.1 == [0; RANKS]).take(4) {
+                    assert_eq!(
+                        batched
+                            .choose_actions_by_wp(&[*query, *query], &board)
+                            .unwrap_err(),
+                        scalar
+                            .choose_action_by_wp(&query.0, &query.1, query.2, &board)
+                            .unwrap_err()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn batch_empty_empirical_population_keeps_physical_fallback() {
+        let board = BoardWinMatrix::from_function(|_, a, b| {
+            (0.5 + (f64::from(a) - f64::from(b)) / 242.0).clamp(0.0, 1.0)
+        });
+        let mut first = Model91Observation::from_public_state(
+            Role::Pone,
+            hand(&[(0, 1), (4, 1)]),
+            hand(&[(2, 1), (7, 1)]),
+            hand(&[(4, 2), (12, 1)]),
+            hand(&[(1, 2)]),
+            None,
+            &[],
+            0,
+            None,
+            None,
+        )
+        .unwrap();
+        let mut beliefs = Model91EmpiricalBeliefs::default();
+        beliefs.replace_row(Role::Dealer, first.opponent_played, Vec::new());
+        let queries = [(first, [1_000_000; RANKS], [118, 120]), {
+            first.own_discards = hand(&[(6, 2)]);
+            (first, [1; RANKS], [118, 120])
+        }];
+        let make = || {
+            let mut policy =
+                Model91Policy::new_with_evidence_cache(Some(beliefs.clone()), 0, 100_000, 0);
+            policy.use_empirical_depletion();
+            policy
+        };
+        let mut scalar = make();
+        let mut batched = make();
+        let expected: Vec<_> = queries
+            .iter()
+            .map(|(o, l, s)| scalar.choose_action_by_wp(o, l, *s, &board).unwrap())
+            .collect();
+        assert_eq!(
+            batched.choose_actions_by_wp(&queries, &board).unwrap(),
+            expected
+        );
+    }
+
 }

@@ -318,7 +318,7 @@ impl Model132Observation {
         Self::from_state_with_buffers(state, actor, Vec::new(), Vec::new())
     }
 
-    fn from_state_with_buffers(
+    pub(crate) fn from_state_with_buffers(
         state: &RankPegState,
         actor: PegSeat,
         mut current_series: Vec<u8>,
@@ -454,6 +454,12 @@ impl Model132Observation {
 /// Executable policies cross this boundary; hidden-world state does not.
 pub trait Model132PeggingPolicy {
     fn choose_action(&self, observation: &Model132Observation) -> Result<RankPegAction, String>;
+    /// Scheduling hint; each observation still has an independent legal posterior.
+    fn rollout_batch_size(&self) -> usize { 1 }
+    /// Results must equal independent scalar queries; never pool private information or probability mass.
+    fn choose_actions(&self, observations: &[Model132Observation]) -> Result<Vec<RankPegAction>, String> {
+        observations.iter().map(|observation| self.choose_action(observation)).collect()
+    }
 }
 
 /// One fully specified hidden world used by an offline builder. The builder
@@ -640,6 +646,7 @@ pub struct Model911Policy {
     preserve_soft_support: bool,
     wp_board: Option<Arc<crate::board_matrix::BoardWinMatrix>>,
     likelihood_cache: Option<Mutex<DeclineLikelihoodCache>>,
+    batch_posteriors: bool,
 }
 
 /// Public-history features only, owned by one live decision policy. Borrowed
@@ -876,6 +883,12 @@ fn score_count_for_rank_series(ranks: &[u8]) -> u8 {
 }
 
 impl Model911Policy {
+    /// Model 20.3 opt-in; historical policies keep scalar rollout scheduling.
+    pub(crate) fn with_batched_posteriors(mut self) -> Self {
+        self.batch_posteriors = true;
+        self
+    }
+
     pub fn new(
         empirical: Option<Model91EmpiricalBeliefs>,
         factors: Model1322DeclineFactors,
@@ -911,6 +924,7 @@ impl Model911Policy {
             preserve_soft_support: false,
             wp_board: None,
             likelihood_cache: None,
+            batch_posteriors: false,
         })
     }
 
@@ -925,6 +939,7 @@ impl Model911Policy {
             preserve_soft_support: self.preserve_soft_support,
             wp_board: None,
             likelihood_cache: None,
+            batch_posteriors: false,
         }
     }
 
@@ -1084,6 +1099,18 @@ impl Model911Policy {
 }
 
 impl Model132PeggingPolicy for Model911Policy {
+    fn rollout_batch_size(&self) -> usize { if self.batch_posteriors && self.wp_board.is_some() { 32 } else { 1 } }
+    fn choose_actions(&self, observations: &[Model132Observation]) -> Result<Vec<RankPegAction>, String> {
+        if !self.batch_posteriors || self.wp_board.is_none() {
+            return observations.iter().map(|o| self.choose_action(o)).collect();
+        }
+        let queries = observations.iter().map(|o| {
+            o.validate()?;
+            Ok((self.model91_observation(o)?, self.opponent_likelihoods(o), [o.my_score as u8, o.opponent_score as u8]))
+        }).collect::<Result<Vec<_>, String>>()?;
+        self.lock_inner().choose_actions_by_wp(&queries, self.wp_board.as_ref().unwrap())
+    }
+
     fn choose_action(&self, observation: &Model132Observation) -> Result<RankPegAction, String> {
         observation.validate()?;
         let model91_observation = self.model91_observation(observation)?;
