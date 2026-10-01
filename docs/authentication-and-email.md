@@ -69,6 +69,8 @@ for missing accounts or numbers. `POST /api/auth/sms/verify` accepts that token
 and the six-digit code. The server checks the stored Twilio verification SID,
 current phone enrollment, expiry, and attempt budget before issuing its normal
 session cookie. Successful challenges cannot be replayed.
+The browser retains a pending SMS challenge when returning to the sign-in
+options during the resend cooldown, so the code already received remains usable.
 
 Sends have a 30-second per-account cooldown and limits of six per account, fifteen
 per originating IP, and thirty across this private-preview app per hour. Five

@@ -1275,6 +1275,8 @@ let authenticatedUser: AuthUser | null = null;
 let pendingAuthEmail = "";
 let pendingAuthChannel: "email" | "sms" = "email";
 let pendingSmsChallenge = "";
+let pendingSmsEmail = "";
+let pendingSmsRequestedAt = 0;
 let selectedPathwayOpponent: Opponent | null = null;
 let remoteResumableModelGames = new Map<Opponent, Phase>();
 let pathwayResumeRefreshGeneration = 0;
@@ -3205,6 +3207,9 @@ function authEmail(): string | null {
 }
 
 function finishAuthentication(user: AuthUser): void {
+  pendingSmsChallenge = "";
+  pendingSmsEmail = "";
+  pendingSmsRequestedAt = 0;
   if (!Number.isSafeInteger(user.id) || user.id <= 0) throw new Error("Please refresh and sign in again.");
   resetTransientGameUi();
   currentSnapshot = null;
@@ -11958,8 +11963,14 @@ async function requestSignInCode(channel: "email" | "sms"): Promise<void> {
   const email = authEmail();
   if (!email) return;
   pendingAuthChannel = channel;
-  pendingSmsChallenge = "";
   els.authOtp.value = "";
+  if (channel === "sms" && pendingSmsChallenge
+      && pendingSmsEmail === email.toLowerCase()
+      && Date.now() - pendingSmsRequestedAt < 30_000) {
+    showAuthView("otp", "A code was recently requested. Enter that code, or wait 30 seconds before requesting another.");
+    window.setTimeout(() => els.authOtp.focus(), 0);
+    return;
+  }
   setAuthBusy(els.authLoginForm, true);
   showAuthView("login", "Sending a secure code…");
   try {
@@ -11968,6 +11979,8 @@ async function requestSignInCode(channel: "email" | "sms"): Promise<void> {
     if (channel === "sms") {
       if (!response.challenge) throw new Error("Text sign-in is unavailable. Please use email.");
       pendingSmsChallenge = response.challenge;
+      pendingSmsEmail = email.toLowerCase();
+      pendingSmsRequestedAt = Date.now();
     }
     showAuthView("otp", response.message || "If that email belongs to an account, a sign-in code is on its way.");
     window.setTimeout(() => els.authOtp.focus(), 0);
@@ -12016,7 +12029,6 @@ els.authOtpForm.addEventListener("submit", async (event) => {
 
 els.authOtpBack.addEventListener("click", () => {
   els.authOtp.value = "";
-  pendingSmsChallenge = "";
   showAuthView("login");
 });
 

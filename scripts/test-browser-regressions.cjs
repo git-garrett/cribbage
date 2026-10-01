@@ -1329,7 +1329,7 @@ async function testSmsSignIn(browser, baseUrl) {
     if (endpoint === "/api/auth/sms/request") {
       expect(route.request().postDataJSON()).toEqual({ email: user.email });
       smsRequests += 1;
-      return route.fulfill({ json: { ok: true, challenge: "private-browser-challenge", message: "If that account has an enrolled mobile number, a code is on its way." } });
+      return route.fulfill({ json: { ok: true, challenge: `private-browser-challenge-${smsRequests}`, message: "If that account has an enrolled mobile number, a code is on its way." } });
     }
     if (endpoint === "/api/auth/otp/request") {
       emailRequests += 1;
@@ -1337,7 +1337,7 @@ async function testSmsSignIn(browser, baseUrl) {
     }
     if (endpoint === "/api/auth/sms/verify") {
       const body = route.request().postDataJSON();
-      expect(body.challenge).toBe("private-browser-challenge");
+      expect(body.challenge).toBe("private-browser-challenge-1");
       expect(body.email).toBeUndefined();
       if (body.code !== "482193") return route.fulfill({ status: 401, json: { error: "That code is invalid or has expired." } });
       signedIn = true;
@@ -1364,11 +1364,12 @@ async function testSmsSignIn(browser, baseUrl) {
     await page.locator("#auth-otp-back").click();
     await page.locator("#auth-sms-request").click();
     await expect(page.locator("#auth-otp")).toHaveValue("");
+    await expect(page.locator("#auth-status")).toContainText("A code was recently requested");
     await page.locator("#auth-otp").fill("482193");
     await page.locator("#auth-otp-form button[type=submit]").click();
     await expect(page.locator("body")).toHaveAttribute("data-auth", "signed-in");
-    expect(smsRequests).toBe(2);
-    return { approved: true, wrongCode: true, emailFallback: true };
+    expect(smsRequests).toBe(1);
+    return { approved: true, wrongCode: true, emailFallback: true, cooldownRetainsChallenge: true };
   } finally { await page.close(); }
 }
 
