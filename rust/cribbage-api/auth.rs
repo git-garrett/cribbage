@@ -13,6 +13,9 @@ use sha2::{Digest, Sha256};
 
 use super::{email, open_game_database, Request, Response, Server};
 
+#[path = "sms.rs"]
+mod sms;
+
 const SESSION_COOKIE: &str = "strong_cribbage_session";
 const SESSION_SECONDS: i64 = 30 * 24 * 60 * 60;
 const OTP_SECONDS: i64 = 10 * 60;
@@ -167,6 +170,7 @@ pub fn initialize(data_dir: &std::path::Path) -> Result<(), String> {
     let engagement_admin_ids =
         env::var("CRIBBAGE_ENGAGEMENT_ADMIN_USER_IDS").unwrap_or_else(|_| "1".to_string());
     bootstrap_engagement_admins(&connection, &engagement_admin_ids)?;
+    sms::initialize(&connection)?;
     Ok(())
 }
 
@@ -232,6 +236,7 @@ fn bootstrap_engagement_admins(
 }
 
 pub fn validate_configuration() -> Result<(), String> {
+    sms::validate_configuration()?;
     if !auth_required() {
         return Ok(());
     }
@@ -287,6 +292,9 @@ pub fn handle(server: &Server, request: &Request) -> Option<Response> {
         ("POST", "/api/auth/login") => password_login(server, request),
         ("POST", "/api/auth/otp/request") => otp_request(server, request),
         ("POST", "/api/auth/otp/verify") => otp_verify(server, request),
+        ("POST", "/api/auth/sms/request") => sms::request_code(server, request),
+        ("POST", "/api/auth/sms/verify") => sms::verify_code(server, request),
+        ("POST", "/api/auth/sms/enroll") => sms::enroll(server, request),
         ("POST", "/api/auth/password/request") => password_request(server, request),
         ("POST", "/api/auth/password/reset") => password_reset(server, request),
         ("POST", "/api/auth/access-request") => request_access(server, request),
@@ -339,7 +347,10 @@ pub fn body_for_user(body: &str, user: &AuthUser) -> String {
 fn session_response(server: &Server, request: &Request) -> Response {
     match authenticated_user(server, request) {
         Ok(Some(user)) => Response::json(200, user_json(&server.data_dir, &user)),
-        Ok(None) => Response::json(200, "{\"authenticated\":false}".to_string()),
+        Ok(None) => Response::json(
+            200,
+            json!({"authenticated": false, "smsEnabled": sms::enabled()}).to_string(),
+        ),
         Err(error) => internal_error(error),
     }
 }
@@ -1137,6 +1148,7 @@ fn unix_seconds() -> i64 {
 fn user_json(data_dir: &std::path::Path, user: &AuthUser) -> String {
     json!({
         "authenticated": true,
+        "smsEnabled": sms::enabled(),
         "user": {
             "id": user.id,
             "username": user.username,
@@ -1198,7 +1210,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    fn test_server(name: &str) -> Server {
+    pub(super) fn test_server(name: &str) -> Server {
         let data_dir = std::env::temp_dir().join(format!(
             "cribbage-auth-{}-{}-{}",
             name,
@@ -1475,7 +1487,9 @@ mod tests {
         assert_eq!(response.status, 200);
         assert!(response.body.contains("\"displayName\":\"Garrett\""));
         let body: serde_json::Value = serde_json::from_str(&response.body).unwrap();
-        let owner = find_user_by_email(&server.data_dir, "founder@evenvision.com").unwrap().unwrap();
+        let owner = find_user_by_email(&server.data_dir, "founder@evenvision.com")
+            .unwrap()
+            .unwrap();
         assert_eq!(body["user"]["id"], owner.id);
         let cookie = response
             .headers

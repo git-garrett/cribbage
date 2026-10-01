@@ -1316,6 +1316,62 @@ async function testRestoredHumanHistory(browser, baseUrl) {
   }
 }
 
+async function testSmsSignIn(browser, baseUrl) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await installStaticBuild(page);
+  let signedIn = false;
+  let emailRequests = 0;
+  let smsRequests = 0;
+  const user = { id: 1, username: "qa-player", displayName: "QA Player", email: "qa@example.test" };
+  await page.route("**/api/**", async route => {
+    const endpoint = new URL(route.request().url()).pathname;
+    if (endpoint === "/api/auth/session") return route.fulfill({ json: { authenticated: signedIn, smsEnabled: true, user: signedIn ? user : undefined } });
+    if (endpoint === "/api/auth/sms/request") {
+      expect(route.request().postDataJSON()).toEqual({ email: user.email });
+      smsRequests += 1;
+      return route.fulfill({ json: { ok: true, challenge: "private-browser-challenge", message: "If that account has an enrolled mobile number, a code is on its way." } });
+    }
+    if (endpoint === "/api/auth/otp/request") {
+      emailRequests += 1;
+      return route.fulfill({ json: { ok: true } });
+    }
+    if (endpoint === "/api/auth/sms/verify") {
+      const body = route.request().postDataJSON();
+      expect(body.challenge).toBe("private-browser-challenge");
+      expect(body.email).toBeUndefined();
+      if (body.code !== "482193") return route.fulfill({ status: 401, json: { error: "That code is invalid or has expired." } });
+      signedIn = true;
+      return route.fulfill({ json: { authenticated: true, user } });
+    }
+    if (endpoint === "/api/people/me") return route.fulfill({ json: { profile: { ...user, isSelf: true, lookingForGame: false } } });
+    if (endpoint === "/api/people/presence" || endpoint === "/api/people/online") return route.fulfill({ json: { players: [], incomingChallenges: [], outgoingChallenges: [], onlineCount: 1 } });
+    if (endpoint === "/api/game/history") return route.fulfill({ json: { events: [] } });
+    return route.fulfill({ status: 404, json: { error: "Unused test endpoint" } });
+  });
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator("#auth-email").fill(user.email);
+    await page.locator("#auth-sms-request").click();
+    await expect(page.locator("#auth-title")).toHaveText("Check your phone.");
+    await page.locator("#auth-otp").fill("000000");
+    await page.locator("#auth-otp-form button[type=submit]").click();
+    await expect(page.locator("#auth-status")).toContainText("invalid or has expired");
+    await expect(page.locator("#auth-page")).toBeVisible();
+    await page.locator("#auth-otp-back").click();
+    await page.locator("#auth-code-request").click();
+    await expect(page.locator("#auth-title")).toHaveText("Check your email.");
+    expect(emailRequests).toBe(1);
+    await page.locator("#auth-otp-back").click();
+    await page.locator("#auth-sms-request").click();
+    await expect(page.locator("#auth-otp")).toHaveValue("");
+    await page.locator("#auth-otp").fill("482193");
+    await page.locator("#auth-otp-form button[type=submit]").click();
+    await expect(page.locator("body")).toHaveAttribute("data-auth", "signed-in");
+    expect(smsRequests).toBe(2);
+    return { approved: true, wrongCode: true, emailFallback: true };
+  } finally { await page.close(); }
+}
+
 async function main() {
   if (!fs.existsSync(path.join(root, "index.html"))) {
     throw new Error("Missing dist/index.html; run npm run build first.");
@@ -1324,6 +1380,10 @@ async function main() {
   const browser = await browserType.launch({ headless: true });
   try {
     const baseUrl = "https://strong-cribbage.test";
+    if (process.argv.includes("--sms-auth")) {
+      console.log(JSON.stringify(await testSmsSignIn(browser, baseUrl)));
+      return;
+    }
     if (process.argv.includes("--dynamic-calibration")) {
       console.log(JSON.stringify([await testDynamicCalibrationPresentation(browser, baseUrl, true), await testDynamicCalibrationPresentation(browser, baseUrl, false)]));
       return;
@@ -1419,6 +1479,7 @@ async function main() {
     const blockedIndexedDb = await testBlockedIndexedDbLeavesBackfillPending(browser, baseUrl);
     const people = await testPeopleInteractions(browser, baseUrl);
     const engagement = await testEngagementDashboard(browser, baseUrl);
+    await testSmsSignIn(browser, baseUrl);
     console.log(JSON.stringify({ authenticationRecovery: state, dynamicCalibration, firstDealerCut, accountIsolation, restoredHumanHistory, postgameAnalysis, aceOpeningPlays, puttingTogether, peggingAnimations, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
   } finally {
     await browser.close();
