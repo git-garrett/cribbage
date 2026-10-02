@@ -28,7 +28,9 @@ function svgNode(tag, attributes, text) {
 function chart(id, rows, options) {
   const svg = $(id);
   svg.replaceChildren();
-  const [, , width, height] = svg.getAttribute('viewBox').split(' ').map(Number);
+  const width = Math.max(280, svg.clientWidth);
+  const height = id === 'win-chart' && innerWidth > 540 ? 300 : 240;
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   const left = 56, right = width - 20, top = 18, bottom = height - 38;
   if (!rows.length) {
     svg.append(svgNode('text', { x: width / 2, y: height / 2, 'text-anchor': 'middle' }, 'Waiting for saved game pairs'));
@@ -195,3 +197,6 @@ $('win-scale').addEventListener('change', renderCharts);
 $('inspect').addEventListener('input', () => { followLatest = Number($('inspect').value) === Number($('inspect').max); inspectedPairs = report.history[Number($('inspect').value)]?.pairs || 0; renderCharts(); });
 document.addEventListener('visibilitychange', () => { clearTimeout(timer); if (!document.hidden) refresh(); else request?.abort(); });
 refresh();
+
+let resizeFrame;
+window.addEventListener('resize', () => { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(renderCharts); });
