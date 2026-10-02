@@ -1382,6 +1382,115 @@ async function testSmsSignIn(browser, baseUrl) {
   } finally { await page.close(); }
 }
 
+async function testAccountSecurity(browser, baseUrl, width = 390) {
+  const page = await browser.newPage({ viewport: { width, height: 900 } });
+  await installStaticBuild(page);
+  const user = { id: 1, username: "Garrett", displayName: "Garrett", email: "qa@example.test" };
+  let phone = { number: "+12025550123", verified: true };
+  let recent = true;
+  let hasPassword = false;
+  let requestedPhone = null;
+  let phoneRequests = 0;
+  let passwordRequests = 0;
+  let statusRequests = 0;
+  let slowStatus = null;
+  await page.route("**/api/**", async route => {
+    const endpoint = new URL(route.request().url()).pathname;
+    if (endpoint === "/api/auth/session" || endpoint === "/api/auth/login") {
+      if (endpoint.endsWith("login")) recent = true;
+      return route.fulfill({ json: { authenticated: true, smsEnabled: true, user } });
+    }
+    if (endpoint === "/api/people/me") return route.fulfill({ json: { profile: { ...user, isSelf: true, lookingForGame: false } } });
+    if (endpoint === "/api/people/profile") {
+      const own = route.request().postDataJSON().username === user.username;
+      return route.fulfill({ json: { profile: { username: own ? user.username : "Shane", displayName: own ? user.displayName : "Shane", isSelf: own, online: true } } });
+    }
+    if (endpoint === "/api/people/presence" || endpoint === "/api/people/online") return route.fulfill({ json: { players: [], incomingChallenges: [], outgoingChallenges: [], onlineCount: 1 } });
+    if (endpoint === "/api/game/history") return route.fulfill({ json: { events: [] } });
+    if (endpoint === "/api/auth/account") {
+      statusRequests += 1;
+      if (slowStatus) await slowStatus;
+      return route.fulfill({ json: { smsEnabled: true, phone, hasPassword, recentSignIn: recent } });
+    }
+    if (endpoint === "/api/auth/account/phone/request") {
+      phoneRequests += 1;
+      if (phoneRequests === 2) return route.fulfill({ status: 429, json: { error: "Too many attempts. Please wait and try again." } });
+      requestedPhone = "+12025550124";
+      return route.fulfill({ json: { phone: requestedPhone, challenge: "private-enrollment-token" } });
+    }
+    if (endpoint === "/api/auth/account/phone/verify") {
+      const input = route.request().postDataJSON();
+      expect(input.challenge).toBe("private-enrollment-token");
+      if (input.code !== "482193") return route.fulfill({ status: 401, json: { error: "That code is invalid or has expired." } });
+      phone = { number: requestedPhone, verified: true };
+      return route.fulfill({ json: { ok: true } });
+    }
+    if (endpoint === "/api/auth/account/phone/remove") {
+      phone = null;
+      return route.fulfill({ json: { ok: true } });
+    }
+    if (endpoint === "/api/auth/account/password") {
+      passwordRequests += 1;
+      expect(route.request().postDataJSON()).toEqual({ password: "a memorable testing passphrase" });
+      hasPassword = true;
+      return route.fulfill({ json: { authenticated: true, user } });
+    }
+    return route.fulfill({ status: 404, json: { error: "Unused test endpoint" } });
+  });
+  try {
+    await page.goto(`${baseUrl}/?profile=Garrett`, { waitUntil: "networkidle" });
+    await expect(page.locator("#account-security")).toBeVisible();
+    await expect(page.locator("#account-phone-summary")).toContainText("+12025550123");
+    await page.locator("#account-phone").fill("(202) 555-0124");
+    await page.locator("#account-phone-send").click();
+    await expect(page.locator("#account-phone-code-form")).toBeVisible();
+    await expect(page.locator("#account-phone-summary")).toContainText("+12025550123");
+    await page.locator("#account-phone-code").fill("000000");
+    await page.locator("#account-phone-code-form button[type=submit]").click();
+    await expect(page.locator("#account-phone-status")).toContainText("invalid or has expired");
+    await page.locator("#account-phone-resend").click();
+    await expect(page.locator("#account-phone-status")).toContainText("Too many attempts");
+    await page.locator("#account-phone-code").fill("482193");
+    await page.locator("#account-phone-code-form button[type=submit]").click();
+    await expect(page.locator("#account-phone-summary")).toContainText("+12025550124");
+    await expect(page.locator("#account-phone-code-form")).toBeHidden();
+    await page.locator("#account-new-password").fill("a memorable testing passphrase");
+    await page.locator("#account-confirm-password").fill("a mismatched testing passphrase");
+    await page.locator("#account-password-save").click();
+    expect(passwordRequests).toBe(0);
+    await page.locator("#account-confirm-password").fill("a memorable testing passphrase");
+    await page.locator("#account-password-save").click();
+    await expect(page.locator("#account-password-status")).toContainText("Password updated");
+    await expect(page.locator("#account-new-password")).toHaveValue("");
+    expect(passwordRequests).toBe(1);
+    await page.locator("#account-phone-remove").click();
+    await expect(page.locator("#account-phone-summary")).toContainText("No phone number");
+    recent = false;
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(page.locator("#account-reauth")).toBeVisible();
+    await expect(page.locator("#account-new-password")).toBeDisabled();
+    await page.locator("#account-reauth-button").click();
+    await expect(page.locator("#auth-page")).toBeVisible();
+    await page.locator("#auth-password").fill("a current testing passphrase");
+    await page.locator("#auth-password-submit").click();
+    await expect(page.locator("#people-profile-page")).toBeVisible();
+    await expect(page.locator("#account-new-password")).toBeEnabled();
+    const beforeOtherProfile = statusRequests;
+    await page.goto(`${baseUrl}/?profile=Shane`, { waitUntil: "networkidle" });
+    await expect(page.locator("#account-security")).toBeHidden();
+    expect(statusRequests).toBe(beforeOtherProfile);
+    let releaseStatus;
+    slowStatus = new Promise(resolve => { releaseStatus = resolve; });
+    await page.goto(`${baseUrl}/?profile=Garrett`, { waitUntil: "domcontentloaded" });
+    await expect(page.locator("#account-security")).toBeVisible();
+    await page.locator("#people-profile-back").click();
+    releaseStatus();
+    await expect(page.locator("#account-security")).toBeHidden();
+    await expect(page.locator("#account-phone")).toHaveValue("");
+    return { phoneVerified: true, failedCode: true, resendRetainsCode: true, passwordChanged: true, phoneRemoved: true, reauthentication: true, privateToOwner: true, width };
+  } finally { await page.close(); }
+}
+
 async function main() {
   if (!fs.existsSync(path.join(root, "index.html"))) {
     throw new Error("Missing dist/index.html; run npm run build first.");
@@ -1390,6 +1499,10 @@ async function main() {
   const browser = await browserType.launch({ headless: true });
   try {
     const baseUrl = "https://strong-cribbage.test";
+    if (process.argv.includes("--account-security")) {
+      console.log(JSON.stringify([await testAccountSecurity(browser, baseUrl), await testAccountSecurity(browser, baseUrl, 1000)]));
+      return;
+    }
     if (process.argv.includes("--sms-auth")) {
       console.log(JSON.stringify(await testSmsSignIn(browser, baseUrl)));
       return;
@@ -1490,6 +1603,7 @@ async function main() {
     const people = await testPeopleInteractions(browser, baseUrl);
     const engagement = await testEngagementDashboard(browser, baseUrl);
     await testSmsSignIn(browser, baseUrl);
+    await testAccountSecurity(browser, baseUrl);
     console.log(JSON.stringify({ authenticationRecovery: state, dynamicCalibration, firstDealerCut, accountIsolation, restoredHumanHistory, postgameAnalysis, aceOpeningPlays, puttingTogether, peggingAnimations, discardIntro, trainingFeedback, pathwayNavigation, leaderboardInfo, leaderboardBackfill, blockedIndexedDb, people, engagement }));
   } finally {
     await browser.close();

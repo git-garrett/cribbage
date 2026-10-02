@@ -1,5 +1,5 @@
-//! Account-bound SMS sign-in. Phone enrollment is an explicit administrator action;
-//! public requests can never select the destination or create an account.
+//! Account-bound SMS sign-in. Public requests cannot select a destination;
+//! authenticated account settings verify phone changes separately.
 use super::*;
 use std::time::Duration;
 
@@ -24,15 +24,35 @@ pub(super) fn initialize(connection: &rusqlite::Connection) -> Result<(), String
            consumed_at INTEGER
          );",
         )
-        .map_err(|error| format!("initialize SMS authentication: {error}"))
+        .map_err(|error| format!("initialize SMS authentication: {error}"))?;
+    let columns = connection
+        .prepare("PRAGMA table_info(auth_sms_challenges)")
+        .map_err(|error| error.to_string())?
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    for (name, definition) in [
+        ("purpose", "TEXT NOT NULL DEFAULT 'signin'"),
+        ("session_hash", "TEXT"),
+    ] {
+        if !columns.iter().any(|column| column == name) {
+            connection
+                .execute_batch(&format!(
+                    "ALTER TABLE auth_sms_challenges ADD COLUMN {name} {definition}"
+                ))
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
 }
 
-struct TwilioVerify {
+pub(super) struct TwilioVerify {
     service: String,
     authorization: String,
 }
 
-trait VerifyProvider {
+pub(super) trait VerifyProvider {
     fn send(&self, phone: &str) -> Result<String, String>;
     fn check(&self, sid: &str, code: &str) -> Result<bool, String>;
 }
@@ -44,7 +64,7 @@ fn valid_sid(value: &str, prefix: &str) -> bool {
 }
 
 impl TwilioVerify {
-    fn configured() -> Result<Option<Self>, String> {
+    pub(super) fn configured() -> Result<Option<Self>, String> {
         let names = [
             "TWILIO_VERIFY_SERVICE_SID",
             "TWILIO_API_KEY_SID",
@@ -144,7 +164,7 @@ pub(super) fn request_code(server: &Server, request: &Request) -> Response {
 }
 
 // Reserve all applicable limits in one transaction, before contacting Twilio.
-fn reserve_send(
+pub(super) fn reserve_send(
     connection: &mut rusqlite::Connection,
     user_id: i64,
     ip: &str,
@@ -161,7 +181,7 @@ fn reserve_send(
     )
 }
 
-fn reserve_limits(
+pub(super) fn reserve_limits(
     connection: &mut rusqlite::Connection,
     limits: &[(&str, &str, i64, i64)],
 ) -> Result<bool, String> {
@@ -307,7 +327,7 @@ fn verify_with(server: &Server, request: &Request, provider: &impl VerifyProvide
             .query_row(
                 "SELECT c.user_id,c.phone,c.verification_sid FROM auth_sms_challenges c
              JOIN auth_phone_numbers p ON p.user_id=c.user_id AND p.phone=c.phone
-             WHERE c.token_hash=?1 AND c.expires_at>?2 AND c.consumed_at IS NULL AND c.attempts<5",
+             WHERE c.token_hash=?1 AND c.purpose='signin' AND c.expires_at>?2 AND c.consumed_at IS NULL AND c.attempts<5",
                 params![token_hash, now],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -504,6 +524,40 @@ mod tests {
             &request(json!({"challenge":token,"code":code})),
             provider,
         )
+    }
+
+    #[test]
+    fn enrollment_challenges_cannot_be_used_for_public_sign_in() {
+        let server = setup("sms-enrollment-purpose");
+        let provider = Provider::default();
+        let token = send(&server, &provider);
+        open_game_database(&server.data_dir)
+            .unwrap()
+            .execute("UPDATE auth_sms_challenges SET purpose='enroll'", [])
+            .unwrap();
+        assert_eq!(check(&server, &provider, &token, "482193").status, 401);
+        assert_eq!(provider.checks.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn existing_sms_challenges_migrate_as_sign_in_challenges() {
+        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection.execute_batch("CREATE TABLE auth_users(id INTEGER PRIMARY KEY);
+            INSERT INTO auth_users VALUES(1);
+            CREATE TABLE auth_sms_challenges(token_hash TEXT PRIMARY KEY,user_id INTEGER,phone TEXT,
+            verification_sid TEXT,expires_at INTEGER,attempts INTEGER DEFAULT 0,consumed_at INTEGER);
+            INSERT INTO auth_sms_challenges(token_hash,user_id,phone,verification_sid,expires_at)
+            VALUES('old-token',1,'+12025550123','old-sid',1);").unwrap();
+        initialize(&connection).unwrap();
+        initialize(&connection).unwrap();
+        let migrated: (String, Option<String>) = connection
+            .query_row(
+                "SELECT purpose,session_hash FROM auth_sms_challenges WHERE token_hash='old-token'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(migrated, ("signin".to_string(), None));
     }
 
     #[test]

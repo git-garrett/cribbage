@@ -540,6 +540,54 @@
           </div>
           <p id="people-profile-status" class="people-form-status" role="status" aria-live="polite"></p>
         </form>
+        <section id="account-security" class="people-profile-form account-security" aria-labelledby="account-security-title" hidden>
+          <header><p class="people-eyebrow">Private to you</p><h2 id="account-security-title">Sign-in methods</h2></header>
+          <div id="account-reauth" hidden>
+            <p>For your security, sign in again before changing your phone number or password.</p>
+            <button id="account-reauth-button" class="people-secondary-action" type="button">Confirm sign-in</button>
+          </div>
+          <p id="account-security-status" class="people-form-status" role="status" aria-live="polite"></p>
+          <fieldset id="account-security-controls" disabled>
+            <section class="account-method" aria-labelledby="account-phone-title">
+              <h3 id="account-phone-title">Phone number <span class="account-optional">Optional</span></h3>
+              <p id="account-phone-summary">Loading sign-in methods…</p>
+              <p>Your number is private and used only for sign-in codes.</p>
+              <form id="account-phone-form">
+                <div class="people-profile-fields">
+                  <label><span>Mobile number</span><input id="account-phone" type="tel" autocomplete="tel" maxlength="40" placeholder="(555) 123-4567" aria-describedby="account-phone-help" required></label>
+                </div>
+                <small id="account-phone-help">US numbers can use 10 digits. For other countries, include + and the country code.</small>
+                <button id="account-phone-send" class="people-primary-action" type="submit">Send verification code</button>
+              </form>
+              <form id="account-phone-code-form" hidden>
+                <p id="account-phone-code-description"></p>
+                <div class="people-profile-fields">
+                  <label><span>Phone verification code</span><input id="account-phone-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required></label>
+                </div>
+                <div class="people-profile-actions">
+                  <button class="people-primary-action" type="submit">Verify and save phone</button>
+                  <button id="account-phone-resend" class="people-secondary-action" type="button">Resend code</button>
+                  <button id="account-phone-cancel" class="people-secondary-action" type="button">Cancel</button>
+                </div>
+              </form>
+              <button id="account-phone-remove" class="people-secondary-action" type="button" hidden>Remove phone number</button>
+              <p id="account-phone-status" class="people-form-status" role="status" aria-live="polite"></p>
+            </section>
+            <section class="account-method" aria-labelledby="account-password-title">
+              <h3 id="account-password-title">Password</h3>
+              <p id="account-password-summary"></p>
+              <form id="account-password-form">
+                <div class="people-profile-fields">
+                  <label><span>New password</span><input id="account-new-password" type="password" autocomplete="new-password" minlength="15" maxlength="256" aria-describedby="account-password-help" required></label>
+                  <label><span>Confirm new password</span><input id="account-confirm-password" type="password" autocomplete="new-password" required></label>
+                </div>
+                <small id="account-password-help">Use a memorable passphrase of 15–128 characters.</small>
+                <button id="account-password-save" class="people-primary-action" type="submit">Update password</button>
+              </form>
+              <p id="account-password-status" class="people-form-status" role="status" aria-live="polite"></p>
+            </section>
+          </fieldset>
+        </section>
       </div>
     </section>
 
