@@ -424,6 +424,52 @@ impl PolicyAssets {
         self.decision_policy()?.opponent_hands(observation)
     }
 
+    /// Model 20.7 pegging-time crib prior: sum P(keep | legal observation)
+    /// times P(discard | keep, our six cards, cut). Normalize within each keep
+    /// so the amount of compatible discard evidence cannot change its mass.
+    /// Do not derive this from rollout worlds: their late-tail optimization
+    /// collapses private discards once the opponent has at most one card.
+    pub(crate) fn opponent_discard_weights(
+        &self,
+        observation: &Model132Observation,
+        hands: &[([u8; 13], f64)],
+    ) -> Result<[f64; 91], String> {
+        observation.validate()?;
+        if rank_count_total(&observation.own_discards) != 2 {
+            return Err("Model 20.7 crib forecast requires two known own discards".into());
+        }
+        let total: f64 = hands.iter().map(|(_, weight)| *weight).sum();
+        if !total.is_finite() || total <= 0.0
+            || hands.iter().any(|(_, weight)| !weight.is_finite() || *weight < 0.0)
+        {
+            return Err("Model 20.7 crib forecast has invalid keep probabilities".into());
+        }
+        let own_six = std::array::from_fn(|rank| observation.own_remaining[rank]
+            + observation.own_played[rank] + observation.own_discards[rank]);
+        let opponent_role = if observation.role == Role::Dealer { Role::Pone } else { Role::Dealer };
+        let mut weights = [0.0; 91];
+        for (remaining, hand_weight) in hands {
+            if *hand_weight == 0.0 { continue; }
+            if (0..13).any(|r| remaining[r] > 4 - observation.opponent_played[r]) {
+                return Err("Model 20.7 crib forecast has an impossible keep".into());
+            }
+            let initial = std::array::from_fn(|r| remaining[r] + observation.opponent_played[r]);
+            let variants = self.discards.conditioned(opponent_role, &initial,
+                &own_six, observation.turn_rank)?;
+            let conditional_total: f64 = variants.iter().map(|(_, weight)| *weight).sum();
+            if !conditional_total.is_finite() || conditional_total <= 0.0 {
+                return Err("Model 20.7 crib forecast has no conditional discard support".into());
+            }
+            for (discard, weight) in variants {
+                let mut ranks = discard.iter().enumerate()
+                    .flat_map(|(r, n)| std::iter::repeat(r as u8).take(*n as usize));
+                let index = crate::model203_crib::pair_index(ranks.next().unwrap(), ranks.next().unwrap());
+                weights[index] += (*hand_weight / total) * (weight / conditional_total);
+            }
+        }
+        Ok(weights)
+    }
+
     pub(crate) fn suited_discard_rates(&self, role: Role) -> Result<&SuitedDiscardRates, String> {
         let rates = self
             .suit_rates
@@ -1255,6 +1301,48 @@ fn rollout_candidate(
 mod tests {
     use super::*;
     use crate::model132::{choose_for_state, rollout_model132_world};
+
+    #[test]
+    fn model207_discard_mixture_preserves_each_keeps_posterior_mass() {
+        let assets = PolicyAssets::load_model205(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let (mut observation, _) = opening();
+        let a = hand(&[2, 5, 8, 12]);
+        let b = hand(&[4, 4, 4, 9]);
+        for role in [Role::Pone, Role::Dealer] {
+            observation.role = role;
+            let pa = assets.opponent_discard_weights(&observation, &[(a, 1.0)]).unwrap();
+            let pb = assets.opponent_discard_weights(&observation, &[(b, 1.0)]).unwrap();
+            assert_ne!(pa, pb);
+            let mixed = assets.opponent_discard_weights(&observation, &[(a, 1.0), (b, 3.0)]).unwrap();
+            for i in 0..91 { assert!((mixed[i] - (pa[i] + 3.0 * pb[i]) / 4.0).abs() < 1e-14); }
+            assert!((mixed.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+            // Splitting one posterior entry cannot give its keep more mass.
+            let split = assets.opponent_discard_weights(&observation, &[(a, 1.0), (b, 1.0), (b, 2.0), (a, 0.0)]).unwrap();
+            for i in 0..91 { assert!((mixed[i] - split[i]).abs() < 1e-14); }
+            for invalid in [vec![], vec![(a, 0.0)], vec![(a, -1.0), (b, 2.0)], vec![(a, f64::NAN)]] {
+                assert!(assets.opponent_discard_weights(&observation, &invalid).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn model207_crib_keeps_all_private_discards_through_last_opponent_card() {
+        let assets = PolicyAssets::load_model205(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let (observation, _) = opening();
+        let ranks = [2, 5, 8, 12];
+        let expected = assets.opponent_discard_weights(&observation, &[(hand(&ranks), 1.0)]).unwrap();
+        assert!(expected.iter().filter(|p| **p > 0.0).count() > 1);
+        for prefix in 1..=4 {
+            let mut later = observation.clone();
+            later.opponent_played = hand(&ranks[..prefix]);
+            let remaining = hand(&ranks[prefix..]);
+            let actual = assets.opponent_discard_weights(&later, &[(remaining, 1.0)]).unwrap();
+            assert_eq!(actual, expected, "original keep is unchanged at prefix {prefix}");
+        }
+        let mut missing = observation;
+        missing.own_discards = [0; 13];
+        assert!(assets.opponent_discard_weights(&missing, &[(hand(&ranks), 1.0)]).is_err());
+    }
 
     fn assert_identical_forecasts(
         actual: &[PegCandidateForecast],

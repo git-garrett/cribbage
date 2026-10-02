@@ -1,8 +1,8 @@
-# Model 20.7: short legal-rank check
+# Model 20.7: short legal-rank check and conditional crib forecast
 
 Model 20.7 (`schell_table-peg_table-20.7`) inherits final 20.6 policy, assets,
 root ordering, exact bounds, forced-continuation loops and integer suit-class
-show forecasting. Its only additional optimization is accepted trial
+show forecasting. Its additional speed optimization is accepted trial
 `01-rank-predicate`: when a batched WP query asks whether a rank choice exists,
 stop at the second legal rank instead of allocating and filling a temporary
 vector just to count it.
@@ -12,6 +12,11 @@ single legal rank still constitute a forced rank choice. The same legality
 predicate and ascending rank order feed both the short check and the historical
 vector-producing helper. No posterior, floating-point operation, candidate
 valuation, tie rule, or information boundary changes.
+
+The subsequent pegging-time crib update changes valuations as described in
+[the conditional-crib assessment](model207-conditional-crib.md). The exact-value
+parity results below describe the initial short-rank-check integration at
+`bb879b1`, before that valuation change.
 
 ## Version boundary
 

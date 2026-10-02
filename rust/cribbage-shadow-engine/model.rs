@@ -6036,10 +6036,20 @@ fn model1323_pegging_win_evaluator(
             dealer_is_perspective: input.role == Role::Dealer,
             pone_hand, dealer_hand,
             crib: if input.own_discards.len() == 2 {
-                crib_score_outcomes_for_cut(
-                    &input.own_discards, input.turn_card, input.role, &known, crib_rank,
-                    Some(tables.pegging_policy_assets(input)?.suited_discard_rates(other_role(input.role))?),
-                )
+                let assets = tables.pegging_policy_assets(input)?;
+                let rates = Some(assets.suited_discard_rates(other_role(input.role))?);
+                if input.model == MODEL_20_7 {
+                    let weights = assets.opponent_discard_weights(&model1323_observation(input), hands)?;
+                    let table = crib_rank.indexed.as_ref().ok_or("Model 20.7 requires indexed crib scores")?;
+                    let outcomes = table.outcomes_with_weights(
+                        &input.own_discards, input.turn_card, &known, &weights, rates);
+                    if outcomes.is_empty() { return Err("Model 20.7 has no legal crib support".into()); }
+                    outcomes
+                } else {
+                    crib_score_outcomes_for_cut(
+                        &input.own_discards, input.turn_card, input.role, &known, crib_rank, rates,
+                    )
+                }
             } else {
                 upcoming_crib_score_distribution(input, None)
             },
@@ -7661,6 +7671,33 @@ mod tests {
                 let diagnostic = select_saved_model1323_forecasts(&changed, root.to_str().unwrap(), &forecasts).unwrap();
                 assert_eq!(format!("{before:?}"), format!("{after:?}"));
                 assert_eq!(format!("{after:?}"), format!("{diagnostic:?}"));
+            }
+        }
+    }
+
+    #[test]
+    fn model207_crib_changes_with_go_evidence_without_changing_historical_cribs() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+        let tables = RuntimeTables::new(root.to_str().unwrap());
+        for role in ["pone", "dealer"] {
+            for model in [MODEL_20_6, MODEL_20_7] {
+                let mut input = parse_decision_input(&format!("model={model};kind=peg;role={role};aiHand=2,6;aiTable=9,4;ownDiscards=1,3;turnCard=8;humanTable=10;humanHandCount=3;aiScore=95;humanScore=96;plays=9,10,4;count=25;last=ai;pegHistory=s9,o10,s4")).unwrap();
+                let before = model1323_pegging_win_evaluator(&input, &tables, None).unwrap();
+                input.public_history.push(PublicPegEvent::OpponentGo);
+                let after = model1323_pegging_win_evaluator(&input, &tables, None).unwrap();
+                let PeggingWinMode::KnownCards(before) = before.mode else { panic!("show histogram") };
+                let PeggingWinMode::KnownCards(after) = after.mode else { panic!("show histogram") };
+                if model == MODEL_20_7 { assert_ne!(before.crib, after.crib); }
+                else { assert_eq!(before.crib, after.crib); }
+                for distribution in [&before.crib, &after.crib] {
+                    assert!((distribution.iter().map(|(_,p)| p).sum::<f64>() - 1.0).abs() < 1e-12);
+                    assert!(distribution.iter().all(|(s,p)| (0..=29).contains(s) && p.is_finite() && *p > 0.0));
+                }
+                let observation = model1323_observation(&input);
+                let prepared = tables.pegging_policy_assets(&input).unwrap().prepare_decision(&observation).unwrap();
+                let reused = model1323_pegging_win_evaluator(&input, &tables, Some(prepared.opponent_hands())).unwrap();
+                let PeggingWinMode::KnownCards(reused) = reused.mode else { panic!("show histogram") };
+                assert_eq!(reused.crib, after.crib);
             }
         }
     }
