@@ -499,7 +499,7 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
         .next()
         .ok_or_else(|| "missing request path".to_string())?;
     let path = raw_path.split('?').next().unwrap_or(raw_path).to_string();
-    let headers = header_text
+    let mut headers = header_text
         .lines()
         .skip(1)
         .filter_map(|line| {
@@ -507,6 +507,19 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
                 .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.trim().to_string()))
         })
         .collect::<HashMap<_, _>>();
+    // Overwrite any client-supplied value. Only the local reverse proxy may
+    // provide the originating IP; Caddy appends the address it observed.
+    let peer = stream.peer_addr().map_err(|error| error.to_string())?.ip();
+    let client_ip = if peer.is_loopback() {
+        headers
+            .get("x-forwarded-for")
+            .and_then(|value| value.rsplit(',').next())
+            .and_then(|value| value.trim().parse::<std::net::IpAddr>().ok())
+            .unwrap_or(peer)
+    } else {
+        peer
+    };
+    headers.insert("x-cribbage-client-ip".to_string(), client_ip.to_string());
     let content_length = header_text
         .lines()
         .find_map(|line| {

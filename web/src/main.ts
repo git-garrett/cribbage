@@ -655,6 +655,7 @@ const els = {
   authOtp: document.querySelector("#auth-otp") as HTMLInputElement,
   authNewPassword: document.querySelector("#auth-new-password") as HTMLInputElement,
   authCodeRequest: document.querySelector("#auth-code-request") as HTMLButtonElement,
+  authSmsRequest: document.querySelector("#auth-sms-request") as HTMLButtonElement,
   authForgotPassword: document.querySelector("#auth-forgot-password") as HTMLButtonElement,
   authOtpBack: document.querySelector("#auth-otp-back") as HTMLButtonElement,
   authPasswordAction: document.querySelector("#auth-password-action") as HTMLButtonElement,
@@ -1260,16 +1261,22 @@ type PendingAuthDestination =
 
 interface AuthSessionResponse {
   authenticated: boolean;
+  smsEnabled?: boolean;
   user?: AuthUser;
 }
 
 interface AuthMessageResponse {
   ok: boolean;
   message?: string;
+  challenge?: string;
 }
 
 let authenticatedUser: AuthUser | null = null;
 let pendingAuthEmail = "";
+let pendingAuthChannel: "email" | "sms" = "email";
+let pendingSmsChallenge = "";
+let pendingSmsEmail = "";
+let pendingSmsRequestedAt = 0;
 let selectedPathwayOpponent: Opponent | null = null;
 let remoteResumableModelGames = new Map<Opponent, Phase>();
 let pathwayResumeRefreshGeneration = 0;
@@ -3171,8 +3178,10 @@ function showAuthView(view: AuthView, message = "", error = false): void {
     els.authIntro.textContent = "Finish setting up your Strong Cribbage account.";
     els.authPasswordAction.textContent = "Set up account";
   } else if (view === "otp") {
-    els.authTitle.textContent = "Check your email.";
-    els.authIntro.textContent = `Enter the six-digit code sent to ${pendingAuthEmail}.`;
+    els.authTitle.textContent = pendingAuthChannel === "sms" ? "Check your phone." : "Check your email.";
+    els.authIntro.textContent = pendingAuthChannel === "sms"
+      ? "Enter the six-digit code sent to the mobile number enrolled on your account."
+      : `Enter the six-digit code sent to ${pendingAuthEmail}.`;
   } else {
     els.authTitle.textContent = "Your seat is waiting.";
     els.authIntro.textContent = "Sign in to continue your games and keep your results with your account.";
@@ -3198,6 +3207,9 @@ function authEmail(): string | null {
 }
 
 function finishAuthentication(user: AuthUser): void {
+  pendingSmsChallenge = "";
+  pendingSmsEmail = "";
+  pendingSmsRequestedAt = 0;
   if (!Number.isSafeInteger(user.id) || user.id <= 0) throw new Error("Please refresh and sign in again.");
   resetTransientGameUi();
   currentSnapshot = null;
@@ -3257,6 +3269,7 @@ async function initializeAuthentication(): Promise<boolean> {
   }
   try {
     const session = await authJson<AuthSessionResponse>("/api/auth/session");
+    els.authSmsRequest.hidden = session.smsEnabled !== true;
     if (session.authenticated && session.user) {
       finishAuthentication(session.user);
       return true;
@@ -11946,21 +11959,45 @@ els.authLoginForm.addEventListener("submit", async (event) => {
   }
 });
 
-els.authCodeRequest.addEventListener("click", async () => {
+async function requestSignInCode(channel: "email" | "sms"): Promise<void> {
   const email = authEmail();
   if (!email) return;
+  pendingAuthChannel = channel;
+  els.authOtp.value = "";
+  if (channel === "sms" && pendingSmsChallenge
+      && pendingSmsEmail === email.toLowerCase()
+      && Date.now() - pendingSmsRequestedAt < 30_000) {
+    showAuthView("otp", "A code was recently requested. Enter that code, or wait 30 seconds before requesting another.");
+    window.setTimeout(() => els.authOtp.focus(), 0);
+    return;
+  }
   setAuthBusy(els.authLoginForm, true);
   showAuthView("login", "Sending a secure code…");
   try {
-    const response = await authJson<AuthMessageResponse>("/api/auth/otp/request", { email });
+    const endpoint = channel === "sms" ? "/api/auth/sms/request" : "/api/auth/otp/request";
+    const response = await authJson<AuthMessageResponse>(endpoint, { email });
+    if (channel === "sms") {
+      if (!response.challenge) throw new Error("Text sign-in is unavailable. Please use email.");
+      pendingSmsChallenge = response.challenge;
+      pendingSmsEmail = email.toLowerCase();
+      pendingSmsRequestedAt = Date.now();
+    }
     showAuthView("otp", response.message || "If that email belongs to an account, a sign-in code is on its way.");
     window.setTimeout(() => els.authOtp.focus(), 0);
   } catch (error) {
-    showAuthView("login", error instanceof Error ? error.message : "The code could not be requested.", true);
+    const message = error instanceof Error ? error.message : "The code could not be requested.";
+    const canUsePendingSms = channel === "sms" && pendingSmsChallenge
+      && pendingSmsEmail === email.toLowerCase()
+      && Date.now() - pendingSmsRequestedAt < 10 * 60_000;
+    showAuthView(canUsePendingSms ? "otp" : "login", canUsePendingSms
+      ? `${message} You can still enter the code already received.` : message, true);
   } finally {
     setAuthBusy(els.authLoginForm, false);
   }
-});
+}
+
+els.authCodeRequest.addEventListener("click", () => { void requestSignInCode("email"); });
+els.authSmsRequest.addEventListener("click", () => { void requestSignInCode("sms"); });
 
 els.authForgotPassword.addEventListener("click", async () => {
   const email = authEmail();
@@ -11983,11 +12020,11 @@ els.authOtpForm.addEventListener("submit", async (event) => {
   setAuthBusy(els.authOtpForm, true);
   showAuthView("otp", "Verifying code…");
   try {
-    const response = await authJson<AuthSessionResponse>("/api/auth/otp/verify", {
-      email: pendingAuthEmail,
-      code: els.authOtp.value.trim(),
-    });
-    await completeAuthenticationAndStart(response, "otp");
+    const code = els.authOtp.value.trim();
+    const response = pendingAuthChannel === "sms"
+      ? await authJson<AuthSessionResponse>("/api/auth/sms/verify", { challenge: pendingSmsChallenge, code })
+      : await authJson<AuthSessionResponse>("/api/auth/otp/verify", { email: pendingAuthEmail, code });
+    await completeAuthenticationAndStart(response, pendingAuthChannel === "sms" ? "sms_otp" : "otp");
   } catch (error) {
     showAuthView("otp", error instanceof Error ? error.message : "The code could not be verified.", true);
   } finally {

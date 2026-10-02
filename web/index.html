@@ -733,6 +733,7 @@
           </label>
           <button id="auth-password-submit" class="auth-primary" type="submit">Sign in</button>
           <button id="auth-code-request" class="auth-secondary" type="button">Email me a sign-in code</button>
+          <button id="auth-sms-request" class="auth-secondary" type="button" hidden>Text me a sign-in code</button>
           <button id="auth-forgot-password" class="auth-link" type="button">Forgot password?</button>
           <p class="auth-access">Don’t have an account? <a href="https://strongcribbage.com/#request-access">Request preview access</a>.</p>
         </form>
@@ -743,7 +744,7 @@
             <input id="auth-otp" class="auth-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="000000">
           </label>
           <button class="auth-primary" type="submit">Verify and sign in</button>
-          <button id="auth-otp-back" class="auth-link" type="button">Back to password</button>
+          <button id="auth-otp-back" class="auth-link" type="button">Back to sign-in options</button>
         </form>
         <form id="auth-password-form" class="auth-form" hidden>
           <label>
