@@ -10,10 +10,14 @@ API_LABEL="com.strongcribbage.local-api"
 WEB_LABEL="com.strongcribbage.local-web"
 API_PORT=8787
 WEB_PORT=8765
+WORKBENCH_LABEL="com.strongcribbage.benchmark-workbench"
+WORKBENCH_PORT=8766
+WORKBENCH_DIR="${RUNTIME_DIR}/workbench"
 
 usage() {
   cat <<'USAGE'
 Usage: scripts/local-runtime.sh start|restart|stop|status
+       scripts/local-runtime.sh workbench-start [JOB.json]|workbench-stop|workbench-status
 
 This is the single owner of the shared local Cribbage runtime used by Codex in
 VS Code and the Codex app. It uses launchd labels com.strongcribbage.local-api
@@ -23,6 +27,10 @@ start    Reuse the current source build, or rebuild and replace a stale runtime.
 restart  Rebuild and replace the runtime unconditionally.
 stop     Stop only the two repository-owned launchd services.
 status   Show service, listener, health, version, and source-staleness status.
+
+workbench-start   Register a paired benchmark and start/reuse its browser UI.
+workbench-stop    Stop the browser UI only; benchmark workers are unaffected.
+workbench-status Show the workbench service and local URL (port 8766).
 
 Local state and logs live in /private/tmp/strong-cribbage-local-runtime/. On first use, existing local data
 is copied from the former dated runtime when available, otherwise from data/.
@@ -181,7 +189,80 @@ status_runtime() {
   echo "LAN/iOS: http://<this-Mac's-LAN-IP>:${WEB_PORT}/"
 }
 
+workbench_fingerprint() {
+  shasum "${ROOT_DIR}/scripts/benchmark_workbench.py" \
+    "${ROOT_DIR}/scripts/benchmark_workbench_stats.py" \
+    "${ROOT_DIR}/scripts/benchmark-workbench/"* | shasum | awk '{print $1}'
+}
+
+workbench_status() {
+  local state="stopped"
+  service_loaded "$WORKBENCH_LABEL" && state="loaded"
+  echo "Benchmark workbench: ${state}; http://127.0.0.1:${WORKBENCH_PORT}/"
+}
+
+workbench_stop() {
+  launchctl bootout "gui/$(id -u)/${WORKBENCH_LABEL}" >/dev/null 2>&1 || true
+  for _ in {1..50}; do
+    [[ -z "$(listener_pid "$WORKBENCH_PORT")" ]] && return
+    sleep 0.1
+  done
+  echo "Workbench port ${WORKBENCH_PORT} remains occupied; refusing to replace it." >&2
+  return 1
+}
+
+workbench_start() {
+  acquire_lock
+  mkdir -p "$WORKBENCH_DIR"
+  if [[ -n "${1:-}" ]]; then
+    python3 "${ROOT_DIR}/scripts/benchmark_workbench.py" register "$1"
+  fi
+  local fingerprint
+  fingerprint="$(workbench_fingerprint)"
+  if service_loaded "$WORKBENCH_LABEL" \
+    && [[ -f "${WORKBENCH_DIR}/fingerprint" ]] \
+    && [[ "$(cat "${WORKBENCH_DIR}/fingerprint")" == "$fingerprint" ]] \
+    && curl -fsS "http://127.0.0.1:${WORKBENCH_PORT}/health" >/dev/null 2>&1; then
+    workbench_status
+    return
+  fi
+  if service_loaded "$WORKBENCH_LABEL"; then
+    workbench_stop
+  fi
+  if [[ -n "$(listener_pid "$WORKBENCH_PORT")" ]]; then
+    echo "Refusing to replace an unrelated listener on port ${WORKBENCH_PORT}." >&2
+    return 1
+  fi
+  mkdir -p "${WORKBENCH_DIR}/app/benchmark-workbench"
+  cp "${ROOT_DIR}/scripts/benchmark_workbench.py" "${ROOT_DIR}/scripts/benchmark_workbench_stats.py" "${WORKBENCH_DIR}/app/"
+  cp "${ROOT_DIR}/scripts/benchmark-workbench/"* "${WORKBENCH_DIR}/app/benchmark-workbench/"
+  python3 - "$WORKBENCH_DIR" "$WORKBENCH_LABEL" <<'PY'
+from pathlib import Path
+import plistlib, sys
+root = Path(sys.argv[1])
+plist = {'Label': sys.argv[2], 'ProgramArguments': ['/usr/bin/python3', str(root / 'app/benchmark_workbench.py'), 'serve'],
+         'RunAtLoad': True, 'KeepAlive': False, 'ProcessType': 'Background',
+         'StandardOutPath': str(root / 'server.log'), 'StandardErrorPath': str(root / 'server.log')}
+with (root / 'service.plist').open('wb') as handle:
+    plistlib.dump(plist, handle)
+PY
+  launchctl bootstrap "gui/$(id -u)" "${WORKBENCH_DIR}/service.plist"
+  for _ in {1..50}; do
+    if curl -fsS "http://127.0.0.1:${WORKBENCH_PORT}/health" >/dev/null 2>&1; then
+      echo "$fingerprint" >"${WORKBENCH_DIR}/fingerprint"
+      workbench_status
+      return
+    fi
+    sleep 0.1
+  done
+  echo "Workbench did not become healthy; see ${WORKBENCH_DIR}/server.log" >&2
+  return 1
+}
+
 case "${1:-}" in
+  workbench-start) workbench_start "${2:-}" ;;
+  workbench-stop) acquire_lock; workbench_stop; echo "Workbench stopped; benchmark workers unchanged." ;;
+  workbench-status) workbench_status ;;
   start) start_runtime false ;;
   restart) start_runtime true ;;
   stop) acquire_lock; stop_services; echo "Shared local runtime stopped." ;;

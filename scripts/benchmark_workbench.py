@@ -1,0 +1,377 @@
+#!/usr/bin/env python3
+"""Read-only, on-demand browser workbench for the one-shot benchmark supervisor."""
+
+from __future__ import annotations
+
+import argparse
+from contextlib import closing
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import math
+import os
+from pathlib import Path
+import re
+import sqlite3
+import threading
+import time
+from urllib.parse import parse_qs, urlsplit
+
+from benchmark_workbench_stats import paired_history
+
+
+RUNTIME = Path('/private/tmp/strong-cribbage-local-runtime/workbench')
+STATIC = Path(__file__).resolve().parent / 'benchmark-workbench'
+PORT = 8766
+CACHE_SECONDS = 15
+
+
+def read_json(path, fallback=None):
+    try:
+        value = json.loads(Path(path).read_text())
+        return value if isinstance(value, dict) else fallback
+    except (OSError, ValueError):
+        return fallback
+
+
+def manifest(root):
+    try:
+        return dict(line.split('=', 1) for line in (root / 'manifest.txt').read_text().splitlines() if '=' in line)
+    except OSError:
+        return {}
+
+
+def benchmark_root(spec):
+    if spec.get('benchmarkRoot'):
+        return Path(spec['benchmarkRoot']).resolve()
+    roots = {Path(check['path']).resolve().parent.parent
+             for stage in spec.get('stages', [])
+             for check in stage.get('completionChecks', [])
+             if check.get('table') == 'compact_games' and check.get('path')}
+    return next(iter(roots)) if len(roots) == 1 else None
+
+
+def register(spec_path, runtime=RUNTIME):
+    spec_path = Path(spec_path).resolve()
+    spec = read_json(spec_path)
+    if not spec or not re.fullmatch('[a-z0-9-]+', spec.get('jobId', '')):
+        raise ValueError('A valid job specification is required')
+    root = benchmark_root(spec)
+    if root is None:
+        return None
+    entry = {'id': spec['jobId'], 'root': str(root), 'spec': str(spec_path)}
+    directory = runtime / 'jobs'
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / (entry['id'] + '.json')
+    temporary = destination.with_suffix('.tmp')
+    temporary.write_text(json.dumps(entry) + '\n')
+    temporary.replace(destination)
+    return entry
+
+
+def job_status(entry):
+    spec = read_json(entry['spec'], {})
+    root = Path(spec.get('jobRoot', '/private/tmp/cribbage-jobs/' + entry['id']))
+    return read_json(root / 'status.json', {})
+
+
+def list_jobs(runtime=RUNTIME):
+    jobs = []
+    for path in (runtime / 'jobs').glob('*.json'):
+        entry = read_json(path)
+        if not entry:
+            continue
+        info = manifest(Path(entry['root']))
+        status = job_status(entry)
+        jobs.append({**entry, 'candidate': info.get('candidate'), 'opponent': info.get('opponent'),
+                     'state': status.get('state', 'pending'), 'updatedAt': status.get('updatedAt', '')})
+    return sorted(jobs, key=lambda x: (x['state'] == 'running', x['updatedAt']), reverse=True)
+
+
+def timestamp(value):
+    try:
+        return datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def orientation(root, label, run_id):
+    if not label or Path(label).name != label or label in ('.', '..'):
+        raise ValueError('Manifest must name two orientation directories')
+    status = read_json(root / label / 'status.json', {})
+    path = root / label / 'games.db'
+    if not path.is_file():
+        return [], status, run_id
+    # No VACUUM, copy, persistent connection, or scans of per-decision telemetry.
+    # WAL readers do not block writers; timeout bounds contention on older DBs.
+    with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=0.15)) as db:
+        db.row_factory = sqlite3.Row
+        db.execute('PRAGMA query_only=ON')
+        if not run_id:
+            runs = db.execute('SELECT DISTINCT run_id FROM compact_games').fetchall()
+            if len(runs) > 1:
+                raise ValueError('Multiple run IDs: specify orientation run IDs in the manifest')
+            run_id = runs[0][0] if runs else status.get('runId')
+        games = [dict(row) for row in db.execute(
+            'SELECT game_index, random_seed, left_engine, right_engine, winner, '
+            'final_left_score, final_right_score, started_at, ended_at '
+            'FROM compact_games WHERE run_id = ? AND included_in_tables = 1 ORDER BY game_index', (run_id,))]
+    if status.get('runId') != run_id:
+        status = {}
+    return games, status, run_id
+
+
+def report_arguments(info):
+    args = {}
+    try:
+        command = json.loads(info.get('reportCommand', '[]'))
+        args = {command[i]: command[i + 1] for i in range(len(command) - 1) if command[i].startswith('--')}
+    except (ValueError, TypeError, AttributeError):
+        pass
+    return args
+
+
+def config(info):
+    args = report_arguments(info)
+    return [info.get('candidateLeftRunId') or args.get('--candidate-left-run-id'),
+            info.get('opponentLeftRunId') or args.get('--opponent-left-run-id')]
+
+
+
+def resolve_manifest(entry):
+    """Read legacy manifests without modifying a frozen experiment."""
+    root = Path(entry['root'])
+    info = manifest(root)
+    info.setdefault('opponent', info.get('baseline'))
+    args = report_arguments(info)
+    for field, flag in [('candidateLeft', '--candidate-left'), ('opponentLeft', '--opponent-left')]:
+        if not info.get(field) and args.get(flag):
+            info[field] = args[flag]
+    if all(info.get(field) for field in ('candidateLeft', 'opponentLeft')):
+        return info
+    if not info.get('candidate') or not info.get('opponent'):
+        return info
+    spec = read_json(entry['spec'], {})
+    paths = {Path(check['path']).resolve() for stage in spec.get('stages', [])
+             for check in stage.get('completionChecks', [])
+             if check.get('table') == 'compact_games' and check.get('path')}
+    if not paths:
+        paths = set(root.glob('*/games.db'))
+    inferred = {}
+    for path in sorted(paths):
+        if path.parent.parent != root or path.name != 'games.db':
+            continue
+        status = read_json(path.parent / 'status.json', {})
+        engines = (status.get('left'), status.get('right'))
+        if not all(engines) and path.is_file():
+            with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=.15)) as db:
+                identities = db.execute('SELECT DISTINCT left_engine, right_engine FROM compact_games LIMIT 2').fetchall()
+            if len(identities) != 1:
+                continue
+            engines = identities[0]
+        field = ('candidateLeft' if engines == (info['candidate'], info['opponent']) else
+                 'opponentLeft' if engines == (info['opponent'], info['candidate']) else None)
+        if field:
+            if field in inferred and inferred[field] != path.parent.name:
+                raise ValueError('Ambiguous orientation directories; record labels in the manifest')
+            inferred[field] = path.parent.name
+    for field, value in inferred.items():
+        info.setdefault(field, value)
+    return info
+
+
+def inspect_games(games, candidate, opponent, side, target, start):
+    indexed = {}
+    for game in games:
+        index = game['game_index']
+        if index in indexed:
+            raise ValueError(f'Duplicate game index {index}; cannot pair multiple matchups')
+        if not isinstance(index, int) or not start <= index < start + target:
+            raise ValueError(f'Game index {index} is outside the contracted interval')
+        if (game['left_engine'], game['right_engine']) != ((candidate, opponent) if side == 0 else (opponent, candidate)):
+            raise ValueError(f'Engine mismatch at index {index}')
+        if game['winner'] not in (0, 1) or any(not isinstance(game[key], int) for key in ('final_left_score', 'final_right_score')):
+            raise ValueError(f'Incomplete outcome at index {index}')
+        indexed[index] = game
+    return indexed
+
+
+def progress_history(games):
+    ends = sorted(t for g in games if (t := timestamp(g['ended_at'])) is not None)
+    starts = [t for g in games if (t := timestamp(g['started_at'])) is not None]
+    if not ends or not starts:
+        return []
+    start = min(starts)
+    stride = max(1, math.ceil(len(ends) / 200))
+    result = []
+    for i, end in enumerate(ends, 1):
+        if i == 1 or i % stride == 0 or i == len(ends):
+            hours = max(0, (end - start) / 3600)
+            result.append({'hours': hours, 'games': i, 'gamesPerHour': i / hours if hours else None})
+    return result
+
+
+def build_report(entry, now=None):
+    started = time.monotonic()
+    now = time.time() if now is None else now
+    root = Path(entry['root'])
+    info = resolve_manifest(entry)
+    job = job_status(entry)
+    stages = [{'name': s.get('name'), 'state': s.get('state')} for s in job.get('stages', [])]
+    result = {'id': entry['id'], 'root': str(root), 'state': job.get('state', 'pending'),
+              'stages': stages, 'asOf': datetime.fromtimestamp(now, timezone.utc).isoformat(),
+              'candidate': info.get('candidate'), 'opponent': info.get('opponent')}
+    if not all(info.get(k) for k in ('candidate', 'opponent', 'candidateLeft', 'opponentLeft', 'gamesPerOrientation')):
+        return {**result, 'waiting': 'Waiting for the paired benchmark manifest.'}
+    candidate, opponent = info['candidate'], info['opponent']
+    target = int(info['gamesPerOrientation'])
+    start = int(info.get('startIndex', 0))
+    if target <= 0 or start < 0:
+        raise ValueError('Manifest must specify a positive target and nonnegative startIndex')
+    data = [orientation(root, label, run_id) for label, run_id in zip(
+        (info['candidateLeft'], info['opponentLeft']), config(info))]
+    indexed = [inspect_games(rows, candidate, opponent, i, target, start) for i, (rows, _, _) in enumerate(data)]
+    matches = sorted(indexed[0].keys() & indexed[1].keys())
+    for index in matches:
+        if not indexed[0][index]['random_seed'] or indexed[0][index]['random_seed'] != indexed[1][index]['random_seed']:
+            raise ValueError(f'Paired seed mismatch at index {index}')
+    if info.get('seed'):
+        seed = int(info['seed'], 0)
+        for orientation_games in indexed:
+            for index, game in orientation_games.items():
+                if str(game['random_seed']) != str((seed + index) % (2 ** 32)):
+                    raise ValueError(f'Seed mismatch with the manifest at index {index}')
+    # Only a fixed-order contiguous prefix can enter sequential inference.
+    # Skipping a slow unfinished game could select outcomes by game duration.
+    pairs = []
+    index = start
+    while index in indexed[0] and index in indexed[1]:
+        pairs.append((indexed[0][index], indexed[1][index]))
+        index += 1
+    history = paired_history(pairs)
+    orientations = []
+    remaining = []
+    warnings = []
+    for side, (rows, status, run_id) in enumerate(data):
+        count = len(rows)
+        state = status.get('status', 'waiting')
+        if result['state'] in ('stopped', 'failed'):
+            state = result['state']
+        elif count == target:
+            state = 'complete'
+        elif state == 'complete':
+            state = 'snapshot incomplete'
+        age = now - (timestamp(status.get('updatedAt')) or 0)
+        stale = state == 'running' and age > 300
+        if stale:
+            warnings.append(f"{('Candidate left', 'Opponent left')[side]} has no update in the last five minutes.")
+        rate = status.get('gamesPerSecond')
+        rate = rate if isinstance(rate, (float, int)) and math.isfinite(rate) and rate > 0 else None
+        eta = (target - count) / rate if rate and state == 'running' and not stale else (0 if count == target else None)
+        remaining.append(eta)
+        wins = sum(g['winner'] == side for g in rows)
+        orientations.append({'label': (info['candidateLeft'], info['opponentLeft'])[side],
+                             'saved': count, 'target': target, 'state': state, 'stale': stale,
+                             'winRate': wins / count if count else None, 'candidateWins': wins,
+                             'runId': run_id, 'updatedAt': status.get('updatedAt'), 'workers': status.get('workers'),
+                             'gamesPerHour': rate * 3600 if rate else None})
+    saved = sum(x['saved'] for x in orientations)
+    wins = sum(x['candidateWins'] for x in orientations)
+    elapsed = max(remaining) if all(x is not None for x in remaining) else None
+    latest = history[-1] if history else None
+    result.update({
+        'experiment': info.get('experiment', entry['id']), 'sourceCommit': info.get('sourceCommit'),
+        'seed': info.get('seed'), 'compiler': info.get('compiler'), 'timingNote': info.get('timingNote'),
+        'saved': saved, 'target': target * 2, 'rawWinRate': wins / saved if saved else None,
+        'candidateWins': wins, 'opponentWins': saved - wins,
+        'orientations': orientations, 'remainingSeconds': elapsed,
+        'estimatedCompletion': datetime.fromtimestamp(now + elapsed, timezone.utc).isoformat() if elapsed else None,
+        'matchedPairs': len(matches), 'orderedPairs': len(pairs), 'pendingPairs': len(matches) - len(pairs),
+        'history': history, 'latest': latest, 'progressHistory': progress_history(data[0][0] + data[1][0]),
+        'warnings': warnings, 'integrity': 'passed',
+        'readMilliseconds': round((time.monotonic() - started) * 1000, 1),
+    })
+    return result
+
+
+class WorkbenchServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, address, runtime=RUNTIME):
+        super().__init__(address, Handler)
+        self.runtime = runtime
+        self.cache = {}
+        self.cache_lock = threading.Lock()
+
+    def report(self, entry):
+        with self.cache_lock:
+            cached = self.cache.get(entry['id'])
+            if cached and time.monotonic() - cached[0] < CACHE_SECONDS:
+                return cached[1]
+            try:
+                report = build_report(entry)
+            except (OSError, ValueError, sqlite3.Error) as error:
+                report = {'id': entry['id'], 'error': str(error), 'integrity': 'unavailable',
+                          'asOf': datetime.now(timezone.utc).isoformat()}
+            self.cache[entry['id']] = (time.monotonic(), report)
+            return report
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *_args):
+        pass
+
+    def respond(self, value, status=200, content_type='application/json'):
+        body = json.dumps(value, allow_nan=False).encode() if content_type == 'application/json' else value
+        self.send_response(status)
+        self.send_header('Content-Type', content_type + '; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('Content-Security-Policy', "default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        # Reject DNS rebinding and cross-origin access to local experiment data.
+        if self.headers.get('Host') not in (f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'):
+            return self.respond({'error': 'Local access only'}, 403)
+        url = urlsplit(self.path)
+        if url.path == '/health':
+            return self.respond({'service': 'cribbage-benchmark-workbench', 'version': 1})
+        jobs = None
+        if url.path in ('/api/jobs', '/api/report'):
+            jobs = list_jobs(self.server.runtime)
+        if url.path == '/api/jobs':
+            return self.respond({'jobs': jobs, 'refreshSeconds': CACHE_SECONDS})
+        if url.path == '/api/report':
+            selected = parse_qs(url.query).get('job', [''])[0]
+            entry = next((job for job in jobs if job['id'] == selected), None)
+            if not entry:
+                return self.respond({'error': 'Unknown benchmark'}, 404)
+            return self.respond(self.server.report(entry))
+        files = {'/favicon.svg': ('favicon.svg', 'image/svg+xml'), '/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
+        if url.path in files:
+            filename, content_type = files[url.path]
+            return self.respond((STATIC / filename).read_bytes(), content_type=content_type)
+        return self.respond({'error': 'Not found'}, 404)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('action', choices=('register', 'serve'))
+    parser.add_argument('spec', nargs='?')
+    args = parser.parse_args()
+    if args.action == 'register':
+        if not args.spec:
+            parser.error('register requires a job specification')
+        entry = register(args.spec)
+        if entry:
+            print(f"http://127.0.0.1:{PORT}/?job={entry['id']}")
+        return
+    os.nice(10)
+    WorkbenchServer(('127.0.0.1', PORT)).serve_forever(poll_interval=0.5)
+
+
+if __name__ == '__main__':
+    main()
