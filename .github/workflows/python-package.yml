@@ -31,6 +31,7 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: scripts/run-quiet.sh "Python lint" flake8 src tests scripts webapp.py --count --select=E9,F63,F7,F82 --show-source --statistics
       - run: scripts/run-quiet.sh "Python tests" pytest
+      - run: npm run --silent test:workbench
       - run: npm run --silent test:quiet-wrapper
       - run: npm run --silent test:release-build
       - run: npm run --silent typecheck
