@@ -19,7 +19,7 @@ const HAND_MASK: u128 = (1_u128 << SERIES) - 1;
 
 /// The entire semantic state fits in 124 bits; equality checks all of them.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct State(u128);
+pub(super) struct State(u128);
 
 impl Hash for State {
     fn hash<H: Hasher>(&self, hasher: &mut H) {
@@ -48,7 +48,7 @@ impl Hasher for StateHasher {
 }
 
 impl State {
-    fn from_reference(state: &AverageState) -> Self {
+    pub(super) fn from_reference(state: &AverageState) -> Self {
         let mut key = 0;
         for player in 0..2 {
             for rank in 0..RANKS {
@@ -345,9 +345,15 @@ impl SeriesScoreMemo {
 pub(super) struct WpMemo {
     outcomes: HashMap<WpKey, f64, BuildHasherDefault<StateHasher>>,
     series_scores: SeriesScoreMemo,
+    collapse_forced: bool,
 }
 
 impl WpMemo {
+    /// Decision-local opt-in for 20.6; historical models keep the recursive path.
+    pub(super) fn collapse_forced_continuations(&mut self) {
+        self.collapse_forced = true;
+    }
+
     pub(super) fn clear(&mut self) {
         self.outcomes.clear();
         self.series_scores.clear();
@@ -361,8 +367,19 @@ impl WpMemo {
         rank: u8,
         board: &BoardWinMatrix,
     ) -> Result<f64, String> {
+        self.forced_play_prepared(State::from_reference(state), scores, role, rank, board)
+    }
+
+    pub(super) fn forced_play_prepared(
+        &mut self,
+        state: State,
+        scores: [u8; 2],
+        role: Role,
+        rank: u8,
+        board: &BoardWinMatrix,
+    ) -> Result<f64, String> {
         let state = WpState {
-            peg: State::from_reference(state),
+            peg: state,
             scores,
             role,
         };
@@ -372,7 +389,11 @@ impl WpMemo {
         if state.peg.count() + VALUES[rank as usize] > 31 {
             return Err("Model 20.1 WP evaluator selected an illegal play".into());
         }
-        self.play(state, rank, board)
+        if self.collapse_forced {
+            self.play_collapsed(state, rank, board)
+        } else {
+            self.play(state, rank, board)
+        }
     }
 
     fn terminal(state: WpState, board: &BoardWinMatrix) -> f64 {
@@ -496,6 +517,161 @@ impl WpMemo {
         }
         self.future(next, board)
     }
+    // Keep the historical evaluator above unchanged. This 20.6-only loop
+    // collapses one physical legal card or go, not duplicate-rank weighting.
+    // Cache-eligible states still take the original lookup/insert path.
+    fn after_play(&mut self, state: WpState, rank: u8) -> Result<WpState, String> {
+        let current = state.peg.current();
+        // forced_play checks the entry; future visits only present, playable ranks.
+        debug_assert!(rank < RANKS as u8 && state.peg.copies(current, rank) > 0);
+        let count = state.peg.count() + VALUES[rank as usize];
+        debug_assert!(count <= 31);
+        if state.peg.len() >= MAX_SERIES {
+            return Err("Model 20.1 WP evaluator selected an illegal play".into());
+        }
+        let mut next = state;
+        next.peg.0 -= 1_u128 << (u32::from(current) * HAND_BITS + u32::from(rank) * 3);
+        next.peg.set(SERIES + state.peg.len() as u32 * 4, 15, rank);
+        next.peg.set(LENGTH, 15, state.peg.len() as u8 + 1);
+        next.peg.set(COUNT, 31, count);
+        next.scores[current as usize] += self.series_scores.score(next.peg);
+        if count == 31 {
+            next.peg.reset(1 - current);
+        } else {
+            next.peg.set(LAST, 3, current + 1);
+            if state.peg.field(GO, 3) == 0 {
+                next.peg.set(CURRENT, 1, 1 - current);
+            }
+        }
+        Ok(next)
+    }
+    #[inline]
+    fn remaining(peg: State) -> u32 {
+        let hands = peg.0 & HAND_MASK;
+        let low = HAND_MASK / 7;
+        (hands & low).count_ones()
+            + 2 * ((hands >> 1) & low).count_ones()
+            + 4 * ((hands >> 2) & low).count_ones()
+    }
+
+    #[inline]
+    fn legal(peg: State) -> (u64, u64) {
+        let mask = (1_u64 << HAND_BITS) - 1;
+        let hand = (peg.0 >> (u32::from(peg.current()) * HAND_BITS)) as u64 & mask;
+        let room = 31 - peg.count();
+        let ranks = if room >= 10 { 13 } else { u32::from(room) };
+        (
+            hand,
+            (hand | hand >> 1 | hand >> 2) & (mask / 7) & ((1_u64 << (ranks * 3)) - 1),
+        )
+    }
+
+    #[inline]
+    fn after_go(mut state: WpState) -> WpState {
+        let current = state.peg.current();
+        if state.peg.field(GO, 3) != 0 {
+            let last = state.peg.field(LAST, 3);
+            if last != 0 {
+                state.scores[usize::from(last - 1)] += 1;
+            }
+            state.peg.reset(1 - current);
+        } else {
+            state.peg.set(GO, 3, current + 1);
+            state.peg.set(CURRENT, 1, 1 - current);
+        }
+        state
+    }
+
+    // Each elided (0 + 1 * value) / 1 normalizes negative zero once.
+    #[inline]
+    fn finish_collapsed(value: f64, normalize_zero: bool) -> f64 {
+        if normalize_zero {
+            0.0 + value
+        } else {
+            value
+        }
+    }
+
+    fn future_collapsed(
+        &mut self,
+        mut state: WpState,
+        board: &BoardWinMatrix,
+    ) -> Result<f64, String> {
+        let mut normalize_zero = false;
+        loop {
+            if state.scores.iter().any(|score| *score >= 121) {
+                return Ok(Self::finish_collapsed(
+                    Self::terminal(state, board),
+                    normalize_zero,
+                ));
+            }
+            if state.peg.0 & HAND_MASK == 0 {
+                let last = state.peg.field(LAST, 3);
+                if state.peg.count() != 0 && last != 0 {
+                    state.scores[usize::from(last - 1)] += 1;
+                }
+                return Ok(Self::finish_collapsed(
+                    Self::terminal(state, board),
+                    normalize_zero,
+                ));
+            }
+            let cache = state.peg.count() == 0 && Self::remaining(state.peg) > 2;
+            if cache {
+                if let Some(value) = self.outcomes.get(&WpKey::from(state)) {
+                    return Ok(Self::finish_collapsed(*value, normalize_zero));
+                }
+            }
+            let (hand, mut present) = Self::legal(state.peg);
+            // Preserve cached entry insertion and duplicate-rank multiply/divide.
+            if !cache {
+                if present == 0 {
+                    state = Self::after_go(state);
+                    continue;
+                }
+                if present.is_power_of_two() {
+                    let shift = present.trailing_zeros();
+                    if (hand >> shift) & 7 == 1 {
+                        normalize_zero = true;
+                        state = self.after_play(state, (shift / 3) as u8)?;
+                        continue;
+                    }
+                }
+            }
+            let mut weighted = 0.0;
+            let mut copies = 0_u8;
+            while present != 0 {
+                let shift = present.trailing_zeros();
+                present &= present - 1;
+                let count = ((hand >> shift) & 7) as u8;
+                weighted +=
+                    f64::from(count) * self.play_collapsed(state, (shift / 3) as u8, board)?;
+                copies += count;
+            }
+            let value = if copies > 0 {
+                weighted / f64::from(copies)
+            } else {
+                self.future_collapsed(Self::after_go(state), board)?
+            };
+            if cache {
+                if self.outcomes.len() >= 1_000_000 {
+                    self.outcomes.clear();
+                }
+                self.outcomes.insert(WpKey::from(state), value);
+            }
+            return Ok(Self::finish_collapsed(value, normalize_zero));
+        }
+    }
+
+    fn play_collapsed(
+        &mut self,
+        state: WpState,
+        rank: u8,
+        board: &BoardWinMatrix,
+    ) -> Result<f64, String> {
+        let next = self.after_play(state, rank)?;
+        self.future_collapsed(next, board)
+    }
+
 }
 
 #[cfg(test)]
@@ -603,6 +779,53 @@ mod tests {
         );
     }
 
+    #[test]
+    fn collapsed_wp_preserves_zero_bits_cache_and_series_guards() {
+        for probability in [-0.0, 0.0, 0.12345678901234567, 1.0] {
+            let board = BoardWinMatrix::from_function(|_, _, _| probability);
+            for role in [Role::Dealer, Role::Pone] {
+                let mut old = WpMemo::default();
+                let mut new = WpMemo::default();
+                new.collapse_forced_continuations();
+                for rank in 0..13 {
+                    for count in 1..=4 {
+                        let mut hands = [[0; RANKS]; 2];
+                        hands[1][rank] = count;
+                        for (series, total, go, last) in [
+                            (vec![], 0, None, None),
+                            (vec![9, 9, 9], 30, None, Some(0)),
+                            (vec![0, 1, 0, 1, 0, 1, 0], 10, None, Some(1)),
+                        ] {
+                            let average =
+                                AverageState::new(hands, &series, total, 0, go, last).unwrap();
+                            for scores in [[0, 0], [120, 119], [119, 120]] {
+                                let state = WpState {
+                                    peg: State::from_reference(&average),
+                                    scores,
+                                    role,
+                                };
+                                let expected = old.future(state, &board).map(f64::to_bits);
+                                assert_eq!(
+                                    new.future_collapsed(state, &board).map(f64::to_bits),
+                                    expected
+                                );
+                            }
+                        }
+                    }
+                }
+                assert_eq!(new.outcomes.len(), old.outcomes.len());
+                assert!(old.outcomes.iter().all(|(key, value)| new
+                    .outcomes
+                    .get(key)
+                    .map(|v| v.to_bits())
+                    == Some(value.to_bits())));
+                new.clear();
+                assert!(new.collapse_forced);
+                assert!(new.outcomes.is_empty());
+            }
+        }
+    }
+
     fn reference_wp(state: &RankPegState, board: &BoardWinMatrix) -> f64 {
         if let Some(winner) = state.winner {
             return f64::from(winner == PegSeat::Zero);
@@ -642,8 +865,11 @@ mod tests {
         });
         let mut seed = 201;
         let mut memo = WpMemo::default();
+        let mut prepared_memo = WpMemo::default();
+        let mut collapsed_memo = WpMemo::default();
+        collapsed_memo.collapse_forced_continuations();
         let mut checked = 0;
-        for game in 0..32 {
+        for game in 0..128 {
             let mut deck: Vec<u8> = (0..52).map(|card| card % 13).collect();
             for index in (1..deck.len()).rev() {
                 deck.swap(index, next_random(&mut seed) % (index + 1));
@@ -656,7 +882,7 @@ mod tests {
                 hands,
                 own_discards: [[0; RANKS]; 2],
                 turn_rank: deck[8],
-                scores: if game < 16 { [0, 0] } else { [118, 119] },
+                scores: if game < 64 { [0, 0] } else { [118, 119] },
                 dealer: if game % 2 == 0 {
                     PegSeat::Zero
                 } else {
@@ -681,6 +907,7 @@ mod tests {
                     state.last_player.map(|s| s.index() as u8),
                 )
                 .unwrap();
+                let prepared = State::from_reference(&average);
                 for action in state.legal_actions() {
                     let crate::information_set::RankPegAction::Play(rank) = action else {
                         continue;
@@ -700,6 +927,21 @@ mod tests {
                             &board,
                         )
                         .unwrap();
+                    assert_eq!(
+                        prepared_memo.forced_play_prepared(
+                            prepared,
+                            [state.scores[0] as u8, state.scores[1] as u8],
+                            if state.dealer == PegSeat::Zero { Role::Dealer } else { Role::Pone },
+                            rank,
+                            &board,
+                        ).unwrap().to_bits(),
+                        actual.to_bits(),
+                    );
+                    assert_eq!(collapsed_memo.forced_play_prepared(
+                        prepared, [state.scores[0] as u8, state.scores[1] as u8],
+                        if state.dealer == PegSeat::Zero { Role::Dealer } else { Role::Pone },
+                        rank, &board,
+                    ).unwrap().to_bits(), actual.to_bits());
                     assert!(
                         (actual - reference_wp(&next, &board)).abs() < 1e-12,
                         "state={state:?} action={action:?}"

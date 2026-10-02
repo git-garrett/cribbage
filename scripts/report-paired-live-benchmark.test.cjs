@@ -106,21 +106,18 @@ test("markdown includes a prominent Pacific completion time and remaining durati
     candidate: "candidate", opponent: "opponent", manifest: {}, progress,
     results: summarizeGames([], [], "candidate", "opponent"),
     orientationAnalysis: {}, phaseScoring: [], availableEventScoring: [],
-    evCalibration: [], winProbabilityCalibration: [], timing: [],
+    evCalibration: [], winProbabilityCalibration: [], timing: [
+      {kind: "peg_opening", role: "pone", model: "candidate", rows: 2, avgMs: 1000, totalSeconds: 2},
+      {kind: "peg_hand", role: "dealer", model: "opponent", rows: 3, avgMs: 2000, totalSeconds: 6},
+      {kind: "pegging", role: "pone", model: "candidate", rows: 4, avgMs: 500, totalSeconds: 2},
+    ],
     evTelemetry: { legacyImmediatePegModels: [] },
     integrity: { invalidEngineIndexes: [], pairedSeedMismatchIndexes: [] },
   };
   const markdown = renderMarkdown(report);
   assert.match(markdown, /- ETA: \*\*.*Sep 18, 2026.*12:13.*PM PDT.*\*\*.*0h 13m 20s remaining/);
   assert.ok(markdown.indexOf("- ETA:") < markdown.indexOf("## Runner status"));
-});
-
-
-test("elapsed totals sum orientations while latency averages by decision count", () => {
-  const { combineRows } = require("./report-paired-live-benchmark.cjs");
-  const rows = [{ rows: 2, avgMs: 1000, totalSeconds: 2 }, { rows: 3, avgMs: 2000, totalSeconds: 6 }];
-  const actual = combineRows(rows, (row) => [{ ...row, kind: "peg", role: "dealer", model: "candidate" }], ["avgMs", "totalSeconds"], ["totalSeconds"]);
-  assert.equal(actual[0].rows, 5);
-  assert.equal(actual[0].avgMs, 1600);
-  assert.equal(actual[0].totalSeconds, 8);
+  assert.match(markdown, /Opening play \/ hand/);
+  assert.match(markdown, /Total \/ pegging hand/);
+  assert.doesNotMatch(markdown, /\| pegging \|/);
 });

@@ -1,5 +1,8 @@
 # Model 20.4 version boundary
 
+Historical boundary established before the new [20.4 versus 20.3 benchmark](model204-vs-model203-benchmark.md).
+Further work now belongs to [20.5](model205-outer-rollout.md).
+
 Model 20.3's current paired 10,000-game benchmark last resumed at
 `2026-09-28T14:33:24.149196Z`, with source commit
 `567ff4f0570faea537a2f257df2cacf4494d5b24`. The experiment is

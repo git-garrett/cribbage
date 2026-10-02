@@ -502,9 +502,53 @@ pub fn score_count(plays: &[Card]) -> u8 {
     score_count_components(plays).total()
 }
 
+/// Pegging score for an already validated rank series, without materializing cards.
+pub(crate) fn score_count_ranks(ranks: &[u8]) -> u8 {
+    if ranks.len() < 2 { return 0; }
+    let count: u8 = ranks.iter().map(|rank| VALUES[*rank as usize]).sum();
+    let mut points = if matches!(count, 15 | 31) { 2 } else { 0 };
+    let same = ranks.iter().rev().take_while(|rank| **rank == ranks[ranks.len() - 1]).count();
+    points += match same { 2 => 2, 3 => 6, 4 => 12, _ => 0 };
+    let mut seen = 0_u16;
+    let mut run = 0;
+    for (index, rank) in ranks.iter().rev().enumerate() {
+        let bit = 1_u16 << rank;
+        // Every longer suffix would contain this duplicate too.
+        if seen & bit != 0 { break; }
+        seen |= bit;
+        let length = index + 1;
+        if length >= 3 && (16 - seen.leading_zeros() - seen.trailing_zeros()) as usize == length {
+            run = length as u8;
+        }
+    }
+    points + run
+}
+
 #[cfg(test)]
 mod pegging_score_component_tests {
     use super::*;
+
+    #[test]
+    fn direct_rank_scoring_matches_card_scoring() {
+        fn visit(series: &mut Vec<u8>, counts: &mut [u8; 13], total: u8) {
+            let cards: Vec<_> = series.iter().copied().map(peg_card_for_rank).collect();
+            assert_eq!(score_count_ranks(series), score_count(&cards), "{series:?}");
+            if series.len() == 5 { return; }
+            for rank in 0..13 {
+                if counts[rank] == 4 || total + VALUES[rank] > 31 { continue; }
+                counts[rank] += 1;
+                series.push(rank as u8);
+                visit(series, counts, total + VALUES[rank]);
+                series.pop();
+                counts[rank] -= 1;
+            }
+        }
+        visit(&mut Vec::new(), &mut [0; 13], 0);
+        for series in [vec![0, 2, 1, 4, 3, 5], vec![3, 2, 4, 1, 5, 0, 6],
+            vec![0, 0, 0, 0, 1, 1, 1, 1], vec![9, 8, 3, 2, 1, 0]] {
+            assert_eq!(score_count_ranks(&series), score_count(&series.iter().copied().map(peg_card_for_rank).collect::<Vec<_>>()));
+        }
+    }
 
     fn cards(ids: &[u8]) -> Vec<Card> {
         ids.iter().map(|id| Card::new(*id).unwrap()).collect()

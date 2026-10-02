@@ -61,6 +61,16 @@ pub const MODEL_20_3: &str = "schell_table-peg_table-20.3";
 /// Model 20.4 retains 20.3 assets and adds the optimizations developed after
 /// the 2026-09-28 speed-v4 benchmark restart (frozen commit 567ff4f).
 pub const MODEL_20_4: &str = "schell_table-peg_table-20.4";
+/// Frozen Model 20.5 optimization baseline, retaining 20.4 learning assets.
+pub const MODEL_20_5: &str = "schell_table-peg_table-20.5";
+/// Model 20.6 retains 20.5 policy and assets, with exact root utility bounds.
+pub const MODEL_20_6: &str = "schell_table-peg_table-20.6";
+/// Model 20.7 retains 20.6 policy and assets, avoiding a legal-rank count allocation.
+pub const MODEL_20_7: &str = "schell_table-peg_table-20.7";
+/// Experimental posterior-weighted strategic pegging; 20.5 discard assets stay fixed.
+pub const MODEL_20_5_PEGGING: &str = "schell_table-peg_table-20.5.pegging";
+/// Symmetric backward bucket policy: both actors use their own smoothed posterior.
+pub const MODEL_20_5_PEGGING2: &str = "schell_table-peg_table-20.5.pegging2";
 /// Five-sample Myrmidon agent from the Moulton cribbage RL framework. Strong
 /// Cribbage exposes it as the Easy opponent and also retains it for benchmarks.
 pub const MYRMIDON_5: &str = "myrmidon-5";
@@ -94,6 +104,11 @@ pub enum ModelId {
     Schell202,
     Schell203,
     Schell204,
+    Schell205,
+    Schell206,
+    Schell207,
+    Schell205Pegging,
+    Schell205Pegging2,
     Myrmidon5,
     Dynamic,
 }
@@ -127,6 +142,11 @@ impl ModelId {
             ModelId::Schell202 => MODEL_20_2,
             ModelId::Schell203 => MODEL_20_3,
             ModelId::Schell204 => MODEL_20_4,
+            ModelId::Schell205 => MODEL_20_5,
+            ModelId::Schell206 => MODEL_20_6,
+            ModelId::Schell207 => MODEL_20_7,
+            ModelId::Schell205Pegging => MODEL_20_5_PEGGING,
+            ModelId::Schell205Pegging2 => MODEL_20_5_PEGGING2,
             ModelId::Myrmidon5 => MYRMIDON_5,
             ModelId::Dynamic => DYNAMIC,
         }
@@ -158,6 +178,11 @@ impl ModelId {
             ModelId::Schell202 => "Schell Table + Peg Table 20.2",
             ModelId::Schell203 => "Schell Table + Peg Table 20.3",
             ModelId::Schell204 => "Schell Table + Peg Table 20.4",
+            ModelId::Schell205 => "Schell Table + Peg Table 20.5",
+            ModelId::Schell206 => "Schell Table + Peg Table 20.6",
+            ModelId::Schell207 => "Schell Table + Peg Table 20.7",
+            ModelId::Schell205Pegging => "20.5.pegging (experimental)",
+            ModelId::Schell205Pegging2 => "20.5.pegging2 (experimental)",
             ModelId::Myrmidon5 => "Myrmidon (5 simulations)",
             ModelId::Dynamic => "Dynamic",
         }
@@ -190,6 +215,11 @@ impl ModelId {
                 | ModelId::Schell202
                 | ModelId::Schell203
                 | ModelId::Schell204
+                | ModelId::Schell205
+                | ModelId::Schell206
+                | ModelId::Schell207
+                | ModelId::Schell205Pegging
+                | ModelId::Schell205Pegging2
                 | ModelId::Myrmidon5
         )
     }
@@ -246,6 +276,11 @@ impl FromStr for ModelId {
             MODEL_20_2 => Ok(ModelId::Schell202),
             MODEL_20_3 => Ok(ModelId::Schell203),
             MODEL_20_4 => Ok(ModelId::Schell204),
+            MODEL_20_5 => Ok(ModelId::Schell205),
+            MODEL_20_6 => Ok(ModelId::Schell206),
+            MODEL_20_7 => Ok(ModelId::Schell207),
+            MODEL_20_5_PEGGING | "20.5.pegging" => Ok(ModelId::Schell205Pegging),
+            MODEL_20_5_PEGGING2 | "20.5.pegging2" => Ok(ModelId::Schell205Pegging2),
             MYRMIDON_5 => Ok(ModelId::Myrmidon5),
             DYNAMIC => Ok(ModelId::Dynamic),
             other => Err(format!("unsupported model id: {}", other)),
@@ -294,9 +329,31 @@ mod tests {
         assert!(ModelId::Schell201.has_native_rust_decisions());
         assert_eq!(MODEL_20_2.parse::<ModelId>().unwrap(), ModelId::Schell202);
         assert_eq!(MODEL_20_4.parse::<ModelId>().unwrap(), ModelId::Schell204);
+        assert_eq!(MODEL_20_5.parse::<ModelId>().unwrap(), ModelId::Schell205);
+        assert_eq!(MODEL_20_6.parse::<ModelId>().unwrap(), ModelId::Schell206);
+        assert_eq!(ModelId::Schell206.as_str(), MODEL_20_6);
+        assert!(ModelId::Schell206.has_native_rust_decisions());
+        assert!(!ModelId::Schell206.is_ace());
+        assert_eq!(MODEL_20_7.parse::<ModelId>().unwrap(), ModelId::Schell207);
+        assert_eq!(ModelId::Schell207.as_str(), MODEL_20_7);
+        assert!(ModelId::Schell207.has_native_rust_decisions());
+        assert!(!ModelId::Schell207.is_ace());
+        assert_eq!(MODEL_20_5_PEGGING.parse::<ModelId>().unwrap(), ModelId::Schell205Pegging);
+        assert_eq!("20.5.pegging".parse::<ModelId>().unwrap(), ModelId::Schell205Pegging);
+        assert_eq!(ModelId::Schell205Pegging.as_str(), MODEL_20_5_PEGGING);
+        assert!(ModelId::Schell205Pegging.has_native_rust_decisions());
+        assert!(!ModelId::Schell205Pegging.is_ace());
+        assert_eq!(MODEL_20_5_PEGGING2.parse::<ModelId>().unwrap(), ModelId::Schell205Pegging2);
+        assert_eq!("20.5.pegging2".parse::<ModelId>().unwrap(), ModelId::Schell205Pegging2);
+        assert_eq!(ModelId::Schell205Pegging2.as_str(), MODEL_20_5_PEGGING2);
+        assert!(ModelId::Schell205Pegging2.has_native_rust_decisions());
+        assert!(!ModelId::Schell205Pegging2.is_ace());
         assert_eq!(ModelId::Schell204.as_str(), MODEL_20_4);
+        assert_eq!(ModelId::Schell205.as_str(), MODEL_20_5);
         assert!(ModelId::Schell204.has_native_rust_decisions());
+        assert!(ModelId::Schell205.has_native_rust_decisions());
         assert!(!ModelId::Schell204.is_ace());
+        assert!(!ModelId::Schell205.is_ace());
         assert_eq!(MODEL_20_3.parse::<ModelId>().unwrap(), ModelId::Schell203);
         assert_eq!(ModelId::Schell203.as_str(), MODEL_20_3);
         assert!(ModelId::Schell203.has_native_rust_decisions());

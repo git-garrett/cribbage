@@ -25,6 +25,15 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+#[path = "model1323_rollout.rs"]
+mod rollout_storage;
+#[path = "model206_bounds.rs"]
+mod direct_bounds;
+#[path = "model205_pegging.rs"]
+mod bucketed;
+#[path = "model205_pegging2.rs"]
+pub(crate) mod symmetric;
+
 /// Identities recorded by the running correction builder, in header order:
 /// beliefs, decline factors, keep prior, discard prior, baseline keep pairs.
 pub const CORRECTION_INPUT_CHECKSUMS: [u64; 5] = [
@@ -130,6 +139,8 @@ pub struct PolicyAssets {
     empirical_depletion: bool,
     complete_hold_support: bool,
     optimized_queries: bool,
+    prepare_continuation_bases: bool,
+    reuse_rollout_buffers: bool,
     pub(crate) wp_board: Option<Arc<crate::board_matrix::BoardWinMatrix>>,
 }
 
@@ -144,8 +155,45 @@ pub(crate) struct PreparedDecision<'a> {
 }
 
 impl PreparedDecision<'_> {
+    pub(crate) fn use_short_legal_rank_check(&self) {
+        self.policy.use_short_legal_rank_check();
+    }
+
+    pub(crate) fn collapse_forced_wp_continuations(&self) {
+        self.policy.collapse_forced_wp_continuations();
+    }
+
     pub(crate) fn opponent_hands(&self) -> &[([u8; 13], f64)] {
         &self.hands
+    }
+
+    pub(crate) fn forecast_symmetric(
+        &self, actions: &[RankPegAction], cache: Option<&HandCache>,
+    ) -> Result<Vec<PegCandidateForecast>, String> {
+        let worlds = self.assets.worlds_for_hand_with_posterior(
+            self.observation, &self.policy, cache, Some(&self.hands),
+        )?;
+        symmetric::forecast(self.assets, &self.policy, self.observation, worlds, actions)
+            .map(|(forecasts, _stats)| forecasts)
+    }
+
+    /// Experimental best response: optimize every root-player decision in its
+    /// complete legal-information bucket against the fixed 20.5 opponent policy.
+    pub(crate) fn forecast_bucketed(
+        &self,
+        actions: &[RankPegAction],
+        cache: Option<&HandCache>,
+        win_probability: &mut impl FnMut(u8, u8) -> f64,
+    ) -> Result<Vec<PegCandidateForecast>, String> {
+        let worlds = self.assets.worlds_for_hand_with_posterior(
+            self.observation, &self.policy, cache, Some(&self.hands),
+        )?;
+        // This solver asks the executable policy only for opponent decisions.
+        // Do not inherit the baseline rollout's root-role-only cache admission.
+        let opponent = self.assets.decision_policy()?.with_batched_posteriors();
+        opponent.prepare_continuation_bases();
+        bucketed::forecast(self.observation, &opponent, worlds, actions, win_probability)
+            .map(|(forecasts, _stats)| forecasts)
     }
 
     pub(crate) fn forecast_actions(
@@ -157,6 +205,23 @@ impl PreparedDecision<'_> {
         )?;
         self.assets.forecast_population_actions(
             self.observation, usize::MAX, &self.policy, worlds, actions,
+        )
+    }
+
+    /// Model 20.6 only: exact ceilings over each hypothetical world's legal
+    /// continuations. The executable policy sees the same legal observations.
+    pub(crate) fn forecast_for_choice_model206(
+        &self,
+        cache: Option<&HandCache>,
+        win_probability: &mut impl FnMut(u8, u8) -> f64,
+    ) -> Result<Vec<PegCandidateForecast>, String> {
+        let worlds = self.assets.worlds_for_hand_with_posterior(
+            self.observation, &self.policy, cache, Some(&self.hands),
+        )?;
+        let count = worlds.len();
+        let worlds = sample_worlds(worlds, LIVE_WORLD_BUDGET, observation_seed(self.observation))?;
+        direct_bounds::forecast_worlds_for_choice(
+            self.observation, &self.policy, &worlds, count, win_probability,
         )
     }
 
@@ -233,6 +298,8 @@ impl PolicyAssets {
             empirical_depletion: false,
             complete_hold_support: false,
             optimized_queries: false,
+            prepare_continuation_bases: false,
+            reuse_rollout_buffers: false,
             wp_board: None,
             beliefs,
             factors,
@@ -277,6 +344,8 @@ impl PolicyAssets {
             empirical_depletion: true,
             complete_hold_support: false,
             optimized_queries: false,
+            prepare_continuation_bases: false,
+            reuse_rollout_buffers: false,
             wp_board: None,
         })
     }
@@ -327,6 +396,8 @@ impl PolicyAssets {
             empirical_depletion: true,
             complete_hold_support: true,
             optimized_queries: false,
+            prepare_continuation_bases: false,
+            reuse_rollout_buffers: false,
             wp_board: Some(Arc::new(crate::board_matrix::BoardWinMatrix::load_verified_model202(
                 directory.join("model202-board-win-matrix.bin"))?)),
         })
@@ -336,6 +407,13 @@ impl PolicyAssets {
         // Identical immutable learning snapshot; only execution strategy differs.
         let mut assets = Self::load_model203(directory)?;
         assets.optimized_queries = true;
+        Ok(assets)
+    }
+
+    pub(crate) fn load_model205(directory: &Path) -> Result<Self, String> {
+        let mut assets = Self::load_model204(directory)?;
+        assets.prepare_continuation_bases = true;
+        assets.reuse_rollout_buffers = true;
         Ok(assets)
     }
 
@@ -398,6 +476,10 @@ impl PolicyAssets {
         observation: &Model132Observation,
     ) -> Result<Model911Policy, String> {
         let policy = self.decision_policy()?;
+        let policy = if self.reuse_rollout_buffers { policy.with_reusable_rollouts() } else { policy };
+        if self.prepare_continuation_bases {
+            policy.prepare_continuation_bases();
+        }
         if self.optimized_queries {
             // Model 20.4 streams many opponent private-hand variants through
             // one solve. Their action keys rarely repeat before eviction; the
@@ -902,6 +984,7 @@ fn forecast_world_actions(
     let progress = crate::progress::current();
     let mut forecasts = Vec::new();
     let mut observation_scratch = Model132ObservationScratch::default();
+    let mut rollout_storage = rollout_storage::RolloutStorage::default();
     let batch_size = policy.rollout_batch_size().clamp(1, 32);
     let mut batch_scores = Vec::new();
     for &action in actions {
@@ -913,27 +996,28 @@ fn forecast_world_actions(
                 }
             }
             if batch_size > 1 && index % batch_size == 0 {
-                batch_scores = match rollout_candidate_batch(
+                match rollout_storage.batch(
                     observation,
                     policy,
                     &worlds[index..(index + batch_size).min(worlds.len())],
                     action,
+                    &mut batch_scores,
                 ) {
-                    Ok(scores) => scores,
+                    Ok(()) => (),
                     Err(_) => {
                         if let Some(progress) = &progress {
                             progress.check_cancelled()?;
                         }
                         // A speculative later world may never be needed after pruning.
                         // Revisit this chunk in canonical scalar order before exposing errors.
-                        Vec::new()
+                        batch_scores.clear();
                     }
                 };
             }
             let (own, opponent) = if let Some(score) = batch_scores.get(index % batch_size) {
                 *score
             } else {
-                rollout_candidate(observation, policy, world, action, &mut observation_scratch)?
+                rollout_storage.scalar(observation, policy, world, action, &mut observation_scratch)?
             };
             *outcomes.entry((own, opponent)).or_insert(0.0) += world.weight;
         }
@@ -962,6 +1046,7 @@ fn forecast_worlds_for_choice(
 ) -> Result<Vec<PegCandidateForecast>, String> {
     let progress = crate::progress::current();
     let mut observation_scratch = Model132ObservationScratch::default();
+    let mut rollout_storage = rollout_storage::RolloutStorage::default();
     let batch_size = policy.rollout_batch_size().clamp(1, 32);
     let mut batch_scores = Vec::new();
     let actions = observation.legal_actions();
@@ -999,27 +1084,28 @@ fn forecast_worlds_for_choice(
                 }
             }
             if batch_size > 1 && index % batch_size == 0 {
-                batch_scores = match rollout_candidate_batch(
+                match rollout_storage.batch(
                     observation,
                     policy,
                     &worlds[index..(index + batch_size).min(worlds.len())],
                     action,
+                    &mut batch_scores,
                 ) {
-                    Ok(scores) => scores,
+                    Ok(()) => (),
                     Err(_) => {
                         if let Some(progress) = &progress {
                             progress.check_cancelled()?;
                         }
                         // A speculative later world may never be needed after pruning.
                         // Revisit this chunk in canonical scalar order before exposing errors.
-                        Vec::new()
+                        batch_scores.clear();
                     }
                 };
             }
             let score = if let Some(score) = batch_scores.get(index % batch_size) {
                 *score
             } else {
-                rollout_candidate(observation, policy, world, action, &mut observation_scratch)?
+                rollout_storage.scalar(observation, policy, world, action, &mut observation_scratch)?
             };
             *outcomes.entry(score).or_insert(0.0) += world.weight;
             let utility = *utilities
@@ -2014,6 +2100,36 @@ mod tests {
     }
 
     #[test]
+    fn model206_cancelled_forecasts_never_return_partial_candidates() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct CancelDuringRollout {
+            progress: Arc<crate::progress::DecisionProgress>, calls: AtomicUsize,
+        }
+        impl Model132PeggingPolicy for CancelDuringRollout {
+            fn choose_action(&self, observation: &Model132Observation) -> Result<RankPegAction, String> {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                self.progress.cancel();
+                FirstLegal.choose_action(observation)
+            }
+        }
+        let (observation, world) = opening();
+        let worlds = vec![world; 513];
+        for bounded in [false, true] {
+            let progress = Arc::new(crate::progress::DecisionProgress::default());
+            let policy = CancelDuringRollout { progress: Arc::clone(&progress), calls: AtomicUsize::new(0) };
+            let result = crate::progress::with_progress(progress, || {
+                if bounded {
+                    direct_bounds::forecast_worlds_for_choice(&observation, &policy, &worlds, worlds.len(), &mut |_, _| 0.5)
+                } else {
+                    forecast_worlds(&observation, &policy, &worlds, worlds.len())
+                }
+            });
+            assert_eq!(result.err().as_deref(), Some(crate::progress::CANCELLED_ERROR));
+            assert!(policy.calls.load(Ordering::Relaxed) > 0);
+        }
+    }
+
+    #[test]
     fn cancelled_forecasts_never_return_partial_candidates() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         struct CancelDuringRollout {
@@ -2040,6 +2156,69 @@ mod tests {
             });
             assert_eq!(result.err().as_deref(), Some(crate::progress::CANCELLED_ERROR));
             assert!(policy.calls.load(Ordering::Relaxed) > 0);
+        }
+    }
+
+    #[test]
+    fn model206_choice_bound_preserves_full_histograms_and_never_eliminates_ties() {
+        let (observation, world) = opening();
+        let worlds = sample_worlds(vec![world; 513], usize::MAX, 0).unwrap();
+        let full = forecast_worlds(&observation, &FirstLegal, &worlds, worlds.len()).unwrap();
+        let target = (full[0].outcomes[0].0, full[0].outcomes[0].1);
+        assert!(full
+            .iter()
+            .any(|f| (f.outcomes[0].0, f.outcomes[0].1) != target));
+        for difference in [0.0, f64::EPSILON, 0.25] {
+            let utility = |a, b| 0.5 + if (a, b) == target { difference } else { 0.0 };
+            let bounded = direct_bounds::forecast_worlds_for_choice(
+                &observation,
+                &FirstLegal,
+                &worlds,
+                worlds.len(),
+                &mut |a, b| utility(a, b),
+            )
+            .unwrap();
+            let progress = std::sync::Arc::new(crate::progress::DecisionProgress::default());
+            let observed = crate::progress::with_progress(std::sync::Arc::clone(&progress), || {
+                direct_bounds::forecast_worlds_for_choice(&observation, &FirstLegal, &worlds, worlds.len(),
+                    &mut |a, b| utility(a, b)).unwrap()
+            });
+            assert_identical_forecasts(&bounded, &observed);
+            let total = worlds.len() * observation.legal_actions().len();
+            assert_eq!(progress.snapshot(), (total, total), "pruned branches count as resolved");
+            let score = |f: &PegCandidateForecast| {
+                f.outcomes
+                    .iter()
+                    .map(|(a, b, w)| w * utility(*a, *b))
+                    .sum::<f64>()
+            };
+            let best = full.iter().map(score).fold(f64::NEG_INFINITY, f64::max);
+            // Preserve *every* tied winner so the production tie break is unchanged.
+            for expected in full.iter().filter(|f| score(f) == best) {
+                let actual = bounded
+                    .iter()
+                    .find(|f| f.action == expected.action)
+                    .unwrap();
+                assert_identical_forecasts(
+                    std::slice::from_ref(actual),
+                    std::slice::from_ref(expected),
+                );
+            }
+            for actual in &bounded {
+                let expected = full.iter().find(|f| f.action == actual.action).unwrap();
+                assert_identical_forecasts(
+                    std::slice::from_ref(actual),
+                    std::slice::from_ref(expected),
+                );
+            }
+            if difference <= f64::EPSILON {
+                assert_identical_forecasts(&bounded, &full); // Includes canonical tie order.
+            } else {
+                assert!(
+                    bounded.len() < full.len(),
+                    "fixture must exercise actual early termination"
+                );
+            }
         }
     }
 
@@ -2101,6 +2280,64 @@ mod tests {
                 assert!(
                     bounded.len() < full.len(),
                     "fixture must exercise actual early termination"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn model206_choice_bound_matches_full_evaluation_with_unequal_world_weights() {
+        let assets =
+            PolicyAssets::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")).unwrap();
+        let (observation, _) = opening();
+        let policy = assets.decision_policy().unwrap();
+        let worlds: Vec<_> = assets
+            .worlds(&observation, &policy)
+            .unwrap()
+            .into_iter()
+            .step_by(97)
+            .take(64)
+            .enumerate()
+            .map(|(index, mut world)| {
+                world.weight *= if index % 3 == 0 {
+                    1e-12
+                } else {
+                    (index + 1) as f64
+                };
+                world
+            })
+            .collect();
+        let worlds = sample_worlds(worlds, usize::MAX, 0).unwrap();
+        let full = forecast_worlds(&observation, &FirstLegal, &worlds, worlds.len()).unwrap();
+        for seed in 0..32_u32 {
+            let utility = |a: u8, b: u8| {
+                let hash =
+                    (u32::from(a) * 65537 + u32::from(b) * 257 + seed).wrapping_mul(2654435761);
+                f64::from(hash % 1025) / 1024.0
+            };
+            let actual = direct_bounds::forecast_worlds_for_choice(
+                &observation,
+                &FirstLegal,
+                &worlds,
+                worlds.len(),
+                &mut |a, b| utility(a, b),
+            )
+            .unwrap();
+            let score = |f: &PegCandidateForecast| {
+                f.outcomes
+                    .iter()
+                    .map(|(a, b, w)| w * utility(*a, *b))
+                    .sum::<f64>()
+            };
+            let best = full.iter().map(score).fold(f64::NEG_INFINITY, f64::max);
+            for winner in full.iter().filter(|f| score(f) == best) {
+                assert!(actual.iter().any(|f| f.action == winner.action));
+            }
+            for candidate in actual {
+                let expected = full.iter().find(|f| f.action == candidate.action).unwrap();
+                assert_identical_forecasts(
+                    std::slice::from_ref(&candidate),
+                    std::slice::from_ref(expected),
                 );
             }
         }
@@ -2512,6 +2749,72 @@ mod tests {
             .unwrap();
         }
     }
+    #[test]
+    fn reusable_rollouts_preserve_worlds_histograms_pruning_and_error_recovery() {
+        struct Reuse { batch: usize, fail_batch: bool }
+        impl Model132PeggingPolicy for Reuse {
+            fn choose_action(&self, o: &Model132Observation) -> Result<RankPegAction, String> {
+                FirstLegal.choose_action(o)
+            }
+            fn choose_actions(&self, observations: &[Model132Observation]) -> Result<Vec<RankPegAction>, String> {
+                if self.fail_batch { return Err("speculative batch failure".into()); }
+                observations.iter().map(|o| self.choose_action(o)).collect()
+            }
+            fn rollout_batch_size(&self) -> usize { self.batch }
+            fn reuse_rollout_buffers(&self) -> bool { true }
+        }
+        let mut positions = 0;
+        for scores in [[0, 0], [116, 118], [120, 120]] {
+            let (mut root, world) = opening();
+            root.my_score = scores[0]; root.opponent_score = scores[1];
+            let mut state = world_state(&root, &world).unwrap();
+            while !state.complete && state.winner.is_none() {
+                let observation = Model132Observation::from_state(&state, state.current).unwrap();
+                let world = World {
+                    remaining: state.hands[state.current.other().index()],
+                    discards: state.own_discards[state.current.other().index()], weight: 1.0,
+                };
+                let worlds = sample_worlds((0..65).map(|i| {
+                    let mut changed = world.clone();
+                    if let Some(rank) = changed.remaining.iter().position(|n| *n > 0) {
+                        changed.remaining[rank] -= 1;
+                        changed.remaining[i % 13] += 1;
+                        if world_state(&observation, &changed).is_err() { changed = world.clone(); }
+                    }
+                    changed.weight = (i + 1) as f64;
+                    changed
+                }).collect(), usize::MAX, 0).unwrap();
+                let expected = forecast_worlds(&observation, &FirstLegal, &worlds, worlds.len()).unwrap();
+                for policy in [Reuse { batch: 1, fail_batch: false }, Reuse { batch: 32, fail_batch: false }, Reuse { batch: 32, fail_batch: true }] {
+                    assert_identical_forecasts(&forecast_worlds(&observation, &policy, &worlds, worlds.len()).unwrap(), &expected);
+                    for difference in [0.0, f64::EPSILON, 0.25] {
+                        let utility = |a, b| if a > b { 0.5 + difference } else { 0.5 };
+                        let reference = forecast_worlds_for_choice(&observation, &FirstLegal, &worlds, worlds.len(), &mut |a, b| utility(a, b)).unwrap();
+                        let actual = forecast_worlds_for_choice(&observation, &policy, &worlds, worlds.len(), &mut |a, b| utility(a, b)).unwrap();
+                        assert_identical_forecasts(&actual, &reference);
+                    }
+                    // Reused slots must reject invalid input and recover to a
+                    // different valid world without retaining its private cards.
+                    let mut storage = rollout_storage::RolloutStorage::default();
+                    let mut scratch = Model132ObservationScratch::default();
+                    let action = observation.legal_actions()[0];
+                    let expected = rollout_candidate(&observation, &FirstLegal, &world, action, &mut scratch).unwrap();
+                    assert_eq!(storage.scalar(&observation, &policy, &world, action, &mut scratch).unwrap(), expected);
+                    let invalid = World { remaining: [4; 13], ..world.clone() };
+                    assert_eq!(storage.scalar(&observation, &policy, &invalid, action, &mut scratch).unwrap_err(),
+                        rollout_candidate(&observation, &FirstLegal, &invalid, action, &mut scratch).unwrap_err());
+                    let mut invalid_root = observation.clone(); invalid_root.own_played[0] += 1;
+                    assert_eq!(storage.scalar(&invalid_root, &policy, &world, action, &mut scratch).unwrap_err(),
+                        rollout_candidate(&invalid_root, &FirstLegal, &world, action, &mut scratch).unwrap_err());
+                    assert_eq!(storage.scalar(&observation, &policy, &world, action, &mut scratch).unwrap(), expected);
+                }
+                positions += 1;
+                state.apply(state.legal_actions()[0]).unwrap();
+            }
+        }
+        assert!(positions > 12);
+    }
+
     #[test]
     fn batch_rollouts_preserve_histogram_bits_and_pruning() {
         struct BatchedFirst;

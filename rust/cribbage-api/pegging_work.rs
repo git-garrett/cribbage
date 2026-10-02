@@ -136,7 +136,7 @@ pub(super) fn opening_key(session: &Session) -> Option<String> {
     let game = &session.game;
     let own = game.player(AI);
     let opponent = game.player(HUMAN);
-    if !matches!(session.model, ModelId::Schell1323 | ModelId::Schell200 | ModelId::Schell201 | ModelId::Schell202 | ModelId::Schell203 | ModelId::Schell204)
+    if !matches!(session.model, ModelId::Schell1323 | ModelId::Schell200 | ModelId::Schell201 | ModelId::Schell202 | ModelId::Schell203 | ModelId::Schell204 | ModelId::Schell205 | ModelId::Schell206 | ModelId::Schell207 | ModelId::Schell205Pegging | ModelId::Schell205Pegging2)
         || session.forfeited
         || session.completed_at.is_some()
         || session.waiting_for_deal_cut
@@ -195,7 +195,7 @@ pub(super) fn prepare(server: &Server, session: &Session) -> Option<Arc<Work>> {
 /// fixed at deal time; only the opponent's eventual four-card count is needed.
 /// This cannot influence the already-completed discard decision or human UI.
 fn after_discard(session: &Session, cards: &[u8]) -> Option<Session> {
-    if !matches!(session.model, ModelId::Schell1323 | ModelId::Schell200 | ModelId::Schell201 | ModelId::Schell202 | ModelId::Schell203 | ModelId::Schell204)
+    if !matches!(session.model, ModelId::Schell1323 | ModelId::Schell200 | ModelId::Schell201 | ModelId::Schell202 | ModelId::Schell203 | ModelId::Schell204 | ModelId::Schell205 | ModelId::Schell206 | ModelId::Schell207 | ModelId::Schell205Pegging | ModelId::Schell205Pegging2)
         || session.game.dealer != HUMAN
         || session.game.phase != Phase::Discard
         || cards.len() != 2

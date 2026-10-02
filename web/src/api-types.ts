@@ -25,7 +25,12 @@ export type Opponent =
   | "schell_table-peg_table-20.1"
   | "schell_table-peg_table-20.2"
   | "schell_table-peg_table-20.3"
-  | "schell_table-peg_table-20.4";
+  | "schell_table-peg_table-20.4"
+  | "schell_table-peg_table-20.5"
+  | "schell_table-peg_table-20.6"
+  | "schell_table-peg_table-20.7"
+  | "schell_table-peg_table-20.5.pegging"
+  | "schell_table-peg_table-20.5.pegging2";
 export type StoredOpponent = Opponent;
 export type Phase =
   | "cut_for_deal"

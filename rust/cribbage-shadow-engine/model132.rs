@@ -456,6 +456,8 @@ pub trait Model132PeggingPolicy {
     fn choose_action(&self, observation: &Model132Observation) -> Result<RankPegAction, String>;
     /// Scheduling hint; each observation still has an independent legal posterior.
     fn rollout_batch_size(&self) -> usize { 1 }
+    /// Reuse simulation storage without changing legal observations or scheduling.
+    fn reuse_rollout_buffers(&self) -> bool { false }
     /// Results must equal independent scalar queries; never pool private information or probability mass.
     fn choose_actions(&self, observations: &[Model132Observation]) -> Result<Vec<RankPegAction>, String> {
         observations.iter().map(|observation| self.choose_action(observation)).collect()
@@ -647,6 +649,7 @@ pub struct Model911Policy {
     wp_board: Option<Arc<crate::board_matrix::BoardWinMatrix>>,
     likelihood_cache: Option<Mutex<DeclineLikelihoodCache>>,
     batch_posteriors: bool,
+    reuse_rollout_buffers: bool,
 }
 
 /// Public-history features only, owned by one live decision policy. Borrowed
@@ -883,6 +886,10 @@ fn score_count_for_rank_series(ranks: &[u8]) -> u8 {
 }
 
 impl Model911Policy {
+    pub(crate) fn with_reusable_rollouts(mut self) -> Self {
+        self.reuse_rollout_buffers = true;
+        self
+    }
     /// Model 20.4 opt-in; historical policies keep scalar rollout scheduling.
     pub(crate) fn with_batched_posteriors(mut self) -> Self {
         self.batch_posteriors = true;
@@ -925,6 +932,7 @@ impl Model911Policy {
             wp_board: None,
             likelihood_cache: None,
             batch_posteriors: false,
+            reuse_rollout_buffers: false,
         })
     }
 
@@ -940,6 +948,7 @@ impl Model911Policy {
             wp_board: None,
             likelihood_cache: None,
             batch_posteriors: false,
+            reuse_rollout_buffers: false,
         }
     }
 
@@ -949,6 +958,18 @@ impl Model911Policy {
 
     pub(crate) fn use_compact_continuations(&self) {
         self.lock_inner().use_compact_continuations();
+    }
+
+    pub(crate) fn use_short_legal_rank_check(&self) {
+        self.lock_inner().use_short_legal_rank_check();
+    }
+
+    pub(crate) fn collapse_forced_wp_continuations(&self) {
+        self.lock_inner().collapse_forced_wp_continuations();
+    }
+
+    pub(crate) fn prepare_continuation_bases(&self) {
+        self.lock_inner().prepare_continuation_bases();
     }
 
     pub(crate) fn cache_wp_actions_for_role(&self, role: Role) {
@@ -1099,6 +1120,7 @@ impl Model911Policy {
 }
 
 impl Model132PeggingPolicy for Model911Policy {
+    fn reuse_rollout_buffers(&self) -> bool { self.reuse_rollout_buffers }
     fn rollout_batch_size(&self) -> usize { if self.batch_posteriors && self.wp_board.is_some() { 32 } else { 1 } }
     fn choose_actions(&self, observations: &[Model132Observation]) -> Result<Vec<RankPegAction>, String> {
         if !self.batch_posteriors || self.wp_board.is_none() {

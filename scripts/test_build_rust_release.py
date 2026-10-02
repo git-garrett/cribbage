@@ -48,6 +48,20 @@ class ReleaseBuildTests(unittest.TestCase):
             BUILD.build(self.options(root, kind=kind, **options))
         return calls
 
+    def test_embedded_priors_are_fingerprinted_with_external_runtime_assets(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)/'source'; runtime = Path(d)/'runtime'
+            for name in ['rust/Cargo.toml', 'rust/Cargo.lock', 'scripts/build_rust_release.py', 'corpus.json',
+                         'rust/cribbage-shadow-engine/assets/model206-root-ordering.json']:
+                f = root/name; f.parent.mkdir(parents=True, exist_ok=True); f.write_text('{}')
+            (runtime/'rust/cribbage-shadow-engine/assets').mkdir(parents=True)
+            prior = (root/'rust/cribbage-shadow-engine/assets/model206-root-ordering.json').resolve()
+            before = BUILD.inputs(root, runtime, root/'corpus.json')
+            self.assertIn(str(prior), before)
+            prior.write_text('{"changed":true}')
+            after = BUILD.inputs(root, runtime, root/'corpus.json')
+            self.assertNotEqual(before[str(prior)], after[str(prior)])
+
     def test_mac_profiles_checks_then_publishes(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d);calls = self.exercise(p)

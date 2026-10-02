@@ -647,6 +647,35 @@ pub struct RankPegState {
 }
 
 impl RankPegState {
+    pub(crate) fn legal_rank_mask(&self) -> u16 {
+        if self.complete || self.winner.is_some() { return 0; }
+        self.hands[self.current.index()].iter().enumerate().fold(0, |mask, (rank, copies)| {
+            if *copies > 0 && self.count + crate::cards::VALUES[rank] <= 31 {
+                mask | (1 << rank)
+            } else { mask }
+        })
+    }
+
+    pub(crate) fn allows(&self, action: RankPegAction) -> bool {
+        if self.complete || self.winner.is_some() { return false; }
+        let mask = self.legal_rank_mask();
+        match action {
+            RankPegAction::Go => mask == 0,
+            RankPegAction::Play(rank) => rank < 13 && mask & (1 << rank) != 0,
+        }
+    }
+
+    /// Same transitions and checks; callers may retain vector capacity across worlds.
+    pub(crate) fn apply_without_temporary_vectors(&mut self, action: RankPegAction) -> Result<i32, String> {
+        if self.complete || self.winner.is_some() {
+            return Err("pegging state is already terminal".to_string());
+        }
+        match action {
+            RankPegAction::Play(rank) => self.apply_play::<true>(rank),
+            RankPegAction::Go => self.apply_go::<true>(),
+        }
+    }
+
     pub fn legal_actions(&self) -> Vec<RankPegAction> {
         if self.complete || self.winner.is_some() {
             return Vec::new();
@@ -664,8 +693,8 @@ impl RankPegState {
             return Err("pegging state is already terminal".to_string());
         }
         match action {
-            RankPegAction::Play(rank) => self.apply_play(rank),
-            RankPegAction::Go => self.apply_go(),
+            RankPegAction::Play(rank) => self.apply_play::<false>(rank),
+            RankPegAction::Go => self.apply_go::<false>(),
         }
     }
 
@@ -696,7 +725,7 @@ impl RankPegState {
         })
     }
 
-    fn apply_play(&mut self, rank: u8) -> Result<i32, String> {
+    fn apply_play<const RANK_ONLY: bool>(&mut self, rank: u8) -> Result<i32, String> {
         if rank >= RANKS as u8 {
             return Err(format!("invalid pegging rank {}", rank));
         }
@@ -716,13 +745,12 @@ impl RankPegState {
         self.plays.push(rank);
         self.count += card.value;
         self.last_player = Some(self.current);
-        let played_cards = self
-            .plays
-            .iter()
-            .copied()
-            .map(peg_card_for_rank)
-            .collect::<Vec<_>>();
-        let points = i32::from(score_count(&played_cards));
+        let points = if RANK_ONLY {
+            i32::from(crate::cards::score_count_ranks(&self.plays))
+        } else {
+            let played_cards = self.plays.iter().copied().map(peg_card_for_rank).collect::<Vec<_>>();
+            i32::from(score_count(&played_cards))
+        };
         self.add_score(self.current, points);
         if self.winner.is_some() {
             return Ok(points);
@@ -736,8 +764,10 @@ impl RankPegState {
         Ok(points)
     }
 
-    fn apply_go(&mut self) -> Result<i32, String> {
-        if !legal_ranks(&self.hands[self.current.index()], self.count).is_empty() {
+    fn apply_go<const RANK_ONLY: bool>(&mut self) -> Result<i32, String> {
+        let can_play = if RANK_ONLY { self.legal_rank_mask() != 0 }
+            else { !legal_ranks(&self.hands[self.current.index()], self.count).is_empty() };
+        if can_play {
             return Err("current player still has a legal rank".to_string());
         }
         self.history.push(RankPegEvent::Go { seat: self.current });
@@ -841,6 +871,44 @@ fn perspective_event(event: RankPegEvent, perspective: PegSeat) -> PublicPegEven
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn allocation_light_transitions_match_reference_through_complete_hands() {
+        let mut seed = 205_u64;
+        let mut random = || { seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1); (seed >> 32) as usize };
+        let mut checked = 0;
+        for game in 0..512 {
+            let mut deck: Vec<u8> = (0..52).map(|c| c % 13).collect();
+            for i in (1..deck.len()).rev() { deck.swap(i, random() % (i + 1)); }
+            let mut hands = [[0; 13]; 2];
+            for i in 0..8 { hands[i / 4][deck[i] as usize] += 1; }
+            let mut reference = state(hands);
+            reference.scores = if game % 3 == 0 { [118, 119] } else { [0, 0] };
+            reference.dealer = if game % 2 == 0 { PegSeat::Zero } else { PegSeat::One };
+            let mut lean = reference.clone();
+            while !reference.complete && reference.winner.is_none() {
+                let legal = reference.legal_actions();
+                let mask = lean.legal_rank_mask();
+                let from_mask: Vec<_> = if mask == 0 { vec![RankPegAction::Go] } else {
+                    (0..13).filter(|rank| mask & (1 << rank) != 0).map(RankPegAction::Play).collect()
+                };
+                assert_eq!(legal, from_mask);
+                for action in std::iter::once(RankPegAction::Go).chain((0..=13).map(RankPegAction::Play)) {
+                    assert_eq!(lean.allows(action), legal.contains(&action));
+                    let mut a = reference.clone(); let mut b = lean.clone();
+                    assert_eq!(a.apply(action), b.apply_without_temporary_vectors(action));
+                    assert_eq!(a, b);
+                }
+                let action = legal[random() % legal.len()];
+                assert_eq!(reference.apply(action), lean.apply_without_temporary_vectors(action));
+                assert_eq!(reference, lean);
+                checked += 1;
+            }
+            assert!(!lean.allows(RankPegAction::Go));
+            assert_eq!(reference.apply(RankPegAction::Go), lean.apply_without_temporary_vectors(RankPegAction::Go));
+        }
+        assert!(checked > 3000);
+    }
 
     fn hand(entries: &[(u8, u8)]) -> [u8; RANKS] {
         let mut hand = [0_u8; RANKS];

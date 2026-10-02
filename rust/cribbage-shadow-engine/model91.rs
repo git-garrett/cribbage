@@ -755,6 +755,8 @@ pub struct Model91Policy {
     decision_cache: HashMap<Model91DecisionKey, Model91Choice>,
     wp_decisions: HashMap<(Model91DecisionKey, [u8; 2]), RankPegAction>,
     wp_action_cache_role: Option<Role>,
+    prepare_continuation_bases: bool,
+    short_legal_rank_check: bool,
     wp_future: compact::WpMemo,
     wp_evidence: HashMap<(Model91Observation, [u8; 2]), Arc<Model91ActionEvidence<f64>>>,
     wp_evidence_outcomes: usize,
@@ -768,6 +770,20 @@ pub struct Model91Policy {
 }
 
 impl Model91Policy {
+    /// Model 20.7 only: stop once a second legal rank is found.
+    pub(crate) fn use_short_legal_rank_check(&mut self) {
+        self.short_legal_rank_check = true;
+    }
+
+    pub(crate) fn collapse_forced_wp_continuations(&mut self) {
+        self.wp_future.collapse_forced_continuations();
+    }
+
+    /// Reuse immutable packed bases across candidates within one evidence build.
+    pub(crate) fn prepare_continuation_bases(&mut self) {
+        self.prepare_continuation_bases = true;
+    }
+
     /// Model 20 opt-in. Historical policies retain their empirical weights.
     pub(crate) fn use_empirical_depletion(&mut self) {
         self.empirical_depletion = true;
@@ -798,6 +814,8 @@ impl Model91Policy {
             decision_cache: HashMap::new(),
             wp_decisions: HashMap::new(),
             wp_action_cache_role: None,
+            prepare_continuation_bases: false,
+            short_legal_rank_check: false,
             wp_future: compact::WpMemo::default(),
             wp_evidence: HashMap::new(),
             wp_evidence_outcomes: 0,
@@ -1002,8 +1020,19 @@ impl Model91Policy {
                 )
             };
             let mut outcomes = Vec::with_capacity(legal.len() * hands.len());
-            for rank in legal {
-                for hand in &hands {
+            // Keep action-major evaluation and memo access order unchanged. Build
+            // each base during the first action, so entry errors also retain their
+            // original order. Single-action evidence needs no temporary storage.
+            let reuse = self.prepare_continuation_bases && legal.len() > 1;
+            let mut bases = Vec::with_capacity(if reuse { hands.len() } else { 0 });
+            for (action_index, rank) in legal.iter().enumerate() {
+                for (hand_index, hand) in hands.iter().enumerate() {
+                    if reuse && action_index > 0 {
+                        outcomes.push(self.wp_future.forced_play_prepared(
+                            bases[hand_index], scores, observation.role, *rank, board,
+                        )?);
+                        continue;
+                    }
                     let state = AverageState::new(
                         [observation.own_remaining, hand.ranks],
                         observation.series(),
@@ -1012,13 +1041,17 @@ impl Model91Policy {
                         relative_index(observation.go_player),
                         relative_index(observation.last_player),
                     )?;
-                    outcomes.push(self.wp_future.forced_play(
-                        &state,
-                        scores,
-                        observation.role,
-                        *rank,
-                        board,
-                    )?);
+                    if reuse {
+                        let base = compact::State::from_reference(&state);
+                        bases.push(base);
+                        outcomes.push(self.wp_future.forced_play_prepared(
+                            base, scores, observation.role, *rank, board,
+                        )?);
+                    } else {
+                        outcomes.push(self.wp_future.forced_play(
+                            &state, scores, observation.role, *rank, board,
+                        )?);
+                    }
                 }
             }
             let evidence = Arc::new(Model91ActionEvidence {
@@ -1069,7 +1102,12 @@ impl Model91Policy {
                     continue;
                 }
             }
-            if legal_ranks(&observation.own_remaining, observation.count).len() <= 1
+            let forced_rank = if self.short_legal_rank_check {
+                legal_rank_iter(&observation.own_remaining, observation.count).nth(1).is_none()
+            } else {
+                legal_ranks(&observation.own_remaining, observation.count).len() <= 1
+            };
+            if forced_rank
                 || self.evidence_cache_outcome_limit == 0
             {
                 results[index] =
@@ -2176,13 +2214,14 @@ fn average_go(
     }
 }
 
+fn legal_rank_iter(hand: &[u8; RANKS], count: u8) -> impl Iterator<Item = u8> + '_ {
+    hand.iter().enumerate().filter_map(move |(rank, copies)| {
+        (*copies > 0 && count + VALUES[rank] <= 31).then_some(rank as u8)
+    })
+}
+
 fn legal_ranks(hand: &[u8; RANKS], count: u8) -> Vec<u8> {
-    hand.iter()
-        .enumerate()
-        .filter_map(|(rank, copies)| {
-            (*copies > 0 && count + VALUES[rank] <= 31).then_some(rank as u8)
-        })
-        .collect()
+    legal_rank_iter(hand, count).collect()
 }
 
 fn score_count_for_ranks(ranks: &[u8]) -> u8 {
@@ -2217,6 +2256,25 @@ mod tests {
     use super::*;
     use std::env;
     use std::process;
+
+    #[test]
+    fn model207_short_rank_check_matches_legal_choices_for_all_masks_and_counts() {
+        let mut policy = Model91Policy::new(None, 0);
+        assert!(!policy.short_legal_rank_check);
+        policy.use_short_legal_rank_check();
+        assert!(policy.short_legal_rank_check);
+        assert!(!Model91Policy::new(None, 0).short_legal_rank_check);
+        for mask in 0_u16..(1 << RANKS) {
+            let hand = std::array::from_fn(|rank| if mask & (1 << rank) == 0 { 0 } else { 4 });
+            for count in 0..=31 {
+                let expected = (0..RANKS).filter(|rank| {
+                    hand[*rank] > 0 && count + VALUES[*rank] <= 31
+                }).count() <= 1;
+                assert_eq!(legal_rank_iter(&hand, count).nth(1).is_none(), expected);
+                assert_eq!(legal_ranks(&hand, count).len() <= 1, expected);
+            }
+        }
+    }
 
     #[test]
     fn observation_hash_includes_every_equality_field_and_option_tag() {
@@ -2286,6 +2344,59 @@ mod tests {
         }
         for (index, value) in variants.iter().step_by(503).enumerate() {
             assert_eq!(colliding.get(value), Some(&index));
+        }
+    }
+
+    #[test]
+    fn prepared_continuation_bases_preserve_evidence_order_values_and_cache_reuse() {
+        let board = BoardWinMatrix::from_function(|_, a, b| {
+            1.0 / (1.0 + ((f64::from(b) - f64::from(a)) / 7.0).exp())
+        });
+        for role in [Role::Dealer, Role::Pone] {
+            let mut observation = Model91Observation::from_public_state(
+                role, hand(&[(0, 1), (4, 1)]), hand(&[(2, 1), (7, 1)]),
+                hand(&[(9, 1), (12, 1)]), hand(&[(1, 2)]), Some(8),
+                &[], 0, None, None,
+            ).unwrap();
+            let mut beliefs = Model91EmpiricalBeliefs::default();
+            beliefs.replace_row(
+                if role == Role::Dealer { Role::Pone } else { Role::Dealer },
+                observation.opponent_played,
+                vec![(hand(&[(0, 2)]), 5), (hand(&[(4, 1), (12, 1)]), 17)],
+            );
+            for empirical in [None, Some(beliefs)] {
+                for limit in [0, 5, 300_000] {
+                    let make = || Model91Policy::new_with_evidence_cache(empirical.clone(), 0, limit, 0);
+                    let mut reference = make();
+                    let mut prepared = make();
+                    prepared.prepare_continuation_bases();
+                    for scores in [[0, 0], [119, 120], [120, 119], [0, 0]] {
+                        for cut in [0, 4, 8] {
+                            observation.turn_rank = Some(cut);
+                            let expected = reference.wp_action_evidence(&observation, &[0, 4], scores, &board).unwrap();
+                            let actual = prepared.wp_action_evidence(&observation, &[0, 4], scores, &board).unwrap();
+                            assert_eq!(actual.legal, expected.legal);
+                            assert_eq!(actual.hands.iter().map(|h| (h.ranks, h.base_weight.to_bits())).collect::<Vec<_>>(),
+                                expected.hands.iter().map(|h| (h.ranks, h.base_weight.to_bits())).collect::<Vec<_>>());
+                            assert_eq!(actual.outcomes.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                                expected.outcomes.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+                            assert_eq!(prepared.wp_evidence_outcomes, reference.wp_evidence_outcomes);
+                            let again = prepared.wp_action_evidence(&observation, &[0, 4], scores, &board).unwrap();
+                            assert_eq!(Arc::ptr_eq(&actual, &again), actual.outcomes.len() <= limit);
+                        }
+                    }
+                    // Fresh uncached builders exercise the no-allocation path and
+                    // preserve entry failures on both the first and later action.
+                    for legal in [vec![], vec![0], vec![13, 0], vec![0, 13]] {
+                        let mut reference = Model91Policy::new(None, 0);
+                        let mut prepared = Model91Policy::new(None, 0);
+                        prepared.prepare_continuation_bases();
+                        let evaluate = |p: &mut Model91Policy| p.wp_action_evidence(&observation, &legal, [0, 0], &board)
+                            .map(|e| e.outcomes.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+                        assert_eq!(evaluate(&mut prepared), evaluate(&mut reference));
+                    }
+                }
+            }
         }
     }
 
@@ -3152,6 +3263,7 @@ mod tests {
                 };
                 let mut scalar = make();
                 let mut batched = make();
+                batched.use_short_legal_rank_check();
                 // Zero support must remain the same error, including the physical fallback.
                 let supported: Vec<_> = queries
                     .iter()

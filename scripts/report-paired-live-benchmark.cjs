@@ -216,7 +216,7 @@ function modelName(model) {
   return model;
 }
 
-function combineRows(analyses, rowsFor, fields, totals = []) {
+function combineRows(analyses, rowsFor, fields, sumFields = []) {
   const groups = new Map();
   for (const analysis of analyses) {
     for (const row of rowsFor(analysis)) {
@@ -224,12 +224,13 @@ function combineRows(analyses, rowsFor, fields, totals = []) {
       const group = groups.get(key) || { kind: row.kind || row.label, role: row.role || null, model: row.model || null, rows: 0 };
       const weight = row.rows;
       group.rows += weight;
-      for (const field of fields) group[field] = (group[field] || 0) + row[field] * (totals.includes(field) ? 1 : weight);
+      for (const field of fields) group[field] = (group[field] || 0) + row[field] * weight;
+      for (const field of sumFields) group[field] = (group[field] || 0) + row[field];
       groups.set(key, group);
     }
   }
   return [...groups.values()].map((group) => {
-    for (const field of fields) if (!totals.includes(field)) group[field] /= group.rows;
+    for (const field of fields) group[field] /= group.rows;
     return group;
   });
 }
@@ -294,7 +295,7 @@ function buildReport(options) {
       evCalibration: combineRows(analyses, (analysis) => analysis.ev.rows, ["avgEv", "avgRealized", "avgError", "meanAbsError"]),
       evTelemetry: { legacyImmediatePegModels, excluded: evExcluded },
       winProbabilityCalibration: combineRows(analyses, (analysis) => analysis.winProbability.rows, ["avgPredicted", "actualWinRate", "miss", "brier", "meanAbsError"]),
-      timing: combineRows(analyses, (analysis) => analysis.timing.rows, ["avgMs", "totalSeconds"], ["totalSeconds"]),
+      timing: combineRows(analyses, (analysis) => analysis.timing.rows, ["avgMs"], ["totalSeconds"]),
       orientationAnalysis: { [options.candidateLeft]: candidateAnalysis, [options.opponentLeft]: opponentAnalysis },
       integrity: { errors: [], warnings: [], invalidEngineIndexes: games.invalidEngines, pairedSeedMismatchIndexes: games.paired.seedMismatches },
     };
@@ -334,7 +335,14 @@ function renderMarkdown(report) {
   const availableRows = report.availableEventScoring.map((row) => [row.label, number(row.candidateMean), number(row.opponentMean), number(row.difference), `${row.candidateRows}/${row.opponentRows}`]);
   const evRows = report.evCalibration.map((row) => [row.kind, row.role, row.model === report.candidate ? candidateShort : opponentShort, row.rows, number(row.avgEv), number(row.avgRealized), number(row.avgError), number(row.meanAbsError)]);
   const probabilityRows = report.winProbabilityCalibration.map((row) => [row.kind, row.role, row.model === report.candidate ? candidateShort : opponentShort, row.rows, number(row.avgPredicted), number(row.actualWinRate), number(row.miss), number(row.brier), number(row.meanAbsError)]);
-  const timingRows = report.timing.map((row) => [row.kind, row.role, row.model === report.candidate ? candidateShort : opponentShort, row.rows, `${number(row.avgMs)} ms`, `${number(row.totalSeconds)} s`]);
+  const timingLabels = { discard: "Discard", peg_opening: "Opening play / hand", peg_hand: "Total / pegging hand" };
+  const timingOrder = { peg_opening: 0, peg_hand: 1, discard: 2 };
+  const roleOrder = { pone: 0, dealer: 1 };
+  const timingRows = report.timing.filter((row) => row.kind !== "pegging").sort((left, right) => (
+    (timingOrder[left.kind] ?? 3) - (timingOrder[right.kind] ?? 3)
+    || (roleOrder[left.role] ?? 2) - (roleOrder[right.role] ?? 2)
+    || Number(right.model === report.candidate) - Number(left.model === report.candidate)
+  )).map((row) => [timingLabels[row.kind] || row.kind, row.role, row.model === report.candidate ? candidateShort : opponentShort, row.rows, `${number(row.avgMs)} ms`, `${number(row.totalSeconds)} s`]);
   const eta = report.progress.eta;
   const localTime = (timestamp) => new Intl.DateTimeFormat("en-US", {
     timeZone: eta.timeZone, weekday: "short", year: "numeric", month: "short", day: "numeric",
@@ -363,7 +371,9 @@ function renderMarkdown(report) {
     "",
     "## Runner status",
     "",
-    ...table(["Orientation", "Status", "Saved", "Rate", "Remaining", "Updated"], report.progress.statuses.map((status) => [status.label, status.status, `${status.savedGames}/${status.totalGames}`, `${number(status.gamesPerSecond)} games/s`, duration(status.estimatedRemainingSeconds), status.updatedAt || "n/a"])),
+    ...table(["Orientation", "Status", "Saved", "Rate", "Remaining", "Updated"], report.progress.statuses.map((status) => [status.label, status.status, `${status.savedGames}/${status.totalGames}`, `${number(Number.isFinite(status.gamesPerSecond) && status.gamesPerSecond > 0 ? 1 / status.gamesPerSecond : null)} s/game`, duration(status.estimatedRemainingSeconds), status.updatedAt || "n/a"])),
+    "",
+    "Rate is elapsed seconds per saved game across all workers in that orientation, not individual game duration.",
     "",
     "## Reciprocal orientations",
     "",
@@ -373,9 +383,13 @@ function renderMarkdown(report) {
     "",
     `## Realized scoring (${candidateShort} − ${opponentShort})`,
     "",
+    "Pegging, hand and crib values are points per recorded hand in the indicated role; pegging sums the whole hand across count resets. Delta is the difference between the models’ averages. N gives the hand counts for each model. Game-ending partial hands are included as played; unreached phases contribute zero. Final score and margin are per game.",
+    "",
     ...table(["Phase", candidateShort, opponentShort, "Delta", "N"], phaseRows),
     "",
     `## Available-event scoring (${candidateShort} − ${opponentShort})`,
+    "",
+    "Points per recorded hand in the indicated role, with the same hand counts as realized scoring. Credits the full event that ended the game, including points beyond 121, but excludes later unplayed scoring events.",
     "",
     ...table(["Phase", candidateShort, opponentShort, "Delta", "N"], availableRows),
     "",
@@ -394,7 +408,7 @@ function renderMarkdown(report) {
     "",
     "## Decision timing",
     "",
-    "Rust model decision calls only; forced no-model rows are excluded.",
+    "Model computation only, excluding opponent time. Opening is each player’s first card of the hand (pone’s initial lead; dealer’s first response). Whole-hand pegging totals sum that player’s calls across every count reset. Forced plays are excluded from opening averages and add zero to totals. Totals with missing non-forced timing are excluded; game-ending partial hands are included as played.",
     "",
     ...table(["Decision", "Role", "Model", "N", "Average", "Total"], timingRows),
     "",
@@ -422,4 +436,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { combineRows, buildReport, parseArgs, summarizeGames, summarizeProgress, renderMarkdown };
+module.exports = { buildReport, parseArgs, summarizeGames, summarizeProgress, renderMarkdown, combineRows };

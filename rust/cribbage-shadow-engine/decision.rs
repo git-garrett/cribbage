@@ -43,7 +43,7 @@ impl From<PegDecision> for PegAction {
 }
 
 /// Choose a live play when the caller does not need EV or win probability.
-/// Model 20.4 skips forecasting for a forced rank; other choices retain the
+/// Models 20.4 and 20.5 skip forecasting for a forced rank; other choices retain the
 /// existing recommendation path. Valuation callers must use that path directly.
 pub fn choose_peg_for_side_with_caches(
     game: &CribbageGame,
@@ -55,7 +55,7 @@ pub fn choose_peg_for_side_with_caches(
     model13_cache: Option<&Model13HandCache>,
 ) -> Result<PegAction, String> {
     ensure_native_model(model_id)?;
-    if model_id == ModelId::Schell204 {
+    if matches!(model_id, ModelId::Schell204 | ModelId::Schell205 | ModelId::Schell206 | ModelId::Schell207 | ModelId::Schell205Pegging | ModelId::Schell205Pegging2) {
         if let Some(action) = forced_rank_action(&game.player(side).hand, game.count) {
             return Ok(action);
         }
