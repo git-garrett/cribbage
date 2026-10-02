@@ -149,22 +149,31 @@ fn reserve_send(
     user_id: i64,
     ip: &str,
 ) -> Result<bool, String> {
+    let user = user_id.to_string();
+    reserve_limits(
+        connection,
+        &[
+            ("sms-send-user", user.as_str(), 30, 1),
+            ("sms-send-user", user.as_str(), 3600, 6),
+            ("sms-send-ip", ip, 3600, 15),
+            ("sms-send-global", "all", 3600, 30),
+        ],
+    )
+}
+
+fn reserve_limits(
+    connection: &mut rusqlite::Connection,
+    limits: &[(&str, &str, i64, i64)],
+) -> Result<bool, String> {
     let transaction = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
     let now = unix_seconds();
-    let user = user_id.to_string();
-    let limits = [
-        ("sms-send-user", user.as_str(), 30, 1),
-        ("sms-send-user", user.as_str(), 3600, 6),
-        ("sms-send-ip", ip, 3600, 15),
-        ("sms-send-global", "all", 3600, 30),
-    ];
     for (kind, subject, window, maximum) in limits {
         let count: i64 = transaction.query_row(
             "SELECT COUNT(*) FROM auth_rate_events WHERE kind=?1 AND subject=?2 AND occurred_at>?3",
             params![kind, subject, now - window], |row| row.get(0)).map_err(|error| error.to_string())?;
-        if count >= maximum {
+        if count >= *maximum {
             return Ok(false);
         }
     }
@@ -174,11 +183,11 @@ fn reserve_send(
             [now - 86400],
         )
         .map_err(|error| error.to_string())?;
-    for (kind, subject) in [
-        ("sms-send-user", user.as_str()),
-        ("sms-send-ip", ip),
-        ("sms-send-global", "all"),
-    ] {
+    let subjects = limits
+        .iter()
+        .map(|(kind, subject, _, _)| (*kind, *subject))
+        .collect::<std::collections::BTreeSet<_>>();
+    for (kind, subject) in subjects {
         transaction
             .execute(
                 "INSERT INTO auth_rate_events(kind,subject,occurred_at) VALUES(?1,?2,?3)",
@@ -201,12 +210,29 @@ fn request_with(server: &Server, request: &Request, provider: &impl VerifyProvid
             json!({"ok": true, "message": GENERIC_MESSAGE, "challenge": token}).to_string(),
         )
     };
-    let result = (|| -> Result<(), String> {
-        let Some(user) = find_user_by_email(&server.data_dir, &normalize_email(&input.email))?
-        else {
-            return Ok(());
-        };
+    let result = (|| -> Result<bool, String> {
+        let normalized = normalize_email(&input.email);
+        let identity = digest(&normalized);
+        let ip = request
+            .headers
+            .get("x-cribbage-client-ip")
+            .map(String::as_str)
+            .unwrap_or("unknown");
         let mut connection = open_game_database(&server.data_dir)?;
+        // Apply request throttles to unknown and unenrolled accounts as well.
+        if !reserve_limits(
+            &mut connection,
+            &[
+                ("sms-request-email", &identity, 30, 1),
+                ("sms-request-email", &identity, 3600, 6),
+                ("sms-request-ip", ip, 3600, 15),
+            ],
+        )? {
+            return Ok(false);
+        }
+        let Some(user) = find_user_by_email(&server.data_dir, &normalized)? else {
+            return Ok(true);
+        };
         let phone: Option<String> = connection
             .query_row(
                 "SELECT phone FROM auth_phone_numbers WHERE user_id=?1",
@@ -216,15 +242,10 @@ fn request_with(server: &Server, request: &Request, provider: &impl VerifyProvid
             .optional()
             .map_err(|error| error.to_string())?;
         let Some(phone) = phone else {
-            return Ok(());
+            return Ok(true);
         };
-        let ip = request
-            .headers
-            .get("x-cribbage-client-ip")
-            .map(String::as_str)
-            .unwrap_or("unknown");
         if !reserve_send(&mut connection, user.id, ip)? {
-            return Ok(());
+            return Ok(false);
         }
         let sid = provider.send(&phone)?;
         let now = unix_seconds();
@@ -240,12 +261,16 @@ fn request_with(server: &Server, request: &Request, provider: &impl VerifyProvid
              VALUES(?1,?2,?3,?4,COALESCE((SELECT MIN(expires_at) FROM auth_sms_challenges WHERE verification_sid=?4),?5),
                     COALESCE((SELECT MAX(attempts) FROM auth_sms_challenges WHERE verification_sid=?4),0))",
             params![digest(&token), user.id, phone, sid, now + OTP_SECONDS]).map_err(|error| error.to_string())?;
-        Ok(())
+        Ok(true)
     })();
-    if let Err(error) = result {
-        eprintln!("SMS sign-in request failed: {error}");
+    match result {
+        Ok(true) => generic(),
+        Ok(false) => too_many_requests(),
+        Err(error) => {
+            eprintln!("SMS sign-in request failed: {error}");
+            unavailable()
+        }
     }
-    generic()
 }
 
 #[derive(Deserialize)]
@@ -517,6 +542,10 @@ mod tests {
             assert_eq!(response.status, 200);
             assert_eq!(value["message"], GENERIC_MESSAGE);
             assert_eq!(
+                request_with(&server, &request(json!({"email":email})), &provider).status,
+                429
+            );
+            assert_eq!(
                 check(
                     &server,
                     &provider,
@@ -536,9 +565,14 @@ mod tests {
         let server = setup("sms-cooldown");
         let provider = Provider::default();
         let first = send(&server, &provider);
-        let throttled = send(&server, &provider);
+        let throttled = request_with(
+            &server,
+            &request(json!({"email":"founder@evenvision.com"})),
+            &provider,
+        );
+        assert_eq!(throttled.status, 429);
+        assert!(!throttled.body.contains("challenge"));
         assert_eq!(provider.sends.load(Ordering::SeqCst), 1);
-        assert_eq!(check(&server, &provider, &throttled, "482193").status, 401);
         assert_eq!(check(&server, &provider, &first, "482193").status, 200);
     }
 
@@ -593,8 +627,12 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(check(&server, &failed, &token, "482193").status, 503);
-        let unsent = send(&setup("sms-send-failure"), &failed);
-        assert_eq!(unsent.len(), 43);
+        let unsent = request_with(
+            &setup("sms-send-failure"),
+            &request(json!({"email":"founder@evenvision.com"})),
+            &failed,
+        );
+        assert_eq!(unsent.status, 503);
         let count: i64 = open_game_database(&server.data_dir)
             .unwrap()
             .query_row("SELECT COUNT(*) FROM auth_sessions", [], |row| row.get(0))
@@ -665,7 +703,12 @@ mod tests {
             ("sms-send-global", "all", 30),
         ] {
             let server = setup(kind);
-            let mut connection = open_game_database(&server.data_dir).unwrap();
+            let provider = Provider::default();
+            let token = send(&server, &provider);
+            let connection = open_game_database(&server.data_dir).unwrap();
+            connection
+                .execute("UPDATE auth_rate_events SET occurred_at=occurred_at-60", [])
+                .unwrap();
             for _ in 0..count {
                 connection
                     .execute(
@@ -674,7 +717,15 @@ mod tests {
                     )
                     .unwrap();
             }
-            assert!(!reserve_send(&mut connection, 1, "127.0.0.1").unwrap());
+            let mut request = request(json!({"email":"founder@evenvision.com"}));
+            request
+                .headers
+                .insert("x-cribbage-client-ip".into(), "127.0.0.1".into());
+            let response = request_with(&server, &request, &provider);
+            assert_eq!(response.status, 429);
+            assert!(!response.body.contains("challenge"));
+            assert_eq!(provider.sends.load(Ordering::SeqCst), 1);
+            assert_eq!(check(&server, &provider, &token, "482193").status, 200);
         }
     }
 }

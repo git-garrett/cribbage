@@ -11985,7 +11985,12 @@ async function requestSignInCode(channel: "email" | "sms"): Promise<void> {
     showAuthView("otp", response.message || "If that email belongs to an account, a sign-in code is on its way.");
     window.setTimeout(() => els.authOtp.focus(), 0);
   } catch (error) {
-    showAuthView("login", error instanceof Error ? error.message : "The code could not be requested.", true);
+    const message = error instanceof Error ? error.message : "The code could not be requested.";
+    const canUsePendingSms = channel === "sms" && pendingSmsChallenge
+      && pendingSmsEmail === email.toLowerCase()
+      && Date.now() - pendingSmsRequestedAt < 10 * 60_000;
+    showAuthView(canUsePendingSms ? "otp" : "login", canUsePendingSms
+      ? `${message} You can still enter the code already received.` : message, true);
   } finally {
     setAuthBusy(els.authLoginForm, false);
   }

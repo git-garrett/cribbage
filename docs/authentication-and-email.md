@@ -71,6 +71,9 @@ current phone enrollment, expiry, and attempt budget before issuing its normal
 session cookie. Successful challenges cannot be replayed.
 The browser retains a pending SMS challenge when returning to the sign-in
 options during the resend cooldown, so the code already received remains usable.
+Throttled requests return HTTP 429 without replacing the pending challenge;
+provider failures return HTTP 503. The browser keeps an existing code-entry flow
+usable in both cases. Per-email and IP request limits also cover unknown accounts.
 
 Sends have a 30-second per-account cooldown and limits of six per account, fifteen
 per originating IP, and thirty across this private-preview app per hour. Five

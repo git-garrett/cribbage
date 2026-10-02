@@ -1329,6 +1329,7 @@ async function testSmsSignIn(browser, baseUrl) {
     if (endpoint === "/api/auth/sms/request") {
       expect(route.request().postDataJSON()).toEqual({ email: user.email });
       smsRequests += 1;
+      if (smsRequests > 1) return route.fulfill({ status: 429, json: { error: "Too many attempts. Please wait and try again." } });
       return route.fulfill({ json: { ok: true, challenge: `private-browser-challenge-${smsRequests}`, message: "If that account has an enrolled mobile number, a code is on its way." } });
     }
     if (endpoint === "/api/auth/otp/request") {
@@ -1365,11 +1366,19 @@ async function testSmsSignIn(browser, baseUrl) {
     await page.locator("#auth-sms-request").click();
     await expect(page.locator("#auth-otp")).toHaveValue("");
     await expect(page.locator("#auth-status")).toContainText("A code was recently requested");
+    expect(smsRequests).toBe(1);
+    await page.locator("#auth-otp-back").click();
+    await page.evaluate(() => {
+      const originalNow = Date.now;
+      Date.now = () => originalNow() + 31_000;
+    });
+    await page.locator("#auth-sms-request").click();
+    await expect(page.locator("#auth-status")).toContainText("You can still enter the code already received");
     await page.locator("#auth-otp").fill("482193");
     await page.locator("#auth-otp-form button[type=submit]").click();
     await expect(page.locator("body")).toHaveAttribute("data-auth", "signed-in");
-    expect(smsRequests).toBe(1);
-    return { approved: true, wrongCode: true, emailFallback: true, cooldownRetainsChallenge: true };
+    expect(smsRequests).toBe(2);
+    return { approved: true, wrongCode: true, emailFallback: true, cooldownRetainsChallenge: true, hourlyThrottleRetainsChallenge: true };
   } finally { await page.close(); }
 }
 
