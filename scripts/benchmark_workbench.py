@@ -121,15 +121,63 @@ def orientation(root, label, run_id):
     return games, status, run_id
 
 
-def config(info):
+def report_arguments(info):
     args = {}
     try:
         command = json.loads(info.get('reportCommand', '[]'))
         args = {command[i]: command[i + 1] for i in range(len(command) - 1) if command[i].startswith('--')}
     except (ValueError, TypeError, AttributeError):
         pass
+    return args
+
+
+def config(info):
+    args = report_arguments(info)
     return [info.get('candidateLeftRunId') or args.get('--candidate-left-run-id'),
             info.get('opponentLeftRunId') or args.get('--opponent-left-run-id')]
+
+
+
+def resolve_manifest(entry):
+    """Read legacy manifests without modifying a frozen experiment."""
+    root = Path(entry['root'])
+    info = manifest(root)
+    info.setdefault('opponent', info.get('baseline'))
+    args = report_arguments(info)
+    for field, flag in [('candidateLeft', '--candidate-left'), ('opponentLeft', '--opponent-left')]:
+        if not info.get(field) and args.get(flag):
+            info[field] = args[flag]
+    if all(info.get(field) for field in ('candidateLeft', 'opponentLeft')):
+        return info
+    if not info.get('candidate') or not info.get('opponent'):
+        return info
+    spec = read_json(entry['spec'], {})
+    paths = {Path(check['path']).resolve() for stage in spec.get('stages', [])
+             for check in stage.get('completionChecks', [])
+             if check.get('table') == 'compact_games' and check.get('path')}
+    if not paths:
+        paths = set(root.glob('*/games.db'))
+    inferred = {}
+    for path in sorted(paths):
+        if path.parent.parent != root or path.name != 'games.db':
+            continue
+        status = read_json(path.parent / 'status.json', {})
+        engines = (status.get('left'), status.get('right'))
+        if not all(engines) and path.is_file():
+            with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=.15)) as db:
+                identities = db.execute('SELECT DISTINCT left_engine, right_engine FROM compact_games LIMIT 2').fetchall()
+            if len(identities) != 1:
+                continue
+            engines = identities[0]
+        field = ('candidateLeft' if engines == (info['candidate'], info['opponent']) else
+                 'opponentLeft' if engines == (info['opponent'], info['candidate']) else None)
+        if field:
+            if field in inferred and inferred[field] != path.parent.name:
+                raise ValueError('Ambiguous orientation directories; record labels in the manifest')
+            inferred[field] = path.parent.name
+    for field, value in inferred.items():
+        info.setdefault(field, value)
+    return info
 
 
 def inspect_games(games, candidate, opponent, side, target, start):
@@ -167,7 +215,7 @@ def build_report(entry, now=None):
     started = time.monotonic()
     now = time.time() if now is None else now
     root = Path(entry['root'])
-    info = manifest(root)
+    info = resolve_manifest(entry)
     job = job_status(entry)
     stages = [{'name': s.get('name'), 'state': s.get('state')} for s in job.get('stages', [])]
     result = {'id': entry['id'], 'root': str(root), 'state': job.get('state', 'pending'),
@@ -302,7 +350,7 @@ class Handler(BaseHTTPRequestHandler):
             if not entry:
                 return self.respond({'error': 'Unknown benchmark'}, 404)
             return self.respond(self.server.report(entry))
-        files = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
+        files = {'/favicon.svg': ('favicon.svg', 'image/svg+xml'), '/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
         if url.path in files:
             filename, content_type = files[url.path]
             return self.respond((STATIC / filename).read_bytes(), content_type=content_type)

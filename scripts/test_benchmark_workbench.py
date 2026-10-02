@@ -143,6 +143,17 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(self.report()['saved'], 1)
         self.assertEqual(before, (self.root / 'left/games.db').read_bytes())
 
+    def test_legacy_baseline_manifest_infers_orientation_from_saved_engines(self):
+        path = self.root / 'manifest.txt'
+        path.write_text('candidate=A\nbaseline=B\ngamesPerOrientation=100\nseed=10\n')
+        self.add_game('left', 0, 0)
+        self.add_game('right', 0, 1)
+        report = self.report()
+        self.assertEqual(report['opponent'], 'B')
+        self.assertEqual(report['orderedPairs'], 1)
+        self.assertEqual([row['label'] for row in report['orientations']], ['left', 'right'])
+        self.assertNotIn('candidateLeft', path.read_text())
+
     def test_stopped_supervisor_overrides_stale_running_status(self):
         self.root.joinpath('status.json').write_text('{"state":"stopped"}')
         report = self.report()

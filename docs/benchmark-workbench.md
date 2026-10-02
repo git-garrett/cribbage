@@ -28,8 +28,9 @@ is needed for this local tool.
 The workbench infers the benchmark root from the job's `compact_games` SQLite
 completion checks. If those paths do not share a root, supply an absolute
 `benchmarkRoot` in the versioned job spec before installing it. The manifest
-must record `candidate`, `opponent`, `candidateLeft`, `opponentLeft`, and
-`gamesPerOrientation`. Optional `startIndex` defaults to zero. Orientation run
+records `candidate`, `opponent` (or legacy `baseline`), and `gamesPerOrientation`.
+`candidateLeft` and `opponentLeft` are used when present; otherwise the workbench
+infers them from the job's database paths and reciprocal saved engine identities. Optional `startIndex` defaults to zero. Orientation run
 IDs come from `candidateLeftRunId` / `opponentLeftRunId`, or the frozen
 `reportCommand` arguments. A single database run can also be inferred; ambiguous
 databases fail closed. A manifest created by a later job stage is supported.
