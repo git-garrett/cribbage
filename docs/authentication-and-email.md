@@ -35,8 +35,35 @@ password-reset email.
 ## Text sign-in codes
 
 Twilio Verify supplies an additional passwordless sign-in option for existing
-accounts with an administrator-enrolled mobile number. It is single-factor
+accounts with an enrolled mobile number. It is single-factor
 sign-in, not an additional MFA step. Email and password sign-in remain available.
+
+Players can manage their own sign-in methods on their account/profile page.
+The optional phone form accepts a US number or an international number with its
+country code. **Send verification code**, followed by the six-digit text code,
+enables SMS sign-in. A replacement leaves the existing number active until the
+new one is verified. Players can also remove their number, or set/update a
+password using the new-password and confirmation fields. The existing emailed
+password-reset pathway remains available.
+
+Changing either sign-in method requires a session created within the last ten
+minutes. Older sessions show **Confirm sign-in**, which returns to the account
+page after the player signs in again by any supported method. Passwords use the
+existing 15–128 character policy. Saving a password replaces the current session
+cookie and signs out other sessions, retiring outstanding email and SMS challenges.
+When email delivery is paused, an account without a password must set one before
+removing its phone number so it retains a working sign-in method.
+
+`GET /api/auth/account` returns only the signed-in account's private phone and
+sign-in-method status. Its JSON mutation endpoints are
+`POST /api/auth/account/phone/request`, `/phone/verify`, `/phone/remove`, and
+`/password` (all under `/api/auth/account`). They require a recent session and
+reject browser requests from other origins. Phone enrollment challenges are
+bound to the requesting account and session, are single-use, and cannot be used
+as public sign-in challenges. The idempotent SMS migration labels existing
+challenges as sign-in challenges and adds purpose/session binding for enrollment.
+Private settings responses use `Cache-Control: no-store`; the controls and phone
+number appear only on the owner's profile.
 
 Create a Verify service named **Strong Cribbage** with six-digit, provider-generated
 codes, the do-not-share warning, and Fraud Guard enabled. Store these three values
@@ -75,9 +102,10 @@ Throttled requests return HTTP 429 without replacing the pending challenge;
 provider failures return HTTP 503. The browser keeps an existing code-entry flow
 usable in both cases. Per-email and IP request limits also cover unknown accounts.
 
-Sends have a 30-second per-account cooldown and limits of six per account, fifteen
+Sign-in and enrollment sends share a 30-second per-account cooldown and limits of six per account, fifteen
 per originating IP, and thirty across this private-preview app per hour. Five
-code checks are allowed per provider verification, shared across resends. These
+code checks are allowed per provider verification, shared across resends and
+enrollment requests for different numbers. These
 reservations and challenge consumption use SQLite transactions. Twilio failures
 never grant access; the login screen keeps email sign-in available. The API must
 remain bound to loopback behind Caddy, as in the production deployment, for

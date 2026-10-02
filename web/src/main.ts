@@ -32,7 +32,8 @@ import {
   currentActivityClient,
   safeActivityPage,
 } from "./activity";
-import { AuthenticationRequiredError, shouldRecoverExpiredSession } from "./auth-recovery";
+import { AuthenticationRequiredError, RecentAuthenticationRequiredError, shouldRecoverExpiredSession } from "./auth-recovery";
+import { createAccountSecurity } from "./account-security";
 import { circularTurnCutPresentation, createCircularBoard, updateCircularBoard } from "./circular-board";
 import { comparisonTone, type ComparisonTone } from "./comparison-difference";
 import {
@@ -1290,6 +1291,14 @@ let peopleDirectory: PeopleDirectoryResponse = {
 };
 let ownPeopleProfile: PeopleProfile | null = null;
 let selectedPeopleProfile: PeopleProfile | null = null;
+const accountSecurity = createAccountSecurity({
+  request: authJson,
+  reauthenticate: () => {
+    if (!authenticatedUser) return;
+    els.authEmail.value = authenticatedUser.email;
+    requestAuthentication({ kind: "profile", username: authenticatedUser.username }, "Confirm your sign-in to update your account.");
+  },
+});
 let pendingAvatarDataUrl: string | null = null;
 let activeHumanTable: HumanTable | null = null;
 let peoplePollTimer: number | null = null;
@@ -1916,8 +1925,9 @@ async function authJson<T>(
     if (shouldRecoverExpiredSession(response.status, path)) {
       throw recoverExpiredAuthentication();
     }
-    const payload = await response.json().catch(() => ({})) as { error?: string };
+    const payload = await response.json().catch(() => ({})) as { error?: string; reauthenticate?: boolean };
     if (!response.ok) {
+      if (payload.reauthenticate) throw new RecentAuthenticationRequiredError(payload.error || "Please sign in again.");
       throw new Error(payload.error || "Account service is temporarily unavailable.");
     }
     return payload as T;
@@ -2570,6 +2580,8 @@ function renderPeopleProfile(profile: PeopleProfile): void {
   els.peopleProfilePlay.textContent = authenticatedUser ? "Play now" : "Sign in to play";
   renderPeopleHeadToHead(profile);
   els.peopleProfileForm.hidden = !profile.isSelf;
+  if (profile.isSelf && authenticatedUser) accountSecurity.show(authenticatedUser.id);
+  else accountSecurity.hide();
   if (profile.isSelf) {
     els.peopleProfileUsername.value = profile.username;
     els.peopleProfileEmail.value = profile.email || authenticatedUser?.email || "";
@@ -2626,6 +2638,7 @@ async function openPeopleProfile(username: string, options: { push?: boolean } =
 }
 
 function hidePeopleProfile(): void {
+  accountSecurity.hide();
   els.peopleProfilePage.hidden = true;
   selectedPeopleProfile = null;
   pendingAvatarDataUrl = null;
@@ -3156,6 +3169,7 @@ async function syncPeopleRouteFromLocation(): Promise<void> {
 type AuthView = "login" | "otp" | "reset" | "invite";
 
 function showAuthView(view: AuthView, message = "", error = false): void {
+  accountSecurity.hide();
   document.body.dataset.auth = "signed-out";
   els.authPage.hidden = false;
   els.pathwayPage.hidden = true;

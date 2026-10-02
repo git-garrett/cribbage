@@ -15,6 +15,8 @@ use super::{email, open_game_database, Request, Response, Server};
 
 #[path = "sms.rs"]
 mod sms;
+#[path = "account.rs"]
+mod account;
 
 const SESSION_COOKIE: &str = "strong_cribbage_session";
 const SESSION_SECONDS: i64 = 30 * 24 * 60 * 60;
@@ -301,7 +303,7 @@ pub fn handle(server: &Server, request: &Request) -> Option<Response> {
         ("POST", "/api/auth/invite/send") => invite_send(server, request),
         ("POST", "/api/auth/invite/accept") => invite_accept(server, request),
         ("POST", "/api/auth/logout") => logout(server, request),
-        _ => return None,
+        _ => return account::handle(server, request),
     };
     Some(response)
 }
