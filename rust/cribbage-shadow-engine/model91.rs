@@ -284,6 +284,13 @@ impl Default for Model91EmpiricalBeliefs {
 }
 
 impl Model91EmpiricalBeliefs {
+    /// Immutable, unconditioned evidence for a score-block actor. Callers apply
+    /// their own legally known cards and likelihoods; no hidden pair enters here.
+    pub(crate) fn score_block_hands(&self, role: Role, played: [u8; RANKS])
+        -> Option<impl Iterator<Item = ([u8; RANKS], f64)> + '_> {
+        self.hands(role, played, &[4; RANKS], 4_u8.checked_sub(rank_count_total(&played))?)
+    }
+
     pub(crate) fn opening_hands(
         &self,
         opponent_role: Role,

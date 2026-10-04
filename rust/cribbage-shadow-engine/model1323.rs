@@ -29,6 +29,8 @@ use std::sync::{Arc, Mutex};
 mod rollout_storage;
 #[path = "model206_bounds.rs"]
 mod direct_bounds;
+#[path = "model283.rs"]
+mod score_blocks;
 #[path = "model205_pegging.rs"]
 mod bucketed;
 #[path = "model205_pegging2.rs"]
@@ -165,6 +167,19 @@ impl PreparedDecision<'_> {
 
     pub(crate) fn opponent_hands(&self) -> &[([u8; 13], f64)] {
         &self.hands
+    }
+
+    pub(crate) fn forecast_score_blocks(&self, actions: &[RankPegAction]) -> Result<Vec<PegCandidateForecast>, String> {
+        score_blocks::forecast(self.assets, self.observation, &self.hands, actions)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn score_block_root_endpoints(&self, actions:&[RankPegAction]) -> Result<Vec<(RankPegAction,Vec<([u8;13],f64,Vec<(u8,u8)>)>)>,String> {
+        score_blocks::root_endpoints(self.assets,self.observation,&self.hands,actions)
+    }
+
+    pub(crate) fn forecast_score_blocks_conditioned(&self, actions: &[RankPegAction]) -> Result<Vec<ScoreBlockForecast>, String> {
+        score_blocks::forecast_conditioned(self.assets, self.observation, &self.hands, actions)
     }
 
     pub(crate) fn forecast_symmetric(
@@ -780,6 +795,12 @@ pub struct PegCandidateForecast {
     pub outcomes: Vec<(u8, u8, f64)>,
     pub posterior_worlds: usize,
     pub evaluated_worlds: usize,
+}
+
+/// Root outcomes retain the legal posterior's hand identity until counting.
+pub(crate) struct ScoreBlockForecast {
+    pub forecast: PegCandidateForecast,
+    pub conditioned: Vec<([u8; 13], u8, u8, f64)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

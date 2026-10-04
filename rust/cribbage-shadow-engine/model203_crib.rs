@@ -21,6 +21,9 @@ pub(crate) fn pair_index(a: u8, b: u8) -> usize {
 }
 
 impl Model203CribTable {
+    pub(crate) fn rank_score(&self, own: usize, cut: u8, other: usize) -> u8 {
+        self.scores[(own * 13 + cut as usize) * PAIRS + other]
+    }
     pub(crate) fn load(path: &Path) -> Result<Self, String> {
         Self::decode(&fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?)
     }

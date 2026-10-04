@@ -1250,6 +1250,15 @@ fn opponent_rank_likelihoods_validated(
     include_known_cut: bool,
     preserve_soft_support: bool,
 ) -> [u32; RANKS] {
+    rank_likelihoods_for_history(observation.turn_rank, &observation.public_history,
+        factors, include_known_cut, preserve_soft_support)
+}
+
+/// Same validated likelihood arithmetic, usable without rebuilding an observation.
+pub(crate) fn rank_likelihoods_for_history(
+    turn_rank: u8, history: &[PublicPegEvent], factors: Model1322DeclineFactors,
+    include_known_cut: bool, preserve_soft_support: bool,
+) -> [u32; RANKS] {
     let mut likelihoods = [1_000_000_u32; RANKS];
     let mut series = Vec::<u8>::new();
     let mut count = 0_u8;
@@ -1257,9 +1266,9 @@ fn opponent_rank_likelihoods_validated(
     let mut opponent_cards_played = 0_usize;
     let mut self_said_go = false;
     if include_known_cut {
-        public_known[observation.turn_rank as usize] = 1;
+        public_known[turn_rank as usize] = 1;
     }
-    for event in &observation.public_history {
+    for event in history {
         match *event {
             PublicPegEvent::SelfPlay(rank) => {
                 count = count.saturating_add(VALUES[rank as usize]);

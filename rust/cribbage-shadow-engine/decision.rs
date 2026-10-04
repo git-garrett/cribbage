@@ -55,7 +55,7 @@ pub fn choose_peg_for_side_with_caches(
     model13_cache: Option<&Model13HandCache>,
 ) -> Result<PegAction, String> {
     ensure_native_model(model_id)?;
-    if matches!(model_id, ModelId::Schell204 | ModelId::Schell205 | ModelId::Schell206 | ModelId::Schell207 | ModelId::Schell205Pegging | ModelId::Schell205Pegging2) {
+    if matches!(model_id, ModelId::Schell204 | ModelId::Schell205 | ModelId::Schell206 | ModelId::Schell207 | ModelId::Schell283 | ModelId::Schell205Pegging | ModelId::Schell205Pegging2) {
         if let Some(action) = forced_rank_action(&game.player(side).hand, game.count) {
             return Ok(action);
         }
