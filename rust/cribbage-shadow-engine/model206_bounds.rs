@@ -4,7 +4,7 @@
 use super::*;
 
 #[path = "model206_ordering.rs"]
-mod ordering;
+pub(super) mod ordering;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct State {

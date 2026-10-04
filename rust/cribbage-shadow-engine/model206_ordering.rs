@@ -24,7 +24,7 @@ pub(super) fn rank(action: RankPegAction) -> u8 {
     }
 }
 
-pub(super) fn order(o: &Model132Observation, actions: &mut [RankPegAction]) {
+pub(crate) fn order(o: &Model132Observation, actions: &mut [RankPegAction]) {
     if actions.len() > 1 {
         order_with_priors(priors(), o, actions);
     }

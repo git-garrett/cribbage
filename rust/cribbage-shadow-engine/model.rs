@@ -1,3 +1,5 @@
+#[path = "model207_joint_counting.rs"]
+mod joint_counting;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -690,6 +692,12 @@ pub fn review_decision(
             // Without a saved recommendation, value all ranks once and share
             // the posterior, policy caches, histograms, and counting evaluator.
             let tables = runtime_tables(root)?;
+            if input.model == MODEL_20_7 && input.own_discards.len() == 2 {
+                let fs=joint_counting::forecast(input,tables,&model1323_observation(input).legal_actions(),None,false)?;
+                let selected=joint_counting::select(input,&[selected_card],&fs)?;
+                let recommended=joint_counting::select(input,&legal,&fs)?;
+                return Ok(DecisionReview {selected,recommended});
+            }
             let actions = model1323_observation(input).legal_actions();
             let (forecasts, mut evaluator) = forecast_peg_review(input, tables, &actions)?;
             let selected = select_reviewed_peg(input, selected_card, &forecasts, &mut evaluator)?;
@@ -2190,6 +2198,10 @@ fn recommend_peg_model1323(
     tables: &RuntimeTables,
     hand_cache: Option<&Model13HandCache>,
 ) -> Result<Decision, String> {
+    if input.model == MODEL_20_7 && input.own_discards.len() == 2 {
+        let fs=joint_counting::forecast(input,tables,&model1323_observation(input).legal_actions(),hand_cache,true)?;
+        return joint_counting::select(input,legal,&fs);
+    }
     let observation = model1323_observation(input);
     let assets = tables.pegging_policy_assets(input)?;
     let prepared = matches!(input.model.as_str(), MODEL_20_3 | MODEL_20_4 | MODEL_20_5 | MODEL_20_6 | MODEL_20_7 | MODEL_20_5_PEGGING | MODEL_20_5_PEGGING2)
@@ -3037,6 +3049,10 @@ fn review_peg_model13(
         });
     }
     let tables = runtime_tables(root)?;
+    if input.model == MODEL_20_7 && input.own_discards.len() == 2 {
+        let fs=joint_counting::forecast(input,tables,&[RankPegAction::Play(selected.rank)],None,false)?;
+        return joint_counting::select(input,&[selected],&fs);
+    }
     if matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3 | MODEL_20_4 | MODEL_20_5 | MODEL_20_6 | MODEL_20_7 | MODEL_20_5_PEGGING | MODEL_20_5_PEGGING2) {
         let actions = if input.model == MODEL_20_3 {
             model1323_observation(input).legal_actions()

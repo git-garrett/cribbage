@@ -3,6 +3,8 @@
 //! preserves the frozen correction builder.
 //! Only finite outcome distributions leave this module. No paths or actions
 //! keyed by observations survive a decision.
+#[path = "model207_joint_rollout.rs"]
+pub(crate) mod joint_rollout;
 use crate::board::Role;
 use crate::cards::{
     enumerate_rank_count_keys, rank_combination_count, rank_count_key, rank_count_total,
