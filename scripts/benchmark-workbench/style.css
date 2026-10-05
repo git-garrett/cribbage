@@ -493,6 +493,34 @@ h2 {
 .chart-grid .panel {
   min-width:0;
 }
+.metric-picker {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  font-size:12px;
+  margin:16px 0;
+}
+.metric-picker select {
+  min-width:0;
+  flex:1;
+}
+.metric-models {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+  margin:20px 0 12px;
+}
+.metric-models strong,.metric-models small {
+  display:block;
+  font-variant-numeric:tabular-nums;
+}
+.metric-models strong {
+  font:600 22px var(--display);
+}
+.metric-models small {
+  font-size:11px;
+  color:var(--muted);
+}
 .metric {
   font:20px var(--mono);
   white-space:nowrap;

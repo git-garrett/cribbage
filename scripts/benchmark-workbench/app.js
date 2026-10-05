@@ -168,11 +168,50 @@ function renderCharts() {
   if ($('show-anytime').checked) bands.push({ key: 'anytime95', className: 'anytime-band' });
   if ($('show-fixed').checked) bands.push({ key: 'fixed95', className: 'fixed-band' });
   chart('win-chart', report.history, { x: (r) => r.pairs, y: (r) => r.winRate, percent: true, reference: .5, bands, inspected: index, domain: $('win-scale').value === 'focus' ? [.4, .6] : null });
-  chart('score-chart', report.history, { x: (r) => r.pairs, y: (r) => r.scoreDelta, reference: 0, minSpan: 1, bands: [{ key: 'score95', className: 'fixed-band' }], inspected: index });
   chart('progress-chart', report.progressHistory, { x: (r) => r.hours, y: (r) => r.games, xHours: true, zero: true, decimals: 0 });
   const point = report.history[index];
+  renderMetric('score', $('score-kind').value, point?.pairs || 0);
+  renderMetric('wp', $('wp-kind').value, point?.pairs || 0);
+  renderMetric('open', 'pone_open', point?.pairs || 0);
   const candidate = modelName(report.candidate), opponent = modelName(report.opponent);
   $('inspection').textContent = point ? `${number.format(point.pairs)} pairs · ${candidate}: ${percent(point.winRate)} · ${opponent}: ${percent(1 - point.winRate)} · ${standing(point.winRate - .5, candidate, opponent)}. ${candidate} win-rate intervals: ordinary ${interval(point.fixed95)}; sequential ${interval(point.anytime95)}.` : 'Waiting for complete pairs';
+}
+
+function renderMetric(prefix, key, pairs) {
+  const wp = prefix === 'wp', timing = prefix === 'open';
+  const decimals = wp ? 4 : 2;
+  const unit = timing ? ' s' : wp ? '' : ' pts';
+  const format = (value) => value == null ? '—' : `${value.toFixed(decimals)}${unit}`;
+  const bounds = (values) => values ? `${format(values[0])} to ${format(values[1])}` : 'More paired deals needed';
+  const candidate = modelName(report.candidate), opponent = modelName(report.opponent);
+  const rows = report.metrics?.[key] || [];
+  const index = rows.findLastIndex((row) => row.pairs <= pairs);
+  const current = rows[index];
+  const delta = current?.delta;
+  const measure = timing ? 'opening seconds' : wp ? 'Brier score' : 'points';
+  $(`${prefix}-chart-title`).textContent = `${candidate} − ${opponent} · ${measure}`;
+  $(`${prefix}-delta`).textContent = current ? `${delta > 0 ? '+' : ''}${format(delta)}` : '—';
+  $(`${prefix}-standing`).textContent = !current ? 'No recorded samples in these paired games yet.' :
+    delta === 0 ? `Equal observed ${measure}` :
+    timing ? `${delta < 0 ? candidate : opponent} has the faster observed opening` :
+    wp ? `${delta < 0 ? candidate : opponent} has the lower observed prediction error` : standing(delta, candidate, opponent);
+  const models = $(`${prefix}-models`);
+  models.replaceChildren();
+  for (const [side, name] of [['candidate', candidate], ['opponent', opponent]]) {
+    const column = element('div');
+    column.append(element('span', name, 'label'), element('strong', format(current?.[side])));
+    column.append(element('small', current ? `${number.format(current[`${side}N`])} ${key === 'final_score' ? 'games' : wp || timing ? 'calls' : 'hands'}` : 'No samples'));
+    column.append(element('small', `95%: ${bounds(current?.[`${side}95`])}`));
+    models.append(column);
+  }
+  $(`${prefix}-interval`).textContent = current ? `Difference at ${number.format(current.pairs)} completed pairs: ${bounds(current.fixed95)} (95% pointwise). ${number.format(current.clusters)} deal pairs contribute recorded samples.` : 'Missing telemetry is not treated as zero.';
+  if (wp) $('wp-calibration').textContent = current ? `Mean predicted / observed wins: ${candidate} ${percent(current.candidatePredicted)} / ${percent(current.candidateActual)}; ${opponent} ${percent(current.opponentPredicted)} / ${percent(current.opponentActual)}. Outcomes are weighted by recorded decisions.` : '';
+  const direction = wp || timing ? `Negative favors ${candidate}; positive favors ${opponent}.` : `Positive favors ${candidate}; negative favors ${opponent}.`;
+  $(`${prefix}-chart`).setAttribute('aria-label', `${candidate} minus ${opponent} ${measure} over completed pairs. ${direction} Shading is the ordinary 95 percent pointwise interval.`);
+  chart(`${prefix}-chart`, rows, { x: (r) => r.pairs, y: (r) => r.delta, reference: 0,
+    minSpan: wp ? .002 : timing ? .1 : 1, decimals: wp ? 3 : 1,
+    bands: [{ key: 'fixed95', className: 'fixed-band' }], inspected: index,
+    empty: 'Waiting for recorded paired samples' });
 }
 
 function render(value) {
@@ -228,12 +267,6 @@ function render(value) {
   $('win-above').textContent = `↑ Above 50%: ${candidate} leads`;
   $('win-below').textContent = `↓ Below 50%: ${opponent} leads`;
   $('win-chart').setAttribute('aria-label', `${candidate} paired win rate by completed pairs. Above 50% favors ${candidate}; below 50% favors ${opponent}. Shading shows ordinary and sequential 95 percent intervals for ${candidate}.`);
-  $('score-chart-title').textContent = `${candidate} − ${opponent}`;
-  $('score-standing').textContent = latest ? standing(latest.scoreDelta, candidate, opponent) : 'Waiting for paired scores';
-  $('score-above').textContent = `↑ Positive: ${candidate} leads`;
-  $('score-below').textContent = `↓ Negative: ${opponent} leads`;
-  $('score-chart').setAttribute('aria-label', `${candidate} minus ${opponent} points per game by completed pairs. Positive favors ${candidate}; negative favors ${opponent}. Shading is the ordinary 95 percent interval.`);
-  $('score-delta').textContent = latest ? `${latest.scoreDelta >= 0 ? '+' : ''}${latest.scoreDelta.toFixed(2)}` : '—';
   $('orientation-wins').textContent = `${candidate} wins`;
   $('orientation-rate').textContent = `${candidate} win rate`;
   $('paired-method').textContent = `The paired win rate is ${candidate}’s share of wins; ${opponent}’s share is the remainder. Each deal gives ${candidate} a score of 0, ½, or 1: two losses, a split, or two wins. Each deal is played with sides reversed. Every graph point includes all earlier pairs in the fixed index order. Pairs beyond an unfinished earlier game wait before entering the evidence calculation.`;
@@ -334,6 +367,8 @@ $('refresh').addEventListener('click', refresh);
 $('show-fixed').addEventListener('change', renderCharts);
 $('show-anytime').addEventListener('change', renderCharts);
 $('win-scale').addEventListener('change', renderCharts);
+$('score-kind').addEventListener('change', renderCharts);
+$('wp-kind').addEventListener('change', renderCharts);
 $('inspect').addEventListener('input', () => { followLatest = Number($('inspect').value) === Number($('inspect').max); inspectedPairs = report.history[Number($('inspect').value)]?.pairs || 0; renderCharts(); });
 document.addEventListener('visibilitychange', () => { clearTimeout(timer); if (!document.hidden) refresh(); else request?.abort(); });
 refresh();
