@@ -1,0 +1,101 @@
+{
+  "assetSha256": "192d43b7712e1f16bf0ba0991df14aaf646c2a44cd43f7e917d6ac8689cc375e",
+  "fixtureHands": [
+    "0,4,8,12,16,20",
+    "4,17,30,43,0,12",
+    "0,1,2,3,4,5",
+    "8,9,10,11,12,25"
+  ],
+  "model": "20.3",
+  "ordering": "alternating reference/cached order by repetition",
+  "precomputedMsPerForecast": 10.42595703125,
+  "profile": "release",
+  "repetitionsPerPath": 8,
+  "runs": [
+    {
+      "precomputed": false,
+      "repeat": 0,
+      "seconds": 0.069780708
+    },
+    {
+      "precomputed": true,
+      "repeat": 0,
+      "seconds": 0.041379167
+    },
+    {
+      "precomputed": true,
+      "repeat": 1,
+      "seconds": 0.041202042
+    },
+    {
+      "precomputed": false,
+      "repeat": 1,
+      "seconds": 0.068147334
+    },
+    {
+      "precomputed": false,
+      "repeat": 2,
+      "seconds": 0.070568459
+    },
+    {
+      "precomputed": true,
+      "repeat": 2,
+      "seconds": 0.041296167
+    },
+    {
+      "precomputed": true,
+      "repeat": 3,
+      "seconds": 0.041257791
+    },
+    {
+      "precomputed": false,
+      "repeat": 3,
+      "seconds": 0.067911417
+    },
+    {
+      "precomputed": false,
+      "repeat": 4,
+      "seconds": 0.067922583
+    },
+    {
+      "precomputed": true,
+      "repeat": 4,
+      "seconds": 0.041286125
+    },
+    {
+      "precomputed": true,
+      "repeat": 5,
+      "seconds": 0.041903625
+    },
+    {
+      "precomputed": false,
+      "repeat": 5,
+      "seconds": 0.070484375
+    },
+    {
+      "precomputed": false,
+      "repeat": 6,
+      "seconds": 0.068270083
+    },
+    {
+      "precomputed": true,
+      "repeat": 6,
+      "seconds": 0.042407208
+    },
+    {
+      "precomputed": true,
+      "repeat": 7,
+      "seconds": 0.0428985
+    },
+    {
+      "precomputed": false,
+      "repeat": 7,
+      "seconds": 0.067807375
+    }
+  ],
+  "schemaVersion": 1,
+  "scope": "Complete discard-time opponent-hand forecasts across all cuts; warmed score cache; excludes other discard evaluation and cold initialization.",
+  "test": "model::tests::model203_precomputed_rank_scores_timing",
+  "timeReductionPercent": 39.43814346125934,
+  "uncachedMsPerForecast": 17.215385437499997
+}

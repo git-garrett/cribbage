@@ -245,6 +245,17 @@ class ConnectionCache:
 def game_samples(
     game: GameRef, connections: ConnectionCache
 ) -> dict[str, list[SeamSample]]:
+    events, seam_offsets = game_trajectory(game, connections)
+    return {
+        seam: [seam_sample(events, offset, dealer) for offset, dealer in offsets]
+        for seam, offsets in seam_offsets.items()
+    }
+
+
+def game_trajectory(
+    game: GameRef, connections: ConnectionCache
+) -> tuple[list[tuple[int, int]], dict[str, list[tuple[int, int]]]]:
+    """Reconstruct ordered scoring and phase boundaries without rebasing tails."""
     source = connections.get(game.source_db)
     trajectory = connections.get(game.trajectory_db)
     terminal = trajectory.execute(
@@ -387,10 +398,7 @@ def game_samples(
     if len(set(seam_counts.values())) != 1:
         raise ValueError(f"{game.game_id} has inconsistent seam counts: {seam_counts}")
 
-    return {
-        seam: [seam_sample(events, offset, dealer) for offset, dealer in offsets]
-        for seam, offsets in seam_offsets.items()
-    }
+    return events, seam_offsets
 
 
 def append_tracked_event(

@@ -14,7 +14,7 @@ async function main() {
   const digest = createHash("sha256");
   for await (const block of fs.createReadStream(asset)) digest.update(block);
   if (digest.digest("hex") !== evidence.assetSha256) throw new Error("Production Ace asset SHA-256 mismatch.");
-  console.log("Production Ace asset verified: Model 13.23.");
+  console.log("Legacy Ace correction asset verified; 28.3 policy inputs are verified by native integration.");
 }
 
 main().catch((error) => { console.error(error.message); process.exitCode = 1; });

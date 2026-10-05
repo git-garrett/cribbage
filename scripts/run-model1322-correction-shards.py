@@ -22,13 +22,15 @@ def required_path(environment: dict[str, str], name: str) -> Path:
     return Path(value)
 
 
-def completed(checkpoint: Path, dealer_count: int) -> bool:
+def completed(checkpoint: Path, dealer_count: int, baseline_checksum: str) -> bool:
     if not checkpoint.is_file():
         return False
     try:
         value = json.loads(checkpoint.read_text())
     except (OSError, json.JSONDecodeError):
         return False
+    if value.get("baselineChecksum") != baseline_checksum:
+        raise ValueError(f"baseline verification input changed for {checkpoint}; use the original input or a new output")
     return (
         value.get("state") == "complete"
         and value.get("completedDealerKeeps") == dealer_count
@@ -56,8 +58,17 @@ def main() -> int:
         "--keep-prior": runtime_root / "assets/model132-keep-prior.json",
         "--discard-histograms": runtime_root
         / "assets/model1322-opponent-discard-histograms.json",
-        "--baseline-pairs": runtime_root / "assets/model911-pair-outcomes.bin",
     }
+    baseline = environment.get("MODEL1322_CORRECTION_BASELINE_PAIRS")
+    baseline_checksum = "0000000000000000"
+    if baseline:
+        inputs["--baseline-pairs"] = Path(baseline)
+        checksum = 14695981039346656037
+        with Path(baseline).open("rb") as source:
+            for chunk in iter(lambda: source.read(1048576), b""):
+                for byte in chunk:
+                    checksum = ((checksum ^ byte) * 1099511628211) & ((1 << 64) - 1)
+        baseline_checksum = f"{checksum:016x}"
     if not builder.is_file() or not os.access(builder, os.X_OK):
         raise ValueError(f"missing Model 13.22 correction builder: {builder}")
     for path in inputs.values():
@@ -71,7 +82,7 @@ def main() -> int:
         dealer_end = (shard_index + 1) * KEEP_COUNT // shard_count
         dealer_count = dealer_end - dealer_start
         shard = output_root / f"shard-{shard_index:02d}"
-        if not completed(shard / "checkpoint.json", dealer_count):
+        if not completed(shard / "checkpoint.json", dealer_count, baseline_checksum):
             pending.append((shard_index, dealer_start, dealer_count))
 
     running: dict[subprocess.Popen[bytes], object] = {}

@@ -22,6 +22,16 @@ Jobs and actions are never serialized into session storage or a policy table.
 Completed abandoned jobs expire from the registry after ten minutes, on the next
 preparation. Failed jobs can be retried by a subsequent game request.
 
+A successful forfeit removes and cancels the game's opening job. Replacing a
+running job with a different legal observation also cancels its old calculation.
+Waiting requests receive cancellation immediately; the engine cooperatively
+stops between hidden-hand preparation steps or batches of 256 forecast worlds.
+No partial move or forecast is returned, and late worker completion cannot
+replace a cancellation result. A rejected or unsaved forfeit keeps valid work.
+Saving or hiding a resumable game does not cancel its still-useful opening.
+The AI-vs-AI runner evaluates decisions synchronously and does not use this
+registry, so this cancellation does not increase benchmark throughput.
+
 The waiting overlay uses a native progress bar starting at 0% when it appears.
 Its baseline is the first work counter received for that visible wait, so progress
 covers the remaining calculation rather than including preparation already done.

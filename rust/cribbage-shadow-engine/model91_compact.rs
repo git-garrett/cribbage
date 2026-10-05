@@ -3,6 +3,8 @@
 //! Rank order, multiplicities, score rules and floating-point operation order
 //! are unchanged. Only inactive series bytes are canonicalized away.
 use super::{AverageState, WeightedPoints, MAX_SERIES, RANKS, VALUES};
+use crate::board::Role;
+use crate::board_matrix::{BoardMatrixSeam, BoardWinMatrix};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 
@@ -17,7 +19,7 @@ const HAND_MASK: u128 = (1_u128 << SERIES) - 1;
 
 /// The entire semantic state fits in 124 bits; equality checks all of them.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct State(u128);
+pub(super) struct State(u128);
 
 impl Hash for State {
     fn hash<H: Hasher>(&self, hasher: &mut H) {
@@ -46,7 +48,7 @@ impl Hasher for StateHasher {
 }
 
 impl State {
-    fn from_reference(state: &AverageState) -> Self {
+    pub(super) fn from_reference(state: &AverageState) -> Self {
         let mut key = 0;
         for player in 0..2 {
             for rank in 0..RANKS {
@@ -85,9 +87,6 @@ impl State {
     fn len(self) -> usize {
         self.field(LENGTH, 15) as usize
     }
-    fn rank(self, index: usize) -> u8 {
-        self.field(SERIES + index as u32 * 4, 15)
-    }
     fn reset(&mut self, current: u8) {
         self.0 &= HAND_MASK;
         self.0 |= u128::from(current) << CURRENT;
@@ -97,29 +96,36 @@ impl State {
         if len < 2 {
             return 0;
         }
-        let mut points = if matches!(self.count(), 15 | 31) {
+        let points = if matches!(self.count(), 15 | 31) {
             2
         } else {
             0
         };
-        let last = self.rank(len - 1);
-        let same = 1
-            + (0..len - 1)
-                .rev()
-                .take_while(|i| self.rank(*i) == last)
-                .count();
-        points += match same {
-            2 => 2,
-            3 => 6,
-            4 => 12,
-            _ => 0,
-        };
-        let mut seen = 0_u16;
-        let mut min = 13;
-        let mut max = 0;
+        let series = (self.0 >> SERIES) as u32;
+        let last = ((series >> ((len - 1) * 4)) & 15) as u8;
+        let mut same = 1;
+        for index in (0..len - 1).rev() {
+            if ((series >> (index * 4)) & 15) as u8 != last {
+                break;
+            }
+            same += 1;
+        }
+        // A repeated final rank rules out every run ending at this play.
+        if same >= 2 {
+            return points
+                + match same {
+                    2 => 2,
+                    3 => 6,
+                    4 => 12,
+                    _ => 0,
+                };
+        }
+        let mut seen = 1_u16 << last;
+        let mut min = last;
+        let mut max = last;
         let mut run = 0;
-        for length in 1..=len {
-            let rank = self.rank(len - length);
+        for length in 2..=len {
+            let rank = ((series >> ((len - length) * 4)) & 15) as u8;
             let bit = 1_u16 << rank;
             if seen & bit != 0 {
                 break;
@@ -247,10 +253,709 @@ impl Memo {
     }
 }
 
+/// Model 20.1's action evaluator averages terminal win probabilities, never
+/// point means. As with the historical average-continuation evaluator, this is
+/// a value estimate for choosing one action, not an omniscient action policy.
+/// The enclosing live rollout asks the WP chooser again at every actual step.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct WpState {
+    peg: State,
+    scores: [u8; 2],
+    role: Role,
+}
+
+// Splitting the packed state into words avoids u128 alignment padding in
+// each hash-table entry. Equality and hashing retain every state/score/role bit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WpKey {
+    peg: [u64; 2],
+    scores: [u8; 2],
+    role: Role,
+}
+
+impl From<WpState> for WpKey {
+    fn from(state: WpState) -> Self {
+        Self {
+            peg: [state.peg.0 as u64, (state.peg.0 >> 64) as u64],
+            scores: state.scores,
+            role: state.role,
+        }
+    }
+}
+
+impl Hash for WpKey {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        // Mix board context before multiplication; appending it left score
+        // variants in the same probe chain. Equality still checks every field.
+        let role = match self.role {
+            Role::Dealer => 0_u64,
+            Role::Pone => 1,
+        };
+        let context = u64::from(self.scores[0]) | (u64::from(self.scores[1]) << 8) | (role << 16);
+        hasher.write_u128(
+            u128::from(self.peg[0]) | (u128::from(self.peg[1] ^ (context << 14)) << 64),
+        );
+    }
+}
+
+// A bounded, decision-local memo of pure scoring results. A collision replaces
+// an entry only after full-key comparison; it never substitutes another score.
+// 131,072 packed entries (1 MiB); see docs/research/model203-series-scoring.md.
+const SCORE_CACHE_BITS: u32 = 17;
+const SCORE_KEY_BITS: u32 = CURRENT - SERIES;
+const SCORE_KEY_MASK: u64 = (1_u64 << SCORE_KEY_BITS) - 1;
+
+#[derive(Default)]
+struct SeriesScoreMemo {
+    entries: Vec<u64>,
+}
+
+impl SeriesScoreMemo {
+    fn index(key: u64) -> usize {
+        (key.wrapping_mul(0x9e3779b97f4a7c15) >> (64 - SCORE_CACHE_BITS)) as usize
+    }
+
+    fn score(&mut self, state: State) -> u8 {
+        // Tiny sequences cost less to calculate than to look up.
+        if state.len() < 3 {
+            return state.score();
+        }
+        if self.entries.is_empty() {
+            self.entries.resize(1 << SCORE_CACHE_BITS, 0);
+        }
+        // All eight rank slots, the active length, and count. Hand contents,
+        // turn, go, last player, scores, and role do not affect this pure score.
+        let key = ((state.0 >> SERIES) as u64) & SCORE_KEY_MASK;
+        let entry = &mut self.entries[Self::index(key)];
+        if *entry & SCORE_KEY_MASK == key {
+            return (*entry >> SCORE_KEY_BITS) as u8;
+        }
+        let score = state.score();
+        // The nonzero length makes a valid key distinct from an empty entry.
+        *entry = key | (u64::from(score) << SCORE_KEY_BITS);
+        score
+    }
+
+    fn clear(&mut self) {
+        self.entries.fill(0);
+    }
+}
+
+#[derive(Default)]
+pub(super) struct WpMemo {
+    outcomes: HashMap<WpKey, f64, BuildHasherDefault<StateHasher>>,
+    series_scores: SeriesScoreMemo,
+    collapse_forced: bool,
+}
+
+impl WpMemo {
+    /// Decision-local opt-in for 20.6; historical models keep the recursive path.
+    pub(super) fn collapse_forced_continuations(&mut self) {
+        self.collapse_forced = true;
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.outcomes.clear();
+        self.series_scores.clear();
+    }
+
+    pub(super) fn forced_play(
+        &mut self,
+        state: &AverageState,
+        scores: [u8; 2],
+        role: Role,
+        rank: u8,
+        board: &BoardWinMatrix,
+    ) -> Result<f64, String> {
+        self.forced_play_prepared(State::from_reference(state), scores, role, rank, board)
+    }
+
+    pub(super) fn forced_play_prepared(
+        &mut self,
+        state: State,
+        scores: [u8; 2],
+        role: Role,
+        rank: u8,
+        board: &BoardWinMatrix,
+    ) -> Result<f64, String> {
+        let state = WpState {
+            peg: state,
+            scores,
+            role,
+        };
+        if rank >= RANKS as u8 || state.peg.copies(state.peg.current(), rank) == 0 {
+            return Err("Model 20.1 WP evaluator selected an absent rank".into());
+        }
+        if state.peg.count() + VALUES[rank as usize] > 31 {
+            return Err("Model 20.1 WP evaluator selected an illegal play".into());
+        }
+        if self.collapse_forced {
+            self.play_collapsed(state, rank, board)
+        } else {
+            self.play(state, rank, board)
+        }
+    }
+
+    fn terminal(state: WpState, board: &BoardWinMatrix) -> f64 {
+        if state.scores[0] >= 121 {
+            return 1.0;
+        }
+        if state.scores[1] >= 121 {
+            return 0.0;
+        }
+        match state.role {
+            Role::Dealer => board.dealer_win_probability(
+                BoardMatrixSeam::AfterPegging,
+                state.scores[0],
+                state.scores[1],
+            ),
+            Role::Pone => {
+                1.0 - board.dealer_win_probability(
+                    BoardMatrixSeam::AfterPegging,
+                    state.scores[1],
+                    state.scores[0],
+                )
+            }
+        }
+    }
+
+    fn future(&mut self, mut state: WpState, board: &BoardWinMatrix) -> Result<f64, String> {
+        // Stop immediately at the first winner, before a later scoring event.
+        if state.scores.iter().any(|score| *score >= 121) {
+            return Ok(Self::terminal(state, board));
+        }
+        if state.peg.0 & HAND_MASK == 0 {
+            let last = state.peg.field(LAST, 3);
+            if state.peg.count() != 0 && last != 0 {
+                state.scores[usize::from(last - 1)] += 1;
+            }
+            return Ok(Self::terminal(state, board));
+        }
+        // Memoize zero-count states, where different played series can converge.
+        // Keep cheap one/two-card tails out of the bounded memo as well.
+        let cache = state.peg.count() == 0 && {
+            let hands = state.peg.0 & HAND_MASK;
+            // Rank counts occupy three-bit fields; sum their bit planes.
+            let rank_low_bits = HAND_MASK / 7;
+            let remaining = (hands & rank_low_bits).count_ones()
+                + 2 * ((hands >> 1) & rank_low_bits).count_ones()
+                + 4 * ((hands >> 2) & rank_low_bits).count_ones();
+            remaining > 2
+        };
+        if cache {
+            if let Some(value) = self.outcomes.get(&WpKey::from(state)) {
+                return Ok(*value);
+            }
+        }
+        let mut weighted = 0.0;
+        let mut copies = 0_u8;
+        // The active hand has at most four ranks. Visit present, playable
+        // ranks in ascending order so the floating-point sum stays identical.
+        let hand_mask = (1_u64 << HAND_BITS) - 1;
+        let hand = (state.peg.0 >> (u32::from(state.peg.current()) * HAND_BITS)) as u64
+            & hand_mask;
+        let room = 31 - state.peg.count();
+        let legal_ranks = if room >= 10 { 13 } else { u32::from(room) };
+        let mut present = (hand | (hand >> 1) | (hand >> 2)) & (hand_mask / 7)
+            & ((1_u64 << (legal_ranks * 3)) - 1);
+        while present != 0 {
+            let shift = present.trailing_zeros();
+            present &= present - 1;
+            let rank = (shift / 3) as u8;
+            let count = ((hand >> shift) & 7) as u8;
+            weighted += f64::from(count) * self.play(state, rank, board)?;
+            copies += count;
+        }
+        let value = if copies > 0 {
+            weighted / f64::from(copies)
+        } else {
+            let mut next = state;
+            if state.peg.field(GO, 3) != 0 {
+                let last = state.peg.field(LAST, 3);
+                if last != 0 {
+                    next.scores[usize::from(last - 1)] += 1;
+                }
+                next.peg.reset(1 - state.peg.current());
+            } else {
+                next.peg.set(GO, 3, state.peg.current() + 1);
+                next.peg.set(CURRENT, 1, 1 - state.peg.current());
+            }
+            self.future(next, board)?
+        };
+        // This memo exists for one live decision and includes scores and role.
+        if cache {
+            if self.outcomes.len() >= 1_000_000 {
+                self.outcomes.clear();
+            }
+            self.outcomes.insert(WpKey::from(state), value);
+        }
+        Ok(value)
+    }
+
+    fn play(&mut self, state: WpState, rank: u8, board: &BoardWinMatrix) -> Result<f64, String> {
+        let current = state.peg.current();
+        // forced_play checks the entry; future visits only present, playable ranks.
+        debug_assert!(rank < RANKS as u8 && state.peg.copies(current, rank) > 0);
+        let count = state.peg.count() + VALUES[rank as usize];
+        debug_assert!(count <= 31);
+        if state.peg.len() >= MAX_SERIES {
+            return Err("Model 20.1 WP evaluator selected an illegal play".into());
+        }
+        let mut next = state;
+        next.peg.0 -= 1_u128 << (u32::from(current) * HAND_BITS + u32::from(rank) * 3);
+        next.peg.set(SERIES + state.peg.len() as u32 * 4, 15, rank);
+        next.peg.set(LENGTH, 15, state.peg.len() as u8 + 1);
+        next.peg.set(COUNT, 31, count);
+        next.scores[current as usize] += self.series_scores.score(next.peg);
+        if count == 31 {
+            next.peg.reset(1 - current);
+        } else {
+            next.peg.set(LAST, 3, current + 1);
+            if state.peg.field(GO, 3) == 0 {
+                next.peg.set(CURRENT, 1, 1 - current);
+            }
+        }
+        self.future(next, board)
+    }
+    // Keep the historical evaluator above unchanged. This 20.6-only loop
+    // collapses one physical legal card or go, not duplicate-rank weighting.
+    // Cache-eligible states still take the original lookup/insert path.
+    fn after_play(&mut self, state: WpState, rank: u8) -> Result<WpState, String> {
+        let current = state.peg.current();
+        // forced_play checks the entry; future visits only present, playable ranks.
+        debug_assert!(rank < RANKS as u8 && state.peg.copies(current, rank) > 0);
+        let count = state.peg.count() + VALUES[rank as usize];
+        debug_assert!(count <= 31);
+        if state.peg.len() >= MAX_SERIES {
+            return Err("Model 20.1 WP evaluator selected an illegal play".into());
+        }
+        let mut next = state;
+        next.peg.0 -= 1_u128 << (u32::from(current) * HAND_BITS + u32::from(rank) * 3);
+        next.peg.set(SERIES + state.peg.len() as u32 * 4, 15, rank);
+        next.peg.set(LENGTH, 15, state.peg.len() as u8 + 1);
+        next.peg.set(COUNT, 31, count);
+        next.scores[current as usize] += self.series_scores.score(next.peg);
+        if count == 31 {
+            next.peg.reset(1 - current);
+        } else {
+            next.peg.set(LAST, 3, current + 1);
+            if state.peg.field(GO, 3) == 0 {
+                next.peg.set(CURRENT, 1, 1 - current);
+            }
+        }
+        Ok(next)
+    }
+    #[inline]
+    fn remaining(peg: State) -> u32 {
+        let hands = peg.0 & HAND_MASK;
+        let low = HAND_MASK / 7;
+        (hands & low).count_ones()
+            + 2 * ((hands >> 1) & low).count_ones()
+            + 4 * ((hands >> 2) & low).count_ones()
+    }
+
+    #[inline]
+    fn legal(peg: State) -> (u64, u64) {
+        let mask = (1_u64 << HAND_BITS) - 1;
+        let hand = (peg.0 >> (u32::from(peg.current()) * HAND_BITS)) as u64 & mask;
+        let room = 31 - peg.count();
+        let ranks = if room >= 10 { 13 } else { u32::from(room) };
+        (
+            hand,
+            (hand | hand >> 1 | hand >> 2) & (mask / 7) & ((1_u64 << (ranks * 3)) - 1),
+        )
+    }
+
+    #[inline]
+    fn after_go(mut state: WpState) -> WpState {
+        let current = state.peg.current();
+        if state.peg.field(GO, 3) != 0 {
+            let last = state.peg.field(LAST, 3);
+            if last != 0 {
+                state.scores[usize::from(last - 1)] += 1;
+            }
+            state.peg.reset(1 - current);
+        } else {
+            state.peg.set(GO, 3, current + 1);
+            state.peg.set(CURRENT, 1, 1 - current);
+        }
+        state
+    }
+
+    // Each elided (0 + 1 * value) / 1 normalizes negative zero once.
+    #[inline]
+    fn finish_collapsed(value: f64, normalize_zero: bool) -> f64 {
+        if normalize_zero {
+            0.0 + value
+        } else {
+            value
+        }
+    }
+
+    fn future_collapsed(
+        &mut self,
+        mut state: WpState,
+        board: &BoardWinMatrix,
+    ) -> Result<f64, String> {
+        let mut normalize_zero = false;
+        loop {
+            if state.scores.iter().any(|score| *score >= 121) {
+                return Ok(Self::finish_collapsed(
+                    Self::terminal(state, board),
+                    normalize_zero,
+                ));
+            }
+            if state.peg.0 & HAND_MASK == 0 {
+                let last = state.peg.field(LAST, 3);
+                if state.peg.count() != 0 && last != 0 {
+                    state.scores[usize::from(last - 1)] += 1;
+                }
+                return Ok(Self::finish_collapsed(
+                    Self::terminal(state, board),
+                    normalize_zero,
+                ));
+            }
+            let cache = state.peg.count() == 0 && Self::remaining(state.peg) > 2;
+            if cache {
+                if let Some(value) = self.outcomes.get(&WpKey::from(state)) {
+                    return Ok(Self::finish_collapsed(*value, normalize_zero));
+                }
+            }
+            let (hand, mut present) = Self::legal(state.peg);
+            // Preserve cached entry insertion and duplicate-rank multiply/divide.
+            if !cache {
+                if present == 0 {
+                    state = Self::after_go(state);
+                    continue;
+                }
+                if present.is_power_of_two() {
+                    let shift = present.trailing_zeros();
+                    if (hand >> shift) & 7 == 1 {
+                        normalize_zero = true;
+                        state = self.after_play(state, (shift / 3) as u8)?;
+                        continue;
+                    }
+                }
+            }
+            let mut weighted = 0.0;
+            let mut copies = 0_u8;
+            while present != 0 {
+                let shift = present.trailing_zeros();
+                present &= present - 1;
+                let count = ((hand >> shift) & 7) as u8;
+                weighted +=
+                    f64::from(count) * self.play_collapsed(state, (shift / 3) as u8, board)?;
+                copies += count;
+            }
+            let value = if copies > 0 {
+                weighted / f64::from(copies)
+            } else {
+                self.future_collapsed(Self::after_go(state), board)?
+            };
+            if cache {
+                if self.outcomes.len() >= 1_000_000 {
+                    self.outcomes.clear();
+                }
+                self.outcomes.insert(WpKey::from(state), value);
+            }
+            return Ok(Self::finish_collapsed(value, normalize_zero));
+        }
+    }
+
+    fn play_collapsed(
+        &mut self,
+        state: WpState,
+        rank: u8,
+        board: &BoardWinMatrix,
+    ) -> Result<f64, String> {
+        let next = self.after_play(state, rank)?;
+        self.future_collapsed(next, board)
+    }
+
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::information_set::{PegSeat, RankPegState};
+
+    #[test]
+    fn series_score_memo_checks_collisions_and_survives_clear() {
+        let mut seen = vec![None; 1 << SCORE_CACHE_BITS];
+        let mut collision = None;
+        for mut encoded in 0..13_usize.pow(4) {
+            let mut series = [0; 4];
+            for rank in &mut series {
+                *rank = (encoded % 13) as u8;
+                encoded /= 13;
+            }
+            let count: u8 = series.iter().map(|r| VALUES[*r as usize]).sum();
+            if count > 31 { continue; }
+            let state = State::from_reference(
+                &AverageState::new([[0; RANKS]; 2], &series, count, 0, None, None).unwrap(),
+            );
+            let score = super::super::score_count_for_ranks(&series);
+            let key = ((state.0 >> SERIES) as u64) & SCORE_KEY_MASK;
+            let index = SeriesScoreMemo::index(key);
+            if let Some((other, other_score)) = seen[index] {
+                if other_score != score {
+                    collision = Some((other, other_score, state, score));
+                    break;
+                }
+            } else {
+                seen[index] = Some((state, score));
+            }
+        }
+        let (a, a_score, b, b_score) = collision.expect("find a real score-key collision");
+        let mut memo = SeriesScoreMemo::default();
+        for _ in 0..3 {
+            for (state, score) in [(a, a_score), (b, b_score), (a, a_score)] {
+                assert_eq!(memo.score(state), score);
+                assert_eq!(memo.score(state), score);
+            }
+            memo.clear();
+        }
+        let mut changed_context = a;
+        changed_context.set(0, 7, 4);
+        changed_context.set(CURRENT, 1, 1);
+        changed_context.set(GO, 3, 2);
+        changed_context.set(LAST, 3, 1);
+        assert_eq!(memo.score(changed_context), a_score);
+    }
+
+    #[test]
+    fn series_score_memo_keys_length_and_count_and_skips_tiny_sequences() {
+        let make = |series: &[u8], count| State::from_reference(
+            &AverageState::new([[0; RANKS]; 2], series, count, 0, None, None).unwrap(),
+        );
+        let mut memo = SeriesScoreMemo::default();
+        assert_eq!(memo.score(make(&[4], 5)), 0);
+        assert_eq!(memo.score(make(&[4, 4], 10)), 2);
+        assert!(memo.entries.is_empty());
+        let a = make(&[1, 2, 3], 9);
+        // Trailing rank zero leaves the rank bits unchanged; length still matters.
+        let mut b = make(&[1, 2, 3, 0], 10);
+        b.set(COUNT, 31, 9); // Isolate length: only the active length now differs.
+        assert_eq!(memo.score(a), 3);
+        assert_eq!(memo.score(b), 4);
+        let mut different_count = a;
+        different_count.set(COUNT, 31, 15);
+        assert_eq!(memo.score(different_count), a.score() + 2);
+        assert_eq!(memo.score(a), 3);
+    }
+
+    #[test]
+    fn wp_checked_entry_and_recursive_series_guard_reject_invalid_plays() {
+        let board = BoardWinMatrix::from_function(|_, _, _| 0.5);
+        let mut memo = WpMemo::default();
+        let mut hands = [[0; RANKS]; 2];
+        hands[0][0] = 1;
+        let state = AverageState::new(hands, &[], 0, 0, None, None).unwrap();
+        for rank in [1, 13, 255] {
+            assert_eq!(
+                memo.forced_play(&state, [0, 0], Role::Dealer, rank, &board)
+                    .unwrap_err(),
+                "Model 20.1 WP evaluator selected an absent rank"
+            );
+        }
+        hands[0] = [0; RANKS];
+        hands[0][4] = 1;
+        let blocked = AverageState::new(hands, &[9, 9, 9], 30, 0, None, Some(1)).unwrap();
+        assert_eq!(
+            memo.forced_play(&blocked, [0, 0], Role::Dealer, 4, &board)
+                .unwrap_err(),
+            "Model 20.1 WP evaluator selected an illegal play"
+        );
+        // An invalid internal caller can supply more cards than a hand permits.
+        // Retain the series bound even after a legal root play and a forced go.
+        hands[0] = [0; RANKS];
+        hands[0][2] = 2;
+        let oversized =
+            AverageState::new(hands, &[0, 1, 0, 1, 0, 1, 0], 10, 0, None, Some(1)).unwrap();
+        assert_eq!(
+            memo.forced_play(&oversized, [0, 0], Role::Dealer, 2, &board)
+                .unwrap_err(),
+            "Model 20.1 WP evaluator selected an illegal play"
+        );
+    }
+
+    #[test]
+    fn collapsed_wp_preserves_zero_bits_cache_and_series_guards() {
+        for probability in [-0.0, 0.0, 0.12345678901234567, 1.0] {
+            let board = BoardWinMatrix::from_function(|_, _, _| probability);
+            for role in [Role::Dealer, Role::Pone] {
+                let mut old = WpMemo::default();
+                let mut new = WpMemo::default();
+                new.collapse_forced_continuations();
+                for rank in 0..13 {
+                    for count in 1..=4 {
+                        let mut hands = [[0; RANKS]; 2];
+                        hands[1][rank] = count;
+                        for (series, total, go, last) in [
+                            (vec![], 0, None, None),
+                            (vec![9, 9, 9], 30, None, Some(0)),
+                            (vec![0, 1, 0, 1, 0, 1, 0], 10, None, Some(1)),
+                        ] {
+                            let average =
+                                AverageState::new(hands, &series, total, 0, go, last).unwrap();
+                            for scores in [[0, 0], [120, 119], [119, 120]] {
+                                let state = WpState {
+                                    peg: State::from_reference(&average),
+                                    scores,
+                                    role,
+                                };
+                                let expected = old.future(state, &board).map(f64::to_bits);
+                                assert_eq!(
+                                    new.future_collapsed(state, &board).map(f64::to_bits),
+                                    expected
+                                );
+                            }
+                        }
+                    }
+                }
+                assert_eq!(new.outcomes.len(), old.outcomes.len());
+                assert!(old.outcomes.iter().all(|(key, value)| new
+                    .outcomes
+                    .get(key)
+                    .map(|v| v.to_bits())
+                    == Some(value.to_bits())));
+                new.clear();
+                assert!(new.collapse_forced);
+                assert!(new.outcomes.is_empty());
+            }
+        }
+    }
+
+    fn reference_wp(state: &RankPegState, board: &BoardWinMatrix) -> f64 {
+        if let Some(winner) = state.winner {
+            return f64::from(winner == PegSeat::Zero);
+        }
+        if state.complete {
+            let dealer = state.scores[state.dealer.index()] as u8;
+            let pone = state.scores[state.dealer.other().index()] as u8;
+            let value = board.dealer_win_probability(BoardMatrixSeam::AfterPegging, dealer, pone);
+            return if state.dealer == PegSeat::Zero {
+                value
+            } else {
+                1.0 - value
+            };
+        }
+        let mut total = 0.0;
+        let mut mass = 0.0;
+        for action in state.legal_actions() {
+            let weight = match action {
+                crate::information_set::RankPegAction::Go => 1.0,
+                crate::information_set::RankPegAction::Play(rank) => {
+                    f64::from(state.hands[state.current.index()][rank as usize])
+                }
+            };
+            let mut next = state.clone();
+            next.apply(action).unwrap();
+            total += weight * reference_wp(&next, board);
+            mass += weight;
+        }
+        total / mass
+    }
+
+    #[test]
+    fn wp_evaluator_matches_scoring_oracle_and_stops_at_first_winner() {
+        // Nonlinear utility detects averaging points before applying WP.
+        let board = BoardWinMatrix::from_function(|_, dealer, pone| {
+            1.0 / (1.0 + ((f64::from(pone) - f64::from(dealer)) / 7.0).exp())
+        });
+        let mut seed = 201;
+        let mut memo = WpMemo::default();
+        let mut prepared_memo = WpMemo::default();
+        let mut collapsed_memo = WpMemo::default();
+        collapsed_memo.collapse_forced_continuations();
+        let mut checked = 0;
+        for game in 0..128 {
+            let mut deck: Vec<u8> = (0..52).map(|card| card % 13).collect();
+            for index in (1..deck.len()).rev() {
+                deck.swap(index, next_random(&mut seed) % (index + 1));
+            }
+            let mut hands = [[0; RANKS]; 2];
+            for index in 0..8 {
+                hands[index / 4][deck[index] as usize] += 1;
+            }
+            let mut state = RankPegState {
+                hands,
+                own_discards: [[0; RANKS]; 2],
+                turn_rank: deck[8],
+                scores: if game < 64 { [0, 0] } else { [118, 119] },
+                dealer: if game % 2 == 0 {
+                    PegSeat::Zero
+                } else {
+                    PegSeat::One
+                },
+                current: PegSeat::Zero,
+                plays: Vec::new(),
+                count: 0,
+                go_player: None,
+                last_player: None,
+                history: Vec::new(),
+                winner: None,
+                complete: false,
+            };
+            while !state.complete && state.winner.is_none() {
+                let average = AverageState::new(
+                    state.hands,
+                    &state.plays,
+                    state.count,
+                    state.current.index() as u8,
+                    state.go_player.map(|s| s.index() as u8),
+                    state.last_player.map(|s| s.index() as u8),
+                )
+                .unwrap();
+                let prepared = State::from_reference(&average);
+                for action in state.legal_actions() {
+                    let crate::information_set::RankPegAction::Play(rank) = action else {
+                        continue;
+                    };
+                    let mut next = state.clone();
+                    next.apply(action).unwrap();
+                    let actual = memo
+                        .forced_play(
+                            &average,
+                            [state.scores[0] as u8, state.scores[1] as u8],
+                            if state.dealer == PegSeat::Zero {
+                                Role::Dealer
+                            } else {
+                                Role::Pone
+                            },
+                            rank,
+                            &board,
+                        )
+                        .unwrap();
+                    assert_eq!(
+                        prepared_memo.forced_play_prepared(
+                            prepared,
+                            [state.scores[0] as u8, state.scores[1] as u8],
+                            if state.dealer == PegSeat::Zero { Role::Dealer } else { Role::Pone },
+                            rank,
+                            &board,
+                        ).unwrap().to_bits(),
+                        actual.to_bits(),
+                    );
+                    assert_eq!(collapsed_memo.forced_play_prepared(
+                        prepared, [state.scores[0] as u8, state.scores[1] as u8],
+                        if state.dealer == PegSeat::Zero { Role::Dealer } else { Role::Pone },
+                        rank, &board,
+                    ).unwrap().to_bits(), actual.to_bits());
+                    assert!(
+                        (actual - reference_wp(&next, &board)).abs() < 1e-12,
+                        "state={state:?} action={action:?}"
+                    );
+                    checked += 1;
+                }
+                let legal = state.legal_actions();
+                state
+                    .apply(legal[next_random(&mut seed) % legal.len()])
+                    .unwrap();
+            }
+        }
+        assert!(checked > 200);
+    }
 
     fn bits(value: WeightedPoints) -> [u64; 3] {
         [
@@ -362,12 +1067,16 @@ mod tests {
 
     #[test]
     fn compact_scoring_matches_reference_for_all_legal_series_up_to_five_cards() {
-        fn visit(series: &mut Vec<u8>, count: u8) {
+        fn visit(series: &mut Vec<u8>, count: u8, memo: &mut SeriesScoreMemo) {
             let state = AverageState::new([[0; RANKS]; 2], series, count, 0, None, None).unwrap();
             assert_eq!(
                 State::from_reference(&state).score(),
                 super::super::score_count_for_ranks(series)
             );
+            let packed = State::from_reference(&state);
+            let expected = super::super::score_count_for_ranks(series);
+            assert_eq!(memo.score(packed), expected);
+            assert_eq!(memo.score(packed), expected);
             if series.len() == 5 {
                 return;
             }
@@ -376,12 +1085,13 @@ mod tests {
                     && series.iter().filter(|r| **r == rank).count() < 4
                 {
                     series.push(rank);
-                    visit(series, count + VALUES[rank as usize]);
+                    visit(series, count + VALUES[rank as usize], memo);
                     series.pop();
                 }
             }
         }
-        visit(&mut Vec::new(), 0);
+        let mut memo = SeriesScoreMemo::default();
+        visit(&mut Vec::new(), 0, &mut memo);
         for series in [
             vec![0, 1, 2, 3, 4, 5, 6],
             vec![6, 5, 4, 3, 2, 1, 0],
@@ -395,6 +1105,90 @@ mod tests {
                 State::from_reference(&state).score(),
                 super::super::score_count_for_ranks(&series)
             );
+            let expected = super::super::score_count_for_ranks(&series);
+            assert_eq!(memo.score(State::from_reference(&state)), expected);
+            assert_eq!(memo.score(State::from_reference(&state)), expected);
+        }
+    }
+}
+
+#[cfg(test)]
+mod wp_key_tests {
+    use super::*;
+
+    #[test]
+    fn wp_key_hash_distributes_board_scores_across_buckets() {
+        // Same remaining hands can recur at many board scores. Appending scores
+        // without mixing them into the low hash bits puts them in one probe chain.
+        for role in [Role::Dealer, Role::Pone] {
+            let mut buckets = std::collections::HashSet::new();
+            let mut fingerprints = std::collections::HashSet::new();
+            for ours in 0..9 {
+                for theirs in 0..9 {
+                    let state = WpState {
+                        peg: State((1 << 0) | (1 << 3) | (1 << 6) | (1 << 39) | (1 << 42)),
+                        scores: [ours, theirs],
+                        role,
+                    };
+                    let mut hasher = StateHasher::default();
+                    WpKey::from(state).hash(&mut hasher);
+                    let hash = hasher.finish();
+                    buckets.insert(hash & ((1 << 19) - 1));
+                    fingerprints.insert(hash >> 57);
+                }
+            }
+            assert!(
+                buckets.len() >= 64,
+                "only {} initial buckets",
+                buckets.len()
+            );
+            assert!(
+                fingerprints.len() >= 16,
+                "only {} fingerprints",
+                fingerprints.len()
+            );
+        }
+    }
+
+    #[test]
+    fn wp_key_retains_all_fields_under_hash_collisions_without_alignment_padding() {
+        #[derive(Default)]
+        struct CollisionHasher;
+        impl Hasher for CollisionHasher {
+            fn finish(&self) -> u64 {
+                0
+            }
+            fn write(&mut self, _: &[u8]) {}
+        }
+        assert_eq!(std::mem::size_of::<(WpKey, f64)>(), 32);
+        assert_eq!(std::mem::size_of::<(WpState, f64)>(), 48);
+        let states = std::iter::once(0)
+            .chain((0..128).map(|bit| 1_u128 << bit))
+            .chain(std::iter::once(u128::MAX));
+        let mut score_cases = vec![[0, 0], [120, 119], [119, 120], [255, 255]];
+        for bit in 0..8 {
+            score_cases.push([1_u8 << bit, 0]);
+            score_cases.push([0, 1_u8 << bit]);
+        }
+        let mut outcomes = HashMap::<WpKey, usize, BuildHasherDefault<CollisionHasher>>::default();
+        let mut cases = Vec::new();
+        for peg in states {
+            for scores in &score_cases {
+                for role in [Role::Dealer, Role::Pone] {
+                    let state = WpState {
+                        peg: State(peg),
+                        scores: *scores,
+                        role,
+                    };
+                    let value = cases.len();
+                    assert_eq!(outcomes.insert(WpKey::from(state), value), None);
+                    cases.push(state);
+                }
+            }
+        }
+        assert_eq!(outcomes.len(), cases.len());
+        for (value, state) in cases.into_iter().enumerate() {
+            assert_eq!(outcomes.get(&WpKey::from(state)), Some(&value));
         }
     }
 }

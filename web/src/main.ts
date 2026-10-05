@@ -999,6 +999,17 @@ const SIMPLE_NETWORK_PUBLIC_OPPONENTS = new Set<string>([
 ]);
 const SIMPLE_NETWORK_LOCAL_OPPONENTS = new Set<string>([
   ...SIMPLE_NETWORK_PUBLIC_OPPONENTS,
+  "schell_table-peg_table-20.0",
+  "schell_table-peg_table-20.1",
+  "schell_table-peg_table-20.2",
+  "schell_table-peg_table-20.3",
+  "schell_table-peg_table-20.4",
+  "schell_table-peg_table-20.5",
+  "schell_table-peg_table-20.6",
+  "schell_table-peg_table-20.7",
+  "schell_table-peg_table-28.3",
+  "schell_table-peg_table-20.5.pegging",
+  "schell_table-peg_table-20.5.pegging2",
   "schell_table-peg_table-16.3",
   "schell_table-peg_table-16.1",
   "schell_table-peg_table-16.0",
@@ -1835,8 +1846,19 @@ const aceProgressPoller = new AceProgressPoller(
 function refreshAceProgress(): void {
   aceProgressPoller.watch(state.game && document.visibilityState !== "hidden" &&
     state.aiThinking && !els.thinkingOverlay.hidden &&
-    (state.game.peggingProgressAvailable || currentSnapshot?.opponent === "schell_table-peg_table-13.23") &&
-    currentSnapshot?.gameId
+    (state.game.peggingProgressAvailable || currentSnapshot?.opponent === "schell_table-peg_table-13.23" ||
+      currentSnapshot?.opponent === "schell_table-peg_table-20.0" ||
+      currentSnapshot?.opponent === "schell_table-peg_table-20.1" ||
+      currentSnapshot?.opponent === "schell_table-peg_table-20.2" ||
+      currentSnapshot?.opponent === "schell_table-peg_table-20.3" ||
+      currentSnapshot?.opponent === "schell_table-peg_table-20.4" ||
+      currentSnapshot?.opponent === "schell_table-peg_table-20.5" ||
+      currentSnapshot?.opponent === "schell_table-peg_table-20.6" ||
+      currentSnapshot?.opponent === "schell_table-peg_table-20.7" ||
+      currentSnapshot?.opponent === "schell_table-peg_table-28.3" ||
+      currentSnapshot?.opponent === "schell_table-peg_table-28.3.fast" ||
+      currentSnapshot?.opponent === "schell_table-peg_table-20.5.pegging" ||
+      currentSnapshot?.opponent === "schell_table-peg_table-20.5.pegging2") && currentSnapshot?.gameId
     ? { gameId: currentSnapshot.gameId, handNumber: state.game.handNumber, played: state.game.plays.length }
     : null);
 }
@@ -9455,6 +9477,17 @@ function analyticsEngineSortKey(engine: Opponent): number {
     "schell_table-peg_table-9.1",
     "schell_table-peg_table-9.11",
     ...ACE_OPPONENTS,
+    "schell_table-peg_table-20.0",
+    "schell_table-peg_table-20.1",
+    "schell_table-peg_table-20.2",
+    "schell_table-peg_table-20.3",
+    "schell_table-peg_table-20.4",
+    "schell_table-peg_table-20.5",
+    "schell_table-peg_table-20.6",
+    "schell_table-peg_table-20.7",
+    "schell_table-peg_table-28.3",
+    "schell_table-peg_table-20.5.pegging",
+    "schell_table-peg_table-20.5.pegging2",
     "schell_table-peg_table-16.3",
     "schell_table-peg_table-16.1",
     "schell_table-peg_table-16.0",

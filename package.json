@@ -1,9 +1,9 @@
 {
-  "version": "16.3.0",
+  "version": "28.3.0",
   "scripts": {
     "build": "scripts/run-quiet.sh --show-warnings \"Client build\" scripts/build-client.sh",
     "build:training-drills": "python3 scripts/build_training_drills.py",
-    "build:deploy": "scripts/run-quiet.sh --show-warnings \"Deploy build\" /bin/sh -c 'npm run --silent build && cargo build --manifest-path rust/cribbage-api/Cargo.toml --release'",
+    "build:deploy": "scripts/run-quiet.sh --show-warnings \"Deploy build\" /bin/sh -c 'npm run --silent build && python3 scripts/build_rust_release.py api'",
     "package:server": "scripts/run-quiet.sh --show-warnings \"Server package\" /bin/sh -c 'scripts/package-rust-server.sh && node scripts/check-server-package.cjs'",
     "qa:predeploy": "scripts/predeploy_qa.sh",
     "cap:copy": "npm run build && cap copy",
@@ -23,7 +23,10 @@
     "test:web": "scripts/run-quiet.sh \"Web tests\" node_modules/.bin/vitest run",
     "typecheck": "scripts/run-quiet.sh \"TypeScript typecheck\" node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit",
     "test:release-build": "scripts/run-quiet.sh \"Release build tests\" python3 -m unittest scripts/test_build_rust_release.py scripts/test_build_production_release.py",
-    "test:workbench": "scripts/run-quiet.sh \"Benchmark workbench tests\" python3 -m unittest discover -s scripts -p test_benchmark_workbench.py"
+    "test:workbench": "scripts/run-quiet.sh \"Benchmark workbench tests\" python3 -m unittest discover -s scripts -p test_benchmark_workbench.py",
+    "build:benchmark": "scripts/run-quiet.sh --show-warnings \"Benchmark release build\" python3 scripts/build_rust_release.py benchmark",
+    "test:opening-assets": "scripts/run-quiet.sh \"Opening asset pipeline tests\" python3 -m unittest discover -s scripts -p test_opening_asset_pipeline.py",
+    "build:opening-assets": "scripts/run-quiet.sh --show-warnings \"Opening asset builder\" python3 scripts/build_rust_release.py opening"
   },
   "dependencies": {
     "@capacitor/core": "^7.4.4"

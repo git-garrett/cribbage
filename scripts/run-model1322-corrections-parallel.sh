@@ -12,7 +12,7 @@ beliefs="${MODEL1322_CORRECTION_BELIEFS:-${runtime_root}/assets/model91-pegging-
 factors="${MODEL1322_CORRECTION_FACTORS:-${runtime_root}/assets/model1322-decline-factors.json}"
 keep_prior="${MODEL1322_CORRECTION_KEEP_PRIOR:-${runtime_root}/assets/model132-keep-prior.json}"
 discard_histograms="${MODEL1322_CORRECTION_DISCARD_HISTOGRAMS:-${runtime_root}/assets/model1322-opponent-discard-histograms.json}"
-baseline_pairs="${MODEL1322_CORRECTION_BASELINE_PAIRS:-${runtime_root}/assets/model911-pair-outcomes.bin}"
+baseline_pairs="${MODEL1322_CORRECTION_BASELINE_PAIRS:-}"
 keeps=1820
 
 if [[ ! -x "$builder" ]]; then
@@ -23,12 +23,16 @@ if [[ "$workers" -lt 1 || "$workers" -gt 10 ]]; then
   echo "MODEL1322_CORRECTION_WORKERS must be between 1 and 10" >&2
   exit 1
 fi
-for asset in "$beliefs" "$factors" "$keep_prior" "$discard_histograms" "$baseline_pairs"; do
+for asset in "$beliefs" "$factors" "$keep_prior" "$discard_histograms"; do
   if [[ ! -f "$asset" ]]; then
     echo "missing frozen Model 13.22 correction input: $asset" >&2
     exit 1
   fi
 done
+if [[ -n "$baseline_pairs" && ! -f "$baseline_pairs" ]]; then
+  echo "missing optional baseline verification input: $baseline_pairs" >&2
+  exit 1
+fi
 
 mkdir -p "$output_root"
 pids=()
@@ -54,7 +58,6 @@ for ((worker = 0; worker < workers; worker += 1)); do
     --factors "$factors"
     --keep-prior "$keep_prior"
     --discard-histograms "$discard_histograms"
-    --baseline-pairs "$baseline_pairs"
     --dealer-start "$dealer_start"
     --dealer-count "$dealer_count"
     --pone-start 0
@@ -63,6 +66,9 @@ for ((worker = 0; worker < workers; worker += 1)); do
     --evidence-cache-outcome-limit "$evidence_cache"
     --future-cache-limit "$future_cache"
   )
+  if [[ -n "$baseline_pairs" ]]; then
+    args+=(--baseline-pairs "$baseline_pairs")
+  fi
   if [[ -f "$shard/checkpoint.json" ]]; then
     args+=(--resume)
   fi

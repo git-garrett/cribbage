@@ -16,7 +16,7 @@ REFERENCE_COMMIT="2d6370b34aca7c81932fd0d483da763eb6c08994"
 
 if [[ ! -x "$RUNNER" ]]; then
   echo "Missing release runner: $RUNNER" >&2
-  echo "Run: cargo build --manifest-path rust/Cargo.toml --release -p cribbage-runner" >&2
+  echo "Run: npm run build:benchmark -- --model schell_table-peg_table-13.0" >&2
   exit 1
 fi
 for required in "$MODEL130_ASSET" "$MYRMIDON_SOURCE"; do

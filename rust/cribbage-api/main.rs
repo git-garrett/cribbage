@@ -14,10 +14,12 @@ use cribbage_shadow_engine::cards::{
     PeggingScoreComponents, RANKS, SUIT_NAMES, VALUES,
 };
 use cribbage_shadow_engine::decision::{
-    recommend_discard_for_side, recommend_peg_for_side, recommend_peg_for_side_with_caches,
+    choose_peg_for_side_with_caches, recommend_discard_for_side, recommend_peg_for_side,
     review_discard_for_side_with_recommendation, review_peg_for_side_with_recommendation,
-    DecisionReview as EngineDecisionReview, PegDecision, ReviewedDecisionValue,
+    DecisionReview as EngineDecisionReview, PegAction, PegDecision, ReviewedDecisionValue,
 };
+#[cfg(test)]
+use cribbage_shadow_engine::decision::recommend_peg_for_side_with_caches;
 use cribbage_shadow_engine::dynamic::{
     DynamicCycleSample, DynamicProfile, DynamicState, DYNAMIC_EVALUATOR_VERSION,
     MIN_COMPLETE_CYCLES,
@@ -25,7 +27,7 @@ use cribbage_shadow_engine::dynamic::{
 use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
 use cribbage_shadow_engine::model::{Model13HandCache, Model911HandCache};
 use cribbage_shadow_engine::model_id::{
-    ModelId, ACE_MODEL, ACE_MODEL_ID, DYNAMIC, MODEL_13_0, MODEL_13_215, MODEL_9_1, MODEL_9_11,
+    ModelId, ACE_MODEL, ACE_MODEL_ID, DYNAMIC, MODEL_13_0, MODEL_13_215, MODEL_13_23, MODEL_28_3, MODEL_9_1, MODEL_9_11,
     MYRMIDON_5,
 };
 use rusqlite::{params, Connection, OptionalExtension};
@@ -634,7 +636,7 @@ fn health_json() -> String {
 
 fn model_json() -> String {
     format!(
-        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\",\"{}\"]}}",
+        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\",\"schell_table-peg_table-20.0\",\"schell_table-peg_table-20.1\",\"schell_table-peg_table-20.2\",\"schell_table-peg_table-20.3\",\"schell_table-peg_table-20.4\",\"schell_table-peg_table-20.5\",\"schell_table-peg_table-20.6\",\"schell_table-peg_table-20.7\",\"schell_table-peg_table-28.3\",\"schell_table-peg_table-20.5.pegging\",\"schell_table-peg_table-20.5.pegging2\",\"{}\"]}}",
         APP_VERSION, ACE_MODEL, ACE_MODEL, MYRMIDON_5, MODEL_9_1, MODEL_9_11, MODEL_13_215, DYNAMIC
     )
 }
@@ -825,6 +827,11 @@ fn game_action(
                 *session = before;
                 return Err(error);
             }
+        }
+        if action == "forfeit" {
+            // Cancel only after persistence succeeds; a rolled-back forfeit
+            // must leave the still-valid opening available to its waiters.
+            server.pegging_work.cancel(&session.id);
         }
         let mut handicap_updated = false;
         if action == "continue-scoring" {
@@ -1413,8 +1420,8 @@ fn load_session_for_player(
         Some(model) if model.is_ace() => connection
             .query_row(
                 "SELECT session_json FROM cribbage_game_sessions
-             WHERE json_extract(session_json, '$.owner_user_id') IS :owner AND (:owner IS NOT NULL OR tag = :tag) AND model IN (:model1, :model2, :model3) AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
-                rusqlite::named_params! {":tag": tag, ":model1": MODEL_13_0, ":model2": MODEL_13_215, ":model3": ACE_MODEL, ":owner": owner_user_id},
+             WHERE json_extract(session_json, '$.owner_user_id') IS :owner AND (:owner IS NOT NULL OR tag = :tag) AND model IN (:model1, :model2, :model3, :model4, :model5) AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
+                rusqlite::named_params! {":tag": tag, ":model1": MODEL_13_0, ":model2": MODEL_13_215, ":model3": ACE_MODEL, ":model4": MODEL_13_23, ":model5": MODEL_28_3, ":owner": owner_user_id},
                 |row| row.get::<_, String>(0),
             )
             .optional(),
@@ -1952,7 +1959,7 @@ fn apply_action_with_peg_decision(
     action: &str,
     body: &str,
     model_root: &str,
-    prepared_peg: Option<PegDecision>,
+    prepared_peg: Option<PegAction>,
 ) -> Result<(), String> {
     if matches!(
         action,
@@ -2160,21 +2167,22 @@ fn apply_action_with_peg_decision(
             }
             let score_before = score_snapshot(&session.game);
             let decision_model = session.decision_model();
-            let decision = prepared_peg.map(Ok).unwrap_or_else(|| recommend_peg_for_side_with_caches(
+            let decision = prepared_peg.map(Ok).unwrap_or_else(|| choose_peg_for_side_with_caches(
                 &session.game,
                 AI,
                 decision_model,
                 None,
                 model_root,
                 Some(&session.model911_hand_cache),
-                (decision_model == ModelId::Schell1323).then_some(&session.model1323_hand_cache),
+                matches!(decision_model, ModelId::Schell1323 | ModelId::Schell200 | ModelId::Schell201 | ModelId::Schell202 | ModelId::Schell203 | ModelId::Schell204 | ModelId::Schell205 | ModelId::Schell206 | ModelId::Schell207 | ModelId::Schell283 | ModelId::Schell283Fast | ModelId::Schell205Pegging | ModelId::Schell205Pegging2)
+                    .then_some(&session.model1323_hand_cache),
             ))?;
             let (reason, cards, score_components) = match decision {
-                PegDecision::Go => {
+                PegAction::Go => {
                     session.game.say_go(AI)?;
                     ("Go", Vec::new(), None)
                 }
-                PegDecision::Play { card_id, .. } => {
+                PegAction::Play { card_id } => {
                     session.game.play_card(AI, card_id)?;
                     (
                         "Pegging play",
@@ -4611,17 +4619,28 @@ mod tests {
         assert!(model_json().contains("schell_table-peg_table-16.0"));
         assert!(model_json().contains("schell_table-peg_table-16.1"));
         assert!(model_json().contains("schell_table-peg_table-16.3"));
+        assert!(model_json().contains("schell_table-peg_table-20.0"));
         assert!(model_json().contains(DYNAMIC));
     }
 
     #[test]
-    fn pathway_models_are_preserved_in_new_server_sessions() {
+    fn pathway_and_experimental_models_are_preserved_in_new_server_sessions() {
         for model in [
             ModelId::Myrmidon5,
             ModelId::Schell91,
             ModelId::Schell911,
             ModelId::Schell13,
             ModelId::Schell13215,
+            ModelId::Schell200,
+            ModelId::Schell201,
+            ModelId::Schell202,
+            ModelId::Schell203,
+            ModelId::Schell204,
+            ModelId::Schell205,
+            ModelId::Schell206,
+            ModelId::Schell207,
+            ModelId::Schell205Pegging,
+            ModelId::Schell205Pegging2,
             ModelId::Dynamic,
         ] {
             let session = new_session_from_seed(model, Some("Player".to_string()), 0x1234_5678, 1);
@@ -4630,6 +4649,21 @@ mod tests {
                 snapshot_json(&session).contains(&format!("\"opponent\":\"{}\"", model.as_str()))
             );
         }
+    }
+
+    #[test]
+    fn current_ace_resumes_each_prior_ace_with_its_original_engine() {
+        let data_dir = std::env::temp_dir().join(format!("ace-versions-{}-{}", std::process::id(), unix_millis()));
+        initialize_game_database(&data_dir).unwrap();
+        for (i, model) in [ModelId::Schell13, ModelId::Schell13215, ModelId::Schell1323, ModelId::Schell283, ACE_MODEL_ID].into_iter().enumerate() {
+            let tag = format!("prior-ace-{i}");
+            let session = new_session_from_seed(model, Some(tag.clone()), 42 + i as u32, 1);
+            persist_session_snapshot(&data_dir, &session).unwrap();
+            let restored = load_session_for_player(&data_dir, &tag, Some(ACE_MODEL_ID), None).unwrap().unwrap();
+            assert_eq!(restored.id, session.id);
+            assert_eq!(restored.model, model);
+        }
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[test]

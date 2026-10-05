@@ -16,8 +16,11 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = {
     'api': [('cribbage-api', 'cribbage-api')],
-    'benchmark': [('cribbage-runner', 'cribbage-runner')],
+    'benchmark': [('cribbage-runner', 'cribbage-runner'),
+                  ('cribbage-shadow-engine', 'cribbage-decision-worker')],
     'shadow': [('cribbage-shadow-engine', 'cribbage-shadow-engine')],
+    'opening': [('cribbage-shadow-engine', 'build-model283-opening'),
+                ('cribbage-shadow-engine', 'model283-hands')],
 }
 
 
@@ -86,6 +89,10 @@ def inputs(root, model_root, corpus):
             paths.extend(p for p in member.rglob('*')
                          if p.is_file() and p.suffix in ('.rs', '.toml')
                          and 'target' not in p.relative_to(member).parts)
+    # Compiled-in traversal priors belong to source even with an external model root.
+    embedded = root / 'rust/cribbage-shadow-engine/assets/model206-root-ordering.json'
+    if embedded.is_file():
+        paths.append(embedded)
     assets = model_root / 'rust/cribbage-shadow-engine/assets'
     if not assets.is_dir():
         raise ValueError('model root must contain rust/cribbage-shadow-engine/assets')
@@ -127,6 +134,8 @@ def build(options):
         cargo.append('--offline')
     workload_cargo = cargo + ['-p', 'cribbage-shadow-engine', '--bin', 'pgo-workload',
                               '--target', target]
+    if options.kind == 'opening':
+        workload_cargo.extend(['--bin', 'build-model283-opening'])
     selected = TARGETS[options.kind]
     for package, binary in selected:
         cargo.extend(['-p', package, '--bin', binary])
@@ -142,7 +151,7 @@ def build(options):
 
     flags = rustflags(os.environ)
     merger = profile_tool(host)
-    models = options.model or ['ace']
+    models = options.model or (['schell_table-peg_table-20.7'] if options.kind == 'benchmark' else ['ace'])
     work = target_dir / 'pgo' / options.kind
     work.mkdir(parents=True, exist_ok=True)
     with (work / 'build.lock').open('w') as lock:
@@ -191,6 +200,8 @@ def build(options):
                 binaries = ({binary: output / binary for _, binary in selected}
                             if name == 'optimized' else {})
                 binaries['pgo-workload'] = output / 'pgo-workload'
+                if options.kind == 'opening':
+                    binaries['build-model283-opening'] = output / 'build-model283-opening'
                 publish(binaries, preserved)
                 shutil.rmtree(directory)
                 output = preserved
@@ -206,16 +217,33 @@ def build(options):
                 raise ValueError('Empty PGO workload results')
             return result
 
+        def opening_sample(directory, label, env):
+            full = run_dir / label / 'full'
+            shallow = run_dir / label / 'shallow'
+            output = run([directory / 'build-model283-opening',
+                          model_root / 'rust/cribbage-shadow-engine/assets',
+                          full, '11', '0', '0', '3', shallow],
+                         cwd=root, env=env, capture_output=True, text=True)
+            result = json.loads(output.stdout)
+            return {kind: digest(Path(result[kind]['path']))
+                    for kind in ['full', 'production']}
+
         try:
             baseline = compile_variant('baseline', [])
             reference = {(m, s): replay(baseline, s, m, os.environ)
                          for m in models for s in ['train', 'validate']}
+            opening_reference = opening_sample(baseline, 'reference-assets', os.environ) if options.kind == 'opening' else None
             raw = run_dir / 'raw'
             instrumented = compile_variant('instrumented', ['-Cprofile-generate=' + str(raw)])
             for m in models:
                 trained = replay(instrumented, 'train', m,
                                  dict(os.environ, LLVM_PROFILE_FILE=str(raw / '%p-%m.profraw')))
                 same_values(reference[m, 'train'], trained, m + '/training')
+            if opening_reference is not None:
+                trained_opening = opening_sample(instrumented, 'training-assets',
+                    dict(os.environ, LLVM_PROFILE_FILE=str(raw / '%p-%m.profraw')))
+                if trained_opening != opening_reference:
+                    raise ValueError('PGO instrumented opening asset parity failed')
             run([merger, 'merge', raw, '-o', profile])
             optimized = compile_variant('optimized', ['-Cprofile-use=' + str(profile),
                                         '-Cllvm-args=-pgo-warn-missing-function'])
@@ -227,6 +255,10 @@ def build(options):
                         cases=len(actual['values']), bitExact=True,
                         baselineSeconds=reference[m, suite]['seconds'],
                         optimizedSeconds=actual['seconds'])
+            if opening_reference is not None:
+                if opening_sample(optimized, 'optimized-assets', os.environ) != opening_reference:
+                    raise ValueError('PGO optimized opening asset parity failed')
+                record['openingAssetParity'] = opening_reference
             if provenance != inputs(root, model_root, corpus):
                 raise ValueError('Source or model assets changed during the PGO build; refusing to publish')
             binaries = {name: optimized / name for _, name in selected}
