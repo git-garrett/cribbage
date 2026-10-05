@@ -1,7 +1,7 @@
 # Benchmark workbench
 
 The local browser workbench shows the paired runner's live progress, projected
-completion, paired win rate, scoring, WP prediction accuracy, pone-opening time,
+completion, paired win rate, scoring, WP calibration, pone-opening time,
 reciprocal outcomes, and historical confidence bands. It is an observer: it cannot launch, stop, resume, or edit a
 benchmark through its HTTP interface.
 
@@ -42,8 +42,9 @@ Completion percentages describe the run, and “left” in orientation labels is
 seat assignment, not a standing. Benchmark play and frozen inputs are unchanged.
 
 Scoring can show final points per game, pegging and hand counting separately for
-pone/dealer, or crib points. WP accuracy shows Brier error (lower is better),
-with separate discard/pegging and pone/dealer selections. Average predicted WP
+pone/dealer, or crib points. WP calibration shows signed miss (observed wins
+minus predicted WP), in percentage points, with separate discard/pegging and
+pone/dealer selections. Average predicted WP
 and observed wins are shown alongside it, weighted by recorded decisions.
 Pone opening is the first card of each hand, not each count-to-31 sequence.
 Its elapsed model-call time excludes forced or missing-timing openings; later
@@ -52,7 +53,10 @@ are not CPU-time measurements or a controlled comparison across workloads.
 
 Each metric shows both models' means and sample counts, with a graph of the
 first model minus the second. Above zero favors the first model for points;
-below zero favors it for Brier error and opening time. The history slider
+below zero favors it for opening time. Each model's positive WP miss means
+underprediction and negative miss means overprediction. Zero means no average
+bias, but opposite misses can cancel. The WP difference graph compares signed
+misses; neither direction automatically favors a model. The history slider
 inspects the same completed-pair checkpoint across all graphs. Missing telemetry
 leaves the relevant metric empty rather than counting it as a zero measurement.
 
@@ -143,10 +147,13 @@ telemetry; the absent mean and difference stay unknown. Means use all samples fr
 the same contiguous prefix as wins, including game-ending partial hands.
 
 Phase scoring retains the reporter's recorded-point convention: unreached
-phases contribute zero. WP Brier error uses the actor's eventual win/loss and
-excludes forced pegging actions and absent predictions. Natural parameter
-bounds clip intervals for nonnegative means and Brier scores. Small-sample,
-heavy-tailed timing intervals can be unreliable. These bands do not control
+phases contribute zero. WP miss uses the actor's eventual win/loss minus its
+selected WP prediction and excludes forced pegging actions and absent
+predictions. Natural parameter
+bounds clip intervals for nonnegative scoring/timing means, signed WP miss
+means (−1 to 1), and differences between signed misses (−2 to 2). The API uses
+probability units; the UI scales WP means, differences and bands to percentage
+points. Small-sample, heavy-tailed timing intervals can be unreliable. These bands do not control
 false positives from repeated checks, metric selection, or changing workloads.
 
 The 95% confidence sequence uses a simple fixed mixture of betting martingales,

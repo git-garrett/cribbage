@@ -257,6 +257,43 @@ class WorkbenchAccessTests(unittest.TestCase):
 
 
 class MetricIntervalTests(unittest.TestCase):
+    def test_signed_wp_intervals_preserve_negative_means_and_full_difference_domain(self):
+        for sign in (1, -1):
+            pairs = []
+            for miss in (.8, 1):
+                samples = [[sign * miss, 1], [-sign * miss, 1]]
+                left = dict(final_left_score=121, final_right_score=100,
+                            metrics={'wp_pegging_pone': samples})
+                right = dict(final_left_score=100, final_right_score=121,
+                             metrics={'wp_pegging_pone': samples[::-1]})
+                pairs.append((left, right))
+            result = metric_histories(pairs)['wp_pegging_pone'][-1]
+            self.assertAlmostEqual(result['candidate'], sign * .9)
+            self.assertAlmostEqual(result['opponent'], -sign * .9)
+            self.assertAlmostEqual(result['delta'], sign * 1.8)
+            negative = result['opponent95' if sign == 1 else 'candidate95']
+            positive = result['candidate95' if sign == 1 else 'opponent95']
+            self.assertEqual(negative[0], -1)
+            self.assertLess(negative[1], 0)
+            self.assertGreater(positive[0], 0)
+            self.assertEqual(positive[1], 1)
+            if sign == 1:
+                self.assertGreater(result['fixed95'][0], 1)
+                self.assertEqual(result['fixed95'][1], 2)
+            else:
+                self.assertEqual(result['fixed95'][0], -2)
+                self.assertLess(result['fixed95'][1], -1)
+
+    def test_pooled_miss_equals_observed_minus_predicted_with_cancellation(self):
+        accumulator = PairedRatio()
+        accumulator.add([.75, 1, .25, 1], [-.5, 2, .5, 0])
+        accumulator.add([-1.5, 2, 1.5, 0], [.75, 1, .25, 1])
+        result = accumulator.snapshot(2)
+        for side in ('candidate', 'opponent'):
+            self.assertAlmostEqual(result[side], result[side + 'Actual'] - result[side + 'Predicted'])
+        self.assertAlmostEqual(result['candidate'], -.25)
+        self.assertAlmostEqual(result['opponent'], .25 / 3)
+
     def test_matches_paired_mean_interval_and_preserves_covariance(self):
         accumulator = PairedRatio()
         differences = [2, -1, 3, 0]
@@ -410,9 +447,9 @@ class MetricTelemetryTests(unittest.TestCase):
         self.db.execute("INSERT INTO compact_discards VALUES ('g',1,0,'B',.2)")
         game = self.game()
         workbench.game_metrics(self.db, [game], {})
-        self.assertEqual(game['metrics']['wp_pegging_pone'][0], [.0625, 1, .75, 1])
-        self.assertEqual(game['metrics']['wp_pegging_dealer'][1], [.0625, 1, .25, 0])
-        self.assertAlmostEqual(game['metrics']['wp_discard_pone'][1][0], .04)
+        self.assertEqual(game['metrics']['wp_pegging_pone'][0], [.25, 1, .75, 1])
+        self.assertEqual(game['metrics']['wp_pegging_dealer'][1], [-.25, 1, .25, 0])
+        self.assertAlmostEqual(game['metrics']['wp_discard_pone'][1][0], -.2)
 
     def test_cache_reads_only_new_games_and_invalidates_changed_metadata(self):
         self.peg(0, 0, 0, 0, 'A', 3000000)
@@ -432,8 +469,13 @@ class MetricTelemetryTests(unittest.TestCase):
         game = self.game()
         game['winner'] = 1
         workbench.game_metrics(self.db, [game], cache)
-        self.assertEqual(game['metrics']['wp_pegging_pone'][0][0], .75 ** 2)
+        self.assertEqual(game['metrics']['wp_pegging_pone'][0][0], -.75)
         self.assertNotIn('new', cache)
+
+    def test_negative_timing_is_still_rejected(self):
+        self.peg(0, 0, 0, 0, 'A', -1000)
+        with self.assertRaisesRegex(ValueError, 'Invalid pone_open telemetry'):
+            workbench.game_metrics(self.db, [self.game()], {})
 
     def test_missing_schema_has_no_samples_and_mismatched_models_fail_closed(self):
         self.db.execute('DROP TABLE compact_discards')

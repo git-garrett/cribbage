@@ -173,10 +173,10 @@ def metric_histories(pairs):
                 if snapshot:
                     for field in ('candidate95', 'opponent95'):
                         if snapshot[field]:
-                            snapshot[field][0] = max(0, snapshot[field][0])
+                            snapshot[field][0] = max(-1 if key.startswith('wp_') else 0, snapshot[field][0])
                             if key.startswith('wp_'):
                                 snapshot[field][1] = min(1, snapshot[field][1])
                     if key.startswith('wp_') and snapshot['fixed95']:
-                        snapshot['fixed95'] = [max(-1, snapshot['fixed95'][0]), min(1, snapshot['fixed95'][1])]
+                        snapshot['fixed95'] = [max(-2, snapshot['fixed95'][0]), min(2, snapshot['fixed95'][1])]
                     histories[key].append(snapshot)
     return histories
