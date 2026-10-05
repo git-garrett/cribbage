@@ -138,7 +138,8 @@ def game_metrics(db, games, cache):
             missing.append((game, signature))
 
     def add(game, key, side, value, predicted=0, actual=0):
-        if not isinstance(value, (float, int)) or not math.isfinite(value) or value < 0:
+        if (not isinstance(value, (float, int)) or not math.isfinite(value)
+                or (value < 0 and not key.startswith('wp_'))):
             raise ValueError(f'Invalid {key} telemetry in game {game["game_index"]}')
         target = game['metrics'][key][side]
         for i, amount in enumerate((value, 1, predicted, actual)):
@@ -191,7 +192,7 @@ def game_metrics(db, games, cache):
                     raise ValueError('Invalid recorded win probability')
                 actual = int(game['winner'] == side)
                 role = 'dealer' if row['role'] else 'pone'
-                add(game, f'wp_{kind}_{role}', side, (prediction - actual) ** 2, prediction, actual)
+                add(game, f'wp_{kind}_{role}', side, actual - prediction, prediction, actual)
 
         seen = set()
         fields = ['game_id', 'hand_number', 'sequence', 'player', 'role', 'model', 'action', 'legal_count', 'decision_elapsed_us']

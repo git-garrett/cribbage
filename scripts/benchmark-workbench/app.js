@@ -179,22 +179,22 @@ function renderCharts() {
 
 function renderMetric(prefix, key, pairs) {
   const wp = prefix === 'wp', timing = prefix === 'open';
-  const decimals = wp ? 4 : 2;
-  const unit = timing ? ' s' : wp ? '' : ' pts';
-  const format = (value) => value == null ? '—' : `${value.toFixed(decimals)}${unit}`;
+  const unit = timing ? ' s' : wp ? ' pp' : ' pts';
+  const format = (value) => value == null ? '—' : `${wp && value > 0 ? '+' : ''}${(value * (wp ? 100 : 1)).toFixed(2)}${unit}`;
   const bounds = (values) => values ? `${format(values[0])} to ${format(values[1])}` : 'More paired deals needed';
   const candidate = modelName(report.candidate), opponent = modelName(report.opponent);
   const rows = report.metrics?.[key] || [];
   const index = rows.findLastIndex((row) => row.pairs <= pairs);
   const current = rows[index];
   const delta = current?.delta;
-  const measure = timing ? 'opening seconds' : wp ? 'Brier score' : 'points';
+  const measure = timing ? 'opening seconds' : wp ? 'WP miss (percentage points)' : 'points';
   $(`${prefix}-chart-title`).textContent = `${candidate} − ${opponent} · ${measure}`;
-  $(`${prefix}-delta`).textContent = delta != null ? `${delta > 0 ? '+' : ''}${format(delta)}` : '—';
+  $(`${prefix}-delta`).textContent = delta != null ? `${!wp && delta > 0 ? '+' : ''}${format(delta)}` : '—';
   $(`${prefix}-standing`).textContent = delta == null ? 'Not enough recorded data to compare both models yet.' :
+    wp ? 'Signed miss: positive underpredicts wins; negative overpredicts wins.' :
     delta === 0 ? `Equal observed ${measure}` :
     timing ? `${delta < 0 ? candidate : opponent} has the faster observed opening` :
-    wp ? `${delta < 0 ? candidate : opponent} has the lower observed prediction error` : standing(delta, candidate, opponent);
+    standing(delta, candidate, opponent);
   const models = $(`${prefix}-models`);
   models.replaceChildren();
   for (const [side, name] of [['candidate', candidate], ['opponent', opponent]]) {
@@ -206,11 +206,13 @@ function renderMetric(prefix, key, pairs) {
   }
   $(`${prefix}-interval`).textContent = delta != null ? `Difference at ${number.format(current.pairs)} completed pairs: ${bounds(current.fixed95)} (95% pointwise). ${number.format(current.clusters)} deal pairs contribute recorded samples.` : 'Missing telemetry is not treated as zero. A difference requires samples from both models.';
   if (wp) $('wp-calibration').textContent = current ? `Mean predicted / observed wins: ${candidate} ${percent(current.candidatePredicted)} / ${percent(current.candidateActual)}; ${opponent} ${percent(current.opponentPredicted)} / ${percent(current.opponentActual)}. Outcomes are weighted by recorded decisions.` : '';
-  const direction = wp || timing ? `Negative favors ${candidate}; positive favors ${opponent}.` : `Positive favors ${candidate}; negative favors ${opponent}.`;
+  const direction = wp ? 'Positive means the first model has a more positive miss, not necessarily better calibration.' : timing ? `Negative favors ${candidate}; positive favors ${opponent}.` : `Positive favors ${candidate}; negative favors ${opponent}.`;
   $(`${prefix}-chart`).setAttribute('aria-label', `${candidate} minus ${opponent} ${measure} over completed pairs. ${direction} Shading is the ordinary 95 percent pointwise interval.`);
-  const comparisons = rows.filter((row) => row.delta != null);
+  const comparisons = rows.filter((row) => row.delta != null).map((row) => wp ? {
+    ...row, delta: row.delta * 100, fixed95: row.fixed95?.map((value) => value * 100),
+  } : row);
   chart(`${prefix}-chart`, comparisons, { x: (r) => r.pairs, y: (r) => r.delta, reference: 0,
-    minSpan: wp ? .002 : timing ? .1 : 1, decimals: wp ? 3 : 1,
+    minSpan: wp ? .2 : timing ? .1 : 1, decimals: wp ? 2 : 1,
     bands: [{ key: 'fixed95', className: 'fixed-band' }], inspected: comparisons.findLastIndex((row) => row.pairs <= pairs),
     empty: 'Waiting for recorded paired samples' });
 }
