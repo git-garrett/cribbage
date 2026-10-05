@@ -216,7 +216,7 @@ function modelName(model) {
   return model;
 }
 
-function combineRows(analyses, rowsFor, fields) {
+function combineRows(analyses, rowsFor, fields, sumFields = []) {
   const groups = new Map();
   for (const analysis of analyses) {
     for (const row of rowsFor(analysis)) {
@@ -225,6 +225,7 @@ function combineRows(analyses, rowsFor, fields) {
       const weight = row.rows;
       group.rows += weight;
       for (const field of fields) group[field] = (group[field] || 0) + row[field] * weight;
+      for (const field of sumFields) group[field] = (group[field] || 0) + row[field];
       groups.set(key, group);
     }
   }
@@ -294,7 +295,7 @@ function buildReport(options) {
       evCalibration: combineRows(analyses, (analysis) => analysis.ev.rows, ["avgEv", "avgRealized", "avgError", "meanAbsError"]),
       evTelemetry: { legacyImmediatePegModels, excluded: evExcluded },
       winProbabilityCalibration: combineRows(analyses, (analysis) => analysis.winProbability.rows, ["avgPredicted", "actualWinRate", "miss", "brier", "meanAbsError"]),
-      timing: combineRows(analyses, (analysis) => analysis.timing.rows, ["avgMs", "totalSeconds"]),
+      timing: combineRows(analyses, (analysis) => analysis.timing.rows, ["avgMs"], ["totalSeconds"]),
       orientationAnalysis: { [options.candidateLeft]: candidateAnalysis, [options.opponentLeft]: opponentAnalysis },
       integrity: { errors: [], warnings: [], invalidEngineIndexes: games.invalidEngines, pairedSeedMismatchIndexes: games.paired.seedMismatches },
     };
@@ -334,7 +335,8 @@ function renderMarkdown(report) {
   const availableRows = report.availableEventScoring.map((row) => [row.label, number(row.candidateMean), number(row.opponentMean), number(row.difference), `${row.candidateRows}/${row.opponentRows}`]);
   const evRows = report.evCalibration.map((row) => [row.kind, row.role, row.model === report.candidate ? candidateShort : opponentShort, row.rows, number(row.avgEv), number(row.avgRealized), number(row.avgError), number(row.meanAbsError)]);
   const probabilityRows = report.winProbabilityCalibration.map((row) => [row.kind, row.role, row.model === report.candidate ? candidateShort : opponentShort, row.rows, number(row.avgPredicted), number(row.actualWinRate), number(row.miss), number(row.brier), number(row.meanAbsError)]);
-  const timingRows = report.timing.map((row) => [row.kind, row.role, row.model === report.candidate ? candidateShort : opponentShort, row.rows, `${number(row.avgMs)} ms`, `${number(row.totalSeconds)} s`]);
+  const timingLabels = { discard: "Discard", peg_opening: "Opening play / hand", peg_hand: "Total / pegging hand" };
+  const timingRows = report.timing.filter((row) => row.kind !== "pegging").map((row) => [timingLabels[row.kind] || row.kind, row.role, row.model === report.candidate ? candidateShort : opponentShort, row.rows, `${number(row.avgMs)} ms`, `${number(row.totalSeconds)} s`]);
   const eta = report.progress.eta;
   const localTime = (timestamp) => new Intl.DateTimeFormat("en-US", {
     timeZone: eta.timeZone, weekday: "short", year: "numeric", month: "short", day: "numeric",
@@ -394,7 +396,7 @@ function renderMarkdown(report) {
     "",
     "## Decision timing",
     "",
-    "Rust model decision calls only; forced no-model rows are excluded.",
+    "Model computation only, excluding opponent time. Opening is each player’s first card of the hand (pone’s initial lead; dealer’s first response). Whole-hand pegging totals sum that player’s calls across every count reset. Forced plays are excluded from opening averages and add zero to totals. Totals with missing non-forced timing are excluded; game-ending partial hands are included as played.",
     "",
     ...table(["Decision", "Role", "Model", "N", "Average", "Total"], timingRows),
     "",
@@ -422,4 +424,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { buildReport, parseArgs, summarizeGames, summarizeProgress, renderMarkdown };
+module.exports = { buildReport, parseArgs, summarizeGames, summarizeProgress, renderMarkdown, combineRows };

@@ -482,21 +482,36 @@ function decisionTiming(db, runIds) {
     }
   }
   if (hasPeggingTiming) {
-    for (const row of db.prepare(`
-      SELECT
-        'pegging' AS kind,
-        p.role,
-        p.model,
-        p.decision_elapsed_us
-      FROM compact_peg_plays p
+    const pegging = `FROM compact_peg_plays p
       JOIN compact_games g ON g.game_id = p.game_id
       WHERE g.run_id IN (${runPlaceholders})
-        AND p.decision_elapsed_us IS NOT NULL
-        AND p.model IS NOT NULL
-        AND p.role IS NOT NULL
-    `).all(...runIds)) {
-      rows.push(row);
-    }
+        AND p.player IS NOT NULL AND p.model IS NOT NULL AND p.role IS NOT NULL`;
+    // Preserve the blended per-call metric in JSON for existing consumers.
+    for (const row of db.prepare(`
+      SELECT 'pegging' AS kind, p.role, p.model, p.decision_elapsed_us
+      ${pegging} AND p.decision_elapsed_us IS NOT NULL
+    `).all(...runIds)) rows.push(row);
+    // Rank all card plays before excluding forced ones, so a later choice is
+    // never promoted to opening play when the actual opening was forced.
+    for (const row of db.prepare(`
+      WITH openings AS (
+        SELECT p.role, p.model, p.decision_elapsed_us,
+          ROW_NUMBER() OVER (
+            PARTITION BY p.game_id, p.hand_number, p.player ORDER BY p.sequence
+          ) AS play_number
+        ${pegging} AND p.action = 0
+      )
+      SELECT 'peg_opening' AS kind, role, model, decision_elapsed_us
+      FROM openings WHERE play_number = 1 AND decision_elapsed_us IS NOT NULL
+    `).all(...runIds)) rows.push(row);
+    for (const row of db.prepare(`
+      SELECT 'peg_hand' AS kind, p.role, p.model,
+        SUM(COALESCE(p.decision_elapsed_us, 0)) AS decision_elapsed_us
+      ${pegging}
+      GROUP BY p.game_id, p.hand_number, p.player, p.role, p.model
+      HAVING SUM(CASE WHEN p.decision_elapsed_us IS NULL
+        AND (p.legal_count IS NULL OR p.legal_count > 1) THEN 1 ELSE 0 END) = 0
+    `).all(...runIds)) rows.push(row);
   }
 
   const buckets = new Map();
@@ -516,7 +531,7 @@ function decisionTiming(db, runIds) {
   }
 
   return {
-    note: "Decision timing measures Rust model decision calls only; forced no-model rows are stored as NULL and excluded.",
+    note: "Model computation only, excluding opponent time. Opening is each player’s first card of the hand (pone’s initial lead; dealer’s first response). Whole-hand pegging totals sum that player’s calls across every count reset. Forced plays are excluded from opening averages and add zero to totals. Totals with missing non-forced timing are excluded; game-ending partial hands are included as played.",
     rows: [...buckets.values()]
       .map((bucket) => ({
         kind: bucket.kind,
@@ -771,10 +786,10 @@ function main() {
   lines.push(`Win confidence leader: ${winLeader} at ${pct(winConfidence.confidence)} (normal approximation to binomial).`);
   lines.push("");
   if (timing.rows.length) {
-    lines.push("Decision timing note: Rust model decision calls only; forced no-model rows are excluded.");
+    lines.push(`Decision timing note: ${timing.note}`);
     lines.push(table(
       ["Kind", "Role", "Model", "Rows", "Avg ms", "P50 ms", "P90 ms", "Max ms", "Total sec"],
-      timing.rows.map((row) => [
+      timing.rows.filter((row) => row.kind !== "pegging").map((row) => [
         row.kind,
         row.role,
         row.model,
@@ -876,4 +891,6 @@ function main() {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { decisionTiming };
