@@ -284,7 +284,8 @@ async function refresh() {
     await Promise.all(visibleJobs().map(async (job) => {
       let snapshot;
       try {
-        const data = await fetch(`/api/report?job=${encodeURIComponent(job.id)}`, { signal: controller.signal });
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]);
+        const data = await fetch(`/api/report?job=${encodeURIComponent(job.id)}`, { signal });
         if (!data.ok) throw new Error(`Benchmark returned ${data.status}`);
         snapshot = await data.json();
       } catch (error) {
