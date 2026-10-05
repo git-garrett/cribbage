@@ -12,6 +12,20 @@ registers it and starts the workbench automatically. Open
 <http://127.0.0.1:8766/>. All browsers use the same service and cached snapshots.
 New installations do not open unsolicited browser tabs.
 
+On a phone on the same local network, use
+`http://<this-Mac's-Bonjour-name>.local:8766/`. `workbench-status` prints the exact
+address. Bookmark the base address: the Bonjour name and port stay the same when
+DHCP changes the Mac's IP address. The Mac must be awake and reachable on the
+same LAN; guest-network client isolation can prevent access. This does not
+publish the workbench to the internet. Renaming the Mac changes its Bonjour URL.
+
+Active benchmarks appear as tabs in one page. Tabs show matchup and job state,
+support touch and keyboard navigation, and keep a direct `?job=` link. The
+experiment selector retains older runs. Installed supervisor jobs are discovered
+automatically, including jobs created by older frozen supervisors without the
+registration hook. Discovery reads specs and status files only. Only the selected
+tab reads game results; inactive tabs do not add database polling.
+
 Attach an existing run without restarting its workers:
 
 ```bash
@@ -20,13 +34,16 @@ scripts/local-runtime.sh workbench-status
 ```
 
 `scripts/local-runtime.sh workbench-stop` stops only the UI. The existing local
-web/API services on 8765/8787 are independent. The workbench listens on loopback
-only; all files and service state live in
+web/API services on 8765/8787 are independent. The managed workbench listens on
+the Mac's IPv4 interfaces and accepts only its configured Bonjour hostname and
+the existing localhost addresses. It retains the read-only HTTP interface and
+Host-header protection. All files and service state live in
 `/private/tmp/strong-cribbage-local-runtime/workbench`. No production deployment
 is needed for this local tool.
 
-The workbench infers the benchmark root from the job's `compact_games` SQLite
-completion checks. If those paths do not share a root, supply an absolute
+The workbench infers the benchmark root from the first stage with `compact_games`
+SQLite completion checks; later archive/sync checks do not override that live
+root. If that stage's paths do not share a root, supply an absolute
 `benchmarkRoot` in the versioned job spec before installing it. The manifest
 records `candidate`, `opponent` (or legacy `baseline`), and `gamesPerOrientation`.
 `candidateLeft` and `opponentLeft` are used when present; otherwise the workbench
@@ -107,7 +124,8 @@ npm run test:workbench
 Tests cover exact null expected capital, cumulative false-positive probability
 over repeated looks, interval inversion, extreme outcomes, out-of-order pairing,
 run filtering, integrity failures, read-only access, cache sharing, stopped jobs,
-and observer failure isolation. Browser validation covers live data, interval
+automatic job discovery, LAN/Host handling, and observer failure isolation.
+Browser validation covers live data, tab switching, direct links, interval
 controls, history inspection, and narrow viewports.
 
 ## Request and scope

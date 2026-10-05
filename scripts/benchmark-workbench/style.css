@@ -108,6 +108,33 @@ main {
   gap:14px;
   margin-bottom:30px;
 }
+.run-tabs {
+  display:flex;
+  gap:8px;
+  overflow-x:auto;
+  padding:4px 4px 12px;
+  margin:0 -4px 12px;
+}
+.run-tabs:empty {
+  display:none;
+}
+.run-tab {
+  flex:none;
+  min-height:54px;
+  text-align:left;
+  border-bottom:3px solid var(--line);
+}
+.run-tab[aria-selected="true"] {
+  background:var(--navy);
+  border-color:var(--navy);
+  color:white;
+}
+.run-tab small {
+  display:block;
+  font-size:11px;
+  font-weight:400;
+  opacity:.8;
+}
 .run-picker label {
   font-size:12px;
   text-transform:uppercase;

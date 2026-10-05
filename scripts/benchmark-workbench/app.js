@@ -10,12 +10,57 @@ let request;
 let selected = new URLSearchParams(location.search).get('job') || '';
 let followLatest = true;
 let inspectedPairs = 0;
+let jobs = [];
+let jobsSignature = '';
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
   if (text != null) node.textContent = text;
   if (className) node.className = className;
   return node;
+}
+
+function renderJobs() {
+  const signature = JSON.stringify(jobs.map(({ id, state, candidate, opponent }) => [id, state, candidate, opponent]));
+  const visible = jobs.filter((job) => job.state === 'running' || job.state === 'pending' || job.id === selected);
+  const tabs = $('run-tabs');
+  const tabIds = visible.map((job) => job.id).join(',');
+  if (tabs.dataset.jobs !== tabIds || signature !== jobsSignature) {
+    const focusedJob = tabs.contains(document.activeElement) ? document.activeElement.dataset.job : null;
+    tabs.replaceChildren();
+    for (const job of visible) {
+      const title = job.candidate && job.opponent ? `${modelName(job.candidate)} vs ${modelName(job.opponent)}` : job.id;
+      const tab = element('button', title, 'run-tab');
+      tab.type = 'button'; tab.id = `tab-${job.id}`; tab.dataset.job = job.id;
+      tab.title = job.id;
+      tab.setAttribute('role', 'tab'); tab.setAttribute('aria-controls', 'benchmark-view');
+      tab.append(element('small', job.state)); tabs.append(tab);
+    }
+    tabs.dataset.jobs = tabIds;
+    if (focusedJob) document.getElementById(`tab-${focusedJob}`)?.focus({ preventScroll: true });
+  }
+  for (const tab of tabs.children) {
+    const active = tab.dataset.job === selected;
+    tab.setAttribute('aria-selected', String(active)); tab.tabIndex = active ? 0 : -1;
+  }
+  if (selected) $('benchmark-view').setAttribute('aria-labelledby', `tab-${selected}`);
+  const picker = $('jobs');
+  if (signature !== jobsSignature) {
+    picker.replaceChildren();
+    for (const job of jobs) {
+      const title = job.candidate && job.opponent ? `${modelName(job.candidate)} vs ${modelName(job.opponent)}` : job.id;
+      const option = element('option', `${title} · ${job.state} · ${job.id}`);
+      option.value = job.id; picker.append(option);
+    }
+    jobsSignature = signature;
+  }
+  picker.value = selected;
+}
+
+function selectJob(id) {
+  selected = id; followLatest = true; report = null;
+  $('report').hidden = true; $('notice').hidden = true;
+  renderJobs(); refresh();
 }
 
 function svgNode(tag, attributes, text) {
@@ -156,40 +201,60 @@ async function refresh() {
   request?.abort();
   const controller = new AbortController(); request = controller;
   $('connection').textContent = 'Updating…';
+  $('benchmark-view').setAttribute('aria-busy', 'true');
   try {
     const response = await fetch('/api/jobs', { signal: controller.signal });
     if (!response.ok) throw new Error(`Workbench returned ${response.status}`);
-    const { jobs } = await response.json();
-    const picker = $('jobs');
-    picker.replaceChildren();
+    const value = await response.json();
+    if (controller.signal.aborted) return;
+    jobs = value.jobs;
     if (!jobs.length) {
-      picker.append(element('option', 'No paired benchmarks registered'));
+      selected = ''; jobsSignature = ''; $('run-tabs').replaceChildren();
+      $('run-tabs').dataset.jobs = '';
+      $('benchmark-view').removeAttribute('aria-labelledby');
+      $('jobs').replaceChildren(element('option', 'No paired benchmarks registered'));
       $('empty').hidden = false; $('report').hidden = true; $('notice').hidden = true;
       $('connection').textContent = 'Connected';
       return;
     }
     $('empty').hidden = true;
     if (!jobs.some((job) => job.id === selected)) selected = jobs[0].id;
-    jobs.forEach((job) => { const option = element('option', `${job.state} · ${job.id}`); option.value = job.id; picker.append(option); });
-    picker.value = selected;
+    renderJobs();
     history.replaceState(null, '', `/?job=${encodeURIComponent(selected)}`);
     const data = await fetch(`/api/report?job=${encodeURIComponent(selected)}`, { signal: controller.signal });
     if (!data.ok) throw new Error(`Benchmark returned ${data.status}`);
-    const value = await data.json();
+    const snapshot = await data.json();
     if (controller.signal.aborted) return;
-    render(value);
-    $('connection').textContent = value.error ? 'Data unavailable' : 'Live · 15s refresh';
+    render(snapshot);
+    $('connection').textContent = snapshot.error ? 'Data unavailable' : 'Live · 15s refresh';
   } catch (error) {
     if (error.name === 'AbortError') return;
     $('connection').textContent = 'Disconnected';
     $('notice').hidden = false;
     $('notice').textContent = `${error.message}. Displayed figures may be out of date. Retrying automatically.`;
   } finally {
-    if (request === controller && !document.hidden) timer = setTimeout(refresh, 15000);
+    if (request === controller) {
+      $('benchmark-view').setAttribute('aria-busy', 'false');
+      if (!document.hidden) timer = setTimeout(refresh, 15000);
+    }
   }
 }
 
-$('jobs').addEventListener('change', () => { selected = $('jobs').value; followLatest = true; $('report').hidden = true; refresh(); });
+$('jobs').addEventListener('change', () => selectJob($('jobs').value));
+$('run-tabs').addEventListener('click', (event) => {
+  const tab = event.target.closest('[role="tab"]');
+  if (tab) selectJob(tab.dataset.job);
+});
+$('run-tabs').addEventListener('keydown', (event) => {
+  const tabs = [...$('run-tabs').children];
+  const index = tabs.indexOf(event.target);
+  if (index < 0 || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+  const id = tabs[next].dataset.job;
+  selectJob(id);
+  document.getElementById(`tab-${id}`)?.focus();
+});
 $('refresh').addEventListener('click', refresh);
 $('show-fixed').addEventListener('change', renderCharts);
 $('show-anytime').addEventListener('change', renderCharts);

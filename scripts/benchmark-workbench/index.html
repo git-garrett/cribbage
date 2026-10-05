@@ -14,7 +14,9 @@
     <span class="connection" id="connection" role="status">Connecting…</span>
   </header>
   <main>
-    <div class="run-picker"><label for="jobs">Experiment</label><select id="jobs"><option value="">Loading benchmarks…</option></select><button id="refresh" type="button">Refresh</button></div>
+    <div id="run-tabs" class="run-tabs" role="tablist" aria-label="Active benchmarks"></div>
+    <div class="run-picker"><label for="jobs">All experiments</label><select id="jobs"><option value="">Loading benchmarks…</option></select><button id="refresh" type="button">Refresh</button></div>
+    <div id="benchmark-view" role="tabpanel" aria-label="Selected benchmark" tabindex="0">
     <div id="notice" class="notice" role="status" hidden></div>
     <section id="empty" class="empty" hidden><h1>Your next benchmark starts here.</h1><p>Install a paired benchmark with the job supervisor and it will appear automatically.</p><p>For an already running job, use <code>scripts/local-runtime.sh workbench-start /path/to/job.json</code>.</p></section>
     <div id="report" hidden>
@@ -35,6 +37,7 @@
       <section class="panel details-panel"><div><h2>Both sides of the table</h2><p class="muted">Raw outcomes include all saved games. Inference above uses pairs in seed order.</p><table><thead><tr><th>Orientation</th><th>Games</th><th>Candidate wins</th><th>Win rate</th></tr></thead><tbody id="orientation-rows"></tbody></table></div><div><h2>Run integrity</h2><dl id="integrity"></dl></div></section>
       <details class="methods"><summary>How to read the confidence bands</summary><div><p>The paired win rate gives each deal a score of 0, ½, or 1: two losses, a split, or two wins. Each deal is played with sides reversed. Every graph point includes all earlier pairs in the fixed index order. Pairs beyond an unfinished earlier game wait before entering the evidence calculation.</p><p>The ordinary interval is a paired normal approximation, useful at a predetermined analysis point. The confidence sequence uses fixed mixtures of bounded betting processes, with 2.5% error allocated to each tail. Under the fixed-matchup, constant conditional-mean assumption, its entire sequence covers the true mean with at least 95% probability. It accounts for repeated checking of this matchup, not selection among multiple model experiments.</p><p>*The confidence sequence is usually wider. An advantage is established by this method only when its lower bound rises above 50%. Score intervals are ordinary intervals. Curves use a sample of display points; all pairs enter the calculations.</p><p><a href="https://arxiv.org/abs/2010.09686" target="_blank" rel="noreferrer">Method: estimating bounded means by betting ↗</a></p></div></details>
       <footer><span>Read-only · refreshes every 15 seconds while visible</span><span id="source"></span></footer>
+    </div>
     </div>
   </main>
 </body>

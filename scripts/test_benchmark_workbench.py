@@ -5,6 +5,7 @@ from pathlib import Path
 import sqlite3
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -99,10 +100,39 @@ class WorkbenchTests(unittest.TestCase):
 
     def test_registration_and_live_status(self):
         self.assertEqual(self.entry['root'], str(self.root))
-        jobs = workbench.list_jobs(self.root / 'runtime')
+        jobs = workbench.list_jobs(self.root / 'runtime', self.root / 'supervisors')
         self.assertEqual(jobs[0]['candidate'], 'A')
         self.assertEqual(self.report()['saved'], 0)
         self.assertEqual(self.report()['remainingSeconds'], 100)
+
+    def test_discovery_finds_new_supervisors_without_registration_or_writes(self):
+        supervisors = self.root / 'supervisors'
+        for identifier in ('paired-test', 'another-run'):
+            directory = supervisors / identifier
+            directory.mkdir(parents=True)
+            spec = {**self.spec, 'jobId': identifier}
+            (directory / 'job.json').write_text(json.dumps(spec))
+        before = sorted(p.name for p in (self.root / 'runtime/jobs').iterdir())
+        jobs = workbench.list_jobs(self.root / 'runtime', supervisors)
+        self.assertEqual({j['id'] for j in jobs}, {'paired-test', 'another-run'})
+        self.assertEqual(len(jobs), 2)  # Registered and discovered copies deduplicate.
+        self.assertEqual(before, sorted(p.name for p in (self.root / 'runtime/jobs').iterdir()))
+        (supervisors / 'another-run/job.json').write_text('invalid JSON')
+        self.assertEqual(len(workbench.list_jobs(self.root / 'runtime', supervisors)), 1)
+
+    def test_archive_checks_do_not_replace_the_live_database_root(self):
+        self.spec['stages'].append({'name': 'sync', 'completionChecks': [
+            {'table': 'compact_games', 'path': str(self.root / 'archive' / label / 'games.db')}
+            for label in ('left', 'right')]})
+        self.assertEqual(workbench.benchmark_root(self.spec), self.root)
+        self.spec['stages'][0]['completionChecks'][1]['path'] = str(self.root / 'different/right/games.db')
+        self.assertIsNone(workbench.benchmark_root(self.spec))
+
+    def test_missing_status_is_not_a_pending_active_job(self):
+        (self.root / 'status.json').unlink()
+        jobs = workbench.list_jobs(self.root / 'runtime', self.root / 'supervisors')
+        self.assertEqual(jobs[0]['state'], 'unavailable')
+        self.assertEqual(self.report()['state'], 'unavailable')
 
     def test_out_of_order_pairs_do_not_enter_inference_until_gap_fills(self):
         for label in ('left', 'right'):
@@ -190,6 +220,39 @@ class WorkbenchTests(unittest.TestCase):
         with mock.patch.object(queue.subprocess, 'run', return_value=failed) as run, mock.patch('sys.stderr'):
             queue.start_workbench(self.spec, self.spec_path)
             self.assertEqual(run.call_args.args[0][2], 'workbench-start')
+
+
+class WorkbenchAccessTests(unittest.TestCase):
+    def test_host_guard_accepts_configured_lan_name_and_rejects_rebinding(self):
+        handler = object.__new__(workbench.Handler)
+        handler.server = SimpleNamespace(allowed_hosts={
+            '127.0.0.1:8766', 'localhost:8766', 'test-mac.local:8766'})
+        handler.path = '/health'
+        for host in ('127.0.0.1:8766', 'localhost:8766', 'Test-Mac.local:8766'):
+            handler.headers = {'Host': host}
+            handler.respond = mock.Mock()
+            handler.do_GET()
+            self.assertEqual(handler.respond.call_args.args[0]['service'], 'cribbage-benchmark-workbench')
+        for host in ('evil.example:8766', 'test-mac.local.evil.example:8766',
+                     'test-mac.local:8767', 'test-mac.local:8766@evil.example', ''):
+            handler.headers = {'Host': host}
+            handler.respond = mock.Mock()
+            handler.do_GET()
+            self.assertEqual(handler.respond.call_args.args[1], 403)
+
+    def test_lan_is_enabled_only_with_a_valid_bonjour_name(self):
+        for arguments, address, name in [([], '127.0.0.1', None),
+                                         (['--lan-hostname', 'test-mac.local'], '0.0.0.0', 'test-mac.local')]:
+            with mock.patch.object(sys, 'argv', ['workbench', 'serve', *arguments]), \
+                 mock.patch.object(workbench.os, 'nice'), mock.patch.object(workbench, 'WorkbenchServer') as server:
+                workbench.main()
+                server.assert_called_once_with((address, 8766), lan_hostname=name)
+        with mock.patch.object(sys, 'argv', ['workbench', 'serve', '--lan-hostname', 'evil.example']), \
+             mock.patch.object(workbench.os, 'nice'), mock.patch('sys.stderr'), \
+             mock.patch.object(workbench, 'WorkbenchServer') as server:
+            with self.assertRaises(SystemExit):
+                workbench.main()
+            server.assert_not_called()
 
 
 if __name__ == '__main__':

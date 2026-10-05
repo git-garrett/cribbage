@@ -21,6 +21,7 @@ from benchmark_workbench_stats import paired_history
 
 
 RUNTIME = Path('/private/tmp/strong-cribbage-local-runtime/workbench')
+JOBS_RUNTIME = Path('/private/tmp/cribbage-jobs')
 STATIC = Path(__file__).resolve().parent / 'benchmark-workbench'
 PORT = 8766
 CACHE_SECONDS = 15
@@ -44,14 +45,18 @@ def manifest(root):
 def benchmark_root(spec):
     if spec.get('benchmarkRoot'):
         return Path(spec['benchmarkRoot']).resolve()
-    roots = {Path(check['path']).resolve().parent.parent
-             for stage in spec.get('stages', [])
-             for check in stage.get('completionChecks', [])
-             if check.get('table') == 'compact_games' and check.get('path')}
-    return next(iter(roots)) if len(roots) == 1 else None
+    # Later sync stages can check a second, durable copy of the same databases.
+    # Observe the first database contract, never its subsequent archive copy.
+    for stage in spec.get('stages', []):
+        roots = {Path(check['path']).resolve().parent.parent
+                 for check in stage.get('completionChecks', [])
+                 if check.get('table') == 'compact_games' and check.get('path')}
+        if roots:
+            return next(iter(roots)) if len(roots) == 1 else None
+    return None
 
 
-def register(spec_path, runtime=RUNTIME):
+def job_entry(spec_path):
     spec_path = Path(spec_path).resolve()
     spec = read_json(spec_path)
     if not spec or not re.fullmatch('[a-z0-9-]+', spec.get('jobId', '')):
@@ -59,7 +64,13 @@ def register(spec_path, runtime=RUNTIME):
     root = benchmark_root(spec)
     if root is None:
         return None
-    entry = {'id': spec['jobId'], 'root': str(root), 'spec': str(spec_path)}
+    return {'id': spec['jobId'], 'root': str(root), 'spec': str(spec_path)}
+
+
+def register(spec_path, runtime=RUNTIME):
+    entry = job_entry(spec_path)
+    if entry is None:
+        return None
     directory = runtime / 'jobs'
     directory.mkdir(parents=True, exist_ok=True)
     destination = directory / (entry['id'] + '.json')
@@ -75,16 +86,27 @@ def job_status(entry):
     return read_json(root / 'status.json', {})
 
 
-def list_jobs(runtime=RUNTIME):
-    jobs = []
+def list_jobs(runtime=RUNTIME, jobs_runtime=JOBS_RUNTIME):
+    entries = {}
     for path in (runtime / 'jobs').glob('*.json'):
         entry = read_json(path)
-        if not entry:
+        if entry:
+            entries[entry['id']] = entry
+    # Older frozen supervisors do not have the registration hook. Discovery is
+    # read-only and reads only small specs/status files, not game databases.
+    for path in jobs_runtime.glob('*/job.json'):
+        try:
+            entry = job_entry(path)
+        except (OSError, ValueError):
             continue
+        if entry:
+            entries[entry['id']] = entry
+    jobs = []
+    for entry in entries.values():
         info = manifest(Path(entry['root']))
         status = job_status(entry)
-        jobs.append({**entry, 'candidate': info.get('candidate'), 'opponent': info.get('opponent'),
-                     'state': status.get('state', 'pending'), 'updatedAt': status.get('updatedAt', '')})
+        jobs.append({**entry, 'candidate': info.get('candidate'), 'opponent': info.get('opponent') or info.get('baseline'),
+                     'state': status.get('state', 'unavailable'), 'updatedAt': status.get('updatedAt', '')})
     return sorted(jobs, key=lambda x: (x['state'] == 'running', x['updatedAt']), reverse=True)
 
 
@@ -218,7 +240,7 @@ def build_report(entry, now=None):
     info = resolve_manifest(entry)
     job = job_status(entry)
     stages = [{'name': s.get('name'), 'state': s.get('state')} for s in job.get('stages', [])]
-    result = {'id': entry['id'], 'root': str(root), 'state': job.get('state', 'pending'),
+    result = {'id': entry['id'], 'root': str(root), 'state': job.get('state', 'unavailable'),
               'stages': stages, 'asOf': datetime.fromtimestamp(now, timezone.utc).isoformat(),
               'candidate': info.get('candidate'), 'opponent': info.get('opponent')}
     if not all(info.get(k) for k in ('candidate', 'opponent', 'candidateLeft', 'opponentLeft', 'gamesPerOrientation')):
@@ -297,11 +319,14 @@ def build_report(entry, now=None):
 class WorkbenchServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, runtime=RUNTIME):
+    def __init__(self, address, runtime=RUNTIME, lan_hostname=None):
         super().__init__(address, Handler)
         self.runtime = runtime
         self.cache = {}
         self.cache_lock = threading.Lock()
+        self.allowed_hosts = {f'127.0.0.1:{self.server_port}', f'localhost:{self.server_port}'}
+        if lan_hostname:
+            self.allowed_hosts.add(f'{lan_hostname.lower()}:{self.server_port}')
 
     def report(self, entry):
         with self.cache_lock:
@@ -334,8 +359,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         # Reject DNS rebinding and cross-origin access to local experiment data.
-        if self.headers.get('Host') not in (f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'):
-            return self.respond({'error': 'Local access only'}, 403)
+        if self.headers.get('Host', '').lower() not in self.server.allowed_hosts:
+            return self.respond({'error': 'Unknown workbench address'}, 403)
         url = urlsplit(self.path)
         if url.path == '/health':
             return self.respond({'service': 'cribbage-benchmark-workbench', 'version': 1})
@@ -361,6 +386,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('register', 'serve'))
     parser.add_argument('spec', nargs='?')
+    parser.add_argument('--lan-hostname', help='Mac Bonjour hostname ending in .local; enables LAN access')
     args = parser.parse_args()
     if args.action == 'register':
         if not args.spec:
@@ -370,7 +396,10 @@ def main():
             print(f"http://127.0.0.1:{PORT}/?job={entry['id']}")
         return
     os.nice(10)
-    WorkbenchServer(('127.0.0.1', PORT)).serve_forever(poll_interval=0.5)
+    if args.lan_hostname and not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.local', args.lan_hostname):
+        parser.error('--lan-hostname must be a Bonjour name ending in .local')
+    bind = '0.0.0.0' if args.lan_hostname else '127.0.0.1'
+    WorkbenchServer((bind, PORT), lan_hostname=args.lan_hostname).serve_forever(poll_interval=0.5)
 
 
 if __name__ == '__main__':

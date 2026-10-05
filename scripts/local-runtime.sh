@@ -30,7 +30,7 @@ status   Show service, listener, health, version, and source-staleness status.
 
 workbench-start   Register a paired benchmark and start/reuse its browser UI.
 workbench-stop    Stop the browser UI only; benchmark workers are unaffected.
-workbench-status Show the workbench service and local URL (port 8766).
+workbench-status Show the workbench service and stable LAN URL (port 8766).
 
 Local state and logs live in /private/tmp/strong-cribbage-local-runtime/. On first use, existing local data
 is copied from the former dated runtime when available, otherwise from data/.
@@ -190,15 +190,26 @@ status_runtime() {
 }
 
 workbench_fingerprint() {
-  shasum "${ROOT_DIR}/scripts/benchmark_workbench.py" \
-    "${ROOT_DIR}/scripts/benchmark_workbench_stats.py" \
-    "${ROOT_DIR}/scripts/benchmark-workbench/"* | shasum | awk '{print $1}'
+  {
+    shasum "${ROOT_DIR}/scripts/benchmark_workbench.py" \
+      "${ROOT_DIR}/scripts/benchmark_workbench_stats.py" \
+      "${ROOT_DIR}/scripts/local-runtime.sh" \
+      "${ROOT_DIR}/scripts/benchmark-workbench/"*
+    workbench_hostname
+  } | shasum | awk '{print $1}'
+}
+
+workbench_hostname() {
+  local name
+  name="$(/usr/sbin/scutil --get LocalHostName)"
+  printf '%s.local\n' "$name"
 }
 
 workbench_status() {
   local state="stopped"
   service_loaded "$WORKBENCH_LABEL" && state="loaded"
   echo "Benchmark workbench: ${state}; http://127.0.0.1:${WORKBENCH_PORT}/"
+  echo "LAN/phone: http://$(workbench_hostname):${WORKBENCH_PORT}/"
 }
 
 workbench_stop() {
@@ -236,11 +247,11 @@ workbench_start() {
   mkdir -p "${WORKBENCH_DIR}/app/benchmark-workbench"
   cp "${ROOT_DIR}/scripts/benchmark_workbench.py" "${ROOT_DIR}/scripts/benchmark_workbench_stats.py" "${WORKBENCH_DIR}/app/"
   cp "${ROOT_DIR}/scripts/benchmark-workbench/"* "${WORKBENCH_DIR}/app/benchmark-workbench/"
-  python3 - "$WORKBENCH_DIR" "$WORKBENCH_LABEL" <<'PY'
+  python3 - "$WORKBENCH_DIR" "$WORKBENCH_LABEL" "$(workbench_hostname)" <<'PY'
 from pathlib import Path
 import plistlib, sys
 root = Path(sys.argv[1])
-plist = {'Label': sys.argv[2], 'ProgramArguments': ['/usr/bin/python3', str(root / 'app/benchmark_workbench.py'), 'serve'],
+plist = {'Label': sys.argv[2], 'ProgramArguments': ['/usr/bin/python3', str(root / 'app/benchmark_workbench.py'), 'serve', '--lan-hostname', sys.argv[3]],
          'RunAtLoad': True, 'KeepAlive': False, 'ProcessType': 'Background',
          'StandardOutPath': str(root / 'server.log'), 'StandardErrorPath': str(root / 'server.log')}
 with (root / 'service.plist').open('wb') as handle:
