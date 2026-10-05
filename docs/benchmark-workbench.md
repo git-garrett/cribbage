@@ -136,7 +136,10 @@ m/(m-1) × sum_i (g·v_i)². The residuals are centered because g·sum_i(v_i) = 
 The same calculation with the other model's gradient terms set to zero gives
 each model's interval. This retains covariance among calls within a game and
 between the reciprocal games; it does not pretend calls are independent deals.
-One contributing pair gets a mean but no interval. Means use all samples from
+Each model needs at least two contributing pairs for its interval, and both
+models must meet that requirement for a difference interval. One model's
+measured mean, count and interval remain available even if the other has no
+telemetry; the absent mean and difference stay unknown. Means use all samples from
 the same contiguous prefix as wins, including game-ending partial hands.
 
 Phase scoring retains the reporter's recorded-point convention: unreached

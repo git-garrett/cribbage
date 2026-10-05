@@ -190,8 +190,8 @@ function renderMetric(prefix, key, pairs) {
   const delta = current?.delta;
   const measure = timing ? 'opening seconds' : wp ? 'Brier score' : 'points';
   $(`${prefix}-chart-title`).textContent = `${candidate} − ${opponent} · ${measure}`;
-  $(`${prefix}-delta`).textContent = current ? `${delta > 0 ? '+' : ''}${format(delta)}` : '—';
-  $(`${prefix}-standing`).textContent = !current ? 'No recorded samples in these paired games yet.' :
+  $(`${prefix}-delta`).textContent = delta != null ? `${delta > 0 ? '+' : ''}${format(delta)}` : '—';
+  $(`${prefix}-standing`).textContent = delta == null ? 'Not enough recorded data to compare both models yet.' :
     delta === 0 ? `Equal observed ${measure}` :
     timing ? `${delta < 0 ? candidate : opponent} has the faster observed opening` :
     wp ? `${delta < 0 ? candidate : opponent} has the lower observed prediction error` : standing(delta, candidate, opponent);
@@ -200,17 +200,18 @@ function renderMetric(prefix, key, pairs) {
   for (const [side, name] of [['candidate', candidate], ['opponent', opponent]]) {
     const column = element('div');
     column.append(element('span', name, 'label'), element('strong', format(current?.[side])));
-    column.append(element('small', current ? `${number.format(current[`${side}N`])} ${key === 'final_score' ? 'games' : wp || timing ? 'calls' : 'hands'}` : 'No samples'));
+    column.append(element('small', current ? `${number.format(current[`${side}N`])} ${key === 'final_score' ? 'games' : wp || timing ? 'calls' : 'hands'} · ${number.format(current[`${side}Clusters`])} pairs` : 'No samples'));
     column.append(element('small', `95%: ${bounds(current?.[`${side}95`])}`));
     models.append(column);
   }
-  $(`${prefix}-interval`).textContent = current ? `Difference at ${number.format(current.pairs)} completed pairs: ${bounds(current.fixed95)} (95% pointwise). ${number.format(current.clusters)} deal pairs contribute recorded samples.` : 'Missing telemetry is not treated as zero.';
+  $(`${prefix}-interval`).textContent = delta != null ? `Difference at ${number.format(current.pairs)} completed pairs: ${bounds(current.fixed95)} (95% pointwise). ${number.format(current.clusters)} deal pairs contribute recorded samples.` : 'Missing telemetry is not treated as zero. A difference requires samples from both models.';
   if (wp) $('wp-calibration').textContent = current ? `Mean predicted / observed wins: ${candidate} ${percent(current.candidatePredicted)} / ${percent(current.candidateActual)}; ${opponent} ${percent(current.opponentPredicted)} / ${percent(current.opponentActual)}. Outcomes are weighted by recorded decisions.` : '';
   const direction = wp || timing ? `Negative favors ${candidate}; positive favors ${opponent}.` : `Positive favors ${candidate}; negative favors ${opponent}.`;
   $(`${prefix}-chart`).setAttribute('aria-label', `${candidate} minus ${opponent} ${measure} over completed pairs. ${direction} Shading is the ordinary 95 percent pointwise interval.`);
-  chart(`${prefix}-chart`, rows, { x: (r) => r.pairs, y: (r) => r.delta, reference: 0,
+  const comparisons = rows.filter((row) => row.delta != null);
+  chart(`${prefix}-chart`, comparisons, { x: (r) => r.pairs, y: (r) => r.delta, reference: 0,
     minSpan: wp ? .002 : timing ? .1 : 1, decimals: wp ? 3 : 1,
-    bands: [{ key: 'fixed95', className: 'fixed-band' }], inspected: index,
+    bands: [{ key: 'fixed95', className: 'fixed-band' }], inspected: comparisons.findLastIndex((row) => row.pairs <= pairs),
     empty: 'Waiting for recorded paired samples' });
 }
 

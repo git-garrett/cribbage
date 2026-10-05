@@ -302,6 +302,35 @@ class MetricIntervalTests(unittest.TestCase):
         self.assertAlmostEqual(result['fixed95'][1], 0)
         self.assertLess(result['candidate95'][0], result['candidate95'][1])
 
+    def test_missing_opponent_does_not_hide_measured_candidate(self):
+        accumulator = PairedRatio()
+        accumulator.add([2, 1], [0, 0])
+        accumulator.add([4, 1], [0, 0])
+        result = accumulator.snapshot(2)
+        self.assertEqual(result['candidate'], 3)
+        self.assertEqual(result['candidateN'], 2)
+        self.assertIsNotNone(result['candidate95'])
+        self.assertIsNone(result['opponent'])
+        self.assertIsNone(result['opponent95'])
+        self.assertIsNone(result['delta'])
+        self.assertIsNone(result['fixed95'])
+
+    def test_each_model_needs_two_contributing_pairs_for_its_interval(self):
+        accumulator = PairedRatio()
+        accumulator.add([2, 1], [0, 0])
+        accumulator.add([0, 0], [3, 1])
+        result = accumulator.snapshot(2)
+        self.assertEqual(result['delta'], -1)
+        for key in ('candidate95', 'opponent95', 'fixed95'):
+            self.assertIsNone(result[key])
+        accumulator.add([4, 1], [0, 0])
+        result = accumulator.snapshot(3)
+        self.assertIsNotNone(result['candidate95'])
+        self.assertIsNone(result['opponent95'])
+        self.assertIsNone(result['fixed95'])
+        accumulator.add([0, 0], [5, 1])
+        self.assertIsNotNone(accumulator.snapshot(4)['fixed95'])
+
     def test_score_history_matches_original_graph_and_reverses_seats(self):
         pairs = []
         for i in range(7):
@@ -366,6 +395,8 @@ class MetricTelemetryTests(unittest.TestCase):
         self.peg(2, 2, 0, 0, 'A', 7000000)
         self.peg(3, 0, 0, 1, 'A', 99000000)  # Dealer is not pone.
         self.peg(4, 0, 0, 0, 'A', 0)  # A measured zero is a valid sample.
+        self.peg(5, 0, 0, 0, 'A', 1000, legal=1)  # Forced, even if legacy data times it.
+        self.peg(5, 2, 0, 0, 'A', 20000000)
         game = self.game()
         workbench.game_metrics(self.db, [game], {})
         self.assertEqual(game['metrics']['pone_open'][0][:2], [3, 2])

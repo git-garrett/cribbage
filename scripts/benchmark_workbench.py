@@ -194,7 +194,7 @@ def game_metrics(db, games, cache):
                 add(game, f'wp_{kind}_{role}', side, (prediction - actual) ** 2, prediction, actual)
 
         seen = set()
-        fields = ['game_id', 'hand_number', 'sequence', 'player', 'role', 'model', 'action', 'decision_elapsed_us']
+        fields = ['game_id', 'hand_number', 'sequence', 'player', 'role', 'model', 'action', 'legal_count', 'decision_elapsed_us']
         for row in rows('compact_peg_plays', fields, 'ORDER BY game_id, hand_number, sequence'):
             if row['action'] != 0 or row['player'] not in (0, 1):
                 continue
@@ -205,7 +205,7 @@ def game_metrics(db, games, cache):
             game = by_id[row['game_id']]
             side = actor(game, row)
             elapsed = row['decision_elapsed_us']
-            if side is not None and row['role'] == 0 and elapsed is not None:
+            if side is not None and row['role'] == 0 and elapsed is not None and (row['legal_count'] or 0) > 1:
                 add(game, 'pone_open', side, elapsed / 1_000_000)
 
         for game, signature in batch:

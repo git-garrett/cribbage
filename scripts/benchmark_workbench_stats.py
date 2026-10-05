@@ -103,6 +103,7 @@ class PairedRatio:
 
     def __init__(self):
         self.count = 0
+        self.model_counts = [0, 0]
         self.total = [0.0] * 4
         self.products = [[0.0] * 4 for _ in range(4)]
         self.context = [0.0] * 4
@@ -111,6 +112,8 @@ class PairedRatio:
         if not (a[1] or b[1]):
             return
         self.count += 1
+        self.model_counts[0] += bool(a[1])
+        self.model_counts[1] += bool(b[1])
         values = [a[0], a[1], b[0], b[1]]
         for i in range(4):
             self.total[i] += values[i]
@@ -124,26 +127,28 @@ class PairedRatio:
 
     def snapshot(self, pairs):
         a, na, b, nb = self.total
-        if not na or not nb:
+        if not na and not nb:
             return None
-        mean_a, mean_b = a / na, b / nb
+        mean_a, mean_b = a / na if na else None, b / nb if nb else None
 
         def bounds(mean, gradient):
-            if self.count < 2:
-                return None
             variance = sum(gradient[i] * gradient[j] * self.products[i][j]
                            for i in range(4) for j in range(4))
             error = Z95 * math.sqrt(max(0, variance) * self.count / (self.count - 1))
             return [mean - error, mean + error]
 
-        ga, gb = [1 / na, -mean_a / na, 0, 0], [0, 0, 1 / nb, -mean_b / nb]
+        ga = [1 / na, -mean_a / na, 0, 0] if na else None
+        gb = [0, 0, 1 / nb, -mean_b / nb] if nb else None
+        delta = mean_a - mean_b if na and nb else None
         return {'pairs': pairs, 'clusters': self.count,
-                'candidate': mean_a, 'opponent': mean_b, 'delta': mean_a - mean_b,
-                'candidate95': bounds(mean_a, ga), 'opponent95': bounds(mean_b, gb),
-                'fixed95': bounds(mean_a - mean_b, [x - y for x, y in zip(ga, gb)]),
+                'candidate': mean_a, 'opponent': mean_b, 'delta': delta,
+                'candidateClusters': self.model_counts[0], 'opponentClusters': self.model_counts[1],
+                'candidate95': bounds(mean_a, ga) if self.model_counts[0] >= 2 else None,
+                'opponent95': bounds(mean_b, gb) if self.model_counts[1] >= 2 else None,
+                'fixed95': bounds(delta, [x - y for x, y in zip(ga, gb)]) if min(self.model_counts) >= 2 else None,
                 'candidateN': int(na), 'opponentN': int(nb),
-                'candidatePredicted': self.context[0] / na, 'candidateActual': self.context[1] / na,
-                'opponentPredicted': self.context[2] / nb, 'opponentActual': self.context[3] / nb}
+                'candidatePredicted': self.context[0] / na if na else None, 'candidateActual': self.context[1] / na if na else None,
+                'opponentPredicted': self.context[2] / nb if nb else None, 'opponentActual': self.context[3] / nb if nb else None}
 
 
 def metric_histories(pairs):
