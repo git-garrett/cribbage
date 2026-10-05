@@ -19,12 +19,17 @@ DHCP changes the Mac's IP address. The Mac must be awake and reachable on the
 same LAN; guest-network client isolation can prevent access. This does not
 publish the workbench to the internet. Renaming the Mac changes its Bonjour URL.
 
-Active benchmarks appear as tabs in one page. Tabs show matchup and job state,
+Active benchmarks appear as tabs in one page. Tabs show matchup, job state,
+saved-game progress, and a miniature of the main paired win-rate graph with both
+95% bands and the 50% reference. Previews use the main graph's default 40–60%
+scale (bands clipped), and name the model whose win rate is plotted. They
 support touch and keyboard navigation, and keep a direct `?job=` link. The
 experiment selector retains older runs. Installed supervisor jobs are discovered
 automatically, including jobs created by older frozen supervisors without the
 registration hook. Discovery reads specs and status files only. Only the selected
-tab reads game results; inactive tabs do not add database polling.
+tab and each active run shown in the tab strip read game results. Older runs in
+the selector are not polled unless selected. Each report is reused for its tab
+preview and detail panel; an unavailable run does not hide other previews.
 
 Standings name the observed leader and trailing model separately from the
 sequential evidence verdict. Both models' paired win rates are shown. Win-rate
@@ -66,8 +71,8 @@ manager prints the attach command instead. UI startup failures never fail jobs.
 
 ## Cost and consistency
 
-The browser polls every 15 seconds while visible. One short read-only SQLite
-query per orientation reads only `compact_games`, filtered by run ID. There are
+The browser polls every 15 seconds while visible. For each displayed run, one
+short read-only SQLite query per orientation reads only `compact_games`, filtered by run ID. There are
 no database backups, per-decision scans, database writes, worker changes, or
 background analysis when nobody is viewing. The WAL reader closes immediately
 after collecting rows. A shared 15-second cache avoids duplicate work across
