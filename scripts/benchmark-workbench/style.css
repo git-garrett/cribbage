@@ -302,7 +302,7 @@ h2 {
   grid-template-columns:1fr 1fr 1fr;
   gap:24px;
   align-items:center;
-  margin-bottom:26px;
+  margin-bottom:12px;
 }
 .evidence-stats>div+div {
   border-left:1px solid var(--line);
@@ -316,6 +316,31 @@ h2 {
 .evidence-stats .hero-number {
   font-size:43px;
   letter-spacing:-2px;
+}
+.evidence-stats .opponent-rate {
+  font:500 16px var(--mono);
+  color:var(--ink);
+}
+.chart-title {
+  margin:24px 0 10px;
+  font-size:15px;
+}
+.chart-direction {
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px 20px;
+  color:var(--navy);
+  font-size:12px;
+  line-height:1.6;
+  margin-bottom:12px;
+}
+.chart-direction span {
+  white-space:nowrap;
+}
+.score-standing {
+  color:var(--ink);
+  font-weight:600;
+  margin:0 0 12px;
 }
 .swatch {
   display:inline-block;
@@ -658,6 +683,23 @@ footer {
   }
   .numeric {
     font-size:12px;
+  }
+  #progress-total {
+    text-align:right;
+    max-width:210px;
+  }
+  .evidence>.section-heading {
+    display:block;
+  }
+  .evidence .verdict {
+    display:block;
+    text-align:left;
+    max-width:none;
+    margin-top:10px;
+  }
+  .chart-direction {
+    flex-direction:column;
+    gap:2px;
   }
   h2 {
     font-size:21px;

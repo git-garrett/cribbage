@@ -4,6 +4,7 @@ const number = new Intl.NumberFormat();
 const percent = (value) => value == null ? '—' : `${(value * 100).toFixed(2)}%`;
 const interval = (values) => values ? `${percent(values[0])} – ${percent(values[1])}` : 'More pairs needed';
 const modelName = (value) => (value || '').replace('schell_table-peg_table-', '').replace(/^13\.23$/, 'Ace (13.23)');
+const standing = (margin, candidate, opponent) => margin === 0 ? `${candidate} and ${opponent} are tied` : margin > 0 ? `${candidate} leads · ${opponent} trails` : `${opponent} leads · ${candidate} trails`;
 let report = null;
 let timer;
 let request;
@@ -76,7 +77,7 @@ function chart(id, rows, options) {
   const width = Math.max(280, svg.clientWidth);
   const height = id === 'win-chart' && innerWidth > 540 ? 300 : 240;
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-  const left = 56, right = width - 20, top = 18, bottom = height - 38;
+  const left = 56, right = width - 20, top = 18, bottom = height - 56;
   if (!rows.length) {
     svg.append(svgNode('text', { x: width / 2, y: height / 2, 'text-anchor': 'middle' }, 'Waiting for saved game pairs'));
     return;
@@ -98,8 +99,9 @@ function chart(id, rows, options) {
     svg.append(svgNode('line', { x1: left, y1: y(value), x2: right, y2: y(value), class: 'grid' }));
     svg.append(svgNode('text', { x: left - 9, y: y(value) + 4, 'text-anchor': 'end' }, options.percent ? `${Math.round(value * 100)}%` : value.toFixed(options.decimals ?? 1)));
     const xValue = xMax * i / 4;
-    svg.append(svgNode('text', { x: x(xValue), y: height - 12, 'text-anchor': 'middle' }, options.xHours ? `${xValue.toFixed(1)}h` : number.format(Math.round(xValue))));
+    svg.append(svgNode('text', { x: x(xValue), y: height - 30, 'text-anchor': 'middle' }, options.xHours ? `${xValue.toFixed(1)}h` : number.format(Math.round(xValue))));
   }
+  svg.append(svgNode('text', { x: (left + right) / 2, y: height - 7, 'text-anchor': 'middle' }, options.xHours ? 'Elapsed hours →' : 'Completed pairs in seed order →'));
   const defs = svgNode('defs', {});
   const clip = svgNode('clipPath', { id: `${id}-clip` });
   clip.append(svgNode('rect', { x: left, y: top, width: right - left, height: bottom - top }));
@@ -133,7 +135,8 @@ function renderCharts() {
   chart('score-chart', report.history, { x: (r) => r.pairs, y: (r) => r.scoreDelta, reference: 0, minSpan: 1, bands: [{ key: 'score95', className: 'fixed-band' }], inspected: index });
   chart('progress-chart', report.progressHistory, { x: (r) => r.hours, y: (r) => r.games, xHours: true, zero: true, decimals: 0 });
   const point = report.history[index];
-  $('inspection').textContent = point ? `${number.format(point.pairs)} pairs · win rate ${percent(point.winRate)} · ordinary ${interval(point.fixed95)} · sequential ${interval(point.anytime95)}` : 'Waiting for complete pairs';
+  const candidate = modelName(report.candidate), opponent = modelName(report.opponent);
+  $('inspection').textContent = point ? `${number.format(point.pairs)} pairs · ${candidate}: ${percent(point.winRate)} · ${opponent}: ${percent(1 - point.winRate)} · ${standing(point.winRate - .5, candidate, opponent)}. ${candidate} win-rate intervals: ordinary ${interval(point.fixed95)}; sequential ${interval(point.anytime95)}.` : 'Waiting for complete pairs';
 }
 
 function render(value) {
@@ -143,21 +146,22 @@ function render(value) {
   $('notice').hidden = !error && !value.warnings?.length;
   $('notice').textContent = error || (value.warnings || []).join(' ');
   if (error) return;
-  $('matchup').textContent = `${modelName(value.candidate)} vs ${modelName(value.opponent)}`;
+  const candidate = modelName(value.candidate), opponent = modelName(value.opponent);
+  $('matchup').textContent = `${candidate} vs ${opponent}`;
   $('experiment').textContent = value.experiment;
   $('state').textContent = value.state;
   const active = value.stages.find((s) => s.state === 'running' || s.state === 'failed');
   $('stage').textContent = value.state === 'complete' ? 'Reports and verification complete' : active ? active.name.replaceAll('-', ' ') : 'Waiting for the next stage';
-  $('progress-total').textContent = `${number.format(value.saved)} / ${number.format(value.target)} · ${(100 * value.saved / value.target).toFixed(1)}%`;
+  $('progress-total').textContent = `${number.format(value.saved)} / ${number.format(value.target)} games · ${(100 * value.saved / value.target).toFixed(1)}% complete`;
   $('lanes').replaceChildren();
   $('orientation-rows').replaceChildren();
   value.orientations.forEach((row, i) => {
-    const label = i === 0 ? 'Candidate left' : 'Opponent left';
+    const label = `${i === 0 ? candidate : opponent} left`;
     const lane = element('div', null, 'lane');
     const name = element('div', label, 'lane-label');
     name.append(element('small', row.stale ? 'No recent update' : row.state));
     const track = element('div', null, 'lane-track');
-    track.setAttribute('role', 'progressbar'); track.setAttribute('aria-label', label);
+    track.setAttribute('role', 'progressbar'); track.setAttribute('aria-label', `${label}: games completed`);
     track.setAttribute('aria-valuemin', '0'); track.setAttribute('aria-valuemax', row.target); track.setAttribute('aria-valuenow', row.saved);
     const fill = element('div', null, 'lane-fill'); fill.style.width = `${100 * row.saved / row.target}%`; track.append(fill);
     lane.append(name, track, element('div', `${number.format(row.saved)} / ${number.format(row.target)}`, 'lane-count'));
@@ -172,15 +176,32 @@ function render(value) {
   $('updated').textContent = new Date(value.asOf).toLocaleTimeString();
   $('read-cost').textContent = `${value.readMilliseconds} ms to read and calculate · shared cache`;
   const latest = value.latest;
+  $('evidence-title').textContent = latest ? standing(latest.winRate - .5, candidate, opponent) : 'Waiting for paired results';
+  $('win-rate-label').textContent = `${candidate} paired win rate`;
   $('win-rate').textContent = percent(latest?.winRate);
+  $('opponent-rate').textContent = `${opponent}: ${percent(latest ? 1 - latest.winRate : null)}`;
+  $('interval-model').textContent = `Both intervals estimate ${candidate}’s win rate.`;
   $('fixed-interval').textContent = interval(latest?.fixed95);
   $('anytime-interval').textContent = latest ? interval(latest.anytime95) : 'More pairs needed';
-  $('sweeps').textContent = latest ? `${latest.candidateSweeps} sweeps · ${latest.splits} splits · ${latest.opponentSweeps} opponent sweeps` : 'Waiting for paired outcomes';
+  $('sweeps').textContent = latest ? `Two-win sweeps: ${candidate} ${latest.candidateSweeps} · ${opponent} ${latest.opponentSweeps} · ${latest.splits} split pairs` : 'Waiting for paired outcomes';
   const advantage = latest?.anytime95[0] > .5;
   const disadvantage = latest?.anytime95[1] < .5;
-  $('verdict').textContent = advantage ? 'Sequential evidence favors the candidate' : disadvantage ? 'Sequential evidence favors the opponent' : 'Sequential interval still includes 50%';
-  $('verdict').classList.toggle('positive', advantage);
+  $('verdict').textContent = !latest ? 'No evidence yet' : advantage ? `Sequential evidence favors ${candidate}` : disadvantage ? `Sequential evidence favors ${opponent}` : 'No established winner yet: sequential interval includes 50%';
+  $('verdict').classList.toggle('positive', advantage || disadvantage);
+  $('win-chart-title').textContent = `${candidate} paired win rate (%)`;
+  $('win-above').textContent = `↑ Above 50%: ${candidate} leads`;
+  $('win-below').textContent = `↓ Below 50%: ${opponent} leads`;
+  $('win-chart').setAttribute('aria-label', `${candidate} paired win rate by completed pairs. Above 50% favors ${candidate}; below 50% favors ${opponent}. Shading shows ordinary and sequential 95 percent intervals for ${candidate}.`);
+  $('score-chart-title').textContent = `${candidate} − ${opponent}`;
+  $('score-standing').textContent = latest ? standing(latest.scoreDelta, candidate, opponent) : 'Waiting for paired scores';
+  $('score-above').textContent = `↑ Positive: ${candidate} leads`;
+  $('score-below').textContent = `↓ Negative: ${opponent} leads`;
+  $('score-chart').setAttribute('aria-label', `${candidate} minus ${opponent} points per game by completed pairs. Positive favors ${candidate}; negative favors ${opponent}. Shading is the ordinary 95 percent interval.`);
   $('score-delta').textContent = latest ? `${latest.scoreDelta >= 0 ? '+' : ''}${latest.scoreDelta.toFixed(2)}` : '—';
+  $('orientation-wins').textContent = `${candidate} wins`;
+  $('orientation-rate').textContent = `${candidate} win rate`;
+  $('paired-method').textContent = `The paired win rate is ${candidate}’s share of wins; ${opponent}’s share is the remainder. Each deal gives ${candidate} a score of 0, ½, or 1: two losses, a split, or two wins. Each deal is played with sides reversed. Every graph point includes all earlier pairs in the fixed index order. Pairs beyond an unfinished earlier game wait before entering the evidence calculation.`;
+  $('sequence-method').textContent = `*The confidence sequence is usually wider. Sequential evidence favors ${candidate} only when its lower bound exceeds 50%, or ${opponent} when its upper bound falls below 50%. An observed lead alone does not establish an advantage. Score intervals are ordinary intervals. Curves use a sample of display points; all pairs enter the calculations.`;
   const rates = value.orientations.map((x) => x.gamesPerHour);
   $('throughput').textContent = rates.every((x) => x != null) ? `${Math.round(rates[0] + rates[1])}/hr` : '—';
   $('integrity').replaceChildren();
