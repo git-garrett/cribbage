@@ -6,6 +6,10 @@ use cribbage_shadow_engine::model_id::{MODEL_13_23, MODEL_20_0, MODEL_20_1, MODE
 
 #[test]
 fn model205_pegging2_keeps_discard_identity_and_live_review_agreement() {
+    model205_pegging2_keeps_discard_identity_and_live_review_agreement_cases(false);
+}
+
+fn model205_pegging2_keeps_discard_identity_and_live_review_agreement_cases(include_discard: bool) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
     let root = root.to_str().unwrap();
     for role in ["dealer", "pone"] {
@@ -21,23 +25,29 @@ fn model205_pegging2_keeps_discard_identity_and_live_review_agreement() {
         assert_eq!(format!("{actual:?}"), format!("{cached:?}"));
         assert_eq!(format!("{actual:?}"), format!("{review:?}"));
         assert_eq!(format!("{before:?}"), format!("{:?}", evaluate_decision(&baseline, root).unwrap()));
-        let fields = format!("kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore=55;humanScore=58");
-        let old = parse_decision_input(&format!("model={MODEL_20_5};{fields}")).unwrap();
-        let new = parse_decision_input(&format!("model={MODEL_20_5_PEGGING2};{fields}")).unwrap();
-        assert_eq!(format!("{:?}", evaluate_decision(&old, root).unwrap()),
-            format!("{:?}", evaluate_decision(&new, root).unwrap()));
+        if include_discard {
+            let fields = format!("kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore=55;humanScore=58");
+            let old = parse_decision_input(&format!("model={MODEL_20_5};{fields}")).unwrap();
+            let new = parse_decision_input(&format!("model={MODEL_20_5_PEGGING2};{fields}")).unwrap();
+            assert_eq!(format!("{:?}", evaluate_decision(&old, root).unwrap()),
+                format!("{:?}", evaluate_decision(&new, root).unwrap()));
+        }
     }
 }
 
 #[test]
 fn model205_pegging_is_isolated_and_live_cached_and_review_paths_agree() {
+    model205_pegging_is_isolated_and_live_cached_and_review_paths_agree_cases(false);
+}
+
+fn model205_pegging_is_isolated_and_live_cached_and_review_paths_agree_cases(include_discard: bool) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
     let root = root.to_str().unwrap();
     for role in ["dealer", "pone"] {
         for fields in [
             format!("kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore=55;humanScore=58"),
             format!("kind=peg;role={role};aiHand=4,9;aiTable=0,3;ownDiscards=1,6;turnCard=10;humanTable=2,5;humanHandCount=2;aiScore=119;humanScore=118;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"),
-        ] {
+        ].into_iter().filter(|fields| include_discard || !fields.starts_with("kind=discard")) {
             let baseline = parse_decision_input(&format!("model={MODEL_20_5};{fields}")).unwrap();
             let experiment = parse_decision_input(&format!("model=20.5.pegging;{fields}")).unwrap();
             assert_eq!(experiment.model, MODEL_20_5_PEGGING);
@@ -62,13 +72,17 @@ fn model205_pegging_is_isolated_and_live_cached_and_review_paths_agree() {
 
 #[test]
 fn model203_live_cached_and_review_paths_agree_without_changing_model202() {
+    model203_live_cached_and_review_paths_agree_without_changing_model202_cases(false);
+}
+
+fn model203_live_cached_and_review_paths_agree_without_changing_model202_cases(include_discard: bool) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
     let root = root.to_str().unwrap();
     for role in ["dealer", "pone"] {
         for fields in [
             format!("kind=peg;turnCard=10;role={role};ownDiscards=1,6;aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore=110;humanScore=109;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"),
             format!("kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore=110;humanScore=109"),
-        ] {
+        ].into_iter().filter(|fields| include_discard || !fields.starts_with("kind=discard")) {
             let old = parse_decision_input(&format!("model={MODEL_20_2};{fields}")).unwrap();
             let new = parse_decision_input(&format!("model={MODEL_20_3};{fields}")).unwrap();
             let before = evaluate_decision(&old, root).unwrap();
@@ -186,13 +200,17 @@ fn model201_live_wp_continuations_match_cache_and_review_in_both_roles() {
 
 #[test]
 fn model202_rebuilt_board_is_used_consistently_for_play_and_review() {
+    model202_rebuilt_board_is_used_consistently_for_play_and_review_cases(false);
+}
+
+fn model202_rebuilt_board_is_used_consistently_for_play_and_review_cases(include_discard: bool) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
     let root = root.to_str().unwrap();
     for role in ["dealer", "pone"] {
         for fields in [
             format!("kind=peg;turnCard=10;role={role};ownDiscards=1,6;aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore=55;humanScore=58;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"),
             format!("kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore=55;humanScore=58"),
-        ] {
+        ].into_iter().filter(|fields| include_discard || !fields.starts_with("kind=discard")) {
             let old = parse_decision_input(&format!("model={MODEL_20_1};{fields}")).unwrap();
             let new = parse_decision_input(&format!("model={MODEL_20_2};{fields}")).unwrap();
             let before = evaluate_decision(&old, root).unwrap();
@@ -215,13 +233,17 @@ fn model202_rebuilt_board_is_used_consistently_for_play_and_review() {
 
 #[test]
 fn model204_keeps_frozen_model203_values_across_shared_cache_and_reviews() {
+    model204_keeps_frozen_model203_values_across_shared_cache_and_reviews_cases(false);
+}
+
+fn model204_keeps_frozen_model203_values_across_shared_cache_and_reviews_cases(include_discard: bool) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
     let root = root.to_str().unwrap();
     for role in ["dealer", "pone"] {
         for fields in [
             format!("kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore=55;humanScore=58"),
             format!("kind=peg;role={role};aiHand=4,9;aiTable=0,3;ownDiscards=1,6;turnCard=10;humanTable=2,5;humanHandCount=2;aiScore=119;humanScore=118;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"),
-        ] {
+        ].into_iter().filter(|fields| include_discard || !fields.starts_with("kind=discard")) {
             let frozen = parse_decision_input(&format!("model={MODEL_20_3};{fields}")).unwrap();
             let current = parse_decision_input(&format!("model={MODEL_20_4};{fields}")).unwrap();
             let newer = parse_decision_input(&format!("model={MODEL_20_6};{fields}")).unwrap();
@@ -244,13 +266,17 @@ fn model204_keeps_frozen_model203_values_across_shared_cache_and_reviews() {
 
 #[test]
 fn model207_conditional_crib_is_isolated_and_live_cache_review_agree() {
+    model207_conditional_crib_is_isolated_and_live_cache_review_agree_cases(false);
+}
+
+fn model207_conditional_crib_is_isolated_and_live_cache_review_agree_cases(include_discard: bool) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
     let root = root.to_str().unwrap();
     for role in ["dealer", "pone"] {
         for fields in [
             format!("kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore=55;humanScore=58"),
             format!("kind=peg;role={role};aiHand=4,9;aiTable=0,3;ownDiscards=1,6;turnCard=10;humanTable=2,5;humanHandCount=2;aiScore=55;humanScore=58;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"),
-        ] {
+        ].into_iter().filter(|fields| include_discard || !fields.starts_with("kind=discard")) {
             let frozen = parse_decision_input(&format!("model={MODEL_20_6};{fields}")).unwrap();
             let changed = parse_decision_input(&format!("model={MODEL_20_7};{fields}")).unwrap();
             let before = evaluate_decision(&frozen, root).unwrap();
@@ -274,4 +300,15 @@ fn model207_conditional_crib_is_isolated_and_live_cache_review_agree() {
             }
         }
     }
+}
+
+#[test]
+#[ignore = "requires installed production correction asset; mandatory predeploy check"]
+fn installed_asset_model20_discard_and_review_regressions() {
+    model205_pegging2_keeps_discard_identity_and_live_review_agreement_cases(true);
+    model205_pegging_is_isolated_and_live_cached_and_review_paths_agree_cases(true);
+    model203_live_cached_and_review_paths_agree_without_changing_model202_cases(true);
+    model202_rebuilt_board_is_used_consistently_for_play_and_review_cases(true);
+    model204_keeps_frozen_model203_values_across_shared_cache_and_reviews_cases(true);
+    model207_conditional_crib_is_isolated_and_live_cache_review_agree_cases(true);
 }

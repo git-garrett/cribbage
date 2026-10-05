@@ -143,3 +143,18 @@ requires the ignored 523 MB production correction asset, which is absent in a
 fresh CI clone. The test is now an explicit mandatory predeploy installed-asset
 check, alongside the existing full-asset integration check; it is not silently
 skipped at deployment. It passed locally with the installed asset.
+
+A subsequent CI target exposed the same installed-asset dependency in six inherited
+20.x mixed pegging/discard tests. Their pegging checks remain in ordinary CI;
+explicit installed-asset wrappers retain all discard/cache/review cases in the
+mandatory predeploy gate. No assertion is dropped. A clean-checkout run without
+the ignored correction asset is being used to verify the complete ordinary suite.
+
+Final compiled progress/cancellation version: twelve complete-hand parity checks
+passed, including exact comparison with the prior frozen solver. Mean CPU seconds:
+fast missing/full/depth2 pone lead 4.497/0.133/0.235, whole-pone
+4.530/0.166/0.268. Depth2 dealer first/whole 0.398/0.405. This small Mac sample
+shows no observed slowdown from cancellation support; it is not a statistical
+latency guarantee. Streaming controller validation also built a native chunk,
+preserved it through a deliberate sync failure, resumed without recomputation,
+and verified idempotent completion. Evidence: rollout `pipeline-validation`.
