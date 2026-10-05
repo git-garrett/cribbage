@@ -11,7 +11,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import benchmark_workbench as workbench
-from benchmark_workbench_stats import confidence_sequence, log_capital, paired_history
+from benchmark_workbench_stats import PairedRatio, Z95, confidence_sequence, log_capital, metric_histories, paired_history
 import cribbage_job_queue as queue
 
 
@@ -204,6 +204,7 @@ class WorkbenchTests(unittest.TestCase):
         # No listener needed to test the observer's shared request path.
         server = object.__new__(workbench.WorkbenchServer)
         server.cache = {}
+        server.metric_cache = {}
         server.cache_lock = workbench.threading.Lock()
         with mock.patch.object(workbench, 'build_report', return_value={'saved': 1}) as build:
             self.assertEqual(server.report(self.entry), server.report(self.entry))
@@ -253,6 +254,196 @@ class WorkbenchAccessTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 workbench.main()
             server.assert_not_called()
+
+
+class MetricIntervalTests(unittest.TestCase):
+    def test_matches_paired_mean_interval_and_preserves_covariance(self):
+        accumulator = PairedRatio()
+        differences = [2, -1, 3, 0]
+        for base, delta in zip((10, 20, 30, 40), differences):
+            accumulator.add([base + delta, 1], [base, 1])
+        result = accumulator.snapshot(4)
+        expected_error = Z95 * math.sqrt(sum((d - 1) ** 2 for d in differences) / 3 / 4)
+        self.assertEqual(result['delta'], 1)
+        self.assertAlmostEqual(result['fixed95'][0], 1 - expected_error)
+        self.assertAlmostEqual(result['fixed95'][1], 1 + expected_error)
+
+    def test_repeating_correlated_calls_does_not_invent_independent_samples(self):
+        first, repeated = PairedRatio(), PairedRatio()
+        samples = [([2, 1], [6, 2]), ([21, 3], [5, 1]), ([6, 2], [8, 4])]
+        for a, b in samples:
+            first.add(a, b)
+            repeated.add([v * 100 for v in a], [v * 100 for v in b])
+        x, y = first.snapshot(3), repeated.snapshot(3)
+        self.assertAlmostEqual(x['candidate'], 29 / 6)
+        self.assertAlmostEqual(x['opponent'], 19 / 7)
+        self.assertEqual(y['clusters'], 3)
+        self.assertEqual(y['candidateN'], 600)
+        for key in ('candidate95', 'opponent95', 'fixed95'):
+            for left, right in zip(x[key], y[key]):
+                self.assertAlmostEqual(left, right)
+
+    def test_single_cluster_and_missing_samples_do_not_get_a_confidence_band(self):
+        accumulator = PairedRatio()
+        self.assertIsNone(accumulator.snapshot(0))
+        accumulator.add([100, 100], [200, 100])
+        result = accumulator.snapshot(1)
+        self.assertIsNone(result['fixed95'])
+        self.assertIsNone(result['candidate95'])
+        accumulator.add([0, 0], [0, 0])
+        self.assertEqual(accumulator.snapshot(2)['clusters'], 1)
+
+    def test_shared_fluctuations_cancel_in_difference(self):
+        accumulator = PairedRatio()
+        for value in (10, 40, 90):
+            accumulator.add([value, 1], [value, 1])
+        result = accumulator.snapshot(3)
+        self.assertAlmostEqual(result['fixed95'][0], 0)
+        self.assertAlmostEqual(result['fixed95'][1], 0)
+        self.assertLess(result['candidate95'][0], result['candidate95'][1])
+
+    def test_missing_opponent_does_not_hide_measured_candidate(self):
+        accumulator = PairedRatio()
+        accumulator.add([2, 1], [0, 0])
+        accumulator.add([4, 1], [0, 0])
+        result = accumulator.snapshot(2)
+        self.assertEqual(result['candidate'], 3)
+        self.assertEqual(result['candidateN'], 2)
+        self.assertIsNotNone(result['candidate95'])
+        self.assertIsNone(result['opponent'])
+        self.assertIsNone(result['opponent95'])
+        self.assertIsNone(result['delta'])
+        self.assertIsNone(result['fixed95'])
+
+    def test_each_model_needs_two_contributing_pairs_for_its_interval(self):
+        accumulator = PairedRatio()
+        accumulator.add([2, 1], [0, 0])
+        accumulator.add([0, 0], [3, 1])
+        result = accumulator.snapshot(2)
+        self.assertEqual(result['delta'], -1)
+        for key in ('candidate95', 'opponent95', 'fixed95'):
+            self.assertIsNone(result[key])
+        accumulator.add([4, 1], [0, 0])
+        result = accumulator.snapshot(3)
+        self.assertIsNotNone(result['candidate95'])
+        self.assertIsNone(result['opponent95'])
+        self.assertIsNone(result['fixed95'])
+        accumulator.add([0, 0], [5, 1])
+        self.assertIsNotNone(accumulator.snapshot(4)['fixed95'])
+
+    def test_score_history_matches_original_graph_and_reverses_seats(self):
+        pairs = []
+        for i in range(7):
+            left = dict(winner=i % 2, final_left_score=121, final_right_score=80 + i,
+                        metrics={'pone_open': [[10, 2], [21, 3]]})
+            right = dict(winner=(i + 1) % 2, final_left_score=100 + i, final_right_score=121,
+                         metrics={'pone_open': [[14, 2], [5, 1]]})
+            pairs.append((left, right))
+        old, new = paired_history(pairs), metric_histories(pairs)
+        for before, after in zip(old, new['final_score']):
+            self.assertAlmostEqual(before['scoreDelta'], after['delta'])
+            if before['score95']:
+                for a, b in zip(before['score95'], after['fixed95']):
+                    self.assertAlmostEqual(a, b)
+        latest = new['pone_open'][-1]
+        self.assertEqual((latest['candidate'], latest['opponent']), (5, 7))
+        self.assertEqual((latest['candidateN'], latest['opponentN']), (21, 35))
+
+
+class MetricTelemetryTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(':memory:')
+        self.addCleanup(self.db.close)
+        self.db.row_factory = sqlite3.Row
+        self.db.executescript('''
+          CREATE TABLE compact_hands (game_id TEXT, hand_number INTEGER, dealer INTEGER,
+            left_pegging_points INTEGER, right_pegging_points INTEGER,
+            left_hand_points INTEGER, right_hand_points INTEGER, crib_points INTEGER,
+            PRIMARY KEY (game_id, hand_number));
+          CREATE TABLE compact_discards (game_id TEXT, player INTEGER, role INTEGER,
+            model TEXT, selected_win_probability REAL);
+          CREATE TABLE compact_peg_plays (game_id TEXT, hand_number INTEGER, sequence INTEGER,
+            player INTEGER, role INTEGER, model TEXT, action INTEGER, legal_count INTEGER,
+            selected_win_probability REAL, decision_elapsed_us INTEGER,
+            PRIMARY KEY (game_id, hand_number, sequence));
+        ''')
+
+    def game(self, identifier='g'):
+        return dict(game_id=identifier, game_index=0, left_engine='A', right_engine='B', winner=0)
+
+    def peg(self, hand, sequence, player, role, model, elapsed, prediction=.75, legal=2, action=0):
+        self.db.execute('INSERT INTO compact_peg_plays VALUES (?,?,?,?,?,?,?,?,?,?)',
+                        ('g', hand, sequence, player, role, model, action, legal, prediction, elapsed))
+
+    def test_scoring_roles_partial_hands_and_missing_phases(self):
+        self.db.execute("INSERT INTO compact_hands VALUES ('g',0,1,4,6,8,10,12)")
+        self.db.execute("INSERT INTO compact_hands VALUES ('g',1,0,2,3,0,0,0)")
+        game = self.game()
+        workbench.game_metrics(self.db, [game], {})
+        metrics = game['metrics']
+        self.assertEqual(metrics['peg_pone'][0][:2], [4, 1])
+        self.assertEqual(metrics['peg_pone'][1][:2], [3, 1])
+        self.assertEqual(metrics['hand_dealer'][0][:2], [0, 1])
+        self.assertEqual(metrics['crib'][1][:2], [12, 1])
+
+    def test_first_card_excludes_forced_and_missing_openings_not_later_decisions(self):
+        self.peg(0, 0, 0, 0, 'A', None, prediction=None, legal=1)
+        self.peg(0, 2, 0, 0, 'A', 9000000)
+        self.peg(1, 0, 0, 0, None, None, prediction=None, legal=1)
+        self.peg(1, 2, 0, 0, 'A', 8000000)
+        self.peg(2, 0, 0, 0, 'A', 3000000)
+        self.peg(2, 2, 0, 0, 'A', 7000000)
+        self.peg(3, 0, 0, 1, 'A', 99000000)  # Dealer is not pone.
+        self.peg(4, 0, 0, 0, 'A', 0)  # A measured zero is a valid sample.
+        self.peg(5, 0, 0, 0, 'A', 1000, legal=1)  # Forced, even if legacy data times it.
+        self.peg(5, 2, 0, 0, 'A', 20000000)
+        game = self.game()
+        workbench.game_metrics(self.db, [game], {})
+        self.assertEqual(game['metrics']['pone_open'][0][:2], [3, 2])
+
+    def test_wp_uses_actor_outcome_and_excludes_forced_actions_and_missing_predictions(self):
+        self.peg(0, 0, 0, 0, 'A', 1000, prediction=.75)
+        self.peg(0, 1, 1, 1, 'B', 1000, prediction=.25)
+        self.peg(0, 2, 0, 0, 'A', None, prediction=.5, legal=1)
+        self.peg(0, 3, 0, 0, 'A', None, prediction=.5, action=1)
+        self.peg(0, 4, 0, 0, 'A', None, prediction=None)
+        self.db.execute("INSERT INTO compact_discards VALUES ('g',1,0,'B',.2)")
+        game = self.game()
+        workbench.game_metrics(self.db, [game], {})
+        self.assertEqual(game['metrics']['wp_pegging_pone'][0], [.0625, 1, .75, 1])
+        self.assertEqual(game['metrics']['wp_pegging_dealer'][1], [.0625, 1, .25, 0])
+        self.assertAlmostEqual(game['metrics']['wp_discard_pone'][1][0], .04)
+
+    def test_cache_reads_only_new_games_and_invalidates_changed_metadata(self):
+        self.peg(0, 0, 0, 0, 'A', 3000000)
+        cache = {}
+        workbench.game_metrics(self.db, [self.game()], cache)
+        queries = []
+        self.db.set_trace_callback(queries.append)
+        game = self.game()
+        workbench.game_metrics(self.db, [game], cache)
+        self.assertFalse(any(q.startswith('SELECT') for q in queries))
+        self.assertEqual(game['metrics']['pone_open'][0][:2], [3, 1])
+        queries.clear()
+        workbench.game_metrics(self.db, [self.game(), self.game('new')], cache)
+        selects = [q for q in queries if q.startswith('SELECT')]
+        self.assertTrue(selects)
+        self.assertTrue(all("IN ('new')" in q for q in selects))
+        game = self.game()
+        game['winner'] = 1
+        workbench.game_metrics(self.db, [game], cache)
+        self.assertEqual(game['metrics']['wp_pegging_pone'][0][0], .75 ** 2)
+        self.assertNotIn('new', cache)
+
+    def test_missing_schema_has_no_samples_and_mismatched_models_fail_closed(self):
+        self.db.execute('DROP TABLE compact_discards')
+        self.db.execute('DROP TABLE compact_hands')
+        game = self.game()
+        workbench.game_metrics(self.db, [game], {})
+        self.assertEqual(game['metrics']['crib'][0][:2], [0, 0])
+        self.peg(0, 0, 0, 0, 'unexpected', 1000)
+        with self.assertRaisesRegex(ValueError, 'engine mismatch'):
+            workbench.game_metrics(self.db, [self.game()], {})
 
 
 if __name__ == '__main__':

@@ -8,6 +8,9 @@ Z95 = 1.959963984540054
 # Equal mixtures retain that property. Ville + alpha/2 per tail gives simultaneous
 # 95% coverage at every pair count, without a normal approximation. See docs.
 BETS = (0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.0)
+METRICS = ('final_score', 'peg_pone', 'peg_dealer', 'hand_pone', 'hand_dealer', 'crib',
+           'wp_discard_pone', 'wp_discard_dealer', 'wp_pegging_pone', 'wp_pegging_dealer',
+           'pone_open')
 
 
 def log_capital(counts, mean, direction):
@@ -87,3 +90,93 @@ def paired_history(pairs):
                 'opponentSweeps': counts[0],
             })
     return history
+
+
+class PairedRatio:
+    """Clustered delta-method intervals for two observation-weighted means.
+
+    One independent cluster is a reciprocal deal pair. Keep all within-game
+    and between-model covariance, rather than treating hands/calls as iid.
+    V = m/(m-1) sum_i (g dot v_i)^2, with g the gradient of A/Na - B/Nb.
+    Since g dot sum(v_i) = 0, these are already centered residuals.
+    """
+
+    def __init__(self):
+        self.count = 0
+        self.model_counts = [0, 0]
+        self.total = [0.0] * 4
+        self.products = [[0.0] * 4 for _ in range(4)]
+        self.context = [0.0] * 4
+
+    def add(self, a, b):
+        if not (a[1] or b[1]):
+            return
+        self.count += 1
+        self.model_counts[0] += bool(a[1])
+        self.model_counts[1] += bool(b[1])
+        values = [a[0], a[1], b[0], b[1]]
+        for i in range(4):
+            self.total[i] += values[i]
+            for j in range(4):
+                self.products[i][j] += values[i] * values[j]
+        # Optional WP context: summed predictions and actual outcomes.
+        for offset, sample in ((0, a), (2, b)):
+            if len(sample) == 4:
+                self.context[offset] += sample[2]
+                self.context[offset + 1] += sample[3]
+
+    def snapshot(self, pairs):
+        a, na, b, nb = self.total
+        if not na and not nb:
+            return None
+        mean_a, mean_b = a / na if na else None, b / nb if nb else None
+
+        def bounds(mean, gradient):
+            variance = sum(gradient[i] * gradient[j] * self.products[i][j]
+                           for i in range(4) for j in range(4))
+            error = Z95 * math.sqrt(max(0, variance) * self.count / (self.count - 1))
+            return [mean - error, mean + error]
+
+        ga = [1 / na, -mean_a / na, 0, 0] if na else None
+        gb = [0, 0, 1 / nb, -mean_b / nb] if nb else None
+        delta = mean_a - mean_b if na and nb else None
+        return {'pairs': pairs, 'clusters': self.count,
+                'candidate': mean_a, 'opponent': mean_b, 'delta': delta,
+                'candidateClusters': self.model_counts[0], 'opponentClusters': self.model_counts[1],
+                'candidate95': bounds(mean_a, ga) if self.model_counts[0] >= 2 else None,
+                'opponent95': bounds(mean_b, gb) if self.model_counts[1] >= 2 else None,
+                'fixed95': bounds(delta, [x - y for x, y in zip(ga, gb)]) if min(self.model_counts) >= 2 else None,
+                'candidateN': int(na), 'opponentN': int(nb),
+                'candidatePredicted': self.context[0] / na if na else None, 'candidateActual': self.context[1] / na if na else None,
+                'opponentPredicted': self.context[2] / nb if nb else None, 'opponentActual': self.context[3] / nb if nb else None}
+
+
+def metric_histories(pairs):
+    """Use the same ordered prefix and display points as the win-rate graph."""
+    histories = {key: [] for key in METRICS}
+    accumulators = {key: PairedRatio() for key in METRICS}
+    stride = max(1, math.ceil(len(pairs) / 250))
+    for n, (left, right) in enumerate(pairs, 1):
+        for key, accumulator in accumulators.items():
+            # Reverse seats in the reciprocal orientation, then pool samples.
+            values = [[0.0] * 4, [0.0] * 4]
+            for game, reverse in ((left, False), (right, True)):
+                samples = ([[game['final_left_score'], 1], [game['final_right_score'], 1]] if key == 'final_score'
+                           else game.get('metrics', {}).get(key, [[0, 0], [0, 0]]))
+                for side, sample in enumerate(samples):
+                    target = values[1 - side if reverse else side]
+                    for i, value in enumerate(sample):
+                        target[i] += value
+            accumulator.add(*values)
+            if n == 1 or n % stride == 0 or n == len(pairs):
+                snapshot = accumulator.snapshot(n)
+                if snapshot:
+                    for field in ('candidate95', 'opponent95'):
+                        if snapshot[field]:
+                            snapshot[field][0] = max(0, snapshot[field][0])
+                            if key.startswith('wp_'):
+                                snapshot[field][1] = min(1, snapshot[field][1])
+                    if key.startswith('wp_') and snapshot['fixed95']:
+                        snapshot['fixed95'] = [max(-1, snapshot['fixed95'][0]), min(1, snapshot['fixed95'][1])]
+                    histories[key].append(snapshot)
+    return histories

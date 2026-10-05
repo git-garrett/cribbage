@@ -1,8 +1,8 @@
 # Benchmark workbench
 
 The local browser workbench shows the paired runner's live progress, projected
-completion, paired win rate, score margin, reciprocal outcomes, and historical
-confidence bands. It is an observer: it cannot launch, stop, resume, or edit a
+completion, paired win rate, scoring, WP prediction accuracy, pone-opening time,
+reciprocal outcomes, and historical confidence bands. It is an observer: it cannot launch, stop, resume, or edit a
 benchmark through its HTTP interface.
 
 ## Use
@@ -39,7 +39,22 @@ show the named first model minus the other in points per game, with positive and
 negative directions labeled. A points lead need not match the win-rate lead.
 Horizontal axes show completed pairs or elapsed hours, not opposing models.
 Completion percentages describe the run, and “left” in orientation labels is a
-seat assignment, not a standing. All calculations and frozen inputs are unchanged.
+seat assignment, not a standing. Benchmark play and frozen inputs are unchanged.
+
+Scoring can show final points per game, pegging and hand counting separately for
+pone/dealer, or crib points. WP accuracy shows Brier error (lower is better),
+with separate discard/pegging and pone/dealer selections. Average predicted WP
+and observed wins are shown alongside it, weighted by recorded decisions.
+Pone opening is the first card of each hand, not each count-to-31 sequence.
+Its elapsed model-call time excludes forced or missing-timing openings; later
+calls never substitute for them. These timings include scheduling effects and
+are not CPU-time measurements or a controlled comparison across workloads.
+
+Each metric shows both models' means and sample counts, with a graph of the
+first model minus the second. Above zero favors the first model for points;
+below zero favors it for Brier error and opening time. The history slider
+inspects the same completed-pair checkpoint across all graphs. Missing telemetry
+leaves the relevant metric empty rather than counting it as a zero measurement.
 
 Attach an existing run without restarting its workers:
 
@@ -71,11 +86,19 @@ manager prints the attach command instead. UI startup failures never fail jobs.
 
 ## Cost and consistency
 
-The browser polls every 15 seconds while visible. For each displayed run, one
-short read-only SQLite query per orientation reads only `compact_games`, filtered by run ID. There are
-no database backups, per-decision scans, database writes, worker changes, or
-background analysis when nobody is viewing. The WAL reader closes immediately
-after collecting rows. A shared 15-second cache avoids duplicate work across
+The browser polls every 15 seconds while visible. For each displayed run, a
+read-only SQLite query per orientation reads `compact_games`, filtered by run
+ID. Indexed game-ID queries read compact hands and decisions for newly seen
+completed games in batches of 100. A first visit backfills earlier games once;
+later visits reuse in-memory per-game sums and counts. Completed records in a
+frozen run are immutable. Changed game metadata, database identity or telemetry
+column names invalidate the affected summaries; restarting the UI also rebuilds
+them. No decision rows or persistent SQLite connections are retained.
+
+There are no database backups, database writes, worker changes, or background
+analysis when nobody is viewing. Games and their telemetry are read in one
+transaction per orientation; the runner commits them atomically. The WAL reader
+closes immediately after collecting rows. A shared 15-second cache avoids duplicate work across
 browser tabs. The UI shows the measured time to read and calculate each snapshot.
 The launchd service runs at background priority, from an internal-disk copy.
 
@@ -98,10 +121,33 @@ For pair i, X_i = (candidate wins in its two side-swapped games) / 2, so X_i is
 0, 1/2, or 1. The paired win rate is the mean of these observations. Its ordinary
 interval is the same normal approximation used by the paired reporter:
 mean ± 1.959963984540054 × sample-standard-deviation / sqrt(n), clipped to [0,1].
-The score graph uses the analogous ordinary interval on average pair margins.
+The final-score graph uses the analogous ordinary interval on average pair margins.
 These approximations have no time-uniform guarantee and can be unreliable at
 very small sample counts. The sequential verdict uses only the confidence
 sequence, never the ordinary interval.
+
+The new metric bands are ordinary 95% **pointwise** normal/delta-method intervals,
+not confidence sequences. Scoring is weighted by recorded hands (or games for
+final score); WP and timing by recorded calls. For each reciprocal deal pair i,
+retain v_i = (sum_A, count_A, sum_B, count_B). With totals (A, Na, B, Nb), the
+difference is D = A/Na - B/Nb and its gradient is
+g = (1/Na, -A/Na², -1/Nb, B/Nb²). With m contributing pairs, estimate variance as
+m/(m-1) × sum_i (g·v_i)². The residuals are centered because g·sum_i(v_i) = 0.
+The same calculation with the other model's gradient terms set to zero gives
+each model's interval. This retains covariance among calls within a game and
+between the reciprocal games; it does not pretend calls are independent deals.
+Each model needs at least two contributing pairs for its interval, and both
+models must meet that requirement for a difference interval. One model's
+measured mean, count and interval remain available even if the other has no
+telemetry; the absent mean and difference stay unknown. Means use all samples from
+the same contiguous prefix as wins, including game-ending partial hands.
+
+Phase scoring retains the reporter's recorded-point convention: unreached
+phases contribute zero. WP Brier error uses the actor's eventual win/loss and
+excludes forced pegging actions and absent predictions. Natural parameter
+bounds clip intervals for nonnegative means and Brier scores. Small-sample,
+heavy-tailed timing intervals can be unreliable. These bands do not control
+false positives from repeated checks, metric selection, or changing workloads.
 
 The 95% confidence sequence uses a simple fixed mixture of betting martingales,
 following the bounded-mean construction in
@@ -141,7 +187,10 @@ over repeated looks, interval inversion, extreme outcomes, out-of-order pairing,
 run filtering, integrity failures, read-only access, cache sharing, stopped jobs,
 automatic job discovery, LAN/Host handling, and observer failure isolation.
 Browser validation covers live data, tab switching, direct links, interval
-controls, history inspection, and narrow viewports.
+controls, metric selection, history inspection, and narrow viewports. Metric
+tests cover reciprocal covariance, unequal sample counts, within-pair sample
+duplication, timing/forced-action selection, WP actor perspective, telemetry
+compatibility, and avoiding repeated decision reads after cache warmup.
 
 ## Request and scope
 

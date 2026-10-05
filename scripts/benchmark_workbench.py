@@ -17,7 +17,7 @@ import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 
-from benchmark_workbench_stats import paired_history
+from benchmark_workbench_stats import METRICS, metric_histories, paired_history
 
 
 RUNTIME = Path('/private/tmp/strong-cribbage-local-runtime/workbench')
@@ -117,27 +117,133 @@ def timestamp(value):
         return None
 
 
-def orientation(root, label, run_id):
+def game_metrics(db, games, cache):
+    """Summarize only newly completed games, using indexed game-id lookups.
+
+    The runner commits a game and its telemetry atomically. Completed records
+    are immutable within a frozen run; changed game metadata invalidates a row.
+    The cache holds sums/counts, never per-decision records or connections.
+    """
+    columns = {table: {row[1] for row in db.execute(f'PRAGMA table_info({table})')}
+               for table in ('compact_hands', 'compact_discards', 'compact_peg_plays')}
+    schema = tuple((table, tuple(sorted(names))) for table, names in columns.items())
+    missing = []
+    for game in games:
+        signature = (schema, tuple(game.items()))
+        cached = cache.get(game['game_id'])
+        if cached and cached[0] == signature:
+            game['metrics'] = cached[1]
+        else:
+            game['metrics'] = {key: [[0.0] * 4, [0.0] * 4] for key in METRICS}
+            missing.append((game, signature))
+
+    def add(game, key, side, value, predicted=0, actual=0):
+        if not isinstance(value, (float, int)) or not math.isfinite(value) or value < 0:
+            raise ValueError(f'Invalid {key} telemetry in game {game["game_index"]}')
+        target = game['metrics'][key][side]
+        for i, amount in enumerate((value, 1, predicted, actual)):
+            target[i] += amount
+
+    def actor(game, row):
+        player = row['player']
+        if player not in (0, 1) or row['role'] not in (0, 1) or row['model'] is None:
+            return None
+        expected = game['left_engine'] if player == 0 else game['right_engine']
+        if row['model'] != expected:
+            raise ValueError(f'Telemetry engine mismatch in game {game["game_index"]}')
+        return player
+
+    for start in range(0, len(missing), 100):
+        batch = missing[start:start + 100]
+        by_id = {game['game_id']: game for game, _ in batch}
+        placeholders = ','.join('?' for _ in batch)
+
+        def rows(table, fields, order=''):
+            if not set(fields) <= columns[table]:
+                return []
+            return db.execute(f'SELECT {",".join(fields)} FROM {table} '
+                              f'WHERE game_id IN ({placeholders}) {order}', tuple(by_id)).fetchall()
+
+        fields = ['game_id', 'dealer', 'left_pegging_points', 'right_pegging_points',
+                  'left_hand_points', 'right_hand_points', 'crib_points']
+        for row in rows('compact_hands', fields):
+            game = by_id[row['game_id']]
+            if row['dealer'] not in (0, 1):
+                raise ValueError('Invalid dealer in scoring telemetry')
+            for side, prefix in enumerate(('left', 'right')):
+                role = 'dealer' if side == row['dealer'] else 'pone'
+                add(game, f'peg_{role}', side, row[f'{prefix}_pegging_points'] or 0)
+                add(game, f'hand_{role}', side, row[f'{prefix}_hand_points'] or 0)
+            add(game, 'crib', row['dealer'], row['crib_points'] or 0)
+
+        for kind, table in (('discard', 'compact_discards'), ('pegging', 'compact_peg_plays')):
+            fields = ['game_id', 'player', 'role', 'model', 'selected_win_probability']
+            if kind == 'pegging':
+                fields += ['action', 'legal_count']
+            for row in rows(table, fields):
+                game = by_id[row['game_id']]
+                side = actor(game, row)
+                prediction = row['selected_win_probability']
+                if side is None or prediction is None or (kind == 'pegging' and
+                        (row['action'] != 0 or (row['legal_count'] or 0) <= 1)):
+                    continue
+                if not isinstance(prediction, (float, int)) or not math.isfinite(prediction) or not 0 <= prediction <= 1:
+                    raise ValueError('Invalid recorded win probability')
+                actual = int(game['winner'] == side)
+                role = 'dealer' if row['role'] else 'pone'
+                add(game, f'wp_{kind}_{role}', side, (prediction - actual) ** 2, prediction, actual)
+
+        seen = set()
+        fields = ['game_id', 'hand_number', 'sequence', 'player', 'role', 'model', 'action', 'legal_count', 'decision_elapsed_us']
+        for row in rows('compact_peg_plays', fields, 'ORDER BY game_id, hand_number, sequence'):
+            if row['action'] != 0 or row['player'] not in (0, 1):
+                continue
+            key = (row['game_id'], row['hand_number'], row['player'])
+            if key in seen:
+                continue
+            seen.add(key)  # Mark the first card BEFORE excluding forced/missing calls.
+            game = by_id[row['game_id']]
+            side = actor(game, row)
+            elapsed = row['decision_elapsed_us']
+            if side is not None and row['role'] == 0 and elapsed is not None and (row['legal_count'] or 0) > 1:
+                add(game, 'pone_open', side, elapsed / 1_000_000)
+
+        for game, signature in batch:
+            cache[game['game_id']] = (signature, game['metrics'])
+    live_ids = {game['game_id'] for game in games}
+    for game_id in list(cache):
+        if game_id not in live_ids:
+            del cache[game_id]
+
+
+def orientation(root, label, run_id, metric_cache=None):
     if not label or Path(label).name != label or label in ('.', '..'):
         raise ValueError('Manifest must name two orientation directories')
     status = read_json(root / label / 'status.json', {})
     path = root / label / 'games.db'
     if not path.is_file():
         return [], status, run_id
-    # No VACUUM, copy, persistent connection, or scans of per-decision telemetry.
+    # No VACUUM, copy, writes, or persistent connection.
     # WAL readers do not block writers; timeout bounds contention on older DBs.
     with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=0.15)) as db:
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA query_only=ON')
+        db.execute('BEGIN')
         if not run_id:
             runs = db.execute('SELECT DISTINCT run_id FROM compact_games').fetchall()
             if len(runs) > 1:
                 raise ValueError('Multiple run IDs: specify orientation run IDs in the manifest')
             run_id = runs[0][0] if runs else status.get('runId')
+        has_ids = 'game_id' in {row[1] for row in db.execute('PRAGMA table_info(compact_games)')}
         games = [dict(row) for row in db.execute(
-            'SELECT game_index, random_seed, left_engine, right_engine, winner, '
+            ('SELECT game_id, ' if has_ids else 'SELECT ') +
+            'game_index, random_seed, left_engine, right_engine, winner, '
             'final_left_score, final_right_score, started_at, ended_at '
             'FROM compact_games WHERE run_id = ? AND included_in_tables = 1 ORDER BY game_index', (run_id,))]
+        if has_ids:
+            identity = (str(path), path.stat().st_ino, run_id)
+            cache = metric_cache.setdefault(identity, {}) if metric_cache is not None else {}
+            game_metrics(db, games, cache)
     if status.get('runId') != run_id:
         status = {}
     return games, status, run_id
@@ -233,7 +339,7 @@ def progress_history(games):
     return result
 
 
-def build_report(entry, now=None):
+def build_report(entry, now=None, metric_cache=None):
     started = time.monotonic()
     now = time.time() if now is None else now
     root = Path(entry['root'])
@@ -250,7 +356,7 @@ def build_report(entry, now=None):
     start = int(info.get('startIndex', 0))
     if target <= 0 or start < 0:
         raise ValueError('Manifest must specify a positive target and nonnegative startIndex')
-    data = [orientation(root, label, run_id) for label, run_id in zip(
+    data = [orientation(root, label, run_id, metric_cache) for label, run_id in zip(
         (info['candidateLeft'], info['opponentLeft']), config(info))]
     indexed = [inspect_games(rows, candidate, opponent, i, target, start) for i, (rows, _, _) in enumerate(data)]
     matches = sorted(indexed[0].keys() & indexed[1].keys())
@@ -310,6 +416,7 @@ def build_report(entry, now=None):
         'estimatedCompletion': datetime.fromtimestamp(now + elapsed, timezone.utc).isoformat() if elapsed else None,
         'matchedPairs': len(matches), 'orderedPairs': len(pairs), 'pendingPairs': len(matches) - len(pairs),
         'history': history, 'latest': latest, 'progressHistory': progress_history(data[0][0] + data[1][0]),
+        'metrics': metric_histories(pairs),
         'warnings': warnings, 'integrity': 'passed',
         'readMilliseconds': round((time.monotonic() - started) * 1000, 1),
     })
@@ -323,6 +430,7 @@ class WorkbenchServer(ThreadingHTTPServer):
         super().__init__(address, Handler)
         self.runtime = runtime
         self.cache = {}
+        self.metric_cache = {}
         self.cache_lock = threading.Lock()
         self.allowed_hosts = {f'127.0.0.1:{self.server_port}', f'localhost:{self.server_port}'}
         if lan_hostname:
@@ -334,7 +442,7 @@ class WorkbenchServer(ThreadingHTTPServer):
             if cached and time.monotonic() - cached[0] < CACHE_SECONDS:
                 return cached[1]
             try:
-                report = build_report(entry)
+                report = build_report(entry, metric_cache=self.metric_cache)
             except (OSError, ValueError, sqlite3.Error) as error:
                 report = {'id': entry['id'], 'error': str(error), 'integrity': 'unavailable',
                           'asOf': datetime.now(timezone.utc).isoformat()}

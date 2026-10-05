@@ -39,16 +39,39 @@
       </section>
       <div class="chart-grid">
         <section class="panel">
-          <div class="section-heading"><div><p class="eyebrow">Mean score difference · points/game</p><h2 id="score-chart-title"></h2></div><strong id="score-delta" class="metric">—</strong></div>
+          <div class="section-heading"><div><p class="eyebrow">Recorded points</p><h2>Scoring</h2></div><strong id="score-delta" class="metric">—</strong></div>
+          <label class="metric-picker">Measure <select id="score-kind"><option value="final_score">Final score · per game</option><option value="peg_pone">Pegging · pone · per hand</option><option value="peg_dealer">Pegging · dealer · per hand</option><option value="hand_pone">Hand counting · pone · per hand</option><option value="hand_dealer">Hand counting · dealer · per hand</option><option value="crib">Crib counting · per crib</option></select></label>
+          <div class="metric-models" id="score-models"></div>
           <p class="score-standing" id="score-standing"></p>
-          <div class="chart-direction"><span id="score-above"></span><span>0 = even</span><span id="score-below"></span></div>
+          <h3 class="chart-title" id="score-chart-title"></h3>
           <svg id="score-chart" class="chart" viewBox="0 0 620 240" role="img" aria-label="Paired score difference with ordinary 95 percent confidence interval"></svg>
-          <p class="caption">Shading is the ordinary 95% interval. A points lead can differ from a win-rate lead.</p>
+          <p class="caption" id="score-interval"></p>
+          <p class="caption">Higher points favor that model. Hand values include game-ending partial hands as played; unreached scoring phases contribute zero. A points lead need not match the win-rate lead.</p>
+        </section>
+        <section class="panel">
+          <div class="section-heading"><div><p class="eyebrow">Win-probability prediction accuracy</p><h2>WP accuracy</h2></div><strong id="wp-delta" class="metric">—</strong></div>
+          <label class="metric-picker">Decisions <select id="wp-kind"><option value="wp_pegging_pone">Pegging · pone</option><option value="wp_pegging_dealer">Pegging · dealer</option><option value="wp_discard_pone">Discard · pone</option><option value="wp_discard_dealer">Discard · dealer</option></select></label>
+          <div class="metric-models" id="wp-models"></div>
+          <p class="score-standing" id="wp-standing"></p>
+          <h3 class="chart-title" id="wp-chart-title"></h3>
+          <svg id="wp-chart" class="chart" viewBox="0 0 620 240" role="img"></svg>
+          <p class="caption" id="wp-interval"></p>
+          <p class="caption" id="wp-calibration"></p>
+          <p class="caption">Brier score is the mean squared error between a selected WP prediction and the eventual game outcome. Lower is better. Forced pegging choices and missing predictions are excluded. Each model is measured on its own recorded decisions, which can occur at different board positions.</p>
+        </section>
+        <section class="panel">
+          <div class="section-heading"><div><p class="eyebrow">First pegging decision of the hand</p><h2>Pone opening</h2></div><strong id="open-delta" class="metric">—</strong></div>
+          <div class="metric-models" id="open-models"></div>
+          <p class="score-standing" id="open-standing"></p>
+          <h3 class="chart-title" id="open-chart-title"></h3>
+          <svg id="open-chart" class="chart" viewBox="0 0 620 240" role="img"></svg>
+          <p class="caption" id="open-interval"></p>
+          <p class="caption">Elapsed seconds inside pone’s opening model call. Lower is faster. Forced openings and missing timings are excluded; a later play never substitutes for an untimed opening. Hardware, scheduling and concurrent workload affect these timings.</p>
         </section>
         <section class="panel"><div class="section-heading"><div><p class="eyebrow">Saved games · both models combined</p><h2>Progress over time</h2></div><strong id="throughput" class="metric">—</strong></div><svg id="progress-chart" class="chart" viewBox="0 0 620 240" role="img" aria-label="Cumulative saved games by elapsed hours"></svg><p class="caption">Games completed, not wins. Elapsed time since the first game, including any pauses.</p></section>
       </div>
       <section class="panel details-panel"><div><h2>Both sides of the table</h2><p class="muted">“Left” is a seat, not the leader. Raw outcomes include all saved games; inference above uses pairs in seed order.</p><table><thead><tr><th>Orientation</th><th>Games</th><th id="orientation-wins">Wins</th><th id="orientation-rate">Win rate</th></tr></thead><tbody id="orientation-rows"></tbody></table></div><div><h2>Run integrity</h2><dl id="integrity"></dl></div></section>
-      <details class="methods"><summary>How to read the confidence bands</summary><div><p id="paired-method"></p><p>The ordinary interval is a paired normal approximation, useful at a predetermined analysis point. The confidence sequence uses fixed mixtures of bounded betting processes, with 2.5% error allocated to each tail. Under the fixed-matchup, constant conditional-mean assumption, its entire sequence covers the true mean with at least 95% probability. It accounts for repeated checking of this matchup, not selection among multiple model experiments.</p><p id="sequence-method"></p><p><a href="https://arxiv.org/abs/2010.09686" target="_blank" rel="noreferrer">Method: estimating bounded means by betting ↗</a></p></div></details>
+      <details class="methods"><summary>How to read the confidence bands</summary><div><p id="paired-method"></p><p>The ordinary interval is a paired normal approximation, useful at a predetermined analysis point. The confidence sequence uses fixed mixtures of bounded betting processes, with 2.5% error allocated to each tail. Under the fixed-matchup, constant conditional-mean assumption, its entire sequence covers the true mean with at least 95% probability. It accounts for repeated checking of this matchup, not selection among multiple model experiments.</p><p id="sequence-method"></p><p>Scoring, WP accuracy and opening-time bands are ordinary 95% pointwise intervals, not confidence sequences. Means are weighted by recorded games, hands or calls. Their uncertainty is clustered by reciprocal deal pair, preserving dependence among decisions from the same games and between the models. They can be unreliable with few pairs and do not justify stopping after repeated checks. Timing intervals describe this run’s workload, not a controlled speed comparison.</p><p><a href="https://arxiv.org/abs/2010.09686" target="_blank" rel="noreferrer">Method: estimating bounded means by betting ↗</a></p></div></details>
       <footer><span>Read-only · refreshes every 15 seconds while visible</span><span id="source"></span></footer>
     </div>
     </div>
