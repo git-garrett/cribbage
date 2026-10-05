@@ -52,6 +52,11 @@ def validate_spec(spec: dict) -> None:
                 "jobRoot must be on the internal disk; external volumes may not be "
                 "mounted or accessible when launchd starts"
             )
+    if spec.get("benchmarkRoot") is not None and (
+        not isinstance(spec["benchmarkRoot"], str)
+        or not Path(spec["benchmarkRoot"]).is_absolute()
+    ):
+        raise ValueError("benchmarkRoot must be an absolute path")
     for field in ("launchdPlistPath", "supervisorLogPath"):
         value = spec.get(field)
         if value is not None and (
@@ -377,7 +382,35 @@ def install_job(spec_path: Path) -> int:
     completed = subprocess.run(
         ["launchctl", "bootstrap", domain, str(plist_path)], check=False
     )
+    if completed.returncode == 0:
+        start_workbench(spec, internal_spec)
     return completed.returncode
+
+
+def start_workbench(spec: dict, internal_spec: Path) -> None:
+    """Best-effort observer startup; it must never fail or restart the job."""
+    paired = spec.get("benchmarkRoot") or any(
+        check.get("table") == "compact_games"
+        for stage in spec["stages"]
+        for check in stage.get("completionChecks", [])
+    )
+    if not paired:
+        return
+    manager = Path(__file__).with_name("local-runtime.sh")
+    if not manager.is_file():
+        print("Workbench: use scripts/local-runtime.sh workbench-start " + str(internal_spec))
+        return
+    try:
+        result = subprocess.run(
+            ["/bin/bash", str(manager), "workbench-start", str(internal_spec)],
+            capture_output=True, text=True, timeout=20, check=False,
+        )
+        if result.returncode:
+            print("Workbench unavailable; benchmark continues. " + (result.stderr or result.stdout).strip(), file=sys.stderr)
+        else:
+            print(result.stdout.strip())
+    except (OSError, subprocess.TimeoutExpired) as error:
+        print(f"Workbench unavailable; benchmark continues: {error}", file=sys.stderr)
 
 
 def print_status(spec_path: Path) -> int:

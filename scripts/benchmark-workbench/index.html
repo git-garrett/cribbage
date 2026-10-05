@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Benchmark workbench · Strong Cribbage</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="masthead">
+    <a class="brand" href="/" aria-label="Benchmark workbench home"><span class="pegmark" aria-hidden="true">⠿</span> STRONG CRIBBAGE <span class="divider">/</span> <span>BENCHMARK WORKBENCH</span></a>
+    <span class="connection" id="connection" role="status">Connecting…</span>
+  </header>
+  <main>
+    <div id="run-tabs" class="run-tabs" role="tablist" aria-label="Active benchmarks"></div>
+    <div class="run-picker"><label for="jobs">All experiments</label><select id="jobs"><option value="">Loading benchmarks…</option></select><button id="refresh" type="button">Refresh</button></div>
+    <div id="benchmark-view" role="tabpanel" aria-label="Selected benchmark" tabindex="0">
+    <div id="notice" class="notice" role="status" hidden></div>
+    <section id="empty" class="empty" hidden><h1>Your next benchmark starts here.</h1><p>Install a paired benchmark with the job supervisor and it will appear automatically.</p><p>For an already running job, use <code>scripts/local-runtime.sh workbench-start /path/to/job.json</code>.</p></section>
+    <div id="report" hidden>
+      <section class="run-heading"><div><p class="eyebrow">Paired, with sides reversed</p><h1 id="matchup"></h1><p id="experiment" class="muted"></p></div><div class="run-state"><span class="state" id="state"></span><p id="stage" class="muted"></p></div></section>
+      <section class="panel progress-panel" aria-labelledby="progress-title">
+        <div class="section-heading"><h2 id="progress-title">The run</h2><span id="progress-total" class="numeric"></span></div>
+        <div id="lanes" class="lanes"></div>
+        <div class="run-facts"><div><span class="label">Estimated game completion</span><strong id="eta">—</strong><small>Verification and final reports follow.</small></div><div><span class="label">Paired evidence</span><strong id="pair-count">—</strong><small id="pair-note"></small></div><div><span class="label">Snapshot</span><strong id="updated">—</strong><small id="read-cost"></small></div></div>
+      </section>
+      <section class="panel evidence" aria-labelledby="evidence-title">
+        <div class="section-heading"><div><p class="eyebrow">Playing strength</p><h2 id="evidence-title">Does the advantage hold?</h2></div><span class="verdict" id="verdict"></span></div>
+        <div class="evidence-stats"><div><span class="label">Paired win rate</span><strong id="win-rate" class="hero-number">—</strong><small id="sweeps"></small></div><div><span class="label"><i class="swatch fixed"></i>Ordinary 95% interval</span><strong id="fixed-interval">—</strong><small>For a fixed analysis point</small></div><div><span class="label"><i class="swatch anytime"></i>95% confidence sequence</span><strong id="anytime-interval">—</strong><small>Valid across repeated checks*</small></div></div>
+        <div class="chart-tools"><label>Scale <select id="win-scale" aria-label="Win rate chart scale"><option value="focus">40–60% (bands clipped)</option><option value="full">Full range</option></select></label><div><label><input id="show-fixed" type="checkbox" checked> Ordinary interval</label><label><input id="show-anytime" type="checkbox" checked> Confidence sequence</label></div></div>
+        <svg id="win-chart" class="chart main-chart" viewBox="0 0 960 300" role="img" aria-label="Paired win rate with ordinary and sequential 95 percent confidence bands"></svg>
+        <div class="inspect"><label for="inspect">Inspect the run</label><input id="inspect" type="range" min="0" max="0" value="0"><output id="inspection" for="inspect">Waiting for complete pairs</output></div>
+      </section>
+      <div class="chart-grid"><section class="panel"><div class="section-heading"><div><p class="eyebrow">Points per game</p><h2>Score advantage</h2></div><strong id="score-delta" class="metric">—</strong></div><svg id="score-chart" class="chart" viewBox="0 0 620 240" role="img" aria-label="Paired score advantage with ordinary 95 percent confidence interval"></svg><p class="caption">Candidate minus opponent. Shading is the ordinary 95% interval.</p></section><section class="panel"><div class="section-heading"><div><p class="eyebrow">Saved games</p><h2>Progress over time</h2></div><strong id="throughput" class="metric">—</strong></div><svg id="progress-chart" class="chart" viewBox="0 0 620 240" role="img" aria-label="Cumulative saved games by elapsed hours"></svg><p class="caption">Elapsed time since the first game, including any pauses.</p></section></div>
+      <section class="panel details-panel"><div><h2>Both sides of the table</h2><p class="muted">Raw outcomes include all saved games. Inference above uses pairs in seed order.</p><table><thead><tr><th>Orientation</th><th>Games</th><th>Candidate wins</th><th>Win rate</th></tr></thead><tbody id="orientation-rows"></tbody></table></div><div><h2>Run integrity</h2><dl id="integrity"></dl></div></section>
+      <details class="methods"><summary>How to read the confidence bands</summary><div><p>The paired win rate gives each deal a score of 0, ½, or 1: two losses, a split, or two wins. Each deal is played with sides reversed. Every graph point includes all earlier pairs in the fixed index order. Pairs beyond an unfinished earlier game wait before entering the evidence calculation.</p><p>The ordinary interval is a paired normal approximation, useful at a predetermined analysis point. The confidence sequence uses fixed mixtures of bounded betting processes, with 2.5% error allocated to each tail. Under the fixed-matchup, constant conditional-mean assumption, its entire sequence covers the true mean with at least 95% probability. It accounts for repeated checking of this matchup, not selection among multiple model experiments.</p><p>*The confidence sequence is usually wider. An advantage is established by this method only when its lower bound rises above 50%. Score intervals are ordinary intervals. Curves use a sample of display points; all pairs enter the calculations.</p><p><a href="https://arxiv.org/abs/2010.09686" target="_blank" rel="noreferrer">Method: estimating bounded means by betting ↗</a></p></div></details>
+      <footer><span>Read-only · refreshes every 15 seconds while visible</span><span id="source"></span></footer>
+    </div>
+    </div>
+  </main>
+</body>
+</html>
