@@ -312,7 +312,8 @@ async function refresh() {
       return;
     }
     $('empty').hidden = true;
-    if (!jobs.some((job) => job.id === selected)) selected = jobs[0].id;
+    const current = jobs.find((job) => job.id === selected || job.aliases?.includes(selected));
+    selected = (current || jobs[0]).id;
     renderJobs();
     history.replaceState(null, '', `/?job=${encodeURIComponent(selected)}`);
     // Reuse each snapshot for both its preview and the selected detail panel.

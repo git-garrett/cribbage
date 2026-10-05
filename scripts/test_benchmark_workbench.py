@@ -111,6 +111,8 @@ class WorkbenchTests(unittest.TestCase):
             directory = supervisors / identifier
             directory.mkdir(parents=True)
             spec = {**self.spec, 'jobId': identifier}
+            if identifier == 'another-run':
+                spec['benchmarkRoot'] = str(self.root / 'different-experiment')
             (directory / 'job.json').write_text(json.dumps(spec))
         before = sorted(p.name for p in (self.root / 'runtime/jobs').iterdir())
         jobs = workbench.list_jobs(self.root / 'runtime', supervisors)
@@ -119,6 +121,49 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(before, sorted(p.name for p in (self.root / 'runtime/jobs').iterdir()))
         (supervisors / 'another-run/job.json').write_text('invalid JSON')
         self.assertEqual(len(workbench.list_jobs(self.root / 'runtime', supervisors)), 1)
+
+    def add_supervisor(self, identifier, state, updated_at, root=None):
+        directory = self.root / 'supervisors' / identifier
+        directory.mkdir(parents=True)
+        spec = {**self.spec, 'jobId': identifier, 'jobRoot': str(directory),
+                'benchmarkRoot': str(root or self.root)}
+        (directory / 'job.json').write_text(json.dumps(spec))
+        (directory / 'status.json').write_text(json.dumps({
+            'state': state, 'updatedAt': updated_at}))
+
+    def test_resumed_supervisors_share_one_experiment_and_old_link_aliases(self):
+        self.root.joinpath('status.json').write_text(json.dumps({
+            'state': 'stopped', 'updatedAt': '2026-10-01T01:00:00Z'}))
+        self.add_supervisor('resumed-test', 'running', '2026-10-01T02:00:00Z')
+        self.add_supervisor('old-attempt', 'failed', '2026-10-01T03:00:00Z')
+        # Equivalent path spellings must not create another tab.
+        self.add_supervisor('older-attempt', 'stopped', '2026-10-01T00:00:00Z',
+                            self.root / 'left' / '..')
+        jobs = workbench.list_jobs(self.root / 'runtime', self.root / 'supervisors')
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]['id'], 'resumed-test')
+        self.assertEqual(jobs[0]['state'], 'running')
+        self.assertEqual(set(jobs[0]['aliases']),
+                         {'paired-test', 'old-attempt', 'older-attempt'})
+
+    def test_latest_inactive_supervisor_represents_its_experiment(self):
+        self.root.joinpath('status.json').write_text(json.dumps({
+            'state': 'stopped', 'updatedAt': '2026-10-01T01:00:00Z'}))
+        self.add_supervisor('resumed-test', 'failed', '2026-10-01T02:00:00Z')
+        jobs = workbench.list_jobs(self.root / 'runtime', self.root / 'supervisors')
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]['id'], 'resumed-test')
+        self.assertEqual(jobs[0]['aliases'], ['paired-test'])
+
+    def test_first_sweep_after_thirteen_splits_produces_expected_graph_step(self):
+        for index in range(14):
+            self.add_game('left', index, 0)
+            self.add_game('right', index, 1 if index == 13 else 0)
+        result = self.report()
+        self.assertEqual(result['history'][12]['winRate'], .5)
+        self.assertEqual(result['history'][13]['winRate'], 15 / 28)
+        self.assertEqual(result['latest']['candidateSweeps'], 1)
+        self.assertEqual(result['latest']['splits'], 13)
 
     def test_archive_checks_do_not_replace_the_live_database_root(self):
         self.spec['stages'].append({'name': 'sync', 'completionChecks': [
@@ -224,6 +269,20 @@ class WorkbenchTests(unittest.TestCase):
 
 
 class WorkbenchAccessTests(unittest.TestCase):
+    def test_report_accepts_a_previous_supervisor_link(self):
+        entry = {'id': 'current-run', 'aliases': ['previous-run']}
+        handler = object.__new__(workbench.Handler)
+        handler.server = SimpleNamespace(
+            allowed_hosts={'localhost:8766'}, runtime=Path('/unused'),
+            report=mock.Mock(return_value={'id': 'current-run'}))
+        handler.path = '/api/report?job=previous-run'
+        handler.headers = {'Host': 'localhost:8766'}
+        handler.respond = mock.Mock()
+        with mock.patch.object(workbench, 'list_jobs', return_value=[entry]):
+            handler.do_GET()
+        handler.server.report.assert_called_once_with(entry)
+        handler.respond.assert_called_once_with({'id': 'current-run'})
+
     def test_host_guard_accepts_configured_lan_name_and_rejects_rebinding(self):
         handler = object.__new__(workbench.Handler)
         handler.server = SimpleNamespace(allowed_hosts={

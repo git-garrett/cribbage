@@ -107,7 +107,16 @@ def list_jobs(runtime=RUNTIME, jobs_runtime=JOBS_RUNTIME):
         status = job_status(entry)
         jobs.append({**entry, 'candidate': info.get('candidate'), 'opponent': info.get('opponent') or info.get('baseline'),
                      'state': status.get('state', 'unavailable'), 'updatedAt': status.get('updatedAt', '')})
-    return sorted(jobs, key=lambda x: (x['state'] == 'running', x['updatedAt']), reverse=True)
+    # A resume changes the supervisor ID, not the experiment's databases.
+    # Keep the active/latest supervisor and resolve old bookmarks to it.
+    experiments = {}
+    for job in sorted(jobs, key=lambda x: (x['state'] == 'running', x['updatedAt']), reverse=True):
+        root = str(Path(job['root']).resolve())
+        if root in experiments:
+            experiments[root]['aliases'].append(job['id'])
+        else:
+            experiments[root] = {**job, 'root': root, 'aliases': []}
+    return list(experiments.values())
 
 
 def timestamp(value):
@@ -480,7 +489,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond({'jobs': jobs, 'refreshSeconds': CACHE_SECONDS})
         if url.path == '/api/report':
             selected = parse_qs(url.query).get('job', [''])[0]
-            entry = next((job for job in jobs if job['id'] == selected), None)
+            entry = next((job for job in jobs
+                          if job['id'] == selected or selected in job['aliases']), None)
             if not entry:
                 return self.respond({'error': 'Unknown benchmark'}, 404)
             return self.respond(self.server.report(entry))
