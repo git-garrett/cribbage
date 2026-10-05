@@ -120,7 +120,7 @@ main {
 }
 .run-tab {
   flex:none;
-  min-height:54px;
+  width:248px;
   text-align:left;
   border-bottom:3px solid var(--line);
 }
@@ -134,6 +134,30 @@ main {
   font-size:11px;
   font-weight:400;
   opacity:.8;
+}
+.tab-heading {
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:8px;
+}
+.tab-heading>span {
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.tab-state {
+  flex:none;
+}
+.tab-rate {
+  margin-top:3px;
+}
+.tab-progress {
+  margin-top:5px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-variant-numeric:tabular-nums;
 }
 .run-picker label {
   font-size:12px;
@@ -426,6 +450,19 @@ h2 {
   fill:white;
   stroke:var(--blue);
   stroke-width:2;
+}
+.tab-chart {
+  height:76px;
+  margin-top:6px;
+  background:white;
+  border-radius:3px;
+  overflow:hidden;
+}
+.tab-chart .line {
+  stroke-width:1.75;
+}
+.chart.tab-chart text {
+  font-size:9px;
 }
 .inspect {
   display:flex;

@@ -13,6 +13,8 @@ let followLatest = true;
 let inspectedPairs = 0;
 let jobs = [];
 let jobsSignature = '';
+const previews = new Map();
+const visibleJobs = () => jobs.filter((job) => job.state === 'running' || job.state === 'pending' || job.id === selected);
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -23,7 +25,7 @@ function element(tag, text, className) {
 
 function renderJobs() {
   const signature = JSON.stringify(jobs.map(({ id, state, candidate, opponent }) => [id, state, candidate, opponent]));
-  const visible = jobs.filter((job) => job.state === 'running' || job.state === 'pending' || job.id === selected);
+  const visible = visibleJobs();
   const tabs = $('run-tabs');
   const tabIds = visible.map((job) => job.id).join(',');
   if (tabs.dataset.jobs !== tabIds || signature !== jobsSignature) {
@@ -31,11 +33,16 @@ function renderJobs() {
     tabs.replaceChildren();
     for (const job of visible) {
       const title = job.candidate && job.opponent ? `${modelName(job.candidate)} vs ${modelName(job.opponent)}` : job.id;
-      const tab = element('button', title, 'run-tab');
+      const tab = element('button', null, 'run-tab');
       tab.type = 'button'; tab.id = `tab-${job.id}`; tab.dataset.job = job.id;
       tab.title = job.id;
       tab.setAttribute('role', 'tab'); tab.setAttribute('aria-controls', 'benchmark-view');
-      tab.append(element('small', job.state)); tabs.append(tab);
+      const heading = element('span', null, 'tab-heading');
+      heading.append(element('span', title), element('small', job.state, 'tab-state'));
+      tab.append(heading, element('small', 'Loading results…', 'tab-rate'));
+      tab.append(svgNode('svg', { id: `preview-${job.id}`, class: 'chart tab-chart', 'aria-hidden': 'true' }));
+      tab.append(element('small', 'Loading progress…', 'tab-progress'));
+      tabs.append(tab);
     }
     tabs.dataset.jobs = tabIds;
     if (focusedJob) document.getElementById(`tab-${focusedJob}`)?.focus({ preventScroll: true });
@@ -56,6 +63,28 @@ function renderJobs() {
     jobsSignature = signature;
   }
   picker.value = selected;
+  renderPreviews();
+}
+
+function renderPreviews() {
+  for (const job of visibleJobs()) {
+    const tab = document.getElementById(`tab-${job.id}`);
+    if (!tab) continue;
+    const snapshot = previews.get(job.id);
+    const unavailable = snapshot?.error || snapshot?.waiting;
+    const rows = unavailable ? [] : snapshot?.history || [];
+    const rate = tab.querySelector('.tab-rate');
+    rate.textContent = unavailable ? (snapshot.error ? 'Data unavailable' : 'Waiting for results') : snapshot ? `${modelName(job.candidate)} paired wins: ${percent(snapshot.latest?.winRate)}` : 'Loading results…';
+    const progress = tab.querySelector('.tab-progress');
+    progress.textContent = snapshot && !unavailable ? `${number.format(snapshot.saved)} / ${number.format(snapshot.target)} games · ${(100 * snapshot.saved / snapshot.target).toFixed(1)}%` : unavailable || 'Loading progress…';
+    progress.title = progress.textContent;
+    chart(`preview-${job.id}`, rows, {
+      compact: true, x: (r) => r.pairs, y: (r) => r.winRate, percent: true, reference: .5,
+      bands: [{ key: 'anytime95', className: 'anytime-band' }, { key: 'fixed95', className: 'fixed-band' }],
+      domain: [.4, .6], empty: unavailable ? 'Preview unavailable' : snapshot ? 'Waiting for paired games' : 'Loading…',
+    });
+    tab.querySelector('svg').append(svgNode('title', {}, 'Paired win rate over completed pairs, 40–60% scale. Ordinary and sequential 95% bands are clipped to this range.'));
+  }
 }
 
 function selectJob(id) {
@@ -74,12 +103,12 @@ function svgNode(tag, attributes, text) {
 function chart(id, rows, options) {
   const svg = $(id);
   svg.replaceChildren();
-  const width = Math.max(280, svg.clientWidth);
-  const height = id === 'win-chart' && innerWidth > 540 ? 300 : 240;
+  const width = Math.max(options.compact ? 180 : 280, svg.clientWidth);
+  const height = options.compact ? 76 : id === 'win-chart' && innerWidth > 540 ? 300 : 240;
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-  const left = 56, right = width - 20, top = 18, bottom = height - 56;
+  const left = options.compact ? 32 : 56, right = width - (options.compact ? 6 : 20), top = options.compact ? 8 : 18, bottom = height - (options.compact ? 8 : 56);
   if (!rows.length) {
-    svg.append(svgNode('text', { x: width / 2, y: height / 2, 'text-anchor': 'middle' }, 'Waiting for saved game pairs'));
+    svg.append(svgNode('text', { x: width / 2, y: height / 2, 'text-anchor': 'middle' }, options.empty || 'Waiting for saved game pairs'));
     return;
   }
   const xMax = Math.max(1, ...rows.map(options.x));
@@ -94,14 +123,17 @@ function chart(id, rows, options) {
   if (high === low) high = low + 1;
   const x = (value) => left + value / xMax * (right - left);
   const y = (value) => bottom - (value - low) / (high - low) * (bottom - top);
-  for (let i = 0; i <= 4; i++) {
-    const value = low + (high - low) * i / 4;
+  const ticks = options.compact ? 2 : 4;
+  for (let i = 0; i <= ticks; i++) {
+    const value = low + (high - low) * i / ticks;
     svg.append(svgNode('line', { x1: left, y1: y(value), x2: right, y2: y(value), class: 'grid' }));
     svg.append(svgNode('text', { x: left - 9, y: y(value) + 4, 'text-anchor': 'end' }, options.percent ? `${Math.round(value * 100)}%` : value.toFixed(options.decimals ?? 1)));
-    const xValue = xMax * i / 4;
-    svg.append(svgNode('text', { x: x(xValue), y: height - 30, 'text-anchor': 'middle' }, options.xHours ? `${xValue.toFixed(1)}h` : number.format(Math.round(xValue))));
+    if (!options.compact) {
+      const xValue = xMax * i / ticks;
+      svg.append(svgNode('text', { x: x(xValue), y: height - 30, 'text-anchor': 'middle' }, options.xHours ? `${xValue.toFixed(1)}h` : number.format(Math.round(xValue))));
+    }
   }
-  svg.append(svgNode('text', { x: (left + right) / 2, y: height - 7, 'text-anchor': 'middle' }, options.xHours ? 'Elapsed hours →' : 'Completed pairs in seed order →'));
+  if (!options.compact) svg.append(svgNode('text', { x: (left + right) / 2, y: height - 7, 'text-anchor': 'middle' }, options.xHours ? 'Elapsed hours →' : 'Completed pairs in seed order →'));
   const defs = svgNode('defs', {});
   const clip = svgNode('clipPath', { id: `${id}-clip` });
   clip.append(svgNode('rect', { x: left, y: top, width: right - left, height: bottom - top }));
@@ -118,6 +150,10 @@ function chart(id, rows, options) {
   }
   if (options.reference != null) plot.append(svgNode('line', { x1: left, y1: y(options.reference), x2: right, y2: y(options.reference), class: 'reference' }));
   plot.append(svgNode('polyline', { points: rows.map((row) => `${x(options.x(row))},${y(options.y(row))}`).join(' '), class: 'line' }));
+  if (options.compact) {
+    const latest = rows[rows.length - 1];
+    plot.append(svgNode('circle', { cx: x(options.x(latest)), cy: y(options.y(latest)), r: 2.5, class: 'point' }));
+  }
   if (options.inspected != null && rows[options.inspected]) {
     const row = rows[options.inspected];
     plot.append(svgNode('line', { x1: x(options.x(row)), x2: x(options.x(row)), y1: top, y2: bottom, class: 'cursor' }));
@@ -229,6 +265,7 @@ async function refresh() {
     const value = await response.json();
     if (controller.signal.aborted) return;
     jobs = value.jobs;
+    for (const id of previews.keys()) if (!jobs.some((job) => job.id === id)) previews.delete(id);
     if (!jobs.length) {
       selected = ''; jobsSignature = ''; $('run-tabs').replaceChildren();
       $('run-tabs').dataset.jobs = '';
@@ -242,17 +279,34 @@ async function refresh() {
     if (!jobs.some((job) => job.id === selected)) selected = jobs[0].id;
     renderJobs();
     history.replaceState(null, '', `/?job=${encodeURIComponent(selected)}`);
-    const data = await fetch(`/api/report?job=${encodeURIComponent(selected)}`, { signal: controller.signal });
-    if (!data.ok) throw new Error(`Benchmark returned ${data.status}`);
-    const snapshot = await data.json();
-    if (controller.signal.aborted) return;
-    render(snapshot);
-    $('connection').textContent = snapshot.error ? 'Data unavailable' : 'Live · 15s refresh';
+    // Reuse each snapshot for both its preview and the selected detail panel.
+    // A slow or unavailable run must not block the other tabs from updating.
+    await Promise.all(visibleJobs().map(async (job) => {
+      let snapshot;
+      try {
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]);
+        const data = await fetch(`/api/report?job=${encodeURIComponent(job.id)}`, { signal });
+        if (!data.ok) throw new Error(`Benchmark returned ${data.status}`);
+        snapshot = await data.json();
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        snapshot = { error: error.message };
+      }
+      if (controller.signal.aborted) return;
+      previews.set(job.id, snapshot);
+      renderPreviews();
+      if (job.id === selected) {
+        render(snapshot);
+        $('connection').textContent = snapshot.error ? 'Data unavailable' : 'Live · 15s refresh';
+      }
+    }));
   } catch (error) {
     if (error.name === 'AbortError') return;
     $('connection').textContent = 'Disconnected';
     $('notice').hidden = false;
     $('notice').textContent = `${error.message}. Displayed figures may be out of date. Retrying automatically.`;
+    for (const job of visibleJobs()) previews.set(job.id, { error: 'Connection lost; retrying automatically.' });
+    renderPreviews();
   } finally {
     if (request === controller) {
       $('benchmark-view').setAttribute('aria-busy', 'false');
@@ -285,4 +339,4 @@ document.addEventListener('visibilitychange', () => { clearTimeout(timer); if (!
 refresh();
 
 let resizeFrame;
-window.addEventListener('resize', () => { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(renderCharts); });
+window.addEventListener('resize', () => { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(() => { renderCharts(); renderPreviews(); }); });
