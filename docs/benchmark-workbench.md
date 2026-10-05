@@ -26,6 +26,16 @@ automatically, including jobs created by older frozen supervisors without the
 registration hook. Discovery reads specs and status files only. Only the selected
 tab reads game results; inactive tabs do not add database polling.
 
+Standings name the observed leader and trailing model separately from the
+sequential evidence verdict. Both models' paired win rates are shown. Win-rate
+curves and both confidence intervals always refer to the explicitly named first
+model; above 50% favors that model and below 50% favors the other. Score curves
+show the named first model minus the other in points per game, with positive and
+negative directions labeled. A points lead need not match the win-rate lead.
+Horizontal axes show completed pairs or elapsed hours, not opposing models.
+Completion percentages describe the run, and “left” in orientation labels is a
+seat assignment, not a standing. All calculations and frozen inputs are unchanged.
+
 Attach an existing run without restarting its workers:
 
 ```bash
