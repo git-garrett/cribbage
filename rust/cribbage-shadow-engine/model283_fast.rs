@@ -105,7 +105,7 @@ fn private_solve(
             .collect());
     }
     if p.left[0] == 0 || p.left[1] == 0 || p.left.iter().all(|n| *n <= 1) {
-        let t = s.suffix(p, &[own], other);
+        let t = s.suffix(p, &[own], other)?;
         return Ok(other
             .iter()
             .enumerate()
@@ -339,7 +339,7 @@ fn private_replay_matches_shared_private_row() {
                     initial: own.initial,
                     known,
                 });
-                let expected = baseline.solve_live(&p, &a, &b, Some(i));
+                let expected = baseline.solve_live(&p, &a, &b, Some(i)).unwrap();
                 let mut fast = Solver::new(&assets, cut).unwrap();
                 let actual = private_solve(&mut fast, &book, &p, *own, &b, &known).unwrap();
                 assert_eq!(

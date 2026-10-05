@@ -237,6 +237,7 @@ fn private_solve(
     known: &Hand,
     public_own: Option<&[Hand]>,
 ) -> Result<Vec<u16>, String> {
+    s.check_cancelled()?;
     if p.done {
         return Ok(other
             .iter()
@@ -250,7 +251,7 @@ fn private_solve(
             .collect());
     }
     if p.left[0] == 0 || p.left[1] == 0 || p.left.iter().all(|n| *n <= 1) {
-        let t = s.suffix(p, &[own], other);
+        let t = s.suffix(p, &[own], other)?;
         return Ok(other
             .iter()
             .enumerate()
@@ -274,7 +275,7 @@ fn private_solve(
             let index = domain.iter().position(|h| h.initial == own.initial)
                 .ok_or("partial opening lacks live hand")?;
             s.stats.opening_fallbacks += 1;
-            return Ok(s.solve_live(p, domain, other, Some(index)).live);
+            return Ok(s.solve_live(p, domain, other, Some(index))?.live);
         }
         let mut groups: [Vec<usize>; 14] = std::array::from_fn(|_| Vec::new());
         for (j, h) in other.iter().enumerate() {
@@ -403,8 +404,9 @@ pub(super) fn asset_forecast(
     s.stats.opening_loaded_rows += book.rows.len() as u64;
     let known = s.live.unwrap().known;
     let public_own = (book.dealer_plays < 3).then_some(public_own);
-    let Ok(live) = private_solve(s, &book, next, *own, other, &known, public_own) else {
-        return Ok(None);
+    let live = match private_solve(s, &book, next, *own, other, &known, public_own) {
+        Ok(live) => live,
+        Err(_) => { s.check_cancelled()?; return Ok(None); }
     };
     s.stats.opening_successes += 1;
     Ok(Some(Solved {
@@ -495,7 +497,7 @@ pub(crate) fn build(
         .unwrap_or_else(|_| "4".into()).parse::<u8>().map_err(|e| e.to_string())?;
     if !(1..=4).contains(&dealer_plays) { return Err("dealer depth must be 1..4".into()); }
     solver.opening_book = Some(Book { dealer_plays, ..Book::default() });
-    let _table = solver.solve_live(&p, &own, &other, None);
+    let _table = solver.solve_live(&p, &own, &other, None)?;
     let mut book = solver.opening_book.take().unwrap();
     book.finish();
     let policy = fingerprint(&solver);
@@ -562,7 +564,7 @@ mod tests {
                         initial: own.initial,
                         known,
                     });
-                    let expected = baseline.solve_live(&p, &a, &b, Some(i));
+                    let expected = baseline.solve_live(&p, &a, &b, Some(i)).unwrap();
                     let mut fast = Solver::new(&assets, cut).unwrap();
                     fast.live = baseline.live;
                     let actual = private_solve(&mut fast, &book, &p, *own, &b, &known, Some(&a)).unwrap();

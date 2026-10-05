@@ -7704,6 +7704,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires the installed production correction asset; mandatory predeploy check"]
     fn model283_discard_policy_matches207_exactly() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
         for role in ["pone", "dealer"] {

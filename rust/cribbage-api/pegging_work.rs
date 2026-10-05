@@ -174,7 +174,7 @@ pub(super) fn opening_key(session: &Session) -> Option<String> {
 pub(super) fn prepare(server: &Server, session: &Session) -> Option<Arc<Work>> {
     let key = opening_key(session)?;
     let game = session.game.clone();
-    let model = session.model;
+    let model = session.decision_model();
     let root = server.model_root.clone();
     let cache91 = session.model911_hand_cache.clone();
     let cache13 = session.model1323_hand_cache.clone();
@@ -316,6 +316,35 @@ mod tests {
         session.waiting_for_deal_cut = false;
         session.turn_card_revealed = true;
         session
+    }
+
+    #[test]
+    fn dynamic_preparation_executes_the_selected_ace_delegate() {
+        for dealer in [HUMAN, AI] {
+            let mut session = opening();
+            session.model = ModelId::Dynamic;
+            session.game.dealer = dealer;
+            session.game.pone = if dealer == AI { HUMAN } else { AI };
+            session.game.turn_card = cribbage_shadow_engine::cards::Card::new(9).unwrap();
+            session.game.player_mut(AI).hand = cribbage_shadow_engine::cards::cards_from_ids(&[0, 13, 26, 39]).unwrap();
+            session.game.player_mut(AI).discarded_to_crib = cribbage_shadow_engine::cards::cards_from_ids(&[1, 2]).unwrap();
+            session.game.player_mut(HUMAN).hand = cribbage_shadow_engine::cards::cards_from_ids(&[3, 4, 5, 6]).unwrap();
+            session.game.player_mut(HUMAN).discarded_to_crib = cribbage_shadow_engine::cards::cards_from_ids(&[7, 8]).unwrap();
+            if dealer == AI {
+                session.game.turn = cribbage_shadow_engine::game::PegTurn::Pone;
+                session.game.play_card(HUMAN, 3).unwrap();
+            }
+            session.use_dynamic_profile(crate::DynamicProfile {
+                strength: 200, ..crate::DynamicProfile::default()
+            });
+            let server = Server {
+                pegging_work: Registry::default(), state: Mutex::new(AppState::default()),
+                model_root: "/no-assets-needed-for-forced-rank".into(),
+                data_dir: std::env::temp_dir(),
+            };
+            let action = prepare(&server, &session).expect("eligible Dynamic Ace opening").wait().unwrap();
+            assert_eq!(action, PegAction::Play { card_id: 0 });
+        }
     }
 
     #[test]
@@ -670,42 +699,48 @@ mod tests {
     #[test]
     #[ignore = "release-only real Ace opening cancellation latency"]
     fn real_opening_stops_after_normal_forfeit() {
-        let session = opening();
-        let id = session.id.clone();
-        let data_dir = std::env::temp_dir().join(format!(
-            "ace-forfeit-real-{}-{}", std::process::id(), crate::unix_millis(),
-        ));
-        crate::initialize_game_database(&data_dir).unwrap();
-        let server = Server {
-            pegging_work: Registry::default(), state: Mutex::new(AppState::default()),
-            model_root: std::env::var("CRIBBAGE_RUST_MODEL_ROOT").unwrap_or_else(|_|
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").to_string_lossy().into_owned()), data_dir: data_dir.clone(),
-        };
-        server.state.lock().unwrap().sessions.insert(id.clone(), session.clone());
-        let job = prepare(&server, &session).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(60);
-        while job.progress.snapshot().0 < 256 && !job.finished.load(Ordering::Acquire) && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(1));
+        let mut reports = Vec::new();
+        for (model, completed) in [(ModelId::Schell1323, 256), (crate::ACE_MODEL_ID, 1)] {
+            let mut session = opening();
+            session.model = model;
+            let id = session.id.clone();
+            let data_dir = std::env::temp_dir().join(format!(
+                "ace-forfeit-real-{}-{}", std::process::id(), crate::unix_millis(),
+            ));
+            crate::initialize_game_database(&data_dir).unwrap();
+            let server = Server {
+                pegging_work: Registry::default(), state: Mutex::new(AppState::default()),
+                model_root: std::env::var("CRIBBAGE_RUST_MODEL_ROOT").unwrap_or_else(|_|
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").to_string_lossy().into_owned()), data_dir: data_dir.clone(),
+            };
+            server.state.lock().unwrap().sessions.insert(id.clone(), session.clone());
+            let job = prepare(&server, &session).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(60);
+            while job.progress.snapshot().0 < completed && !job.finished.load(Ordering::Acquire) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let before = job.progress.snapshot();
+            assert!(!job.finished.load(Ordering::Acquire), "fixture must still be calculating");
+            assert!(before.0 >= completed);
+            let start = Instant::now();
+            let response = crate::game_action(
+                &server, &json!({"gameId":id,"action":"forfeit"}).to_string(), None,
+            );
+            assert_eq!(response.status, 200, "{}", response.body);
+            assert!(job.wait().is_err());
+            while !job.finished.load(Ordering::Acquire) && start.elapsed() < Duration::from_secs(5) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(job.finished.load(Ordering::Acquire), "obsolete engine work did not stop");
+            let report = json!({"model":model.as_str(),"stopMilliseconds":start.elapsed().as_secs_f64()*1000.0,"before":before,"after":job.progress.snapshot(),"cancelled":job.wait().is_err()});
+            reports.push(report);
+            std::fs::remove_dir_all(data_dir).unwrap();
         }
-        let before = job.progress.snapshot();
-        assert!(!job.finished.load(Ordering::Acquire), "fixture must still be calculating");
-        assert!(before.0 >= 256);
-        let start = Instant::now();
-        let response = crate::game_action(
-            &server, &json!({"gameId":id,"action":"forfeit"}).to_string(), None,
-        );
-        assert_eq!(response.status, 200, "{}", response.body);
-        assert!(job.wait().is_err());
-        while !job.finished.load(Ordering::Acquire) && start.elapsed() < Duration::from_secs(5) {
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        assert!(job.finished.load(Ordering::Acquire), "obsolete engine work did not stop");
-        let report = json!({"stopMilliseconds":start.elapsed().as_secs_f64()*1000.0,"before":before,"after":job.progress.snapshot(),"cancelled":job.wait().is_err()});
+        let report = json!(reports);
         if let Ok(path) = std::env::var("CRIBBAGE_CANCELLATION_REPORT") {
             std::fs::write(path, report.to_string()).unwrap();
         }
         println!("{report}");
-        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[test]

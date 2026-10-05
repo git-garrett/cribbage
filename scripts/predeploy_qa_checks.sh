@@ -21,6 +21,7 @@ npm run --silent test:web
 npm test --silent
 scripts/run-quiet.sh --show-warnings "Production Ace integration" cargo test --manifest-path rust/Cargo.toml -p cribbage-api --release -- --ignored
 scripts/run-quiet.sh --show-warnings "Full Ace asset integration" cargo test --manifest-path rust/Cargo.toml -p cribbage-shadow-engine --release model1323_full_asset_native_integration -- --ignored
+scripts/run-quiet.sh --show-warnings "Ace discard policy parity" cargo test --manifest-path rust/Cargo.toml -p cribbage-shadow-engine --release model283_discard_policy_matches207_exactly -- --ignored
 npm run --silent build:deploy
 scripts/run-quiet.sh "Browser regressions" node scripts/test-browser-regressions.cjs
 scripts/run-quiet.sh "PvP browser regressions" node scripts/test-pvp-browser.cjs

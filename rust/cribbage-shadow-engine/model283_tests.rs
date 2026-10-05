@@ -815,7 +815,7 @@ fn discard_continuations_match_independent_reference_and_preserve_opponent_polic
                         initial: own.initial,
                         known,
                     });
-                    let result = solver.solve_live(&p, &aa, &bb, Some(index));
+                    let result = solver.solve_live(&p, &aa, &bb, Some(index)).unwrap();
                     assert_eq!(
                         solver.book, baseline.book,
                         "live private information changed public policy"
@@ -871,4 +871,20 @@ fn discard_continuations_match_independent_reference_and_preserve_opponent_polic
     }
     assert!(checked > 40);
     assert!(changed > 0, "test must exercise corrected future choices");
+}
+
+#[test]
+fn cancellation_interrupts_public_and_forced_solves_without_a_partial_result() {
+    let assets = assets();
+    let progress = Arc::new(crate::progress::DecisionProgress::default());
+    crate::progress::with_progress(Arc::clone(&progress), || {
+        let mut solver = Solver::new(&assets, 4).unwrap();
+        let hands = [Hand::new(counts(&[0, 1, 2, 3]))];
+        let p = Position::start([15, 11], [4, 4]);
+        progress.cancel();
+        assert_eq!(solver.solve_live(&p, &hands, &hands, None).err().as_deref(),
+            Some(crate::progress::CANCELLED_ERROR));
+        assert_eq!(solver.suffix(&p, &hands, &hands).err().as_deref(),
+            Some(crate::progress::CANCELLED_ERROR));
+    });
 }

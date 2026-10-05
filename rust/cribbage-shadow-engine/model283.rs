@@ -358,6 +358,7 @@ struct Solver<'a> {
     started: Instant,
     last_report: Instant,
     progress: Option<String>,
+    observer: Option<Arc<crate::progress::DecisionProgress>>,
     prior_rows: HashMap<(u8, u64), Arc<TypedPrior>>,
     #[cfg(test)]
     fast_book: Option<fast::Book>,
@@ -418,6 +419,7 @@ impl<'a> Solver<'a> {
             started: Instant::now(),
             last_report: Instant::now(),
             progress: std::env::var("CRIBBAGE_283_PROGRESS").ok(),
+            observer: crate::progress::current(),
             prior_rows: HashMap::new(),
             #[cfg(test)]
             fast_book: None,
@@ -617,6 +619,9 @@ impl<'a> Solver<'a> {
             self.book.insert((_p.path, pack(_h.initial), _p.actor), _r);
         }
     }
+    fn check_cancelled(&self) -> Result<(), String> {
+        self.observer.as_ref().map_or(Ok(()), |p| p.check_cancelled())
+    }
     fn progress(&mut self, force: bool) {
         if !force
             && (self.stats.blocks % 1024 != 0
@@ -664,10 +669,11 @@ impl<'a> Solver<'a> {
         }
         state.endpoint()
     }
-    fn suffix(&mut self, p: &Position, a: &[Hand], b: &[Hand]) -> Table {
+    fn suffix(&mut self, p: &Position, a: &[Hand], b: &[Hand]) -> Result<Table, String> {
         let template = State::from_parts(p, [[0; 13]; 2]);
         let mut out = vec![BAD; a.len() * b.len()];
         for (i, ah) in a.iter().enumerate() {
+            if i % 64 == 0 { self.check_cancelled()?; }
             for (j, bh) in b.iter().enumerate() {
                 if !self.compatible(ah, bh) {
                     continue;
@@ -720,11 +726,11 @@ impl<'a> Solver<'a> {
                 self.stats.forced_pairs += 1;
             }
         }
-        self.packed(b.len(), out)
+        Ok(self.packed(b.len(), out))
     }
     #[cfg(test)]
     fn solve(&mut self, p: &Position, a: &[Hand], b: &[Hand]) -> Table {
-        self.solve_live(p, a, b, None).table
+        self.solve_live(p, a, b, None).unwrap().table
     }
     fn terminal_live(&self, table: Table, index: Option<usize>, a: &[Hand], b: &[Hand]) -> Solved {
         let live = if let Some(i) = index {
@@ -748,7 +754,8 @@ impl<'a> Solver<'a> {
         };
         Solved { table, live }
     }
-    fn solve_live(&mut self, p: &Position, a: &[Hand], b: &[Hand], index: Option<usize>) -> Solved {
+    fn solve_live(&mut self, p: &Position, a: &[Hand], b: &[Hand], index: Option<usize>) -> Result<Solved, String> {
+        if self.stats.blocks % 128 == 0 { self.check_cancelled()?; }
         // A private-incompatible subtree may still be needed by the opponent's
         // policy. Omit only its extra live row, never its public score table.
         let index = index.filter(|_| {
@@ -759,11 +766,11 @@ impl<'a> Solver<'a> {
         self.stats.blocks += 1;
         self.progress(false);
         if p.done {
-            return self.terminal_live(Table::Constant(encode(p.scores)), index, a, b);
+            return Ok(self.terminal_live(Table::Constant(encode(p.scores)), index, a, b));
         }
         if p.left[0] == 0 || p.left[1] == 0 || p.left.iter().all(|n| *n <= 1) {
-            let table = self.suffix(p, a, b);
-            return self.terminal_live(table, index, a, b);
+            let table = self.suffix(p, a, b)?;
+            return Ok(self.terminal_live(table, index, a, b));
         }
         let actor = p.actor as usize;
         let own = if actor == 0 { a } else { b };
@@ -794,9 +801,9 @@ impl<'a> Solver<'a> {
                 }
             });
             let table = if actor == 0 {
-                self.solve_live(&child, &child_hands, b, child_index)
+                self.solve_live(&child, &child_hands, b, child_index)?
             } else {
-                self.solve_live(&child, a, &child_hands, child_index)
+                self.solve_live(&child, a, &child_hands, child_index)?
             };
             self.retain(&table);
             branches.push((rank, pts, members, table));
@@ -1018,10 +1025,10 @@ impl<'a> Solver<'a> {
         for (_, _, _, table) in &branches {
             self.release(table);
         }
-        Solved {
+        Ok(Solved {
             table: self.packed(b.len(), result),
             live,
-        }
+        })
     }
 }
 
@@ -1241,6 +1248,8 @@ pub(super) fn forecast_with_opening(assets:&PolicyAssets,o:&Model132Observation,
     }
     let count = weights.iter().filter(|w| **w > 0.0).count();
     let mut solver = Solver::new(assets, o.turn_rank)?;
+    if let Some(observer) = &solver.observer { observer.begin(requested.len()); }
+    solver.check_cancelled()?;
     solver.live = Some(LiveKnowledge {
         actor,
         initial: own,
@@ -1248,6 +1257,7 @@ pub(super) fn forecast_with_opening(assets:&PolicyAssets,o:&Model132Observation,
     });
     let mut out = vec![];
     for &action in requested {
+        solver.check_cancelled()?;
         let rank = match action {
             RankPegAction::Play(r) => r,
             RankPegAction::Go => 13,
@@ -1274,9 +1284,9 @@ pub(super) fn forecast_with_opening(assets:&PolicyAssets,o:&Model132Observation,
         let fast_result: Option<Solved> = None;
         let asset_result=if use_opening {opening::asset_forecast(&mut solver,&p,&next,&children[i],other,rank,&children)?}else{None};
         let table = if let Some(result) = asset_result.or(fast_result) { result } else if actor == 0 {
-            solver.solve_live(&next, &children, other, Some(i))
+            solver.solve_live(&next, &children, other, Some(i))?
         } else {
-            solver.solve_live(&next, other, &children, Some(i))
+            solver.solve_live(&next, other, &children, Some(i))?
         };
         let mut hist: BTreeMap<u16, f64> = BTreeMap::new();
         let mut conditioned = Vec::with_capacity(count);
@@ -1317,7 +1327,9 @@ pub(super) fn forecast_with_opening(assets:&PolicyAssets,o:&Model132Observation,
                 evaluated_worlds: count,
             },
         });
+        solver.check_cancelled()?;
         solver.stats.root_candidates += 1;
+        if let Some(observer) = &solver.observer { observer.complete(out.len()); }
         solver.progress(true);
     }
     if let Ok(path) = std::env::var("CRIBBAGE_283_STATS") {
