@@ -1,0 +1,314 @@
+use cribbage_shadow_engine::model::{
+    evaluate_decision, evaluate_decision_with_caches, evaluate_selected_decision,
+    parse_decision_input, Decision, Model13HandCache,
+};
+use cribbage_shadow_engine::model_id::{MODEL_13_23, MODEL_20_0, MODEL_20_1, MODEL_20_2, MODEL_20_3, MODEL_20_4, MODEL_20_5, MODEL_20_6, MODEL_20_7, MODEL_20_5_PEGGING, MODEL_20_5_PEGGING2};
+
+#[test]
+fn model205_pegging2_keeps_discard_identity_and_live_review_agreement() {
+    model205_pegging2_keeps_discard_identity_and_live_review_agreement_cases(false);
+}
+
+fn model205_pegging2_keeps_discard_identity_and_live_review_agreement_cases(include_discard: bool) {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = root.to_str().unwrap();
+    for role in ["dealer", "pone"] {
+        let fields = format!("kind=peg;role={role};aiHand=4,9;aiTable=0,3;ownDiscards=1,6;turnCard=10;humanTable=2,5;humanHandCount=2;aiScore=119;humanScore=118;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5");
+        let input = parse_decision_input(&format!("model=20.5.pegging2;{fields}")).unwrap();
+        assert_eq!(input.model, MODEL_20_5_PEGGING2);
+        let baseline = parse_decision_input(&format!("model={MODEL_20_5};{fields}")).unwrap();
+        let before = evaluate_decision(&baseline, root).unwrap();
+        let actual = evaluate_decision(&input, root).unwrap();
+        let Decision::Peg { card_id: Some(card), .. } = actual else { panic!("expected a play"); };
+        let cached = evaluate_decision_with_caches(&input, root, None, Some(&Model13HandCache::new())).unwrap();
+        let review = evaluate_selected_decision(&input, &[card], root).unwrap();
+        assert_eq!(format!("{actual:?}"), format!("{cached:?}"));
+        assert_eq!(format!("{actual:?}"), format!("{review:?}"));
+        assert_eq!(format!("{before:?}"), format!("{:?}", evaluate_decision(&baseline, root).unwrap()));
+        if include_discard {
+            let fields = format!("kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore=55;humanScore=58");
+            let old = parse_decision_input(&format!("model={MODEL_20_5};{fields}")).unwrap();
+            let new = parse_decision_input(&format!("model={MODEL_20_5_PEGGING2};{fields}")).unwrap();
+            assert_eq!(format!("{:?}", evaluate_decision(&old, root).unwrap()),
+                format!("{:?}", evaluate_decision(&new, root).unwrap()));
+        }
+    }
+}
+
+#[test]
+fn model205_pegging_is_isolated_and_live_cached_and_review_paths_agree() {
+    model205_pegging_is_isolated_and_live_cached_and_review_paths_agree_cases(false);
+}
+
+fn model205_pegging_is_isolated_and_live_cached_and_review_paths_agree_cases(include_discard: bool) {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = root.to_str().unwrap();
+    for role in ["dealer", "pone"] {
+        for fields in [
+            format!("kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore=55;humanScore=58"),
+            format!("kind=peg;role={role};aiHand=4,9;aiTable=0,3;ownDiscards=1,6;turnCard=10;humanTable=2,5;humanHandCount=2;aiScore=119;humanScore=118;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"),
+        ].into_iter().filter(|fields| include_discard || !fields.starts_with("kind=discard")) {
+            let baseline = parse_decision_input(&format!("model={MODEL_20_5};{fields}")).unwrap();
+            let experiment = parse_decision_input(&format!("model=20.5.pegging;{fields}")).unwrap();
+            assert_eq!(experiment.model, MODEL_20_5_PEGGING);
+            let before = evaluate_decision(&baseline, root).unwrap();
+            let actual = evaluate_decision(&experiment, root).unwrap();
+            if fields.starts_with("kind=discard") { assert_eq!(format!("{before:?}"), format!("{actual:?}")); }
+            let cards = match &actual {
+                Decision::Discard { card_ids, .. } => card_ids.clone(),
+                Decision::Peg { card_id, .. } => card_id.iter().copied().collect(),
+            };
+            let cache = Model13HandCache::new();
+            for input in [&baseline, &experiment, &baseline, &experiment] {
+                let result = evaluate_decision_with_caches(input, root, None, Some(&cache)).unwrap();
+                let expected = if input.model == MODEL_20_5 { &before } else { &actual };
+                assert_eq!(format!("{result:?}"), format!("{expected:?}"));
+            }
+            let review = evaluate_selected_decision(&experiment, &cards, root).unwrap();
+            assert_eq!(format!("{review:?}"), format!("{actual:?}"));
+        }
+    }
+}
+
+#[test]
+fn model203_live_cached_and_review_paths_agree_without_changing_model202() {
+    model203_live_cached_and_review_paths_agree_without_changing_model202_cases(false);
+}
+
+fn model203_live_cached_and_review_paths_agree_without_changing_model202_cases(include_discard: bool) {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = root.to_str().unwrap();
+    for role in ["dealer", "pone"] {
+        for fields in [
+            format!("kind=peg;turnCard=10;role={role};ownDiscards=1,6;aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore=110;humanScore=109;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"),
+            format!("kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore=110;humanScore=109"),
+        ].into_iter().filter(|fields| include_discard || !fields.starts_with("kind=discard")) {
+            let old = parse_decision_input(&format!("model={MODEL_20_2};{fields}")).unwrap();
+            let new = parse_decision_input(&format!("model={MODEL_20_3};{fields}")).unwrap();
+            let before = evaluate_decision(&old, root).unwrap();
+            let actual = evaluate_decision(&new, root).unwrap();
+            let cache = Model13HandCache::new();
+            for input in [&old, &new, &old, &new] {
+                let cached = evaluate_decision_with_caches(input, root, None, Some(&cache)).unwrap();
+                let expected = if input.model == MODEL_20_3 { &actual } else { &before };
+                assert_eq!(format!("{cached:?}"), format!("{expected:?}"));
+            }
+            let cards = match &actual {
+                Decision::Discard { card_ids, .. } => card_ids.clone(),
+                Decision::Peg { card_id, .. } => card_id.iter().copied().collect(),
+            };
+            let review = evaluate_selected_decision(&new, &cards, root).unwrap();
+            assert_eq!(format!("{actual:?}"), format!("{review:?}"));
+        }
+    }
+}
+
+fn assert_discard_cache_and_review(fields: &str) {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let root = root.to_str().unwrap();
+    let ace = parse_decision_input(&format!("model={MODEL_13_23};{fields}")).unwrap();
+    let model20 = parse_decision_input(&format!("model={MODEL_20_0};{fields}")).unwrap();
+    let frozen = evaluate_decision(&ace, root).unwrap();
+    let actual = evaluate_decision(&model20, root).unwrap();
+    assert_ne!(format!("{actual:?}"), format!("{frozen:?}"), "{fields}");
+    let cache = Model13HandCache::new();
+    let cached = evaluate_decision_with_caches(&model20, root, None, Some(&cache)).unwrap();
+    assert_eq!(format!("{cached:?}"), format!("{actual:?}"));
+    let selected = match &actual {
+        Decision::Discard { card_ids, .. } => card_ids.clone(),
+        Decision::Peg { card_id, .. } => card_id.iter().copied().collect(),
+    };
+    let review = evaluate_selected_decision(&model20, &selected, root).unwrap();
+    assert_eq!(format!("{review:?}"), format!("{actual:?}"));
+}
+
+#[test]
+fn model20_pegging_cache_and_review_use_corrected_beliefs() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let root = root.to_str().unwrap();
+    for role in ["dealer", "pone"] {
+        let fields = format!(
+            "kind=peg;turnCard=10;role={role};ownDiscards=1,6;aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore=95;humanScore=96;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"
+        );
+        let ace = parse_decision_input(&format!("model={MODEL_13_23};{fields}")).unwrap();
+        let model20 = parse_decision_input(&format!("model={MODEL_20_0};{fields}")).unwrap();
+        let frozen = evaluate_decision(&ace, root).unwrap();
+        let actual = evaluate_decision(&model20, root).unwrap();
+        assert_ne!(format!("{actual:?}"), format!("{frozen:?}"));
+        let cache = Model13HandCache::new();
+        // The cache retains conditioned discard weights; switching assets must
+        // invalidate those weights in both directions.
+        evaluate_decision_with_caches(&ace, root, None, Some(&cache)).unwrap();
+        for _ in 0..2 {
+            let cached = evaluate_decision_with_caches(&model20, root, None, Some(&cache)).unwrap();
+            assert_eq!(format!("{cached:?}"), format!("{actual:?}"));
+        }
+        let Decision::Peg {
+            card_id: Some(card),
+            ..
+        } = actual
+        else {
+            panic!("expected play")
+        };
+        let review = evaluate_selected_decision(&model20, &[card], root).unwrap();
+        assert_eq!(format!("{review:?}"), format!("{actual:?}"));
+        let ace_again = evaluate_decision_with_caches(&ace, root, None, Some(&cache)).unwrap();
+        assert_eq!(format!("{ace_again:?}"), format!("{frozen:?}"));
+    }
+}
+
+#[test]
+#[ignore = "requires the installed production correction asset"]
+fn model20_discard_and_review_use_conditioned_show_scores() {
+    for role in ["dealer", "pone"] {
+        for (own, opponent) in [(0, 0), (118, 117)] {
+            assert_discard_cache_and_review(&format!(
+                "kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore={own};humanScore={opponent}"
+            ));
+        }
+    }
+}
+
+#[test]
+fn model201_live_wp_continuations_match_cache_and_review_in_both_roles() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    for role in ["dealer", "pone"] {
+        let fields = format!("kind=peg;turnCard=10;role={role};ownDiscards=1,6;aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore=115;humanScore=118;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5");
+        let old = parse_decision_input(&format!("model={MODEL_20_0};{fields}")).unwrap();
+        let new = parse_decision_input(&format!("model={MODEL_20_1};{fields}")).unwrap();
+        let old_before = evaluate_decision(&old, root.to_str().unwrap()).unwrap();
+        let fresh = evaluate_decision(&new, root.to_str().unwrap()).unwrap();
+        let cache = Model13HandCache::new();
+        let cached = evaluate_decision_with_caches(&new, root.to_str().unwrap(), None, Some(&cache)).unwrap();
+        assert_eq!(format!("{fresh:?}"), format!("{cached:?}"));
+        let Decision::Peg { card_id: Some(card), win_probability: Some(wp), .. } = fresh else { panic!("expected WP play") };
+        assert!((0.0..=1.0).contains(&wp));
+        let review = evaluate_selected_decision(&new, &[card], root.to_str().unwrap()).unwrap();
+        assert_eq!(format!("{fresh:?}"), format!("{review:?}"));
+        let old_after = evaluate_decision_with_caches(&old, root.to_str().unwrap(), None, Some(&cache)).unwrap();
+        assert_eq!(format!("{old_before:?}"), format!("{old_after:?}"));
+    }
+}
+
+#[test]
+fn model202_rebuilt_board_is_used_consistently_for_play_and_review() {
+    model202_rebuilt_board_is_used_consistently_for_play_and_review_cases(false);
+}
+
+fn model202_rebuilt_board_is_used_consistently_for_play_and_review_cases(include_discard: bool) {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = root.to_str().unwrap();
+    for role in ["dealer", "pone"] {
+        for fields in [
+            format!("kind=peg;turnCard=10;role={role};ownDiscards=1,6;aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore=55;humanScore=58;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"),
+            format!("kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore=55;humanScore=58"),
+        ].into_iter().filter(|fields| include_discard || !fields.starts_with("kind=discard")) {
+            let old = parse_decision_input(&format!("model={MODEL_20_1};{fields}")).unwrap();
+            let new = parse_decision_input(&format!("model={MODEL_20_2};{fields}")).unwrap();
+            let before = evaluate_decision(&old, root).unwrap();
+            let actual = evaluate_decision(&new, root).unwrap();
+            assert_ne!(format!("{before:?}"), format!("{actual:?}"));
+            let cache = Model13HandCache::new();
+            let cached = evaluate_decision_with_caches(&new, root, None, Some(&cache)).unwrap();
+            assert_eq!(format!("{actual:?}"), format!("{cached:?}"));
+            let cards = match &actual {
+                Decision::Discard { card_ids, .. } => card_ids.clone(),
+                Decision::Peg { card_id, .. } => card_id.iter().copied().collect(),
+            };
+            let review = evaluate_selected_decision(&new, &cards, root).unwrap();
+            assert_eq!(format!("{actual:?}"), format!("{review:?}"));
+            let after = evaluate_decision_with_caches(&old, root, None, Some(&cache)).unwrap();
+            assert_eq!(format!("{before:?}"), format!("{after:?}"));
+        }
+    }
+}
+
+#[test]
+fn model204_keeps_frozen_model203_values_across_shared_cache_and_reviews() {
+    model204_keeps_frozen_model203_values_across_shared_cache_and_reviews_cases(false);
+}
+
+fn model204_keeps_frozen_model203_values_across_shared_cache_and_reviews_cases(include_discard: bool) {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = root.to_str().unwrap();
+    for role in ["dealer", "pone"] {
+        for fields in [
+            format!("kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore=55;humanScore=58"),
+            format!("kind=peg;role={role};aiHand=4,9;aiTable=0,3;ownDiscards=1,6;turnCard=10;humanTable=2,5;humanHandCount=2;aiScore=119;humanScore=118;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"),
+        ].into_iter().filter(|fields| include_discard || !fields.starts_with("kind=discard")) {
+            let frozen = parse_decision_input(&format!("model={MODEL_20_3};{fields}")).unwrap();
+            let current = parse_decision_input(&format!("model={MODEL_20_4};{fields}")).unwrap();
+            let newer = parse_decision_input(&format!("model={MODEL_20_6};{fields}")).unwrap();
+            let next = parse_decision_input(&format!("model={MODEL_20_5};{fields}")).unwrap();
+            let expected = evaluate_decision(&frozen, root).unwrap();
+            let cards = match &expected {
+                Decision::Discard { card_ids, .. } => card_ids.clone(),
+                Decision::Peg { card_id, .. } => card_id.iter().copied().collect(),
+            };
+            let cache = Model13HandCache::new();
+            for input in [&current, &next, &newer, &frozen, &newer, &next, &current, &frozen] {
+                let actual = evaluate_decision_with_caches(input, root, None, Some(&cache)).unwrap();
+                assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+                let review = evaluate_selected_decision(input, &cards, root).unwrap();
+                assert_eq!(format!("{review:?}"), format!("{expected:?}"));
+            }
+        }
+    }
+}
+
+#[test]
+fn model207_conditional_crib_is_isolated_and_live_cache_review_agree() {
+    model207_conditional_crib_is_isolated_and_live_cache_review_agree_cases(false);
+}
+
+fn model207_conditional_crib_is_isolated_and_live_cache_review_agree_cases(include_discard: bool) {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = root.to_str().unwrap();
+    for role in ["dealer", "pone"] {
+        for fields in [
+            format!("kind=discard;role={role};aiHand=0,4,8,12,16,20;aiScore=55;humanScore=58"),
+            format!("kind=peg;role={role};aiHand=4,9;aiTable=0,3;ownDiscards=1,6;turnCard=10;humanTable=2,5;humanHandCount=2;aiScore=55;humanScore=58;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"),
+        ].into_iter().filter(|fields| include_discard || !fields.starts_with("kind=discard")) {
+            let frozen = parse_decision_input(&format!("model={MODEL_20_6};{fields}")).unwrap();
+            let changed = parse_decision_input(&format!("model={MODEL_20_7};{fields}")).unwrap();
+            let before = evaluate_decision(&frozen, root).unwrap();
+            let after = evaluate_decision(&changed, root).unwrap();
+            if fields.starts_with("kind=discard") {
+                assert_eq!(format!("{before:?}"), format!("{after:?}"));
+            } else {
+                assert_ne!(format!("{before:?}"), format!("{after:?}"), "pegging valuation must use the new crib prior");
+            }
+            let cache = Model13HandCache::new();
+            for input in [&changed, &frozen, &changed, &frozen] {
+                let expected = if input.model == MODEL_20_7 { &after } else { &before };
+                let actual = evaluate_decision_with_caches(input, root, None, Some(&cache)).unwrap();
+                assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+                let cards = match expected {
+                    Decision::Discard { card_ids, .. } => card_ids.clone(),
+                    Decision::Peg { card_id, .. } => card_id.iter().copied().collect(),
+                };
+                let review = evaluate_selected_decision(input, &cards, root).unwrap();
+                assert_eq!(format!("{review:?}"), format!("{expected:?}"));
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires installed production correction asset; mandatory predeploy check"]
+fn installed_asset_model20_discard_and_review_regressions() {
+    model205_pegging2_keeps_discard_identity_and_live_review_agreement_cases(true);
+    model205_pegging_is_isolated_and_live_cached_and_review_paths_agree_cases(true);
+    model203_live_cached_and_review_paths_agree_without_changing_model202_cases(true);
+    model202_rebuilt_board_is_used_consistently_for_play_and_review_cases(true);
+    model204_keeps_frozen_model203_values_across_shared_cache_and_reviews_cases(true);
+    model207_conditional_crib_is_isolated_and_live_cache_review_agree_cases(true);
+}

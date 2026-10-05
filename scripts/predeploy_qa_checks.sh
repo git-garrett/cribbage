@@ -15,11 +15,14 @@ scripts/run-quiet.sh "Python lint" "$PYTHON_BIN" -m flake8 src tests scripts web
 scripts/run-quiet.sh "Python tests" "$PYTHON_BIN" -m pytest
 npm run --silent test:quiet-wrapper
 npm run --silent test:release-build
+npm run --silent test:opening-assets
 npm run --silent typecheck
 npm run --silent test:web
 npm test --silent
 scripts/run-quiet.sh --show-warnings "Production Ace integration" cargo test --manifest-path rust/Cargo.toml -p cribbage-api --release -- --ignored
 scripts/run-quiet.sh --show-warnings "Full Ace asset integration" cargo test --manifest-path rust/Cargo.toml -p cribbage-shadow-engine --release model1323_full_asset_native_integration -- --ignored
+scripts/run-quiet.sh --show-warnings "Ace discard policy parity" cargo test --manifest-path rust/Cargo.toml -p cribbage-shadow-engine --release model283_discard_policy_matches207_exactly -- --ignored
+scripts/run-quiet.sh --show-warnings "Legacy discard/cache/review parity" cargo test --manifest-path rust/Cargo.toml -p cribbage-shadow-engine --release --test model20 -- --ignored
 npm run --silent build:deploy
 scripts/run-quiet.sh "Browser regressions" node scripts/test-browser-regressions.cjs
 scripts/run-quiet.sh "PvP browser regressions" node scripts/test-pvp-browser.cjs

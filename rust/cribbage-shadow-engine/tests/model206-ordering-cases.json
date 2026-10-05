@@ -1,0 +1,1165 @@
+[
+  {
+    "id": "deal-2095846337-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=109;humanScore=107;aiHand=1,6,9,5;aiTable=;humanTable=36;humanHandCount=3;ownDiscards=26,48;turnCard=50;count=10;turn=ai;go=-;last=human;plays=36;pegHistory=o10;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      6,
+      5,
+      1,
+      9
+    ]
+  },
+  {
+    "id": "deal-2095846283-step2",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=82;humanScore=77;aiHand=6,34,18;aiTable=42;humanTable=21;humanHandCount=3;ownDiscards=2,38;turnCard=39;count=13;turn=ai;go=-;last=human;plays=42,21;pegHistory=s3,o8;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      8,
+      5,
+      6
+    ]
+  },
+  {
+    "id": "deal-2095846316-step5",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=107;humanScore=113;aiHand=0,28;aiTable=48,1;humanTable=41,40,5;humanHandCount=1;ownDiscards=18,20;turnCard=51;count=23;turn=ai;go=-;last=human;plays=41,48,40,1,5;pegHistory=o2,s9,o1,s1,o5;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      2,
+      0
+    ]
+  },
+  {
+    "id": "deal-2095846327-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=114;humanScore=117;aiHand=31,8,27,22;aiTable=;humanTable=;humanHandCount=4;ownDiscards=51,24;turnCard=28;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      1,
+      9,
+      5,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846312-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=118;humanScore=111;aiHand=51,21,34,43;aiTable=;humanTable=;humanHandCount=4;ownDiscards=36,33;turnCard=3;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      12,
+      8,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846286-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=58;humanScore=62;aiHand=2,1,34,10;aiTable=;humanTable=;humanHandCount=4;ownDiscards=37,21;turnCard=6;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      2,
+      1,
+      10,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846225-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=18;humanScore=24;aiHand=15,14,10,51;aiTable=;humanTable=;humanHandCount=4;ownDiscards=32,34;turnCard=35;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      2,
+      1,
+      10,
+      12
+    ]
+  },
+  {
+    "id": "deal-2095846220-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=51;humanScore=54;aiHand=31,7,44,14;aiTable=;humanTable=26;humanHandCount=3;ownDiscards=38,37;turnCard=49;count=1;turn=ai;go=-;last=human;plays=26;pegHistory=o0;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      7,
+      5,
+      1
+    ]
+  },
+  {
+    "id": "deal-2095846314-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=109;humanScore=113;aiHand=26,3,25,42;aiTable=;humanTable=;humanHandCount=4;ownDiscards=44,14;turnCard=32;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      0,
+      3,
+      12
+    ]
+  },
+  {
+    "id": "deal-2095846301-step3",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=65;humanScore=67;aiHand=35,34,36;aiTable=31;humanTable=41,15;humanHandCount=2;ownDiscards=39,42;turnCard=14;count=12;turn=ai;go=-;last=human;plays=41,31,15;pegHistory=o2,s5,o2;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      8,
+      10,
+      9
+    ]
+  },
+  {
+    "id": "deal-2095846318-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=107;humanScore=108;aiHand=51,31,25,30;aiTable=;humanTable=44;humanHandCount=3;ownDiscards=5,40;turnCard=32;count=6;turn=ai;go=-;last=human;plays=44;pegHistory=o5;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      12,
+      5,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846253-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=15;humanScore=11;aiHand=49,25,51,12;aiTable=;humanTable=;humanHandCount=4;ownDiscards=3,45;turnCard=43;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      10,
+      12
+    ]
+  },
+  {
+    "id": "deal-2095846330-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=118;humanScore=117;aiHand=2,33,48,19;aiTable=;humanTable=;humanHandCount=4;ownDiscards=37,30;turnCard=11;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      2,
+      6,
+      9,
+      7
+    ]
+  },
+  {
+    "id": "deal-2095846318-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=108;humanScore=107;aiHand=20,7,44,37;aiTable=;humanTable=;humanHandCount=4;ownDiscards=24,28;turnCard=32;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      11,
+      7,
+      5
+    ]
+  },
+  {
+    "id": "deal-2095846311-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=108;humanScore=106;aiHand=49,0,26,2;aiTable=;humanTable=;humanHandCount=4;ownDiscards=24,22;turnCard=27;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      0,
+      2,
+      10
+    ]
+  },
+  {
+    "id": "deal-2095846309-step2",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=118;humanScore=120;aiHand=15,19,50;aiTable=14;humanTable=27;humanHandCount=3;ownDiscards=48,0;turnCard=23;count=4;turn=ai;go=-;last=human;plays=14,27;pegHistory=s1,o1;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      11,
+      6,
+      2
+    ]
+  },
+  {
+    "id": "deal-2095846282-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=50;humanScore=55;aiHand=23,42,29,36;aiTable=;humanTable=;humanHandCount=4;ownDiscards=25,41;turnCard=27;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      3,
+      10
+    ]
+  },
+  {
+    "id": "deal-2095846301-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=65;humanScore=67;aiHand=31,35,34,36;aiTable=;humanTable=41;humanHandCount=3;ownDiscards=39,42;turnCard=14;count=3;turn=ai;go=-;last=human;plays=41;pegHistory=o2;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      5,
+      9,
+      8,
+      10
+    ]
+  },
+  {
+    "id": "deal-2095846224-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=34;humanScore=35;aiHand=21,11,8,24;aiTable=;humanTable=;humanHandCount=4;ownDiscards=1,51;turnCard=28;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      8,
+      11
+    ]
+  },
+  {
+    "id": "deal-2095846226-step3",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=8;humanScore=13;aiHand=0,44,45;aiTable=46;humanTable=29,28;humanHandCount=2;ownDiscards=38,12;turnCard=36;count=15;turn=ai;go=-;last=human;plays=29,46,28;pegHistory=o3,s7,o2;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      6,
+      5,
+      0
+    ]
+  },
+  {
+    "id": "deal-2095846282-step3",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=55;humanScore=50;aiHand=18,6,5;aiTable=40;humanTable=42,23;humanHandCount=2;ownDiscards=21,35;turnCard=27;count=16;turn=ai;go=-;last=human;plays=42,40,23;pegHistory=o3,s1,o10;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      6,
+      5
+    ]
+  },
+  {
+    "id": "deal-2095846309-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=118;humanScore=118;aiHand=14,15,19,50;aiTable=;humanTable=;humanHandCount=4;ownDiscards=48,0;turnCard=23;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      2,
+      1,
+      6,
+      11
+    ]
+  },
+  {
+    "id": "deal-2095846326-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=114;humanScore=118;aiHand=48,20,27,18;aiTable=;humanTable=3;humanHandCount=3;ownDiscards=0,38;turnCard=22;count=4;turn=ai;go=-;last=human;plays=3;pegHistory=o3;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      9,
+      7,
+      5,
+      1
+    ]
+  },
+  {
+    "id": "deal-2095846225-step2",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=18;humanScore=24;aiHand=14,10,51;aiTable=15;humanTable=36;humanHandCount=3;ownDiscards=32,34;turnCard=35;count=13;turn=ai;go=-;last=human;plays=15,36;pegHistory=s2,o10;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      10,
+      1,
+      12
+    ]
+  },
+  {
+    "id": "deal-2095846289-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=77;humanScore=76;aiHand=16,17,42,18;aiTable=;humanTable=34;humanHandCount=3;ownDiscards=41,8;turnCard=51;count=9;turn=ai;go=-;last=human;plays=34;pegHistory=o8;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      5,
+      4,
+      3
+    ]
+  },
+  {
+    "id": "deal-2095846313-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=118;humanScore=111;aiHand=4,21,32,40;aiTable=;humanTable=11;humanHandCount=3;ownDiscards=26,0;turnCard=24;count=10;turn=ai;go=-;last=human;plays=11;pegHistory=o11;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      4,
+      8,
+      6,
+      1
+    ]
+  },
+  {
+    "id": "deal-2095846291-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=96;humanScore=96;aiHand=12,4,17,35;aiTable=;humanTable=;humanHandCount=4;ownDiscards=47,46;turnCard=15;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      9,
+      12,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846225-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=24;humanScore=18;aiHand=0,36,40,29;aiTable=;humanTable=15;humanHandCount=3;ownDiscards=45,8;turnCard=35;count=3;turn=ai;go=-;last=human;plays=15;pegHistory=o2;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      0,
+      10,
+      3,
+      1
+    ]
+  },
+  {
+    "id": "deal-2095846307-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=96;humanScore=98;aiHand=6,46,31,32;aiTable=;humanTable=40;humanHandCount=3;ownDiscards=15,37;turnCard=17;count=2;turn=ai;go=-;last=human;plays=40;pegHistory=o1;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      5,
+      7,
+      6
+    ]
+  },
+  {
+    "id": "deal-2095846217-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=11;humanScore=13;aiHand=11,49,9,47;aiTable=;humanTable=;humanHandCount=4;ownDiscards=26,25;turnCard=20;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      11,
+      9,
+      10,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846229-step2",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=5;humanScore=0;aiHand=40,30,9;aiTable=41;humanTable=25;humanHandCount=3;ownDiscards=8,12;turnCard=21;count=13;turn=ai;go=-;last=human;plays=41,25;pegHistory=s2,o12;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      1,
+      4,
+      9
+    ]
+  },
+  {
+    "id": "deal-2095846228-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=51;humanScore=51;aiHand=14,36,9,15;aiTable=;humanTable=31;humanHandCount=3;ownDiscards=6,20;turnCard=12;count=6;turn=ai;go=-;last=human;plays=31;pegHistory=o5;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      9,
+      10,
+      1,
+      2
+    ]
+  },
+  {
+    "id": "deal-2095846297-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=98;humanScore=106;aiHand=8,33,19,32;aiTable=;humanTable=;humanHandCount=4;ownDiscards=24,51;turnCard=13;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846230-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=24;humanScore=18;aiHand=22,11,50,46;aiTable=;humanTable=;humanHandCount=4;ownDiscards=18,1;turnCard=16;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      11,
+      7,
+      9
+    ]
+  },
+  {
+    "id": "deal-2095846303-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=83;humanScore=76;aiHand=34,22,20,23;aiTable=;humanTable=;humanHandCount=4;ownDiscards=0,40;turnCard=21;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      10,
+      9,
+      7,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846299-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=85;humanScore=82;aiHand=39,45,1,20;aiTable=;humanTable=;humanHandCount=4;ownDiscards=37,51;turnCard=19;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      1,
+      0,
+      6,
+      7
+    ]
+  },
+  {
+    "id": "deal-2095846253-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=11;humanScore=15;aiHand=28,14,15,39;aiTable=;humanTable=25;humanHandCount=3;ownDiscards=37,44;turnCard=43;count=10;turn=ai;go=-;last=human;plays=25;pegHistory=o12;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      1,
+      2,
+      0
+    ]
+  },
+  {
+    "id": "deal-2095846292-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=83;humanScore=91;aiHand=14,27,13,26;aiTable=;humanTable=;humanHandCount=4;ownDiscards=34,3;turnCard=4;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      1,
+      0
+    ]
+  },
+  {
+    "id": "deal-2095846316-step2",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=111;humanScore=105;aiHand=5,3,40;aiTable=41;humanTable=48;humanHandCount=3;ownDiscards=50,19;turnCard=51;count=13;turn=ai;go=-;last=human;plays=41,48;pegHistory=s2,o9;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      1,
+      5,
+      3
+    ]
+  },
+  {
+    "id": "deal-2095846363-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=116;humanScore=118;aiHand=32,6,19,23;aiTable=;humanTable=;humanHandCount=4;ownDiscards=40,0;turnCard=9;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      6,
+      10
+    ]
+  },
+  {
+    "id": "deal-2095846224-step5",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=37;humanScore=34;aiHand=48,34;aiTable=43,46;humanTable=21,8,11;humanHandCount=1;ownDiscards=16,26;turnCard=28;count=10;turn=ai;go=-;last=human;plays=11;pegHistory=o8,s4,o8,s7,r,o11;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      8,
+      9
+    ]
+  },
+  {
+    "id": "deal-2095846333-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=118;humanScore=113;aiHand=9,15,8,36;aiTable=;humanTable=;humanHandCount=4;ownDiscards=51,12;turnCard=21;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      2,
+      9,
+      10,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846301-step2",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=67;humanScore=65;aiHand=30,4,15;aiTable=41;humanTable=31;humanHandCount=3;ownDiscards=5,13;turnCard=14;count=9;turn=ai;go=-;last=human;plays=41,31;pegHistory=s2,o5;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      2,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846298-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=64;humanScore=63;aiHand=9,48,31,18;aiTable=;humanTable=;humanHandCount=4;ownDiscards=23,41;turnCard=15;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      5,
+      9
+    ]
+  },
+  {
+    "id": "deal-2095846287-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=65;humanScore=68;aiHand=2,19,27,5;aiTable=;humanTable=;humanHandCount=4;ownDiscards=50,38;turnCard=32;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      2,
+      1,
+      6,
+      5
+    ]
+  },
+  {
+    "id": "deal-2095846296-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=56;humanScore=64;aiHand=24,15,27,48;aiTable=;humanTable=;humanHandCount=4;ownDiscards=25,5;turnCard=49;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      2,
+      1,
+      9,
+      11
+    ]
+  },
+  {
+    "id": "deal-2095846285-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=65;humanScore=70;aiHand=20,5,7,39;aiTable=;humanTable=;humanHandCount=4;ownDiscards=29,9;turnCard=13;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      0,
+      7,
+      5
+    ]
+  },
+  {
+    "id": "deal-2095846222-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=54;humanScore=48;aiHand=3,4,7,11;aiTable=;humanTable=;humanHandCount=4;ownDiscards=40,36;turnCard=19;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      3,
+      7,
+      11,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846329-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=110;humanScore=112;aiHand=1,7,33,3;aiTable=;humanTable=23;humanHandCount=3;ownDiscards=48,36;turnCard=51;count=10;turn=ai;go=-;last=human;plays=23;pegHistory=o10;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      7,
+      1,
+      3
+    ]
+  },
+  {
+    "id": "deal-2095846326-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=118;humanScore=114;aiHand=32,3,41,13;aiTable=;humanTable=;humanHandCount=4;ownDiscards=49,21;turnCard=22;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      3,
+      2,
+      0,
+      6
+    ]
+  },
+  {
+    "id": "deal-2095846315-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=118;humanScore=118;aiHand=41,17,28,44;aiTable=;humanTable=;humanHandCount=4;ownDiscards=40,48;turnCard=34;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      2,
+      5,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846300-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=85;humanScore=88;aiHand=16,19,20,34;aiTable=;humanTable=;humanHandCount=4;ownDiscards=2,10;turnCard=6;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      3,
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846223-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=28;humanScore=36;aiHand=21,32,45,31;aiTable=;humanTable=;humanHandCount=4;ownDiscards=28,37;turnCard=3;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      6,
+      5,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846310-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=113;humanScore=109;aiHand=17,30,10,23;aiTable=;humanTable=;humanHandCount=4;ownDiscards=2,33;turnCard=48;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      10,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846294-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=89;humanScore=83;aiHand=21,30,9,10;aiTable=;humanTable=29;humanHandCount=3;ownDiscards=31,1;turnCard=19;count=4;turn=ai;go=-;last=human;plays=29;pegHistory=o3;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      9,
+      8,
+      10,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846316-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=111;humanScore=105;aiHand=41,5,3,40;aiTable=;humanTable=;humanHandCount=4;ownDiscards=50,19;turnCard=51;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      2,
+      1,
+      3,
+      5
+    ]
+  },
+  {
+    "id": "deal-2095846244-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=5;humanScore=11;aiHand=3,11,24,42;aiTable=;humanTable=;humanHandCount=4;ownDiscards=20,1;turnCard=45;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      3,
+      11
+    ]
+  },
+  {
+    "id": "deal-2095846295-step3",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=111;humanScore=100;aiHand=30,35,49;aiTable=8;humanTable=44,29;humanHandCount=2;ownDiscards=13,12;turnCard=10;count=19;turn=ai;go=-;last=human;plays=44,8,29;pegHistory=o5,s8,o3;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      9,
+      10,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846288-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=93;humanScore=96;aiHand=8,20,34,6;aiTable=;humanTable=;humanHandCount=4;ownDiscards=25,41;turnCard=32;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846232-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=36;humanScore=28;aiHand=51,17,11,3;aiTable=;humanTable=;humanHandCount=4;ownDiscards=40,6;turnCard=30;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      3,
+      11,
+      12,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846325-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=118;humanScore=115;aiHand=42,7,25,19;aiTable=;humanTable=;humanHandCount=4;ownDiscards=40,27;turnCard=2;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      3,
+      6,
+      7,
+      12
+    ]
+  },
+  {
+    "id": "deal-2095846319-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=106;humanScore=100;aiHand=51,4,17,16;aiTable=;humanTable=;humanHandCount=4;ownDiscards=40,19;turnCard=46;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      3,
+      12,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846296-step2",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=56;humanScore=64;aiHand=24,27,48;aiTable=15;humanTable=37;humanHandCount=3;ownDiscards=25,5;turnCard=49;count=13;turn=ai;go=-;last=human;plays=15,37;pegHistory=s2,o11;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      1,
+      11,
+      9
+    ]
+  },
+  {
+    "id": "deal-2095846297-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=106;humanScore=98;aiHand=49,9,22,10;aiTable=;humanTable=19;humanHandCount=3;ownDiscards=5,39;turnCard=13;count=7;turn=ai;go=-;last=human;plays=19;pegHistory=o6;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      9,
+      10
+    ]
+  },
+  {
+    "id": "deal-2095846223-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=36;humanScore=28;aiHand=10,38,43,9;aiTable=;humanTable=32;humanHandCount=3;ownDiscards=29,42;turnCard=3;count=7;turn=ai;go=-;last=human;plays=32;pegHistory=o6;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      9,
+      12,
+      10,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846229-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=5;humanScore=0;aiHand=40,41,30,9;aiTable=;humanTable=;humanHandCount=4;ownDiscards=8,12;turnCard=21;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      2,
+      1,
+      9,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846221-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=12;humanScore=5;aiHand=34,22,9,4;aiTable=;humanTable=2;humanHandCount=3;ownDiscards=28,6;turnCard=38;count=3;turn=ai;go=-;last=human;plays=2;pegHistory=o2;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      8,
+      9,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846329-step7",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=110;humanScore=113;aiHand=1,3;aiTable=7,33;humanTable=23,0,15;humanHandCount=1;ownDiscards=48,36;turnCard=51;count=0;turn=ai;go=-;last=-;plays=;pegHistory=o10,s7,o0,s7,o2,sg,og,r;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      3,
+      1
+    ]
+  },
+  {
+    "id": "deal-2095846298-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=63;humanScore=64;aiHand=27,3,21,14;aiTable=;humanTable=9;humanHandCount=3;ownDiscards=50,35;turnCard=15;count=10;turn=ai;go=-;last=human;plays=9;pegHistory=o9;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      1,
+      8,
+      3
+    ]
+  },
+  {
+    "id": "deal-2095846218-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=40;humanScore=33;aiHand=15,28,49,34;aiTable=;humanTable=;humanHandCount=4;ownDiscards=19,38;turnCard=6;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      2,
+      10,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846238-step3",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=39;humanScore=34;aiHand=0,29,2;aiTable=33;humanTable=49,46;humanHandCount=2;ownDiscards=50,10;turnCard=42;count=26;turn=ai;go=-;last=human;plays=49,33,46;pegHistory=o10,s7,o7;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      2,
+      3,
+      0
+    ]
+  },
+  {
+    "id": "deal-2095846290-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=72;humanScore=69;aiHand=47,10,15,21;aiTable=;humanTable=46;humanHandCount=3;ownDiscards=25,12;turnCard=41;count=8;turn=ai;go=-;last=human;plays=46;pegHistory=o7;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      10,
+      2,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846295-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=109;humanScore=100;aiHand=8,30,35,49;aiTable=;humanTable=44;humanHandCount=3;ownDiscards=13,12;turnCard=10;count=6;turn=ai;go=-;last=human;plays=44;pegHistory=o5;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      8,
+      9,
+      10,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846283-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=82;humanScore=77;aiHand=6,34,42,18;aiTable=;humanTable=;humanHandCount=4;ownDiscards=2,38;turnCard=39;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      3,
+      6,
+      5,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846289-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=76;humanScore=77;aiHand=34,48,20,47;aiTable=;humanTable=;humanHandCount=4;ownDiscards=40,14;turnCard=51;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      9,
+      7,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846330-step3",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=119;humanScore=118;aiHand=44,49,13;aiTable=28;humanTable=2,48;humanHandCount=2;ownDiscards=0,35;turnCard=11;count=16;turn=ai;go=-;last=human;plays=2,28,48;pegHistory=o2,s2,o9;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      5,
+      10,
+      0
+    ]
+  },
+  {
+    "id": "deal-2095846320-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=98;humanScore=106;aiHand=8,0,34,26;aiTable=;humanTable=;humanHandCount=4;ownDiscards=2,25;turnCard=5;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      0,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846241-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=0;humanScore=3;aiHand=19,30,43,44;aiTable=;humanTable=;humanHandCount=4;ownDiscards=14,6;turnCard=40;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      6,
+      5,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846329-step2",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=112;humanScore=110;aiHand=27,15,0;aiTable=23;humanTable=7;humanHandCount=3;ownDiscards=5,22;turnCard=51;count=18;turn=ai;go=-;last=human;plays=23,7;pegHistory=s10,o7;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      1,
+      2,
+      0
+    ]
+  },
+  {
+    "id": "deal-2095846301-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=67;humanScore=65;aiHand=30,4,41,15;aiTable=;humanTable=;humanHandCount=4;ownDiscards=5,13;turnCard=14;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      2,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846244-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=11;humanScore=5;aiHand=33,40,16,12;aiTable=;humanTable=3;humanHandCount=3;ownDiscards=35,36;turnCard=45;count=4;turn=ai;go=-;last=human;plays=3;pegHistory=o3;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      3,
+      12,
+      7,
+      1
+    ]
+  },
+  {
+    "id": "deal-2095846221-step3",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=12;humanScore=5;aiHand=22,9,4;aiTable=34;humanTable=2,43;humanHandCount=2;ownDiscards=28,6;turnCard=38;count=17;turn=ai;go=-;last=human;plays=2,34,43;pegHistory=o2,s8,o4;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      4,
+      9
+    ]
+  },
+  {
+    "id": "deal-2095846232-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=28;humanScore=36;aiHand=32,19,20,8;aiTable=;humanTable=3;humanHandCount=3;ownDiscards=4,25;turnCard=30;count=4;turn=ai;go=-;last=human;plays=3;pegHistory=o3;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      8,
+      7,
+      6
+    ]
+  },
+  {
+    "id": "deal-2095846221-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=5;humanScore=12;aiHand=45,2,18,43;aiTable=;humanTable=;humanHandCount=4;ownDiscards=21,24;turnCard=38;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      2,
+      6,
+      5,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846285-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=70;humanScore=65;aiHand=44,32,16,34;aiTable=;humanTable=20;humanHandCount=3;ownDiscards=24,49;turnCard=13;count=8;turn=ai;go=-;last=human;plays=20;pegHistory=o7;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      6,
+      3,
+      5,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846311-step2",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=108;humanScore=108;aiHand=0,26,2;aiTable=49;humanTable=17;humanHandCount=3;ownDiscards=24,22;turnCard=27;count=15;turn=ai;go=-;last=human;plays=49,17;pegHistory=s10,o4;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      2,
+      0
+    ]
+  },
+  {
+    "id": "deal-2095846295-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=100;humanScore=109;aiHand=29,17,44,5;aiTable=;humanTable=;humanHandCount=4;ownDiscards=1,37;turnCard=10;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      3,
+      5,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846310-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=109;humanScore=113;aiHand=18,20,8,35;aiTable=;humanTable=10;humanHandCount=3;ownDiscards=1,38;turnCard=48;count=10;turn=ai;go=-;last=human;plays=10;pegHistory=o10;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      5,
+      7,
+      8,
+      9
+    ]
+  },
+  {
+    "id": "deal-2095846319-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=100;humanScore=106;aiHand=34,32,14,7;aiTable=;humanTable=16;humanHandCount=3;ownDiscards=38,42;turnCard=46;count=4;turn=ai;go=-;last=human;plays=16;pegHistory=o3;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      8,
+      7,
+      6,
+      1
+    ]
+  },
+  {
+    "id": "deal-2095846327-step6",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=116;humanScore=118;aiHand=31,8;aiTable=27,22;humanTable=48,5;humanHandCount=2;ownDiscards=51,24;turnCard=28;count=0;turn=ai;go=-;last=-;plays=;pegHistory=s1,o9,s9,o5,sg,og,r;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      5,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846227-step2",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=25;humanScore=18;aiHand=30,44,47;aiTable=31;humanTable=51;humanHandCount=3;ownDiscards=22,15;turnCard=20;count=16;turn=ai;go=-;last=human;plays=31,51;pegHistory=s5,o12;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      5,
+      8,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846314-step7",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=113;humanScore=110;aiHand=21,30;aiTable=34,17;humanTable=3,25,26;humanHandCount=1;ownDiscards=36,23;turnCard=32;count=0;turn=ai;go=-;last=-;plays=;pegHistory=o3,s8,o12,s4,o0,sg,og,r;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      8,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846337-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=107;humanScore=109;aiHand=36,4,17,43;aiTable=;humanTable=;humanHandCount=4;ownDiscards=34,39;turnCard=50;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      10,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846231-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=21;humanScore=28;aiHand=50,35,24,43;aiTable=;humanTable=;humanHandCount=4;ownDiscards=3,22;turnCard=21;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      9,
+      11,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846220-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=54;humanScore=51;aiHand=20,42,26,6;aiTable=;humanTable=;humanHandCount=4;ownDiscards=12,22;turnCard=49;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      0,
+      3,
+      6,
+      7
+    ]
+  },
+  {
+    "id": "deal-2095846308-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=113;humanScore=117;aiHand=32,19,8,20;aiTable=;humanTable=;humanHandCount=4;ownDiscards=35,42;turnCard=48;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      6,
+      7,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846291-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=96;humanScore=96;aiHand=27,14,1,21;aiTable=;humanTable=35;humanHandCount=3;ownDiscards=45,7;turnCard=15;count=10;turn=ai;go=-;last=human;plays=35;pegHistory=o9;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      1,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846222-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=48;humanScore=54;aiHand=5,46,44,6;aiTable=;humanTable=3;humanHandCount=3;ownDiscards=34,22;turnCard=19;count=4;turn=ai;go=-;last=human;plays=3;pegHistory=o3;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      7,
+      6,
+      5
+    ]
+  },
+  {
+    "id": "deal-2095846290-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=69;humanScore=72;aiHand=46,32,17,34;aiTable=;humanTable=;humanHandCount=4;ownDiscards=36,3;turnCard=41;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      7,
+      6,
+      8,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846314-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=113;humanScore=109;aiHand=17,34,21,30;aiTable=;humanTable=3;humanHandCount=3;ownDiscards=36,23;turnCard=32;count=4;turn=ai;go=-;last=human;plays=3;pegHistory=o3;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      8,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846218-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=33;humanScore=40;aiHand=35,30,43,50;aiTable=;humanTable=15;humanHandCount=3;ownDiscards=33,32;turnCard=6;count=3;turn=ai;go=-;last=human;plays=15;pegHistory=o2;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      9,
+      11,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846294-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=83;humanScore=89;aiHand=29,13,45,26;aiTable=;humanTable=;humanHandCount=4;ownDiscards=20,14;turnCard=19;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      3,
+      0,
+      6
+    ]
+  },
+  {
+    "id": "deal-2095846253-step8",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=15;humanScore=15;aiHand=49,12;aiTable=25,51;humanTable=28,39,15,14;humanHandCount=0;ownDiscards=3,45;turnCard=43;count=0;turn=ai;go=-;last=-;plays=;pegHistory=s12,o2,s12,o0,sg,o2,o1,og,r;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      12,
+      10
+    ]
+  },
+  {
+    "id": "deal-2095846226-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=11;humanScore=8;aiHand=29,20,28,19;aiTable=;humanTable=;humanHandCount=4;ownDiscards=10,48;turnCard=36;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      3,
+      2,
+      6,
+      7
+    ]
+  },
+  {
+    "id": "deal-2095846300-step5",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=90;humanScore=85;aiHand=42,31;aiTable=12,7;humanTable=16,34,20;humanHandCount=1;ownDiscards=35,36;turnCard=6;count=8;turn=ai;go=-;last=human;plays=20;pegHistory=o3,s12,o8,s7,r,o7;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      3,
+      5
+    ]
+  },
+  {
+    "id": "deal-2095846313-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=111;humanScore=118;aiHand=2,11,37,13;aiTable=;humanTable=;humanHandCount=4;ownDiscards=46,7;turnCard=24;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      0,
+      2,
+      11
+    ]
+  },
+  {
+    "id": "deal-2095846219-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=49;humanScore=45;aiHand=11,17,10,48;aiTable=;humanTable=;humanHandCount=4;ownDiscards=19,13;turnCard=45;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      10,
+      11,
+      9,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846219-step6",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=50;humanScore=45;aiHand=11,17;aiTable=10,48;humanTable=6,20;humanHandCount=2;ownDiscards=19,13;turnCard=45;count=8;turn=ai;go=-;last=human;plays=20;pegHistory=s10,o6,s9,og,sg,r,o7;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      4,
+      11
+    ]
+  },
+  {
+    "id": "deal-2095846284-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=92;humanScore=93;aiHand=16,0,50,37;aiTable=;humanTable=;humanHandCount=4;ownDiscards=44,11;turnCard=19;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      0,
+      3,
+      11
+    ]
+  },
+  {
+    "id": "deal-2095846225-step3",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=24;humanScore=20;aiHand=0,40,29;aiTable=36;humanTable=15,14;humanHandCount=2;ownDiscards=45,8;turnCard=35;count=15;turn=ai;go=-;last=human;plays=15,36,14;pegHistory=o2,s10,o1;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      1,
+      3,
+      0
+    ]
+  },
+  {
+    "id": "deal-2095846287-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=68;humanScore=65;aiHand=21,22,9,10;aiTable=;humanTable=2;humanHandCount=3;ownDiscards=31,26;turnCard=32;count=3;turn=ai;go=-;last=human;plays=2;pegHistory=o2;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      9,
+      8,
+      10
+    ]
+  },
+  {
+    "id": "deal-2095846329-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=112;humanScore=110;aiHand=27,15,0,23;aiTable=;humanTable=;humanHandCount=4;ownDiscards=5,22;turnCard=51;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      2,
+      10,
+      1,
+      0
+    ]
+  },
+  {
+    "id": "deal-2095846303-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=76;humanScore=83;aiHand=10,50,9,18;aiTable=;humanTable=20;humanHandCount=3;ownDiscards=32,45;turnCard=21;count=8;turn=ai;go=-;last=human;plays=20;pegHistory=o7;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      11,
+      10,
+      9,
+      5
+    ]
+  },
+  {
+    "id": "deal-2095846307-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=98;humanScore=96;aiHand=43,42,41,40;aiTable=;humanTable=;humanHandCount=4;ownDiscards=12,47;turnCard=17;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846228-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=51;humanScore=51;aiHand=35,23,21,31;aiTable=;humanTable=;humanHandCount=4;ownDiscards=11,41;turnCard=12;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      5,
+      9,
+      10,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846224-step2",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=34;humanScore=35;aiHand=11,8,24;aiTable=21;humanTable=43;humanHandCount=3;ownDiscards=1,51;turnCard=28;count=14;turn=ai;go=-;last=human;plays=21,43;pegHistory=s8,o4;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      8,
+      11
+    ]
+  },
+  {
+    "id": "deal-2095846227-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=25;humanScore=18;aiHand=30,31,44,47;aiTable=;humanTable=;humanHandCount=4;ownDiscards=22,15;turnCard=20;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      8,
+      5,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846293-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=70;humanScore=62;aiHand=31,12,25,44;aiTable=;humanTable=;humanHandCount=4;ownDiscards=14,37;turnCard=47;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      12,
+      5
+    ]
+  },
+  {
+    "id": "deal-2095846238-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=32;humanScore=39;aiHand=49,46,6,36;aiTable=;humanTable=;humanHandCount=4;ownDiscards=25,38;turnCard=42;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      10,
+      6,
+      7
+    ]
+  },
+  {
+    "id": "deal-2095846312-step3",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=111;humanScore=118;aiHand=17,13,27;aiTable=41;humanTable=51,21;humanHandCount=2;ownDiscards=25,12;turnCard=3;count=22;turn=ai;go=-;last=human;plays=51,41,21;pegHistory=o12,s2,o8;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      0,
+      1,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846234-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=37;humanScore=34;aiHand=23,48,22,4;aiTable=;humanTable=;humanHandCount=4;ownDiscards=3,31;turnCard=30;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      9,
+      10,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846325-step3",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=117;humanScore=120;aiHand=20,48,32;aiTable=16;humanTable=42,19;humanHandCount=2;ownDiscards=37,11;turnCard=2;count=15;turn=ai;go=-;last=human;plays=42,16,19;pegHistory=o3,s3,o6;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      9,
+      7,
+      6
+    ]
+  },
+  {
+    "id": "deal-2095846241-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=3;humanScore=0;aiHand=37,22,1,15;aiTable=;humanTable=19;humanHandCount=3;ownDiscards=21,32;turnCard=40;count=7;turn=ai;go=-;last=human;plays=19;pegHistory=o6;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      9,
+      11,
+      2,
+      1
+    ]
+  },
+  {
+    "id": "deal-2095846229-step1",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=0;humanScore=5;aiHand=25,49,10,51;aiTable=;humanTable=41;humanHandCount=3;ownDiscards=39,32;turnCard=21;count=3;turn=ai;go=-;last=human;plays=41;pegHistory=o2;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      12,
+      10
+    ]
+  },
+  {
+    "id": "deal-2095846293-step7",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=dealer;aiScore=62;humanScore=71;aiHand=10,5;aiTable=20,45;humanTable=12,25,31;humanHandCount=1;ownDiscards=41,1;turnCard=47;count=13;turn=ai;go=-;last=human;plays=45,31;pegHistory=o12,s7,o12,sg,og,r,s6,o5;pegLead=-;decisionSeed=3980237087630426216",
+    "order": [
+      5,
+      10
+    ]
+  },
+  {
+    "id": "deal-2095846317-step0",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=111;humanScore=108;aiHand=37,30,38,13;aiTable=;humanTable=;humanHandCount=4;ownDiscards=45,15;turnCard=0;count=0;turn=ai;go=-;last=-;plays=;pegHistory=;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      0,
+      11,
+      12,
+      4
+    ]
+  },
+  {
+    "id": "deal-2095846303-step6",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=84;humanScore=76;aiHand=34,23;aiTable=20,22;humanTable=50,10;humanHandCount=2;ownDiscards=0,40;turnCard=21;count=10;turn=ai;go=-;last=human;plays=10;pegHistory=s7,o11,s9,og,sg,r,o10;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      10,
+      8
+    ]
+  },
+  {
+    "id": "deal-2095846313-step4",
+    "inputText": "kind=peg;model=schell_table-peg_table-20.6;player=ai;role=pone;aiScore=111;humanScore=120;aiHand=2,13;aiTable=11,37;humanTable=4,40;humanHandCount=2;ownDiscards=46,7;turnCard=24;count=27;turn=ai;go=-;last=human;plays=11,4,37,40;pegHistory=s11,o4,s11,o1;pegLead=-;decisionSeed=3980237088065847668",
+    "order": [
+      2,
+      0
+    ]
+  }
+]

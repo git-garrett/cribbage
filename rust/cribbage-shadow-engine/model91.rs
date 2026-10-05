@@ -10,13 +10,15 @@
 //! reproducible; live Model 9.x play does not use that path.
 
 use crate::board::Role;
+use crate::board_matrix::BoardWinMatrix;
 use crate::cards::{
     choose, enumerate_rank_hands, peg_card_for_rank, rank_combination_count, rank_count_total,
-    score_count, VALUES,
+    rank_counts_from_key, score_count, VALUES,
 };
 use crate::information_set::{PegSeat, RankPegAction, RankPegEvent, RankPegState};
 use std::collections::HashMap;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
@@ -38,7 +40,7 @@ pub enum Model91Actor {
     Opponent,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Model91Observation {
     pub role: Role,
     pub own_remaining: [u8; RANKS],
@@ -51,6 +53,38 @@ pub struct Model91Observation {
     pub count: u8,
     pub go_player: Option<Model91Actor>,
     pub last_player: Option<Model91Actor>,
+}
+
+impl Hash for Model91Observation {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // One fixed-length write avoids repeated small hasher writes. Encode
+        // every equality field, including inactive series bytes; never hash
+        // struct padding or use a digest as the cache's equality key.
+        let Self {
+            role, own_remaining, own_played, opponent_played, own_discards,
+            turn_rank, current_series, current_series_len, count, go_player, last_player,
+        } = self;
+        let mut bytes = [0_u8; 4 * RANKS + MAX_SERIES + 7];
+        bytes[..RANKS].copy_from_slice(own_remaining);
+        bytes[RANKS..2 * RANKS].copy_from_slice(own_played);
+        bytes[2 * RANKS..3 * RANKS].copy_from_slice(opponent_played);
+        bytes[3 * RANKS..4 * RANKS].copy_from_slice(own_discards);
+        bytes[4 * RANKS..4 * RANKS + MAX_SERIES].copy_from_slice(current_series);
+        let flags = &mut bytes[4 * RANKS + MAX_SERIES..];
+        flags[0] = match role { Role::Dealer => 0, Role::Pone => 1 };
+        flags[1] = u8::from(turn_rank.is_some());
+        flags[2] = turn_rank.unwrap_or(0);
+        flags[3] = *current_series_len;
+        flags[4] = *count;
+        let actor = |value| match value {
+            None => 0,
+            Some(Model91Actor::SelfPlayer) => 1,
+            Some(Model91Actor::Opponent) => 2,
+        };
+        flags[5] = actor(*go_player);
+        flags[6] = actor(*last_player);
+        state.write(&bytes);
+    }
 }
 
 impl Model91Observation {
@@ -212,20 +246,113 @@ impl Model91Observation {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-struct BeliefKey {
-    opponent_role: Role,
-    played: [u8; RANKS],
+type BeliefRow = Vec<([u8; RANKS], u64)>;
+const BELIEF_CONTEXTS_PER_ROLE: usize = 1 + 13 + 91 + 455;
+
+// Rank a multiset of zero through three played cards in a dense context array.
+// Adding each card's position turns repeated ranks into a strict combination;
+// its combinatorial rank is sum(C(rank + position, position + 1)).
+fn belief_context_index(role: Role, played: &[u8; RANKS]) -> Option<usize> {
+    let mut size = 0;
+    let mut index = 0;
+    for (rank, copies) in played.iter().enumerate() {
+        for _ in 0..*copies {
+            size += 1;
+            index += match size {
+                1 => rank,
+                2 => rank * (rank + 1) / 2,
+                3 => rank * (rank + 1) * (rank + 2) / 6,
+                _ => return None,
+            };
+        }
+    }
+    let role_offset = if role == Role::Dealer { 0 } else { BELIEF_CONTEXTS_PER_ROLE };
+    Some(role_offset + [0, 1, 14, 105][size] + index)
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Model91EmpiricalBeliefs {
-    entries: HashMap<BeliefKey, Vec<([u8; RANKS], u64)>>,
+    // Policies share immutable data; fixture/prior insertion uses copy-on-write.
+    // None remains distinct from an existing row with no compatible hands.
+    entries: Arc<Vec<Option<BeliefRow>>>,
+}
+
+impl Default for Model91EmpiricalBeliefs {
+    fn default() -> Self {
+        Self { entries: Arc::new(vec![None; 2 * BELIEF_CONTEXTS_PER_ROLE]) }
+    }
 }
 
 impl Model91EmpiricalBeliefs {
+    /// Immutable, unconditioned evidence for a score-block actor. Callers apply
+    /// their own legally known cards and likelihoods; no hidden pair enters here.
+    pub(crate) fn score_block_hands(&self, role: Role, played: [u8; RANKS])
+        -> Option<impl Iterator<Item = ([u8; RANKS], f64)> + '_> {
+        self.hands(role, played, &[4; RANKS], 4_u8.checked_sub(rank_count_total(&played))?)
+    }
+
+    pub(crate) fn opening_hands(
+        &self,
+        opponent_role: Role,
+        available: &[u8; RANKS],
+    ) -> Result<Vec<([u8; RANKS], f64)>, String> {
+        let hands = self
+            .hands(opponent_role, [0; RANKS], available, 4)
+            .ok_or("empirical opening keep prior is missing")?;
+        Ok(hands
+            .into_iter()
+            .map(|(hand, weight)| {
+                (
+                    hand,
+                    depleted_empirical_weight(weight, &hand, available, &[4; RANKS]),
+                )
+            })
+            .collect())
+    }
+
+    pub(crate) fn load_opening_keep_prior(&mut self, path: &Path) -> Result<(), String> {
+        #[derive(serde::Deserialize)]
+        struct KeepPrior {
+            version: u32,
+            roles: std::collections::BTreeMap<String, std::collections::BTreeMap<String, u64>>,
+        }
+        let prior: KeepPrior = serde_json::from_slice(
+            &fs::read(path).map_err(|e| format!("read opening keep prior: {e}"))?,
+        )
+        .map_err(|e| format!("parse opening keep prior: {e}"))?;
+        if prior.version != 1 {
+            return Err("unsupported opening keep prior version".to_string());
+        }
+        for (name, opponent_role) in [("dealer", Role::Dealer), ("pone", Role::Pone)] {
+            let rows = prior
+                .roles
+                .get(name)
+                .filter(|rows| !rows.is_empty())
+                .ok_or_else(|| format!("opening keep prior missing {name} hands"))?;
+            let hands = rows
+                .iter()
+                .map(|(key, weight)| {
+                    let hand = rank_counts_from_key(key)?;
+                    if rank_count_total(&hand) != 4 || *weight == 0 {
+                        return Err("opening keep prior has invalid hand or weight".to_string());
+                    }
+                    Ok((hand, *weight))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            self.replace_row(opponent_role, [0; RANKS], hands);
+        }
+        Ok(())
+    }
+
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
-        let path = path.as_ref();
+        Self::load_binary(path.as_ref(), false)
+    }
+
+    pub(crate) fn load_model203(path: &Path) -> Result<Self, String> {
+        Self::load_binary(path, true)
+    }
+
+    fn load_binary(path: &Path, complete_support: bool) -> Result<Self, String> {
         let bytes = fs::read(path).map_err(|error| {
             format!(
                 "read Model 9.1 belief asset {} failed: {}",
@@ -233,7 +360,8 @@ impl Model91EmpiricalBeliefs {
                 error
             )
         })?;
-        if bytes.len() < BELIEF_HEADER_BYTES || &bytes[..8] != BELIEF_MAGIC {
+        let magic = if complete_support { b"M203HB01" } else { BELIEF_MAGIC };
+        if bytes.len() < BELIEF_HEADER_BYTES || &bytes[..8] != magic {
             return Err("invalid Model 9.1 belief asset header".to_string());
         }
         let version = read_u32(&bytes, 8)?;
@@ -286,11 +414,34 @@ impl Model91EmpiricalBeliefs {
                 let weight = read_u64(&bytes, record_offset + RANKS)?;
                 rows.push((remaining, weight));
             }
-            result.insert(role, played, rows)?;
+            if complete_support {
+                if played.iter().any(|n| *n > 4) {
+                    return Err("invalid Model 20.3 prefix".into());
+                }
+                let size = rank_count_total(&played);
+                if size > 3 {
+                    return Err("invalid Model 20.3 prefix".into());
+                }
+                let available = std::array::from_fn(|r| 4 - played[r]);
+                let expected: std::collections::HashSet<_> = enumerate_rank_hands(&available, 4 - size)
+                    .into_iter().map(|(h, _)| h).collect();
+                let actual: std::collections::HashSet<_> = rows.iter().map(|(h, _)| *h).collect();
+                if actual != expected || actual.len() != rows.len() || rows.iter().any(|(_, w)| *w == 0) {
+                    return Err("Model 20.3 row lacks complete positive legal support".into());
+                }
+                if result.replace_row(role, played, rows).is_some() {
+                    return Err("duplicate Model 20.3 prefix".into());
+                }
+            } else {
+                result.insert(role, played, rows)?;
+            }
             expected_first_record += count;
         }
         if expected_first_record != record_count {
             return Err("Model 9.1 belief directory does not cover all records".to_string());
+        }
+        if complete_support && result.entries.iter().any(Option::is_none) {
+            return Err("Model 20.3 requires every role/prefix context".into());
         }
         Ok(result)
     }
@@ -314,14 +465,15 @@ impl Model91EmpiricalBeliefs {
                 "Model 9.1 empirical remaining hand has invalid maximum size or weight".to_string(),
             );
         }
-        let key = BeliefKey {
-            opponent_role,
-            played,
-        };
-        if self.entries.insert(key, remaining_hands).is_some() {
+        if self.replace_row(opponent_role, played, remaining_hands).is_some() {
             return Err("duplicate Model 9.1 empirical belief prefix".to_string());
         }
         Ok(())
+    }
+
+    fn replace_row(&mut self, role: Role, played: [u8; RANKS], row: BeliefRow) -> Option<BeliefRow> {
+        let index = belief_context_index(role, &played).expect("validated empirical prefix");
+        Arc::make_mut(&mut self.entries)[index].replace(row)
     }
 
     fn hands(
@@ -330,22 +482,19 @@ impl Model91EmpiricalBeliefs {
         played: [u8; RANKS],
         available: &[u8; RANKS],
         size: u8,
-    ) -> Option<Vec<([u8; RANKS], f64)>> {
-        let rows = self.entries.get(&BeliefKey {
-            opponent_role,
-            played,
-        })?;
+    ) -> Option<impl Iterator<Item = ([u8; RANKS], f64)> + '_> {
+        let rows = self.entries[belief_context_index(opponent_role, &played)?].as_ref()?;
+        let available = *available;
         Some(
             rows.iter()
-                .filter(|(hand, _)| {
+                .filter(move |(hand, _)| {
                     rank_count_total(hand) == size
                         && hand
                             .iter()
-                            .zip(available)
+                            .zip(&available)
                             .all(|(needed, remaining)| needed <= remaining)
                 })
-                .map(|(hand, weight)| (*hand, *weight as f64))
-                .collect(),
+                .map(|(hand, weight)| (*hand, *weight as f64)),
         )
     }
 }
@@ -548,6 +697,7 @@ impl OpponentHandCache {
 enum Model91EvidenceWeightMode {
     Physical,
     Empirical,
+    DepletedEmpirical([u8; RANKS]),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -555,17 +705,30 @@ struct Model91EvidenceHand {
     ranks: [u8; RANKS],
     rank_mask: u16,
     base_weight: f64,
+    depletion_denominator: f64,
 }
 
 impl Model91EvidenceHand {
-    fn new(ranks: [u8; RANKS], base_weight: f64) -> Self {
+    fn new(ranks: [u8; RANKS], base_weight: f64, mode: Model91EvidenceWeightMode) -> Self {
         let rank_mask = ranks.iter().enumerate().fold(0, |mask, (rank, copies)| {
             mask | if *copies > 0 { 1 << rank } else { 0 }
         });
+        // Public played ranks fix this baseline for the evidence entry. Keep
+        // the denominator itself: predividing base_weight changes rounding.
+        let mut depletion_denominator = 1.0;
+        if let Model91EvidenceWeightMode::DepletedEmpirical(baseline) = mode {
+            let mut mask: u16 = rank_mask;
+            while mask != 0 {
+                let rank = mask.trailing_zeros() as usize;
+                mask &= mask - 1;
+                depletion_denominator *= evidence_choose(baseline[rank], ranks[rank]);
+            }
+        }
         Self {
             ranks,
             rank_mask,
             base_weight,
+            depletion_denominator,
         }
     }
 }
@@ -574,10 +737,10 @@ impl Model91EvidenceHand {
 /// actor-owned dead cards. Continuation outcomes are invariant to those dead
 /// cards; only the compatible hidden-hand weights change. This is memoization
 /// for an edit pass and is never a durable observation-to-action asset.
-struct Model91ActionEvidence {
+struct Model91ActionEvidence<T = WeightedPoints> {
     legal: Vec<u8>,
     hands: Vec<Model91EvidenceHand>,
-    outcomes: Vec<WeightedPoints>,
+    outcomes: Vec<T>,
     weight_mode: Model91EvidenceWeightMode,
 }
 
@@ -595,7 +758,15 @@ pub struct Model91Choice {
 
 pub struct Model91Policy {
     empirical: Option<Model91EmpiricalBeliefs>,
+    empirical_depletion: bool,
     decision_cache: HashMap<Model91DecisionKey, Model91Choice>,
+    wp_decisions: HashMap<(Model91DecisionKey, [u8; 2]), RankPegAction>,
+    wp_action_cache_role: Option<Role>,
+    prepare_continuation_bases: bool,
+    short_legal_rank_check: bool,
+    wp_future: compact::WpMemo,
+    wp_evidence: HashMap<(Model91Observation, [u8; 2]), Arc<Model91ActionEvidence<f64>>>,
+    wp_evidence_outcomes: usize,
     cache_limit: usize,
     future_cache: ContinuationMemo,
     future_cache_limit: usize,
@@ -606,6 +777,38 @@ pub struct Model91Policy {
 }
 
 impl Model91Policy {
+    /// Model 20.7 only: stop once a second legal rank is found.
+    pub(crate) fn use_short_legal_rank_check(&mut self) {
+        self.short_legal_rank_check = true;
+    }
+
+    pub(crate) fn collapse_forced_wp_continuations(&mut self) {
+        self.wp_future.collapse_forced_continuations();
+    }
+
+    /// Reuse immutable packed bases across candidates within one evidence build.
+    pub(crate) fn prepare_continuation_bases(&mut self) {
+        self.prepare_continuation_bases = true;
+    }
+
+    /// Model 20 opt-in. Historical policies retain their empirical weights.
+    pub(crate) fn use_empirical_depletion(&mut self) {
+        self.empirical_depletion = true;
+        self.decision_cache.clear();
+        self.wp_decisions.clear();
+        self.wp_evidence.clear();
+        self.wp_evidence_outcomes = 0;
+        self.clear_evidence_cache();
+    }
+
+    /// Keep reusable actions for the root player, without admitting the stream
+    /// of opponent private-hand variants. Evidence and continuation caches still
+    /// serve both roles. This changes memo admission, never policy arithmetic.
+    pub(crate) fn cache_wp_actions_for_role(&mut self, role: Role) {
+        self.wp_action_cache_role = Some(role);
+        self.wp_decisions.clear();
+    }
+
     /// Representation-only opt-in; historical models retain the reference path.
     pub(crate) fn use_compact_continuations(&mut self) {
         self.future_cache = ContinuationMemo::Compact(compact::Memo::default());
@@ -614,7 +817,15 @@ impl Model91Policy {
     pub fn new(empirical: Option<Model91EmpiricalBeliefs>, cache_limit: usize) -> Self {
         Model91Policy {
             empirical,
+            empirical_depletion: false,
             decision_cache: HashMap::new(),
+            wp_decisions: HashMap::new(),
+            wp_action_cache_role: None,
+            prepare_continuation_bases: false,
+            short_legal_rank_check: false,
+            wp_future: compact::WpMemo::default(),
+            wp_evidence: HashMap::new(),
+            wp_evidence_outcomes: 0,
             cache_limit,
             future_cache: ContinuationMemo::default(),
             future_cache_limit: 0,
@@ -659,6 +870,414 @@ impl Model91Policy {
         observation: &Model91Observation,
     ) -> Result<RankPegAction, String> {
         self.choose_action_with_opponent_likelihood(observation, &[1_000_000_u32; RANKS])
+    }
+
+    /// Model 20.1 only. Aggregate the legal-information posterior before
+    /// selecting an action; hidden hands never get separate optimal actions.
+    pub(crate) fn choose_action_by_wp(
+        &mut self,
+        observation: &Model91Observation,
+        likelihoods: &[u32; RANKS],
+        scores: [u8; 2],
+        board: &BoardWinMatrix,
+    ) -> Result<RankPegAction, String> {
+        observation.validate()?;
+        let cache_action = self.wp_action_cache_role.is_none_or(|role| role == observation.role);
+        let key = (
+            Model91DecisionKey {
+                observation: *observation,
+                opponent_rank_likelihood_ppm: *likelihoods,
+            },
+            scores,
+        );
+        if cache_action {
+            if let Some(action) = self.wp_decisions.get(&key) {
+                return Ok(*action);
+            }
+        }
+        let legal = legal_ranks(&observation.own_remaining, observation.count);
+        if legal.len() > 1 && self.evidence_cache_outcome_limit > 0 {
+            if let Some(action) =
+                self.wp_choice_from_evidence(observation, &legal, likelihoods, scores, board)?
+            {
+                if cache_action && self.cache_limit > 0 {
+                    if self.wp_decisions.len() >= self.cache_limit {
+                        self.wp_decisions.clear();
+                    }
+                    self.wp_decisions.insert(key, action);
+                }
+                return Ok(action);
+            }
+        }
+        let action = match legal.as_slice() {
+            [] => RankPegAction::Go,
+            [rank] => RankPegAction::Play(*rank),
+            _ => {
+                let mut hands = self.opponent_hands(observation, likelihoods)?;
+                if hands.is_empty() {
+                    // A missing empirical population is uncertainty, not proof
+                    // that no opponent hand exists. Retain physical/go evidence.
+                    hands = reweight_opponent_hands(
+                        RankHandIndex::shared().compatible_hands(
+                            &opponent_available(observation)?,
+                            observation.opponent_remaining_count()?,
+                        )?,
+                        likelihoods,
+                    );
+                }
+                let total: f64 = hands.iter().map(|(_, weight)| weight).sum();
+                if !total.is_finite() || total <= 0.0 {
+                    return Err("Model 20.1 WP chooser has no legal posterior support".into());
+                }
+                let mut best = (f64::NEG_INFINITY, 0_u8, 0_u8);
+                for rank in legal {
+                    let mut utility = 0.0;
+                    for (hand, weight) in &hands {
+                        let state = AverageState::new(
+                            [observation.own_remaining, *hand],
+                            observation.series(),
+                            observation.count,
+                            0,
+                            relative_index(observation.go_player),
+                            relative_index(observation.last_player),
+                        )?;
+                        utility += weight / total
+                            * self.wp_future.forced_play(
+                                &state,
+                                scores,
+                                observation.role,
+                                rank,
+                                board,
+                            )?;
+                    }
+                    let immediate = score_count_for_ranks(
+                        &observation
+                            .series()
+                            .iter()
+                            .copied()
+                            .chain(std::iter::once(rank))
+                            .collect::<Vec<_>>(),
+                    );
+                    if (utility, immediate, rank) > best {
+                        best = (utility, immediate, rank);
+                    }
+                }
+                RankPegAction::Play(best.2)
+            }
+        };
+        if cache_action && self.cache_limit > 0 {
+            if self.wp_decisions.len() >= self.cache_limit {
+                self.wp_decisions.clear();
+            }
+            self.wp_decisions.insert(key, action);
+        }
+        Ok(action)
+    }
+
+    fn wp_action_evidence(
+        &mut self,
+        observation: &Model91Observation,
+        legal: &[u8],
+        scores: [u8; 2],
+        board: &BoardWinMatrix,
+    ) -> Result<Arc<Model91ActionEvidence<f64>>, String> {
+        // Dead-card variants change posterior weights, not pegging outcomes.
+        // Retain these finite values only for this live decision, as in the EV
+        // evaluator, with board scores included in the key.
+        let mut key_observation = *observation;
+        key_observation.own_discards = [0; RANKS];
+        key_observation.turn_rank = None;
+        let key = (key_observation, scores);
+        let evidence = if let Some(evidence) = self.wp_evidence.get(&key) {
+            Arc::clone(evidence)
+        } else {
+            let available = opponent_available(&key_observation)?;
+            let size = key_observation.opponent_remaining_count()?;
+            let role = if observation.role == Role::Dealer {
+                Role::Pone
+            } else {
+                Role::Dealer
+            };
+            let (hands, weight_mode) = if let Some(hands) = self
+                .empirical
+                .as_ref()
+                .and_then(|beliefs| beliefs.hands(role, observation.opponent_played, &available, size))
+            {
+                let mode = if self.empirical_depletion {
+                    Model91EvidenceWeightMode::DepletedEmpirical(empirical_baseline(observation))
+                } else {
+                    Model91EvidenceWeightMode::Empirical
+                };
+                (
+                    hands
+                        .map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight, mode))
+                        .collect::<Vec<_>>(),
+                    mode,
+                )
+            } else {
+                (
+                    RankHandIndex::shared()
+                        .compatible_hands(&available, size)?
+                        .into_iter()
+                        .map(|(ranks, weight)| {
+                            Model91EvidenceHand::new(ranks, weight, Model91EvidenceWeightMode::Physical)
+                        })
+                        .collect(),
+                    Model91EvidenceWeightMode::Physical,
+                )
+            };
+            let mut outcomes = Vec::with_capacity(legal.len() * hands.len());
+            // Keep action-major evaluation and memo access order unchanged. Build
+            // each base during the first action, so entry errors also retain their
+            // original order. Single-action evidence needs no temporary storage.
+            let reuse = self.prepare_continuation_bases && legal.len() > 1;
+            let mut bases = Vec::with_capacity(if reuse { hands.len() } else { 0 });
+            for (action_index, rank) in legal.iter().enumerate() {
+                for (hand_index, hand) in hands.iter().enumerate() {
+                    if reuse && action_index > 0 {
+                        outcomes.push(self.wp_future.forced_play_prepared(
+                            bases[hand_index], scores, observation.role, *rank, board,
+                        )?);
+                        continue;
+                    }
+                    let state = AverageState::new(
+                        [observation.own_remaining, hand.ranks],
+                        observation.series(),
+                        observation.count,
+                        0,
+                        relative_index(observation.go_player),
+                        relative_index(observation.last_player),
+                    )?;
+                    if reuse {
+                        let base = compact::State::from_reference(&state);
+                        bases.push(base);
+                        outcomes.push(self.wp_future.forced_play_prepared(
+                            base, scores, observation.role, *rank, board,
+                        )?);
+                    } else {
+                        outcomes.push(self.wp_future.forced_play(
+                            &state, scores, observation.role, *rank, board,
+                        )?);
+                    }
+                }
+            }
+            let evidence = Arc::new(Model91ActionEvidence {
+                legal: legal.to_vec(),
+                hands,
+                outcomes,
+                weight_mode,
+            });
+            let count = evidence.outcomes.len();
+            if count <= self.evidence_cache_outcome_limit {
+                if self.wp_evidence_outcomes + count > self.evidence_cache_outcome_limit {
+                    self.wp_evidence.clear();
+                    self.wp_evidence_outcomes = 0;
+                }
+                self.wp_evidence_outcomes += count;
+                self.wp_evidence.insert(key, Arc::clone(&evidence));
+            }
+            evidence
+        };
+        Ok(evidence)
+    }
+
+    pub(crate) fn choose_actions_by_wp(
+        &mut self,
+        queries: &[(Model91Observation, [u32; RANKS], [u8; 2])],
+        board: &BoardWinMatrix,
+    ) -> Result<Vec<RankPegAction>, String> {
+        let mut results = vec![None; queries.len()];
+        let mut group_index = HashMap::new();
+        let mut pending_keys = HashMap::new();
+        let mut aliases = Vec::new();
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        for (index, (observation, likelihoods, scores)) in queries.iter().enumerate() {
+            observation.validate()?;
+            let cache_action = self
+                .wp_action_cache_role
+                .is_none_or(|role| role == observation.role);
+            let key = (
+                Model91DecisionKey {
+                    observation: *observation,
+                    opponent_rank_likelihood_ppm: *likelihoods,
+                },
+                *scores,
+            );
+            if cache_action {
+                if let Some(action) = self.wp_decisions.get(&key) {
+                    results[index] = Some(*action);
+                    continue;
+                }
+            }
+            let forced_rank = if self.short_legal_rank_check {
+                legal_rank_iter(&observation.own_remaining, observation.count).nth(1).is_none()
+            } else {
+                legal_ranks(&observation.own_remaining, observation.count).len() <= 1
+            };
+            if forced_rank
+                || self.evidence_cache_outcome_limit == 0
+            {
+                results[index] =
+                    Some(self.choose_action_by_wp(observation, likelihoods, *scores, board)?);
+                continue;
+            }
+            if let Some(&prior) = pending_keys.get(&key) {
+                aliases.push((index, prior));
+                continue;
+            }
+            pending_keys.insert(key, index);
+            let mut stripped = *observation;
+            stripped.own_discards = [0; RANKS];
+            stripped.turn_rank = None;
+            let next = groups.len();
+            let group = *group_index.entry((stripped, *scores)).or_insert(next);
+            if group == next {
+                groups.push(Vec::new());
+            }
+            groups[group].push(index);
+        }
+        for indices in groups {
+            if indices.len() == 1 {
+                let i = indices[0];
+                let (o, l, scores) = &queries[i];
+                results[i] = Some(self.choose_action_by_wp(o, l, *scores, board)?);
+                continue;
+            }
+            let (first, _, scores) = &queries[indices[0]];
+            let legal = legal_ranks(&first.own_remaining, first.count);
+            let evidence = self.wp_action_evidence(first, &legal, *scores, board)?;
+            if evidence.hands.is_empty() {
+                // Match the scalar physical fallback before creating strided matrix views.
+                for index in indices {
+                    let (observation, likelihoods, scores) = &queries[index];
+                    results[index] =
+                        Some(self.choose_action_by_wp(observation, likelihoods, *scores, board)?);
+                }
+                continue;
+            }
+            let available = indices
+                .iter()
+                .map(|i| opponent_available(&queries[*i].0))
+                .collect::<Result<Vec<_>, _>>()?;
+            let lanes = indices.len();
+            let likelihoods: Vec<_> = indices.iter().map(|index| &queries[*index].1).collect();
+            let weights = batch_evidence_weights(&evidence, &available, &likelihoods);
+            let totals: Vec<f64> = (0..lanes)
+                .map(|lane| weights[lane..].iter().step_by(lanes).sum())
+                .collect();
+            for total in &totals {
+                if !total.is_finite() && !(*total <= 0.0) {
+                    return Err("non-finite Model 20.1 WP posterior".into());
+                }
+            }
+            let mut best = vec![(f64::NEG_INFINITY, 0_u8, 0_u8); indices.len()];
+            for (action_index, rank) in legal.iter().copied().enumerate() {
+                let mut utilities = vec![-0.0; indices.len()];
+                for hand in 0..evidence.hands.len() {
+                    let outcome = evidence.outcomes[action_index * evidence.hands.len() + hand];
+                    for lane in 0..indices.len() {
+                        let weight = weights[hand * lanes + lane];
+                        if weight > 0.0 {
+                            utilities[lane] += weight / totals[lane] * outcome;
+                        }
+                    }
+                }
+                let immediate = score_count_for_ranks(
+                    &first
+                        .series()
+                        .iter()
+                        .copied()
+                        .chain(std::iter::once(rank))
+                        .collect::<Vec<_>>(),
+                );
+                for lane in 0..indices.len() {
+                    let candidate = (utilities[lane], immediate, rank);
+                    if candidate > best[lane] {
+                        best[lane] = candidate;
+                    }
+                }
+            }
+            for (lane, &index) in indices.iter().enumerate() {
+                let (o, likelihoods, scores) = &queries[index];
+                if totals[lane] <= 0.0 {
+                    results[index] = Some(self.choose_action_by_wp(o, likelihoods, *scores, board)?);
+                } else {
+                    let action = RankPegAction::Play(best[lane].2);
+                    results[index] = Some(action);
+                    if self.cache_limit > 0
+                        && self.wp_action_cache_role.is_none_or(|role| role == o.role)
+                    {
+                        if self.wp_decisions.len() >= self.cache_limit {
+                            self.wp_decisions.clear();
+                        }
+                        self.wp_decisions.insert(
+                            (
+                                Model91DecisionKey {
+                                    observation: *o,
+                                    opponent_rank_likelihood_ppm: *likelihoods,
+                                },
+                                *scores,
+                            ),
+                            action,
+                        );
+                    }
+                }
+            }
+        }
+        for (index, prior) in aliases {
+            results[index] = results[prior];
+        }
+        results
+            .into_iter()
+            .map(|action| action.ok_or_else(|| "missing batched action".into()))
+            .collect()
+    }
+
+    fn wp_choice_from_evidence(
+        &mut self,
+        observation: &Model91Observation,
+        legal: &[u8],
+        likelihoods: &[u32; RANKS],
+        scores: [u8; 2],
+        board: &BoardWinMatrix,
+    ) -> Result<Option<RankPegAction>, String> {
+        let evidence = self.wp_action_evidence(observation, legal, scores, board)?;
+        let available = opponent_available(observation)?;
+        let weights: Vec<_> = evidence
+            .hands
+            .iter()
+            .map(|hand| evidence_hand_weight(hand, evidence.weight_mode, &available, likelihoods))
+            .collect();
+        let total: f64 = weights.iter().sum();
+        if total <= 0.0 {
+            return Ok(None);
+        } // physical fallback in caller
+        if !total.is_finite() {
+            return Err("non-finite Model 20.1 WP posterior".into());
+        }
+        let mut best = (f64::NEG_INFINITY, 0_u8, 0_u8);
+        for (index, rank) in legal.iter().copied().enumerate() {
+            let utility: f64 = weights
+                .iter()
+                .enumerate()
+                .filter(|(_, weight)| **weight > 0.0)
+                .map(|(hand, weight)| {
+                    weight / total * evidence.outcomes[index * weights.len() + hand]
+                })
+                .sum();
+            let immediate = score_count_for_ranks(
+                &observation
+                    .series()
+                    .iter()
+                    .copied()
+                    .chain(std::iter::once(rank))
+                    .collect::<Vec<_>>(),
+            );
+            if (utility, immediate, rank) > best {
+                best = (utility, immediate, rank);
+            }
+        }
+        Ok(Some(RankPegAction::Play(best.2)))
     }
 
     pub fn choose_action_with_net_ev(
@@ -782,6 +1401,7 @@ impl Model91Policy {
 
     pub fn clear_future_cache(&mut self) {
         self.future_cache.clear();
+        self.wp_future.clear();
         self.stats.future_cache_entries = 0;
     }
 
@@ -901,27 +1521,23 @@ impl Model91Policy {
             Role::Dealer => Role::Pone,
             Role::Pone => Role::Dealer,
         };
-        let (hands, weight_mode) = if rank_count_total(&observation.opponent_played) > 0 {
-            if let Some(hands) = self.empirical.as_ref().and_then(|beliefs| {
+        let (hands, weight_mode) = if let Some(hands) =
+            self.empirical.as_ref().and_then(|beliefs| {
                 beliefs.hands(opponent_role, observation.opponent_played, &available, size)
             }) {
-                (hands, Model91EvidenceWeightMode::Empirical)
+            let mode = if self.empirical_depletion {
+                Model91EvidenceWeightMode::DepletedEmpirical(empirical_baseline(observation))
             } else {
-                (
-                    RankHandIndex::shared().compatible_hands(&available, size)?,
-                    Model91EvidenceWeightMode::Physical,
-                )
-            }
+                Model91EvidenceWeightMode::Empirical
+            };
+            (hands.map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight, mode)).collect::<Vec<_>>(), mode)
         } else {
             (
-                RankHandIndex::shared().compatible_hands(&available, size)?,
+                RankHandIndex::shared().compatible_hands(&available, size)?
+                    .into_iter().map(|(ranks, weight)| Model91EvidenceHand::new(ranks, weight, Model91EvidenceWeightMode::Physical)).collect(),
                 Model91EvidenceWeightMode::Physical,
             )
         };
-        let hands = hands
-            .into_iter()
-            .map(|(ranks, base_weight)| Model91EvidenceHand::new(ranks, base_weight))
-            .collect::<Vec<_>>();
         let mut local_memo = ContinuationMemo::default();
         let memo = if self.future_cache_limit == 0 {
             &mut local_memo
@@ -1053,19 +1669,25 @@ impl Model91Policy {
             Role::Pone => Role::Dealer,
         };
         self.stats.posterior_requests = self.stats.posterior_requests.saturating_add(1);
-        let empirical = if rank_count_total(&observation.opponent_played) > 0 {
-            self.empirical.as_ref().and_then(|beliefs| {
-                beliefs.hands(opponent_role, observation.opponent_played, &available, size)
-            })
+        let empirical = self.empirical.as_ref().and_then(|beliefs| {
+            beliefs.hands(opponent_role, observation.opponent_played, &available, size)
+        });
+        let hands = if let Some(hands) = empirical {
+            let baseline = empirical_baseline(observation);
+            reweight_opponent_hands(hands.map(|(hand, weight)| {
+                let weight = if self.empirical_depletion {
+                    depleted_empirical_weight(weight, &hand, &available, &baseline)
+                } else { weight };
+                (hand, weight)
+            }), opponent_rank_likelihood_ppm)
         } else {
-            None
+            let physical = if let Some(cache) = cache {
+                cache.physical_hands(observation, &available, size)?
+            } else {
+                RankHandIndex::shared().compatible_hands(&available, size)?
+            };
+            reweight_opponent_hands(physical, opponent_rank_likelihood_ppm)
         };
-        let base = match (empirical, cache) {
-            (Some(hands), _) => hands,
-            (None, Some(cache)) => cache.physical_hands(observation, &available, size)?,
-            (None, None) => RankHandIndex::shared().compatible_hands(&available, size)?,
-        };
-        let hands = reweight_opponent_hands(base, opponent_rank_likelihood_ppm);
         self.stats.posterior_hands_generated = self
             .stats
             .posterior_hands_generated
@@ -1089,6 +1711,96 @@ fn opponent_available(observation: &Model91Observation) -> Result<[u8; RANKS], S
     Ok(available)
 }
 
+// Evidence counts describe a standard deck: these binomial coefficients are
+// exact integers. Keep the general path for out-of-domain callers.
+#[inline]
+fn evidence_choose(n: u8, k: u8) -> f64 {
+    if k == 1 {
+        return f64::from(n);
+    }
+    if n <= 4 {
+        if k > n {
+            return 0.0;
+        }
+        if k == 0 || k == n {
+            return 1.0;
+        }
+        if n == 4 && k == 2 {
+            return 6.0;
+        }
+        return f64::from(n);
+    }
+    choose(n, k)
+}
+
+#[test]
+fn evidence_combinations_match_general_arithmetic_exactly() {
+    for n in 0..=u8::MAX {
+        for k in 0..=u8::MAX {
+            assert_eq!(evidence_choose(n, k).to_bits(), choose(n, k).to_bits());
+        }
+    }
+}
+
+/// Each lane keeps the scalar rank multiplication order and multiply-then-divide
+/// likelihood arithmetic. Layout groups related queries only; no probabilities
+/// are reassociated or combined across legal information sets.
+fn batch_evidence_weights(
+    evidence: &Model91ActionEvidence<f64>,
+    available: &[[u8; RANKS]],
+    likelihoods: &[&[u32; RANKS]],
+) -> Vec<f64> {
+    let lanes = available.len();
+    let mut weights = vec![0.0; evidence.hands.len() * lanes];
+    let mut compatible = vec![false; lanes];
+    for (hand_index, hand) in evidence.hands.iter().enumerate() {
+        let row = &mut weights[hand_index * lanes..(hand_index + 1) * lanes];
+        if matches!(
+            evidence.weight_mode,
+            Model91EvidenceWeightMode::DepletedEmpirical(_)
+        ) && hand.depletion_denominator != 0.0
+        {
+            row.fill(1.0);
+            let mut mask = hand.rank_mask;
+            while mask != 0 {
+                let rank = mask.trailing_zeros() as usize;
+                mask &= mask - 1;
+                for lane in 0..lanes {
+                    row[lane] *= evidence_choose(available[lane][rank], hand.ranks[rank]);
+                }
+            }
+            for lane in 0..lanes {
+                compatible[lane] = row[lane] != 0.0;
+                row[lane] = hand.base_weight * (row[lane] / hand.depletion_denominator);
+            }
+            let mut mask = hand.rank_mask;
+            while mask != 0 {
+                let rank = mask.trailing_zeros() as usize;
+                mask &= mask - 1;
+                for lane in 0..lanes {
+                    row[lane] = row[lane] * f64::from(likelihoods[lane][rank]) / 1_000_000.0;
+                }
+            }
+            for lane in 0..lanes {
+                // Scalar reference returns positive zero before likelihood arithmetic for impossible hands.
+                if !compatible[lane] {
+                    row[lane] = 0.0;
+                }
+            }
+        } else {
+            for lane in 0..lanes {
+                row[lane] = evidence_hand_weight(
+                    hand,
+                    evidence.weight_mode,
+                    &available[lane],
+                    likelihoods[lane],
+                );
+            }
+        }
+    }
+    weights
+}
+
 fn evidence_hand_weight(
     hand: &Model91EvidenceHand,
     weight_mode: Model91EvidenceWeightMode,
@@ -1098,6 +1810,22 @@ fn evidence_hand_weight(
     let mut weight = match weight_mode {
         Model91EvidenceWeightMode::Physical => 1.0,
         Model91EvidenceWeightMode::Empirical => hand.base_weight,
+        Model91EvidenceWeightMode::DepletedEmpirical(_) => {
+            // Zero-copy ranks contribute exactly one. Use the evidence's
+            // existing rank mask, preserving multiplication order per product.
+            let before = hand.depletion_denominator;
+            let mut after = 1.0;
+            let mut mask = hand.rank_mask;
+            while mask != 0 {
+                let rank = mask.trailing_zeros() as usize;
+                mask &= mask - 1;
+                after *= evidence_choose(available[rank], hand.ranks[rank]);
+            }
+            if before == 0.0 {
+                return 0.0;
+            }
+            hand.base_weight * (after / before)
+        }
     };
     // At most four ranks occur in a hand. Omitted ranks only contributed a
     // compatibility check of 0 <= available and multiplication by exactly 1.
@@ -1109,7 +1837,7 @@ fn evidence_hand_weight(
             return 0.0;
         }
         if matches!(weight_mode, Model91EvidenceWeightMode::Physical) {
-            weight *= choose(available[rank], hand.ranks[rank]);
+            weight *= evidence_choose(available[rank], hand.ranks[rank]);
         }
     }
     let mut mask = hand.rank_mask;
@@ -1123,8 +1851,27 @@ fn evidence_hand_weight(
     weight
 }
 
+fn empirical_baseline(observation: &Model91Observation) -> [u8; RANKS] {
+    // The empirical row already conditions on the opponent's played ranks.
+    // Only additional known cards should reduce its remaining-hand weights.
+    std::array::from_fn(|rank| 4_u8.saturating_sub(observation.opponent_played[rank]))
+}
+
+fn depleted_empirical_weight(
+    weight: f64,
+    hand: &[u8; RANKS],
+    available: &[u8; RANKS],
+    baseline: &[u8; RANKS],
+) -> f64 {
+    let before = rank_combination_count(hand, baseline);
+    if before == 0.0 {
+        return 0.0;
+    }
+    weight * (rank_combination_count(hand, available) / before)
+}
+
 fn reweight_opponent_hands(
-    hands: Vec<([u8; RANKS], f64)>,
+    hands: impl IntoIterator<Item = ([u8; RANKS], f64)>,
     rank_likelihood_ppm: &[u32; RANKS],
 ) -> Vec<([u8; RANKS], f64)> {
     hands
@@ -1474,13 +2221,14 @@ fn average_go(
     }
 }
 
+fn legal_rank_iter(hand: &[u8; RANKS], count: u8) -> impl Iterator<Item = u8> + '_ {
+    hand.iter().enumerate().filter_map(move |(rank, copies)| {
+        (*copies > 0 && count + VALUES[rank] <= 31).then_some(rank as u8)
+    })
+}
+
 fn legal_ranks(hand: &[u8; RANKS], count: u8) -> Vec<u8> {
-    hand.iter()
-        .enumerate()
-        .filter_map(|(rank, copies)| {
-            (*copies > 0 && count + VALUES[rank] <= 31).then_some(rank as u8)
-        })
-        .collect()
+    legal_rank_iter(hand, count).collect()
 }
 
 fn score_count_for_ranks(ranks: &[u8]) -> u8 {
@@ -1515,6 +2263,198 @@ mod tests {
     use super::*;
     use std::env;
     use std::process;
+
+    #[test]
+    fn model207_short_rank_check_matches_legal_choices_for_all_masks_and_counts() {
+        let mut policy = Model91Policy::new(None, 0);
+        assert!(!policy.short_legal_rank_check);
+        policy.use_short_legal_rank_check();
+        assert!(policy.short_legal_rank_check);
+        assert!(!Model91Policy::new(None, 0).short_legal_rank_check);
+        for mask in 0_u16..(1 << RANKS) {
+            let hand = std::array::from_fn(|rank| if mask & (1 << rank) == 0 { 0 } else { 4 });
+            for count in 0..=31 {
+                let expected = (0..RANKS).filter(|rank| {
+                    hand[*rank] > 0 && count + VALUES[*rank] <= 31
+                }).count() <= 1;
+                assert_eq!(legal_rank_iter(&hand, count).nth(1).is_none(), expected);
+                assert_eq!(legal_ranks(&hand, count).len() <= 1, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn observation_hash_includes_every_equality_field_and_option_tag() {
+        #[derive(Default)]
+        struct Transcript(Vec<u8>);
+        impl Hasher for Transcript {
+            fn finish(&self) -> u64 { 0 }
+            fn write(&mut self, bytes: &[u8]) { self.0.extend_from_slice(bytes); }
+        }
+        let base = Model91Observation::from_public_state(
+            Role::Dealer, hand(&[(0, 1), (4, 1), (7, 1), (12, 1)]),
+            [0; RANKS], [0; RANKS], [0; RANKS], None, &[], 0, None, None,
+        ).unwrap();
+        let mut variants = vec![base];
+        for field in 0..4 {
+            for rank in 0..RANKS {
+                for value in 0..=u8::MAX {
+                    let mut other = base;
+                    let ranks = match field {
+                        0 => &mut other.own_remaining,
+                        1 => &mut other.own_played,
+                        2 => &mut other.opponent_played,
+                        _ => &mut other.own_discards,
+                    };
+                    if ranks[rank] == value { continue; }
+                    ranks[rank] = value;
+                    variants.push(other);
+                }
+            }
+        }
+        for value in 0..=u8::MAX {
+            let mut other = base;
+            other.turn_rank = Some(value);
+            variants.push(other);
+            if value == 0 { continue; }
+            for index in 0..MAX_SERIES + 2 {
+                let mut other = base;
+                match index {
+                    MAX_SERIES => other.current_series_len = value,
+                    i if i == MAX_SERIES + 1 => other.count = value,
+                    i => other.current_series[i] = value,
+                }
+                variants.push(other);
+            }
+        }
+        let mut other = base;
+        other.role = Role::Pone;
+        variants.push(other);
+        for actor in [Model91Actor::SelfPlayer, Model91Actor::Opponent] {
+            let mut other = base;
+            other.go_player = Some(actor);
+            variants.push(other);
+            let mut other = base;
+            other.last_player = Some(actor);
+            variants.push(other);
+        }
+        let mut transcripts = std::collections::HashSet::new();
+        for value in &variants {
+            let mut hash = Transcript::default();
+            value.hash(&mut hash);
+            assert!(transcripts.insert(hash.0), "an equality field was lost");
+        }
+        // Even a deliberately constant digest cannot merge distinct keys.
+        let mut colliding = HashMap::<_, _, std::hash::BuildHasherDefault<Transcript>>::default();
+        for (index, value) in variants.iter().step_by(503).enumerate() {
+            colliding.insert(*value, index);
+        }
+        for (index, value) in variants.iter().step_by(503).enumerate() {
+            assert_eq!(colliding.get(value), Some(&index));
+        }
+    }
+
+    #[test]
+    fn prepared_continuation_bases_preserve_evidence_order_values_and_cache_reuse() {
+        let board = BoardWinMatrix::from_function(|_, a, b| {
+            1.0 / (1.0 + ((f64::from(b) - f64::from(a)) / 7.0).exp())
+        });
+        for role in [Role::Dealer, Role::Pone] {
+            let mut observation = Model91Observation::from_public_state(
+                role, hand(&[(0, 1), (4, 1)]), hand(&[(2, 1), (7, 1)]),
+                hand(&[(9, 1), (12, 1)]), hand(&[(1, 2)]), Some(8),
+                &[], 0, None, None,
+            ).unwrap();
+            let mut beliefs = Model91EmpiricalBeliefs::default();
+            beliefs.replace_row(
+                if role == Role::Dealer { Role::Pone } else { Role::Dealer },
+                observation.opponent_played,
+                vec![(hand(&[(0, 2)]), 5), (hand(&[(4, 1), (12, 1)]), 17)],
+            );
+            for empirical in [None, Some(beliefs)] {
+                for limit in [0, 5, 300_000] {
+                    let make = || Model91Policy::new_with_evidence_cache(empirical.clone(), 0, limit, 0);
+                    let mut reference = make();
+                    let mut prepared = make();
+                    prepared.prepare_continuation_bases();
+                    for scores in [[0, 0], [119, 120], [120, 119], [0, 0]] {
+                        for cut in [0, 4, 8] {
+                            observation.turn_rank = Some(cut);
+                            let expected = reference.wp_action_evidence(&observation, &[0, 4], scores, &board).unwrap();
+                            let actual = prepared.wp_action_evidence(&observation, &[0, 4], scores, &board).unwrap();
+                            assert_eq!(actual.legal, expected.legal);
+                            assert_eq!(actual.hands.iter().map(|h| (h.ranks, h.base_weight.to_bits())).collect::<Vec<_>>(),
+                                expected.hands.iter().map(|h| (h.ranks, h.base_weight.to_bits())).collect::<Vec<_>>());
+                            assert_eq!(actual.outcomes.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                                expected.outcomes.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+                            assert_eq!(prepared.wp_evidence_outcomes, reference.wp_evidence_outcomes);
+                            let again = prepared.wp_action_evidence(&observation, &[0, 4], scores, &board).unwrap();
+                            assert_eq!(Arc::ptr_eq(&actual, &again), actual.outcomes.len() <= limit);
+                        }
+                    }
+                    // Fresh uncached builders exercise the no-allocation path and
+                    // preserve entry failures on both the first and later action.
+                    for legal in [vec![], vec![0], vec![13, 0], vec![0, 13]] {
+                        let mut reference = Model91Policy::new(None, 0);
+                        let mut prepared = Model91Policy::new(None, 0);
+                        prepared.prepare_continuation_bases();
+                        let evaluate = |p: &mut Model91Policy| p.wp_action_evidence(&observation, &legal, [0, 0], &board)
+                            .map(|e| e.outcomes.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+                        assert_eq!(evaluate(&mut prepared), evaluate(&mut reference));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wp_chooser_disagrees_with_ev_and_caches_board_scores_separately() {
+        let board = BoardWinMatrix::load_verified_model13215(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/board-win-matrix.bin"),
+        )
+        .unwrap();
+        let mut policy = Model91Policy::new_with_evidence_cache(None, 1000, 300_000, 1_000_000);
+        let mut observation = Model91Observation::from_public_state(
+            Role::Dealer,
+            hand(&[(0, 1), (4, 1)]),
+            hand(&[(0, 1), (2, 1)]),
+            hand(&[(1, 1), (3, 1), (6, 1)]),
+            hand(&[(10, 1), (12, 1)]),
+            Some(8),
+            &[],
+            0,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            policy.choose_action(&observation).unwrap(),
+            RankPegAction::Play(0)
+        );
+        assert_eq!(
+            policy
+                .choose_action_by_wp(&observation, &[1_000_000; 13], [0, 0], &board)
+                .unwrap(),
+            RankPegAction::Play(4)
+        );
+        for role in [Role::Dealer, Role::Pone] {
+            observation.role = role;
+            for scores in [[0, 0], [119, 120], [120, 119], [0, 0]] {
+                let cached = policy
+                    .choose_action_by_wp(&observation, &[1_000_000; 13], scores, &board)
+                    .unwrap();
+                let fresh = Model91Policy::new(None, 0)
+                    .choose_action_by_wp(&observation, &[1_000_000; 13], scores, &board)
+                    .unwrap();
+                assert_eq!(cached, fresh);
+            }
+        }
+        observation.role = Role::Dealer;
+        assert_eq!(
+            policy.choose_action(&observation).unwrap(),
+            RankPegAction::Play(0)
+        );
+    }
 
     fn hand(entries: &[(u8, u8)]) -> [u8; RANKS] {
         let mut hand = [0_u8; RANKS];
@@ -1745,12 +2685,14 @@ mod tests {
         ];
         for size in 0..=4 {
             for (ranks, _) in enumerate_rank_hands(&[4; RANKS], size) {
-                let hand = Model91EvidenceHand::new(ranks, 12345.67);
                 for available in [[4; RANKS], [0, 1, 2, 3, 4, 3, 2, 1, 0, 4, 3, 2, 1]] {
                     for mode in [
                         Model91EvidenceWeightMode::Physical,
                         Model91EvidenceWeightMode::Empirical,
+                        Model91EvidenceWeightMode::DepletedEmpirical([4; RANKS]),
+                        Model91EvidenceWeightMode::DepletedEmpirical([0, 1, 2, 3, 4, 3, 2, 1, 0, 4, 3, 2, 1]),
                     ] {
+                        let hand = Model91EvidenceHand::new(ranks, 12345.67, mode);
                         let expected = if ranks.iter().zip(available).any(|(n, a)| *n > a) {
                             0.0
                         } else {
@@ -1759,6 +2701,11 @@ mod tests {
                                     rank_combination_count(&ranks, &available)
                                 }
                                 Model91EvidenceWeightMode::Empirical => hand.base_weight,
+                                Model91EvidenceWeightMode::DepletedEmpirical(baseline) => {
+                                    depleted_empirical_weight(
+                                        hand.base_weight, &ranks, &available, &baseline,
+                                    )
+                                }
                             };
                             ranks
                                 .iter()
@@ -1772,6 +2719,109 @@ mod tests {
                             evidence_hand_weight(&hand, mode, &available, &likelihoods).to_bits(),
                             expected.to_bits()
                         );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cached_depletion_denominators_match_all_rank_products() {
+        for size in 0..=4 {
+            for (ranks, _) in enumerate_rank_hands(&[4; RANKS], size) {
+                let present: Vec<_> = (0..RANKS).filter(|r| ranks[*r] > 0).collect();
+                for mut encoded in 0..5_usize.pow(present.len() as u32) {
+                    let mut baseline = [4; RANKS];
+                    for rank in &present {
+                        baseline[*rank] = (encoded % 5) as u8;
+                        encoded /= 5;
+                    }
+                    let hand = Model91EvidenceHand::new(
+                        ranks, 12345.67, Model91EvidenceWeightMode::DepletedEmpirical(baseline),
+                    );
+                    assert_eq!(hand.depletion_denominator.to_bits(),
+                        rank_combination_count(&ranks, &baseline).to_bits());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wp_action_cache_preserves_root_entries_across_opponent_churn() {
+        let board = BoardWinMatrix::from_function(|_, a, b| {
+            (0.5 + (f64::from(a) - f64::from(b)) / 242.0).clamp(0.0, 1.0)
+        });
+        for root_role in [Role::Dealer, Role::Pone] {
+            let root = Model91Observation::from_public_state(
+                root_role, hand(&[(0, 1), (4, 1)]), hand(&[(2, 1), (7, 1)]),
+                hand(&[(4, 2), (12, 1)]), hand(&[(1, 2)]), Some(8),
+                &[], 0, None, None,
+            ).unwrap();
+            let likelihoods = [1_000_000; RANKS];
+            let scores = [118, 119];
+            let key = (Model91DecisionKey {
+                observation: root, opponent_rank_likelihood_ppm: likelihoods,
+            }, scores);
+            let mut policy = Model91Policy::new_with_evidence_cache(None, 4, 100_000, 0);
+            policy.cache_wp_actions_for_role(root_role);
+            let expected = Model91Policy::new(None, 0)
+                .choose_action_by_wp(&root, &likelihoods, scores, &board).unwrap();
+            assert_eq!(policy.choose_action_by_wp(&root, &likelihoods, scores, &board).unwrap(), expected);
+            for opponent_score in 90..110 {
+                let mut opponent = root;
+                opponent.role = if root_role == Role::Dealer { Role::Pone } else { Role::Dealer };
+                let scores = [opponent_score, 118];
+                let expected = Model91Policy::new(None, 0)
+                    .choose_action_by_wp(&opponent, &likelihoods, scores, &board).unwrap();
+                assert_eq!(policy.choose_action_by_wp(&opponent, &likelihoods, scores, &board).unwrap(), expected);
+                assert!(policy.wp_decisions.contains_key(&key), "opponent entries evicted the root");
+                assert_eq!(policy.wp_decisions.len(), 1, "one-use opponent actions were admitted");
+            }
+            assert_eq!(policy.choose_action_by_wp(&root, &likelihoods, scores, &board).unwrap(), expected);
+            // Root score variants keep full identity and the existing bound.
+            for own_score in 90..110 {
+                let scores = [own_score, 119];
+                let expected = Model91Policy::new(None, 0)
+                    .choose_action_by_wp(&root, &likelihoods, scores, &board).unwrap();
+                assert_eq!(policy.choose_action_by_wp(&root, &likelihoods, scores, &board).unwrap(), expected);
+                assert!(policy.wp_decisions.len() <= 4);
+            }
+        }
+    }
+
+    #[test]
+    fn cached_wp_depletion_preserves_choices_across_dead_cards_and_scores() {
+        let board = BoardWinMatrix::from_function(|_, a, b| {
+            (0.5 + (f64::from(a) - f64::from(b)) / 242.0).clamp(0.0, 1.0)
+        });
+        for role in [Role::Dealer, Role::Pone] {
+            let mut observation = Model91Observation::from_public_state(
+                role, hand(&[(0, 1), (4, 1)]), hand(&[(2, 1), (7, 1)]),
+                hand(&[(4, 2), (12, 1)]), [0; RANKS], None, &[], 0, None, None,
+            ).unwrap();
+            let mut beliefs = Model91EmpiricalBeliefs::default();
+            beliefs.replace_row(
+                if role == Role::Dealer { Role::Pone } else { Role::Dealer },
+                observation.opponent_played,
+                vec![(hand(&[(0, 1)]), 5), (hand(&[(4, 1)]), 60), (hand(&[(12, 1)]), 17)],
+            );
+            let mut cached = Model91Policy::new_with_evidence_cache(Some(beliefs.clone()), 0, 100_000, 0);
+            cached.use_empirical_depletion();
+            for scores in [[0, 0], [118, 120], [120, 118], [120, 120]] {
+                for cut in [0, 4, 12] {
+                    for discards in [hand(&[(1, 2)]), hand(&[(4, 1), (12, 1)])] {
+                        observation.own_discards = discards;
+                        observation.turn_rank = Some(cut);
+                        // Skip known-card contradictions, not posterior zeroes.
+                        if opponent_available(&observation).is_err() { continue; }
+                        for likelihoods in [[1_000_000; RANKS], [1; RANKS]] {
+                            let mut fresh = Model91Policy::new(Some(beliefs.clone()), 0);
+                            fresh.use_empirical_depletion();
+                            assert_eq!(
+                                cached.choose_action_by_wp(&observation, &likelihoods, scores, &board).unwrap(),
+                                fresh.choose_action_by_wp(&observation, &likelihoods, scores, &board).unwrap(),
+                            );
+                        }
                     }
                 }
             }
@@ -1860,6 +2910,202 @@ mod tests {
     }
 
     #[test]
+    fn empirical_depletion_conditions_surviving_hands_without_recounting_public_cards() {
+        let mut observation =
+            Model91Observation::from_state(&state(hand(&[(0, 1), (4, 2), (12, 1)])), PegSeat::Zero)
+                .unwrap();
+        observation.opponent_played = hand(&[(0, 1)]);
+        observation.own_discards = hand(&[(4, 1), (1, 1)]);
+        let pair = hand(&[(4, 2), (12, 1)]);
+        let single = hand(&[(4, 1), (12, 2)]);
+        let impossible = hand(&[(4, 3)]);
+        let mut beliefs = Model91EmpiricalBeliefs::default();
+        beliefs
+            .insert(
+                Role::Dealer,
+                observation.opponent_played,
+                vec![(pair, 60), (single, 60), (impossible, 60)],
+            )
+            .unwrap();
+        let neutral = [1_000_000; RANKS];
+        let mut frozen = Model91Policy::new(Some(beliefs.clone()), 0);
+        assert_eq!(
+            frozen.opponent_hands(&observation, &neutral).unwrap(),
+            vec![(pair, 60.0), (single, 60.0)]
+        );
+        let mut corrected = Model91Policy::new(Some(beliefs), 0);
+        corrected.use_empirical_depletion();
+        assert_eq!(
+            corrected.opponent_hands(&observation, &neutral).unwrap(),
+            vec![(pair, 10.0), (single, 30.0)]
+        );
+
+        // An empirical row with one public five already has only three unseen
+        // fives in its baseline. Two additional known fives leave one of three.
+        observation.opponent_played = hand(&[(4, 1)]);
+        let baseline = empirical_baseline(&observation);
+        assert_eq!(baseline[4], 3);
+        assert_eq!(
+            depleted_empirical_weight(60.0, &single, &baseline, &baseline),
+            60.0
+        );
+        assert_eq!(
+            depleted_empirical_weight(
+                60.0,
+                &single,
+                &opponent_available(&observation).unwrap(),
+                &baseline
+            ),
+            20.0
+        );
+    }
+
+    #[test]
+    fn empirical_depletion_evidence_cache_matches_uncached_policy() {
+        let mut baseline =
+            Model91Observation::from_state(&state(hand(&[(0, 1), (4, 2), (12, 1)])), PegSeat::Zero)
+                .unwrap();
+        baseline.own_discards = [0; RANKS];
+        baseline.turn_rank = None;
+        // Exercise both the opening prior and an empirical played-card row.
+        for played in [[0; RANKS], hand(&[(4, 1)])] {
+            baseline.opponent_played = played;
+            let size = baseline.opponent_remaining_count().unwrap();
+            let mut beliefs = Model91EmpiricalBeliefs::default();
+            beliefs.replace_row(
+                Role::Dealer,
+                played,
+                vec![
+                    (hand(&[(4, 2), (12, size - 2)]), 60),
+                    (hand(&[(4, 1), (12, size - 1)]), 60),
+                ],
+            );
+            let mut cached =
+                Model91Policy::new_with_evidence_cache(Some(beliefs.clone()), 0, 100_000, 0);
+            cached.use_empirical_depletion();
+            cached.choose_action(&baseline).unwrap();
+            for cut in [4, 12] {
+                let mut observation = baseline;
+                observation.own_discards = hand(&[(4, 1), (1, 1)]);
+                observation.turn_rank = Some(cut);
+                let mut likelihoods = [1_000_000; RANKS];
+                likelihoods[12] = 250_000;
+                let mut uncached = Model91Policy::new(Some(beliefs.clone()), 0);
+                uncached.use_empirical_depletion();
+                let expected = uncached
+                    .choose_action_with_opponent_likelihood_and_net_ev(&observation, &likelihoods)
+                    .unwrap();
+                let actual = cached
+                    .choose_action_with_opponent_likelihood_and_net_ev(&observation, &likelihoods)
+                    .unwrap();
+                assert_eq!(actual.action, expected.action);
+                assert!((actual.net_ev.unwrap() - expected.net_ev.unwrap()).abs() < 1e-12);
+            }
+            assert_eq!(cached.stats().evidence_cache_hits, 2);
+        }
+    }
+
+    #[test]
+    fn opening_keep_prior_preserves_role_weights_and_conditions_known_cards() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/model132-keep-prior.json");
+        let raw: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let mut beliefs = Model91EmpiricalBeliefs::default();
+        beliefs.load_opening_keep_prior(&path).unwrap();
+        let mut observation = Model91Observation::from_state(
+            &state(hand(&[(1, 1), (2, 1), (3, 1), (7, 1)])),
+            PegSeat::Zero,
+        )
+        .unwrap();
+        let mut policy = Model91Policy::new(Some(beliefs), 0);
+        policy.use_empirical_depletion();
+        for (own_role, opponent_role, count) in
+            [(Role::Dealer, "pone", 1798), (Role::Pone, "dealer", 1740)]
+        {
+            observation.role = own_role;
+            let rows = raw["roles"][opponent_role].as_object().unwrap();
+            assert_eq!(rows.len(), count);
+            let available = opponent_available(&observation).unwrap();
+            let mut expected: Vec<_> = rows
+                .iter()
+                .filter_map(|(key, weight)| {
+                    let ranks = rank_counts_from_key(key).unwrap();
+                    let combinations = rank_combination_count(&ranks, &available);
+                    (combinations > 0.0).then(|| {
+                        (
+                            ranks,
+                            weight.as_u64().unwrap() as f64
+                                * (combinations / rank_combination_count(&ranks, &[4; RANKS])),
+                        )
+                    })
+                })
+                .collect();
+            expected.sort_by_key(|(ranks, _)| *ranks);
+            let actual = policy
+                .opponent_hands(&observation, &[1_000_000; RANKS])
+                .unwrap();
+            assert_eq!(actual.len(), expected.len());
+            for ((ranks, weight), (expected_ranks, expected_weight)) in actual.iter().zip(expected)
+            {
+                assert_eq!(*ranks, expected_ranks);
+                assert!((weight - expected_weight).abs() < expected_weight * 1e-14);
+            }
+            let historical = Model91Policy::new(None, 0)
+                .opponent_hands(&observation, &[1_000_000; RANKS])
+                .unwrap();
+            assert_ne!(actual, historical);
+        }
+    }
+
+    #[test]
+    fn indexed_beliefs_preserve_every_packed_row_and_compatibility_filter() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        for (name, complete) in [("model91-pegging-beliefs.bin", false), ("model203-hold.bin", true)] {
+            let path = directory.join(name);
+            let beliefs = Model91EmpiricalBeliefs::load_binary(&path, complete).unwrap();
+            let bytes = fs::read(path).unwrap();
+            let count = read_u32(&bytes, 12).unwrap() as usize;
+            let start = BELIEF_HEADER_BYTES + count * BELIEF_ENTRY_BYTES;
+            for entry in 0..count {
+                let offset = BELIEF_HEADER_BYTES + entry * BELIEF_ENTRY_BYTES;
+                let role = if bytes[offset] == 0 { Role::Dealer } else { Role::Pone };
+                let played: [u8; RANKS] = bytes[offset + 1..offset + 14].try_into().unwrap();
+                let first = read_u32(&bytes, offset + 14).unwrap() as usize;
+                let rows = read_u32(&bytes, offset + 18).unwrap() as usize;
+                let size = 4 - rank_count_total(&played);
+                let raw: Vec<_> = (first..first + rows).map(|record| {
+                    let at = start + record * BELIEF_RECORD_BYTES;
+                    let hand: [u8; RANKS] = bytes[at..at + RANKS].try_into().unwrap();
+                    (hand, read_u64(&bytes, at + RANKS).unwrap() as f64)
+                }).collect();
+                for available in [[4; RANKS], std::array::from_fn(|r| (r % 5) as u8)] {
+                    let expected: Vec<_> = raw.iter().copied().filter(|(h, _)| {
+                        rank_count_total(h) == size && h.iter().zip(available).all(|(n, a)| *n <= a)
+                    }).collect();
+                    let actual: Vec<_> = beliefs.hands(role, played, &available, size).unwrap().collect();
+                    assert_eq!(actual, expected, "{name}, context {entry}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn belief_clones_share_rows_but_later_insertion_is_isolated() {
+        let mut original = Model91EmpiricalBeliefs::default();
+        let first = hand(&[(0, 1)]);
+        let second = hand(&[(1, 1)]);
+        original.insert(Role::Dealer, first, vec![(hand(&[(4, 3)]), 7)]).unwrap();
+        let mut cloned = original.clone();
+        assert!(Arc::ptr_eq(&original.entries, &cloned.entries));
+        cloned.insert(Role::Dealer, second, Vec::new()).unwrap();
+        assert!(!Arc::ptr_eq(&original.entries, &cloned.entries));
+        assert!(original.hands(Role::Dealer, second, &[4; RANKS], 3).is_none());
+        assert_eq!(cloned.hands(Role::Dealer, second, &[4; RANKS], 3).unwrap().count(), 0);
+        assert!(original.hands(Role::Dealer, [4; RANKS], &[4; RANKS], 0).is_none());
+        assert_eq!(original.hands(Role::Dealer, first, &[4; RANKS], 3).unwrap().collect::<Vec<_>>(),
+            cloned.hands(Role::Dealer, first, &[4; RANKS], 3).unwrap().collect::<Vec<_>>());
+    }
+
+    #[test]
     fn empirical_belief_filters_impossible_hidden_hands() {
         let mut beliefs = Model91EmpiricalBeliefs::default();
         beliefs
@@ -1872,7 +3118,7 @@ mod tests {
         let available = hand(&[(4, 2), (12, 4)]);
         let hands = beliefs
             .hands(Role::Dealer, hand(&[(0, 1)]), &available, 3)
-            .unwrap();
+            .unwrap().collect::<Vec<_>>();
         assert_eq!(hands, vec![(hand(&[(12, 3)]), 11.0)]);
     }
 
@@ -1899,8 +3145,202 @@ mod tests {
         let beliefs = Model91EmpiricalBeliefs::load(&path).unwrap();
         let rows = beliefs
             .hands(Role::Dealer, played, &[4_u8; RANKS], 3)
-            .unwrap();
+            .unwrap().collect::<Vec<_>>();
         assert_eq!(rows, vec![(remaining, 17.0)]);
         fs::remove_file(path).unwrap();
     }
+    #[test]
+    fn batch_weight_kernel_matches_scalar_bits() {
+        let available: Vec<_> = (0..32)
+            .map(|lane| {
+                if lane == 0 {
+                    [4; RANKS]
+                } else {
+                    std::array::from_fn(|rank| ((rank * 3 + lane) % 5) as u8)
+                }
+            })
+            .collect();
+        let factors = [0, 1, 2, 333_333, 1_000_000, 1_234_567, u32::MAX];
+        let likelihoods: Vec<[u32; RANKS]> = (0..32)
+            .map(|lane| std::array::from_fn(|rank| factors[(rank + lane) % factors.len()]))
+            .collect();
+        let references: Vec<_> = likelihoods.iter().collect();
+        let bases = [
+            0.0,
+            -0.0,
+            0.123456789,
+            f64::MIN_POSITIVE,
+            1e-200,
+            1e200,
+            1234567.0,
+        ];
+        for mode in [
+            Model91EvidenceWeightMode::Physical,
+            Model91EvidenceWeightMode::Empirical,
+            Model91EvidenceWeightMode::DepletedEmpirical([4; RANKS]),
+            Model91EvidenceWeightMode::DepletedEmpirical(std::array::from_fn(|rank| (rank % 5) as u8)),
+        ] {
+            for size in 0..=4 {
+                let hands = enumerate_rank_hands(&[4; RANKS], size)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (ranks, _))| {
+                        Model91EvidenceHand::new(ranks, bases[index % bases.len()], mode)
+                    })
+                    .collect();
+                let evidence = Model91ActionEvidence::<f64> {
+                    hands,
+                    legal: Vec::new(),
+                    outcomes: Vec::new(),
+                    weight_mode: mode,
+                };
+                let actual = batch_evidence_weights(&evidence, &available, &references);
+                for (hand_index, hand) in evidence.hands.iter().enumerate() {
+                    for lane in 0..available.len() {
+                        let expected =
+                            evidence_hand_weight(hand, mode, &available[lane], &likelihoods[lane]);
+                        assert_eq!(
+                            actual[hand_index * available.len() + lane].to_bits(),
+                            expected.to_bits(),
+                            "size={size} hand={hand_index} lane={lane} mode={mode:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn batch_choices_preserve_private_cards_likelihoods_roles_and_scores() {
+        let board = BoardWinMatrix::from_function(|_, a, b| {
+            (0.5 + (f64::from(a) - f64::from(b)) / 242.0).clamp(0.0, 1.0)
+        });
+        for role in [Role::Dealer, Role::Pone] {
+            let mut observation = Model91Observation::from_public_state(
+                role,
+                hand(&[(0, 1), (4, 1)]),
+                hand(&[(2, 1), (7, 1)]),
+                hand(&[(4, 2), (12, 1)]),
+                [0; RANKS],
+                None,
+                &[],
+                0,
+                None,
+                None,
+            )
+            .unwrap();
+            let mut beliefs = Model91EmpiricalBeliefs::default();
+            beliefs.replace_row(
+                if role == Role::Dealer {
+                    Role::Pone
+                } else {
+                    Role::Dealer
+                },
+                observation.opponent_played,
+                vec![
+                    (hand(&[(0, 1)]), 5),
+                    (hand(&[(4, 1)]), 60),
+                    (hand(&[(12, 1)]), 17),
+                ],
+            );
+            let mut queries = Vec::new();
+            for scores in [[0, 0], [118, 120], [120, 118], [120, 120]] {
+                for cut in [0, 4, 12] {
+                    for discards in [hand(&[(1, 2)]), hand(&[(4, 1), (12, 1)])] {
+                        observation.own_discards = discards;
+                        observation.turn_rank = Some(cut);
+                        if opponent_available(&observation).is_err() {
+                            continue;
+                        }
+                        for likelihoods in [[1_000_000; RANKS], [1; RANKS], [0; RANKS]] {
+                            queries.push((observation, likelihoods, scores));
+                        }
+                    }
+                }
+            }
+            // Exact duplicates exercise in-batch coalescing; each role also exercises action memo hits.
+            queries.extend(queries.clone());
+            for cache_role in [Role::Pone, Role::Dealer] {
+                let make = || {
+                    let mut p =
+                        Model91Policy::new_with_evidence_cache(Some(beliefs.clone()), 4, 100_000, 0);
+                    p.use_empirical_depletion();
+                    p.cache_wp_actions_for_role(cache_role);
+                    p
+                };
+                let mut scalar = make();
+                let mut batched = make();
+                batched.use_short_legal_rank_check();
+                // Zero support must remain the same error, including the physical fallback.
+                let supported: Vec<_> = queries
+                    .iter()
+                    .copied()
+                    .filter(|q| q.1 != [0; RANKS])
+                    .collect();
+                for chunk in supported.chunks(32) {
+                    let expected: Vec<_> = chunk
+                        .iter()
+                        .map(|(o, l, s)| scalar.choose_action_by_wp(o, l, *s, &board).unwrap())
+                        .collect();
+                    assert_eq!(
+                        batched.choose_actions_by_wp(chunk, &board).unwrap(),
+                        expected
+                    );
+                }
+                for query in queries.iter().filter(|q| q.1 == [0; RANKS]).take(4) {
+                    assert_eq!(
+                        batched
+                            .choose_actions_by_wp(&[*query, *query], &board)
+                            .unwrap_err(),
+                        scalar
+                            .choose_action_by_wp(&query.0, &query.1, query.2, &board)
+                            .unwrap_err()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn batch_empty_empirical_population_keeps_physical_fallback() {
+        let board = BoardWinMatrix::from_function(|_, a, b| {
+            (0.5 + (f64::from(a) - f64::from(b)) / 242.0).clamp(0.0, 1.0)
+        });
+        let mut first = Model91Observation::from_public_state(
+            Role::Pone,
+            hand(&[(0, 1), (4, 1)]),
+            hand(&[(2, 1), (7, 1)]),
+            hand(&[(4, 2), (12, 1)]),
+            hand(&[(1, 2)]),
+            None,
+            &[],
+            0,
+            None,
+            None,
+        )
+        .unwrap();
+        let mut beliefs = Model91EmpiricalBeliefs::default();
+        beliefs.replace_row(Role::Dealer, first.opponent_played, Vec::new());
+        let queries = [(first, [1_000_000; RANKS], [118, 120]), {
+            first.own_discards = hand(&[(6, 2)]);
+            (first, [1; RANKS], [118, 120])
+        }];
+        let make = || {
+            let mut policy =
+                Model91Policy::new_with_evidence_cache(Some(beliefs.clone()), 0, 100_000, 0);
+            policy.use_empirical_depletion();
+            policy
+        };
+        let mut scalar = make();
+        let mut batched = make();
+        let expected: Vec<_> = queries
+            .iter()
+            .map(|(o, l, s)| scalar.choose_action_by_wp(o, l, *s, &board).unwrap())
+            .collect();
+        assert_eq!(
+            batched.choose_actions_by_wp(&queries, &board).unwrap(),
+            expected
+        );
+    }
+
 }

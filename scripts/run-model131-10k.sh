@@ -14,7 +14,7 @@ MODEL131_ASSET="${ROOT_DIR}/rust/cribbage-shadow-engine/assets/model131-discard-
 
 if [[ ! -x "$RUNNER" ]]; then
   echo "Missing release runner: $RUNNER" >&2
-  echo "Run: cargo build --manifest-path rust/Cargo.toml --release -p cribbage-runner" >&2
+  echo "Run: npm run build:benchmark -- --model schell_table-peg_table-13.1" >&2
   exit 1
 fi
 for asset in "$MODEL130_ASSET" "$MODEL131_ASSET"; do

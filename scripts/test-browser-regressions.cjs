@@ -878,7 +878,7 @@ async function testPuttingTogetherDiscards(browser, baseUrl, pegCard = "5d", red
 }
 
 function acePeggingFixture() {
-  const model = "schell_table-peg_table-13.23";
+  const model = "schell_table-peg_table-28.3.fast";
   const card = (id, rank, value) => ({ id, rank, value, suit: "clubs", symbol: "♣", label: `${rank}♣` });
   const hand = [card(0, "A", 1), card(4, "2", 2), card(8, "3", 3), card(12, "4", 4)];
   const lead = { ...card(16, "5", 5), owner: "ai" };

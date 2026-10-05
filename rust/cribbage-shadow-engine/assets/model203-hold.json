@@ -1,0 +1,351 @@
+{
+  "approvedStrongVersions": [
+    "10.0",
+    "11.0",
+    "11.1",
+    "12.0",
+    "13.0",
+    "13.1",
+    "13.2",
+    "13.21",
+    "13.215",
+    "13.22",
+    "13.23",
+    "14.3",
+    "14.8",
+    "14.8.1",
+    "20.0",
+    "20.1",
+    "20.2",
+    "20.3",
+    "7.0",
+    "8.0",
+    "9.0",
+    "9.1",
+    "9.11"
+  ],
+  "bytes": 945770,
+  "contexts": 1120,
+  "evidenceObservationsByRoleAndPrefixLength": {
+    "dealer": {
+      "0": 2329127,
+      "1": 2283193,
+      "2": 2278961,
+      "3": 2274951
+    },
+    "pone": {
+      "0": 2331583,
+      "1": 2285629,
+      "2": 2284137,
+      "3": 2278879
+    }
+  },
+  "evidenceSha256": "0fe217bee05937762279a047d09227c7ae8655a193b87e998e9ab791a9647a1c",
+  "legacySource": {
+    "excludedWrongHandSizeObservations": {
+      "dealer": 73633,
+      "pone": 70450
+    },
+    "filters": {
+      "compactHandRowsMatched": 1486749,
+      "dbPath": "benchmarks/ai-db/cribbage-games.sqlite",
+      "includeExcluded": false,
+      "limit": null,
+      "models": [
+        "schell_table-peg_table-7.0",
+        "schell_table-peg_table-8.0",
+        "schell_table-peg_table-9.0",
+        "schell_table-peg_table-10.0",
+        "schell_table-peg_table-11.0",
+        "schell_table-peg_table-11.1",
+        "schell_table-peg_table-12.0"
+      ]
+    },
+    "gitPath": "web/src/models/schell_table-peg_table-13.0/pegging-remaining-hand-distribution.json",
+    "gitRevision": "58e44d4^",
+    "kind": "verified-legacy",
+    "sha256": "19beb2b634ff53c889f59bedb67bb0f349a849bdabc868d89032dd305dc0c805",
+    "sourceGames": {
+      "gameCount": 170905,
+      "identity": "run_id, matchup_id, game_index, game_id",
+      "runs": [
+        {
+          "games": 1,
+          "left_engine": "schell_table-peg_table-10.0",
+          "matchup_id": "schell_table-peg_table-10.0__vs__schell_table-peg_table-11.0__w1-g1-old1536",
+          "maxGameIndex": 0,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-11.0",
+          "run_id": "component-ev-log-smoke-20260615"
+        },
+        {
+          "games": 2,
+          "left_engine": "schell_table-peg_table-11.0",
+          "matchup_id": "schell_table-peg_table-11.0__vs__schell_table-peg_table-10.0__w1-g2-old768",
+          "maxGameIndex": 1,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-10.0",
+          "run_id": "component-log-smoke-20260614"
+        },
+        {
+          "games": 2,
+          "left_engine": "schell_table-peg_table-8.0",
+          "matchup_id": "schell_table-peg_table-8.0__vs__schell_table-peg_table-7.0__w1-g2-old768",
+          "maxGameIndex": 1,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-7.0",
+          "run_id": "sanity-8-vs-7-ev"
+        },
+        {
+          "games": 2,
+          "left_engine": "schell_table-peg_table-8.0",
+          "matchup_id": "schell_table-peg_table-8.0__vs__schell_table-peg_table-7.0__w1-g2-old768",
+          "maxGameIndex": 1,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-7.0",
+          "run_id": "sanity-8-vs-7-ev-optimized"
+        },
+        {
+          "games": 2325,
+          "left_engine": "schell_table-peg_table-10.0",
+          "matchup_id": "schell_table-peg_table-10.0__vs__schell_table-peg_table-11.0__w3-g30000-old1536",
+          "maxGameIndex": 2324,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-11.0",
+          "run_id": "schell-10-vs-11-30k-components-20260614"
+        },
+        {
+          "games": 14700,
+          "left_engine": "schell_table-peg_table-10.0",
+          "matchup_id": "schell_table-peg_table-10.0__vs__schell_table-peg_table-11.0__w3-g30000-old1536",
+          "maxGameIndex": 14699,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-11.0",
+          "run_id": "schell-10-vs-11-30k-split-ev-components-20260615"
+        },
+        {
+          "games": 5319,
+          "left_engine": "schell_table-peg_table-10.0",
+          "matchup_id": "schell_table-peg_table-10.0__vs__schell_table-peg_table-11.1__w8-g10000-old1536",
+          "maxGameIndex": 5318,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-11.1",
+          "run_id": "schell-10-vs-11.1-10k-8w-20260615"
+        },
+        {
+          "games": 229,
+          "left_engine": "schell_table-peg_table-10.0",
+          "matchup_id": "schell_table-peg_table-10.0__vs__schell_table-peg_table-11.1__w10-g10000-old1536",
+          "maxGameIndex": 228,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-11.1",
+          "run_id": "schell-10-vs-11.1-10k-batch1-20260615"
+        },
+        {
+          "games": 800,
+          "left_engine": "schell_table-peg_table-11.0",
+          "matchup_id": "schell_table-peg_table-11.0__vs__schell_table-peg_table-10.0__w2-g20000-old768",
+          "maxGameIndex": 799,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-10.0",
+          "run_id": "schell-11-vs-10-20k-20260614"
+        },
+        {
+          "games": 2050,
+          "left_engine": "schell_table-peg_table-11.0",
+          "matchup_id": "schell_table-peg_table-11.0__vs__schell_table-peg_table-10.0__w3-g20000-old1536",
+          "maxGameIndex": 2049,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-10.0",
+          "run_id": "schell-11-vs-10-20k-calibrated-20260614"
+        },
+        {
+          "games": 36,
+          "left_engine": "schell_table-peg_table-11.0",
+          "matchup_id": "schell_table-peg_table-11.0__vs__schell_table-peg_table-10.0__w1-g36-old1536",
+          "maxGameIndex": 35,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-10.0",
+          "run_id": "schell-11-vs-10-calibration-20260614"
+        },
+        {
+          "games": 36,
+          "left_engine": "schell_table-peg_table-11.0",
+          "matchup_id": "schell_table-peg_table-11.0__vs__schell_table-peg_table-10.0__w1-g36-old768",
+          "maxGameIndex": 35,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-10.0",
+          "run_id": "schell-11-vs-10-calibration-20260614"
+        },
+        {
+          "games": 36,
+          "left_engine": "schell_table-peg_table-11.0",
+          "matchup_id": "schell_table-peg_table-11.0__vs__schell_table-peg_table-10.0__w2-g36-old1536",
+          "maxGameIndex": 35,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-10.0",
+          "run_id": "schell-11-vs-10-calibration-20260614"
+        },
+        {
+          "games": 36,
+          "left_engine": "schell_table-peg_table-11.0",
+          "matchup_id": "schell_table-peg_table-11.0__vs__schell_table-peg_table-10.0__w2-g36-old768",
+          "maxGameIndex": 35,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-10.0",
+          "run_id": "schell-11-vs-10-calibration-20260614"
+        },
+        {
+          "games": 36,
+          "left_engine": "schell_table-peg_table-11.0",
+          "matchup_id": "schell_table-peg_table-11.0__vs__schell_table-peg_table-10.0__w3-g36-old1536",
+          "maxGameIndex": 35,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-10.0",
+          "run_id": "schell-11-vs-10-calibration-20260614"
+        },
+        {
+          "games": 36,
+          "left_engine": "schell_table-peg_table-11.0",
+          "matchup_id": "schell_table-peg_table-11.0__vs__schell_table-peg_table-10.0__w3-g36-old768",
+          "maxGameIndex": 35,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-10.0",
+          "run_id": "schell-11-vs-10-calibration-20260614"
+        },
+        {
+          "games": 36,
+          "left_engine": "schell_table-peg_table-11.0",
+          "matchup_id": "schell_table-peg_table-11.0__vs__schell_table-peg_table-10.0__w4-g36-old1536",
+          "maxGameIndex": 35,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-10.0",
+          "run_id": "schell-11-vs-10-calibration-20260614"
+        },
+        {
+          "games": 36,
+          "left_engine": "schell_table-peg_table-11.0",
+          "matchup_id": "schell_table-peg_table-11.0__vs__schell_table-peg_table-10.0__w4-g36-old768",
+          "maxGameIndex": 35,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-10.0",
+          "run_id": "schell-11-vs-10-calibration-20260614"
+        },
+        {
+          "games": 9512,
+          "left_engine": "schell_table-peg_table-11.1",
+          "matchup_id": "schell_table-peg_table-11.1__vs__schell_table-peg_table-12.0__w6-g10000-old1024",
+          "maxGameIndex": 9511,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-12.0",
+          "run_id": "schell-11.1-vs-12.0-10k-20260615"
+        },
+        {
+          "games": 70500,
+          "left_engine": "schell_table-peg_table-7.0",
+          "matchup_id": "schell_table-peg_table-7.0__vs__schell_table-peg_table-7.0__w4-g1000000-old768",
+          "maxGameIndex": 70499,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-7.0",
+          "run_id": "schell-7-7-1000k-compact-20260613"
+        },
+        {
+          "games": 3000,
+          "left_engine": "schell_table-peg_table-7.0",
+          "matchup_id": "schell_table-peg_table-7.0__vs__schell_table-peg_table-7.0__w4-g1000000-old768",
+          "maxGameIndex": 2999,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-7.0",
+          "run_id": "schell-7-7-1000k-db-20260612"
+        },
+        {
+          "games": 15000,
+          "left_engine": "schell_table-peg_table-7.0",
+          "matchup_id": "schell_table-peg_table-7.0__vs__schell_table-peg_table-7.0__w4-g1000000-old768",
+          "maxGameIndex": 14999,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-7.0",
+          "run_id": "schell-7-7-1000k-events-20260612"
+        },
+        {
+          "games": 5200,
+          "left_engine": "schell_table-peg_table-8.0",
+          "matchup_id": "schell_table-peg_table-8.0__vs__schell_table-peg_table-7.0__w6-g10000-old768",
+          "maxGameIndex": 5199,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-7.0",
+          "run_id": "schell-8-vs-7-10k-20260613"
+        },
+        {
+          "games": 10000,
+          "left_engine": "schell_table-peg_table-8.0",
+          "matchup_id": "schell_table-peg_table-8.0__vs__schell_table-peg_table-7.0__w6-g10000-old768",
+          "maxGameIndex": 9999,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-7.0",
+          "run_id": "schell-8-vs-7-10k-ev2-20260613"
+        },
+        {
+          "games": 20000,
+          "left_engine": "schell_table-peg_table-9.0",
+          "matchup_id": "schell_table-peg_table-9.0__vs__schell_table-peg_table-10.0__w4-g20000-old1024",
+          "maxGameIndex": 19999,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-10.0",
+          "run_id": "schell-9-vs-10-20k-20260614"
+        },
+        {
+          "games": 1975,
+          "left_engine": "schell_table-peg_table-9.0",
+          "matchup_id": "schell_table-peg_table-9.0__vs__schell_table-peg_table-8.0__w6-g10000-old768",
+          "maxGameIndex": 1974,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-8.0",
+          "run_id": "schell-9-vs-8-10k-20260613"
+        },
+        {
+          "games": 10000,
+          "left_engine": "schell_table-peg_table-9.0",
+          "matchup_id": "schell_table-peg_table-9.0__vs__schell_table-peg_table-8.0__w6-g10000-old768",
+          "maxGameIndex": 9999,
+          "minGameIndex": 0,
+          "right_engine": "schell_table-peg_table-8.0",
+          "run_id": "schell-9-vs-8-10k-remaining-hands-20260613"
+        }
+      ]
+    }
+  },
+  "maximumPackingProbabilityError": 2.1094237467877974e-15,
+  "model": "20.3",
+  "newActorHandsByModel": {
+    "schell_table-peg_table-13.0": 485244,
+    "schell_table-peg_table-13.1": 200088,
+    "schell_table-peg_table-13.215": 72273,
+    "schell_table-peg_table-13.23": 133438,
+    "schell_table-peg_table-20.0": 183899,
+    "schell_table-peg_table-20.1": 60051,
+    "schell_table-peg_table-20.2": 62683,
+    "schell_table-peg_table-9.0": 265535,
+    "schell_table-peg_table-9.1": 183116,
+    "schell_table-peg_table-9.11": 90358
+  },
+  "newCompletedGames": 121996,
+  "olderModelEvidenceWeight": 1.0,
+  "openingBackoffSha256": "ce5f9e6fc81854d5a6cab52a539906298e65c70861afa54ddfaf94eb4c09b4a4",
+  "openingSupportPerRole": {
+    "dealer": 1820,
+    "pone": 1820
+  },
+  "physicalPriorMixture": 0.001,
+  "probabilityWeightScale": 1000000000000000,
+  "recencyWeighting": "none; retained raw counts accumulate once",
+  "records": 43862,
+  "schemaVersion": 1,
+  "sha256": "192d43b7712e1f16bf0ba0991df14aaf646c2a44cd43f7e917d6ac8689cc375e",
+  "smoothingStrengthByPrefixLength": [
+    100000,
+    1000000,
+    100000,
+    10000
+  ]
+}

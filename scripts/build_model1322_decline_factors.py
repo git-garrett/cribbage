@@ -46,9 +46,6 @@ EXHAUSTIVE_PEGGING_MODELS = frozenset(
         "14.3",
         "14.8",
         "14.8.1",
-        "15.0",
-        "15.1",
-        "15.2",
     )
 )
 
@@ -201,6 +198,14 @@ def compact_database_counts(
     try:
         hand_columns = table_columns(connection, "compact_hands")
         play_columns = table_columns(connection, "compact_peg_plays")
+        game_columns = table_columns(connection, "compact_games")
+        game_engines = {}
+        if {"game_id", "left_engine", "right_engine"}.issubset(game_columns):
+            game_engines = {game_id: (left, right) for game_id, left, right in connection.execute(
+                "SELECT game_id,left_engine,right_engine FROM compact_games"
+            )}
+        if "model" not in play_columns and not game_engines:
+            raise ValueError(f"{path}: model identity is required by ADR-0002")
         if not {"game_id", "hand_number", "left_keep", "right_keep"}.issubset(hand_columns):
             raise ValueError(f"{path}: compact_hands lacks required keep columns")
         dealt_fields = (
@@ -252,9 +257,8 @@ def compact_database_counts(
                     known[actor][rank] + public_played[1 - actor][rank]
                     for rank in range(13)
                 ]
-                model_is_allowed = (
-                    model is None and "model" not in play_columns
-                ) or model in EXHAUSTIVE_PEGGING_MODELS
+                actor_model = model or game_engines.get(game_id, (None, None))[actor]
+                model_is_allowed = actor_model in EXHAUSTIVE_PEGGING_MODELS
                 if event_key not in seen_events and model_is_allowed:
                     observe_action(
                         counts,

@@ -38,6 +38,14 @@ class ReleaseBuildTests(unittest.TestCase):
                     (output/name).write_text(target.name)
             elif args[0] == 'merger':
                 Path(args[-1]).write_text('fresh profile')
+            elif Path(args[0]).name == 'build-model283-opening':
+                result = {}
+                for kind, directory in [('full', args[2]), ('production', args[7])]:
+                    path = Path(directory) / 'shard.bin'
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(kind)
+                    result[kind] = {'path': str(path)}
+                return subprocess.CompletedProcess(args, 0, stdout=json.dumps(result))
             else:
                 self.assertEqual(Path(args[0]).name, 'pgo-workload')
                 is_optimized = '/optimized/' in args[0]
@@ -48,6 +56,20 @@ class ReleaseBuildTests(unittest.TestCase):
         with patch.object(BUILD, 'run', side_effect=fake_run), patch.object(BUILD, 'profile_tool', return_value='merger'), patch.object(BUILD, 'inputs', side_effect=stamps), patch.object(BUILD.sys, 'platform', platform), patch.dict(BUILD.os.environ, {}, clear=True):
             BUILD.build(self.options(root, kind=kind, **options))
         return calls
+
+    def test_embedded_priors_are_fingerprinted_with_external_runtime_assets(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)/'source'; runtime = Path(d)/'runtime'
+            for name in ['rust/Cargo.toml', 'rust/Cargo.lock', 'scripts/build_rust_release.py', 'corpus.json',
+                         'rust/cribbage-shadow-engine/assets/model206-root-ordering.json']:
+                f = root/name; f.parent.mkdir(parents=True, exist_ok=True); f.write_text('{}')
+            (runtime/'rust/cribbage-shadow-engine/assets').mkdir(parents=True)
+            prior = (root/'rust/cribbage-shadow-engine/assets/model206-root-ordering.json').resolve()
+            before = BUILD.inputs(root, runtime, root/'corpus.json')
+            self.assertIn(str(prior), before)
+            prior.write_text('{"changed":true}')
+            after = BUILD.inputs(root, runtime, root/'corpus.json')
+            self.assertNotEqual(before[str(prior)], after[str(prior)])
 
     def test_mac_profiles_checks_then_publishes(self):
         with tempfile.TemporaryDirectory() as d:
@@ -69,7 +91,8 @@ class ReleaseBuildTests(unittest.TestCase):
             self.assertTrue(all(args[-1]=='reviews' for args,_ in calls if Path(args[0]).name=='pgo-workload'))
 
     def test_pgo_builds_only_workload_until_optimized_stage(self):
-        for kind, (_, binary) in [(kind, targets[0]) for kind, targets in BUILD.TARGETS.items()]:
+        for kind, targets in BUILD.TARGETS.items():
+            binary = targets[0][1]
             for compact in [False, True]:
                 with self.subTest(kind=kind, compact=compact), tempfile.TemporaryDirectory() as d:
                     root = Path(d)
@@ -77,14 +100,15 @@ class ReleaseBuildTests(unittest.TestCase):
                     commands = [a for a, _ in calls if a[:2] == ['cargo', 'build']]
                     binaries = [[a[i + 1] for i, arg in enumerate(a) if arg == '--bin']
                                 for a in commands]
-                    self.assertEqual(binaries[:2], [['pgo-workload'], ['pgo-workload']])
-                    self.assertEqual(set(binaries[2]), {binary, 'pgo-workload'})
+                    training_bins = ['pgo-workload'] + (['build-model283-opening'] if kind == 'opening' else [])
+                    self.assertEqual(binaries[:2], [training_bins, training_bins])
+                    self.assertEqual(set(binaries[2]), {name for _, name in targets} | {'pgo-workload'})
                     self.assertTrue((root / 'target/release' / binary).exists())
                     if compact:
                         for stage in ['baseline', 'instrumented']:
                             paths = list((root / 'target/pgo' / kind).glob('run-*/' + stage))
                             self.assertEqual(len(paths), 1)
-                            self.assertEqual([p.name for p in paths[0].iterdir()], ['pgo-workload'])
+                            self.assertEqual(set(p.name for p in paths[0].iterdir()), set(training_bins))
 
     def test_each_build_uses_a_new_profile_path(self):
         with tempfile.TemporaryDirectory() as d:

@@ -1,0 +1,44 @@
+{
+  "evidenceSha256": "7feedb1dedac7da43e52691341330ee76991e61a01b013dc1afc2c187018d84b",
+  "factors": {
+    "fourOfAKindAfterPairRoyal": [
+      1549,
+      11124
+    ],
+    "fourPlusCardRun": [
+      49293,
+      34308
+    ],
+    "pair": [
+      161273,
+      108751,
+      93980
+    ],
+    "pairRoyalAfterPair": [
+      20574,
+      19186
+    ],
+    "safePair": [
+      8109,
+      37807,
+      8856
+    ],
+    "safePairRoyal": [
+      5640,
+      1561
+    ],
+    "threeCardRun": [
+      88481,
+      56410
+    ]
+  },
+  "modelVersion": "20.3",
+  "schemaVersion": 2,
+  "selectionPolicy": "strategic-pegging-v1",
+  "smoothing": {
+    "baseAlpha": 0.5,
+    "baseBeta": 0.5,
+    "categoryPriorStrength": 1,
+    "minimumPpm": 1
+  }
+}

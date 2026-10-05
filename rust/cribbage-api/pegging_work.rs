@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use cribbage_shadow_engine::decision::{recommend_peg_for_side_with_caches, PegDecision};
+use cribbage_shadow_engine::decision::{choose_peg_for_side_with_caches, PegAction};
 use cribbage_shadow_engine::game::CribbageGame;
 use cribbage_shadow_engine::game::Phase;
 use cribbage_shadow_engine::model_id::ModelId;
@@ -26,12 +26,20 @@ pub(super) struct Work {
     created: Instant,
     progress: Arc<DecisionProgress>,
     finished: AtomicBool,
-    result: Mutex<Option<Result<PegDecision, String>>>,
+    result: Mutex<Option<Result<PegAction, String>>>,
     changed: Condvar,
 }
 
 impl Work {
-    fn wait(&self) -> Result<PegDecision, String> {
+    fn cancel(&self) {
+        let mut result = self.result.lock().unwrap_or_else(|e| e.into_inner());
+        self.progress.cancel();
+        *result = Some(Err(cribbage_shadow_engine::progress::CANCELLED_ERROR.into()));
+        drop(result);
+        self.changed.notify_all();
+    }
+
+    fn wait(&self) -> Result<PegAction, String> {
         let result = self.result.lock().unwrap_or_else(|e| e.into_inner());
         let result = self
             .changed
@@ -59,17 +67,24 @@ impl Work {
 }
 
 impl Registry {
+    pub(super) fn cancel(&self, session_id: &str) {
+        if let Some(job) = self.0.lock().unwrap_or_else(|e| e.into_inner()).remove(session_id) {
+            job.cancel();
+        }
+    }
+
     fn start(
         &self,
         session: &Session,
         key: String,
-        solve: impl FnOnce() -> Result<PegDecision, String> + Send + 'static,
+        solve: impl FnOnce() -> Result<PegAction, String> + Send + 'static,
     ) -> Arc<Work> {
         let mut jobs = self.0.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(job) = jobs.get(&session.id) {
             if job.key == key && job.owner == session.owner_user_id && !job.failed() {
                 return Arc::clone(job);
             }
+            if !job.finished.load(Ordering::Acquire) { job.cancel(); }
         }
         // Completed abandoned games need no long-lived cache. Never evict running work.
         jobs.retain(|_, job| {
@@ -93,11 +108,14 @@ impl Registry {
             .name("ace-opening".into())
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    worker.progress.check_cancelled()?;
                     with_progress(Arc::clone(&worker.progress), solve)
                 }))
                 .unwrap_or_else(|_| Err("Ace calculation failed; please retry.".into()));
                 let mut saved = worker.result.lock().unwrap_or_else(|e| e.into_inner());
-                *saved = Some(result);
+                // Cancellation and publication share this lock, so a late
+                // successful solve cannot overwrite the cancellation result.
+                *saved = Some(worker.progress.check_cancelled().and(result));
                 worker.finished.store(true, Ordering::Release);
                 drop(saved);
                 worker.changed.notify_all();
@@ -118,7 +136,7 @@ pub(super) fn opening_key(session: &Session) -> Option<String> {
     let game = &session.game;
     let own = game.player(AI);
     let opponent = game.player(HUMAN);
-    if session.decision_model() != ModelId::Schell1323
+    if !matches!(session.decision_model(), ModelId::Schell1323 | ModelId::Schell200 | ModelId::Schell201 | ModelId::Schell202 | ModelId::Schell203 | ModelId::Schell204 | ModelId::Schell205 | ModelId::Schell206 | ModelId::Schell207 | ModelId::Schell283 | ModelId::Schell283Fast | ModelId::Schell205Pegging | ModelId::Schell205Pegging2)
         || session.forfeited
         || session.completed_at.is_some()
         || session.waiting_for_deal_cut
@@ -156,14 +174,15 @@ pub(super) fn opening_key(session: &Session) -> Option<String> {
 pub(super) fn prepare(server: &Server, session: &Session) -> Option<Arc<Work>> {
     let key = opening_key(session)?;
     let game = session.game.clone();
+    let model = session.decision_model();
     let root = server.model_root.clone();
     let cache91 = session.model911_hand_cache.clone();
     let cache13 = session.model1323_hand_cache.clone();
     Some(server.pegging_work.start(session, key, move || {
-        recommend_peg_for_side_with_caches(
+        choose_peg_for_side_with_caches(
             &game,
             AI,
-            ModelId::Schell1323,
+            model,
             None,
             &root,
             Some(&cache91),
@@ -176,7 +195,7 @@ pub(super) fn prepare(server: &Server, session: &Session) -> Option<Arc<Work>> {
 /// fixed at deal time; only the opponent's eventual four-card count is needed.
 /// This cannot influence the already-completed discard decision or human UI.
 fn after_discard(session: &Session, cards: &[u8]) -> Option<Session> {
-    if session.decision_model() != ModelId::Schell1323
+    if !matches!(session.decision_model(), ModelId::Schell1323 | ModelId::Schell200 | ModelId::Schell201 | ModelId::Schell202 | ModelId::Schell203 | ModelId::Schell204 | ModelId::Schell205 | ModelId::Schell206 | ModelId::Schell207 | ModelId::Schell283 | ModelId::Schell283Fast | ModelId::Schell205Pegging | ModelId::Schell205Pegging2)
         || session.game.dealer != HUMAN
         || session.game.phase != Phase::Discard
         || cards.len() != 2
@@ -215,7 +234,7 @@ pub(super) fn prepare_after_discard(
 
 pub(super) struct PreparedDecision {
     key: String,
-    pub decision: PegDecision,
+    pub decision: PegAction,
 }
 
 impl PreparedDecision {
@@ -300,6 +319,35 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_preparation_executes_the_selected_ace_delegate() {
+        for dealer in [HUMAN, AI] {
+            let mut session = opening();
+            session.model = ModelId::Dynamic;
+            session.game.dealer = dealer;
+            session.game.pone = if dealer == AI { HUMAN } else { AI };
+            session.game.turn_card = cribbage_shadow_engine::cards::Card::new(9).unwrap();
+            session.game.player_mut(AI).hand = cribbage_shadow_engine::cards::cards_from_ids(&[0, 13, 26, 39]).unwrap();
+            session.game.player_mut(AI).discarded_to_crib = cribbage_shadow_engine::cards::cards_from_ids(&[1, 2]).unwrap();
+            session.game.player_mut(HUMAN).hand = cribbage_shadow_engine::cards::cards_from_ids(&[3, 4, 5, 6]).unwrap();
+            session.game.player_mut(HUMAN).discarded_to_crib = cribbage_shadow_engine::cards::cards_from_ids(&[7, 8]).unwrap();
+            if dealer == AI {
+                session.game.turn = cribbage_shadow_engine::game::PegTurn::Pone;
+                session.game.play_card(HUMAN, 3).unwrap();
+            }
+            session.use_dynamic_profile(crate::DynamicProfile {
+                strength: 200, ..crate::DynamicProfile::default()
+            });
+            let server = Server {
+                pegging_work: Registry::default(), state: Mutex::new(AppState::default()),
+                model_root: "/no-assets-needed-for-forced-rank".into(),
+                data_dir: std::env::temp_dir(),
+            };
+            let action = prepare(&server, &session).expect("eligible Dynamic Ace opening").wait().unwrap();
+            assert_eq!(action, PegAction::Play { card_id: 0 });
+        }
+    }
+
+    #[test]
     fn dynamic_ace_openings_expose_progress_for_both_roles() {
         for dealer in [HUMAN, AI] {
             let mut session = new_session_from_seed(ModelId::Dynamic, None, 42, 1);
@@ -341,7 +389,7 @@ mod tests {
                 model_root: String::new(),
                 data_dir: std::env::temp_dir(),
             };
-            let job = server.pegging_work.start(&session, key, || Ok(PegDecision::Go));
+            let job = server.pegging_work.start(&session, key, || Ok(crate::PegDecision::Go.into()));
             job.wait().unwrap();
             let played = usize::from(dealer == AI);
             let query = json!({"gameId":session.id,"handNumber":1,"played":played}).to_string();
@@ -361,6 +409,58 @@ mod tests {
                 assert_eq!(state["peggingProgressAvailable"], false);
             }
         }
+    }
+
+    #[test]
+    fn model204_forced_rank_live_and_prepared_play_need_no_valuation_assets() {
+        let mut session = opening();
+        session.model = ModelId::Schell204;
+        session.game = CribbageGame::new_with_seed(42, HUMAN);
+        session.game.player_mut(AI).hand =
+            cribbage_shadow_engine::cards::cards_from_ids(&[26, 0, 13, 39, 8, 9]).unwrap();
+        session.game.player_mut(HUMAN).hand =
+            cribbage_shadow_engine::cards::cards_from_ids(&[1, 2, 3, 4, 5, 6]).unwrap();
+        session.game.turn_card = crate::Card::new(7).unwrap();
+        session.game.discard(AI, [8, 9]).unwrap();
+        session.game.discard(HUMAN, [5, 6]).unwrap();
+        let server = Server {
+            pegging_work: Registry::default(),
+            state: Mutex::new(AppState::default()),
+            model_root: "/nonexistent-model204-forced-choice-assets".into(),
+            data_dir: std::env::temp_dir(),
+        };
+        let prepared = prepare(&server, &session).unwrap().wait().unwrap();
+        assert_eq!(prepared, PegAction::Play { card_id: 26 });
+        let mut direct = session.clone();
+        crate::apply_action_with_peg_decision(
+            &mut session,
+            "advance-pegging",
+            "{}",
+            &server.model_root,
+            Some(prepared),
+        )
+        .unwrap();
+        crate::apply_action(&mut direct, "advance-pegging", "{}", &server.model_root).unwrap();
+        assert_eq!(
+            serde_json::to_value(&session.game).unwrap(),
+            serde_json::to_value(&direct.game).unwrap()
+        );
+        assert_eq!(session.game.player(AI).table[0].id, 26);
+        // Later duplicate-rank turns use the direct path after preparation no
+        // longer applies, and still preserve the next physical card's identity.
+        session.game.play_card(HUMAN, 1).unwrap();
+        assert!(prepare(&server, &session).is_none());
+        crate::apply_action(&mut session, "advance-pegging", "{}", &server.model_root).unwrap();
+        assert_eq!(
+            session
+                .game
+                .player(AI)
+                .table
+                .iter()
+                .map(|c| c.id)
+                .collect::<Vec<_>>(),
+            vec![26, 0]
+        );
     }
 
     #[test]
@@ -400,10 +500,8 @@ mod tests {
     fn preparation_and_advance_share_work_without_holding_the_session_lock() {
         let session = opening();
         let card_id = session.game.player(AI).hand[0].id;
-        let expected = PegDecision::Play {
+        let expected = PegAction::Play {
             card_id,
-            ev: Some(0.0),
-            win_probability: Some(0.5),
         };
         let server = Arc::new(Server {
             pegging_work: Registry::default(),
@@ -498,6 +596,153 @@ mod tests {
         assert!(heels_cases > 0, "cover heels scores in the projection");
     }
 
+
+    #[test]
+    fn forfeiting_an_opening_cancels_work_and_releases_waiters() {
+        let session = opening();
+        let id = session.id.clone();
+        let data_dir = std::env::temp_dir().join(format!(
+            "ace-forfeit-work-{}-{}", std::process::id(), crate::unix_millis(),
+        ));
+        crate::initialize_game_database(&data_dir).unwrap();
+        let server = Server {
+            pegging_work: Registry::default(),
+            state: Mutex::new(AppState::default()),
+            model_root: String::new(), data_dir: data_dir.clone(),
+        };
+        server.state.lock().unwrap().sessions.insert(id.clone(), session.clone());
+        let (started_tx, started_rx) = mpsc::channel();
+        let (finish_tx, finish_rx) = mpsc::channel();
+        let job = server.pegging_work.start(&session, opening_key(&session).unwrap(), move || {
+            started_tx.send(()).unwrap();
+            finish_rx.recv().unwrap();
+            Ok(PegAction::Go)
+        });
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let other_user = auth::test_user(999, "other", "other@example.invalid");
+        let denied = crate::game_action(
+            &server, &json!({"gameId":id,"action":"forfeit"}).to_string(), Some(&other_user),
+        );
+        assert_eq!(denied.status, 400);
+        assert!(job.result.lock().unwrap().is_none());
+        let response = crate::game_action(
+            &server, &json!({"gameId":id,"action":"forfeit"}).to_string(), None,
+        );
+        let released = job.result.lock().unwrap().as_ref().is_some_and(Result::is_err);
+        let removed = !server.pegging_work.0.lock().unwrap().contains_key(&id);
+        // Always release the diagnostic worker, including on the old behavior.
+        finish_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !job.finished.load(Ordering::Acquire) && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        std::fs::remove_dir_all(data_dir).unwrap();
+        assert_eq!(response.status, 200, "{}", response.body);
+        assert!(released, "normal forfeit left the obsolete opening and its waiters running");
+        assert!(removed, "forfeited work must leave the registry");
+        assert!(job.wait().is_err(), "a late result must not replace cancellation");
+    }
+
+
+    #[test]
+    fn replacing_work_cancels_only_the_obsolete_job() {
+        let session = opening();
+        let registry = Registry::default();
+        let (finish_tx, finish_rx) = mpsc::channel();
+        let job = registry.start(&session, opening_key(&session).unwrap(), move || {
+            finish_rx.recv().unwrap();
+            Ok(PegAction::Go)
+        });
+        let same = registry.start(&session, opening_key(&session).unwrap(), || panic!("duplicate solve"));
+        assert!(Arc::ptr_eq(&job, &same));
+        assert!(job.progress.check_cancelled().is_ok());
+        let mut changed = session.clone();
+        changed.game.player_mut(AI).score += 1;
+        let replacement = registry.start(&changed, opening_key(&changed).unwrap(), || Ok(PegAction::Go));
+        assert!(job.wait().is_err());
+        assert!(job.progress.check_cancelled().is_err());
+        // The old thread may not have started yet; cancellation also handles
+        // that case without invoking its solve closure.
+        let _ = finish_tx.send(());
+        assert_eq!(replacement.wait(), Ok(PegAction::Go));
+        assert!(replacement.progress.check_cancelled().is_ok());
+    }
+
+    #[test]
+    fn a_failed_forfeit_keeps_the_opening_usable() {
+        let session = opening();
+        let id = session.id.clone();
+        let invalid_dir = std::env::temp_dir().join(format!(
+            "ace-forfeit-invalid-dir-{}-{}", std::process::id(), crate::unix_millis(),
+        ));
+        std::fs::write(&invalid_dir, b"not a directory").unwrap();
+        let server = Server {
+            pegging_work: Registry::default(), state: Mutex::new(AppState::default()),
+            model_root: String::new(), data_dir: invalid_dir.clone(),
+        };
+        server.state.lock().unwrap().sessions.insert(id.clone(), session.clone());
+        let (finish_tx, finish_rx) = mpsc::channel();
+        let job = server.pegging_work.start(&session, opening_key(&session).unwrap(), move || {
+            finish_rx.recv().unwrap(); Ok(PegAction::Go)
+        });
+        let response = crate::game_action(
+            &server, &json!({"gameId":id,"action":"forfeit"}).to_string(), None,
+        );
+        finish_tx.send(()).unwrap();
+        assert_eq!(response.status, 400);
+        assert!(!server.state.lock().unwrap().sessions[&id].forfeited);
+        assert!(job.progress.check_cancelled().is_ok());
+        assert_eq!(job.wait(), Ok(PegAction::Go));
+        std::fs::remove_file(invalid_dir).unwrap();
+    }
+
+    #[test]
+    #[ignore = "release-only real Ace opening cancellation latency"]
+    fn real_opening_stops_after_normal_forfeit() {
+        let mut reports = Vec::new();
+        for (model, completed) in [(ModelId::Schell1323, 256), (crate::ACE_MODEL_ID, 1)] {
+            let mut session = opening();
+            session.model = model;
+            let id = session.id.clone();
+            let data_dir = std::env::temp_dir().join(format!(
+                "ace-forfeit-real-{}-{}", std::process::id(), crate::unix_millis(),
+            ));
+            crate::initialize_game_database(&data_dir).unwrap();
+            let server = Server {
+                pegging_work: Registry::default(), state: Mutex::new(AppState::default()),
+                model_root: std::env::var("CRIBBAGE_RUST_MODEL_ROOT").unwrap_or_else(|_|
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").to_string_lossy().into_owned()), data_dir: data_dir.clone(),
+            };
+            server.state.lock().unwrap().sessions.insert(id.clone(), session.clone());
+            let job = prepare(&server, &session).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(60);
+            while job.progress.snapshot().0 < completed && !job.finished.load(Ordering::Acquire) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let before = job.progress.snapshot();
+            assert!(!job.finished.load(Ordering::Acquire), "fixture must still be calculating");
+            assert!(before.0 >= completed);
+            let start = Instant::now();
+            let response = crate::game_action(
+                &server, &json!({"gameId":id,"action":"forfeit"}).to_string(), None,
+            );
+            assert_eq!(response.status, 200, "{}", response.body);
+            assert!(job.wait().is_err());
+            while !job.finished.load(Ordering::Acquire) && start.elapsed() < Duration::from_secs(5) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(job.finished.load(Ordering::Acquire), "obsolete engine work did not stop");
+            let report = json!({"model":model.as_str(),"stopMilliseconds":start.elapsed().as_secs_f64()*1000.0,"before":before,"after":job.progress.snapshot(),"cancelled":job.wait().is_err()});
+            reports.push(report);
+            std::fs::remove_dir_all(data_dir).unwrap();
+        }
+        let report = json!(reports);
+        if let Ok(path) = std::env::var("CRIBBAGE_CANCELLATION_REPORT") {
+            std::fs::write(path, report.to_string()).unwrap();
+        }
+        println!("{report}");
+    }
+
     #[test]
     fn failed_work_can_be_retried_without_poisoning_the_next_move() {
         let session = opening();
@@ -505,13 +750,14 @@ mod tests {
         let key = opening_key(&session).unwrap();
         let failed = registry.start(&session, key.clone(), || Err("first request failed".into()));
         assert!(failed.wait().is_err());
-        let retry = registry.start(&session, key, || Ok(PegDecision::Go));
+        let retry = registry.start(&session, key, || Ok(PegAction::Go));
         assert!(!Arc::ptr_eq(&failed, &retry));
-        assert_eq!(retry.wait().unwrap(), PegDecision::Go);
+        assert_eq!(retry.wait().unwrap(), PegAction::Go);
     }
     #[test]
     #[ignore = "full production Ace opening; run in release mode with assets"]
     fn discard_calculation_prepares_the_lead_before_opponent_discard_or_reveal() {
+        for model in [ModelId::Schell1323, crate::ACE_MODEL_ID] {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
@@ -523,7 +769,7 @@ mod tests {
             crate::unix_millis()
         ));
         crate::initialize_game_database(&data_dir).unwrap();
-        let mut session = new_session_from_seed(ModelId::Schell1323, None, 42, 1);
+        let mut session = new_session_from_seed(model, None, 42, 1);
         session.game = CribbageGame::new_with_seed(42, HUMAN);
         session.waiting_for_deal_cut = false;
         let id = session.id.clone();
@@ -591,7 +837,7 @@ mod tests {
             Arc::ptr_eq(&job, &same),
             "the prepared solve must be reused"
         );
-        let PegDecision::Play { card_id, .. } = expected else {
+        let PegAction::Play { card_id, .. } = expected else {
             panic!("opening must be a play")
         };
         let app = server.state.lock().unwrap();
@@ -606,5 +852,6 @@ mod tests {
         );
         drop(app);
         std::fs::remove_dir_all(data_dir).unwrap();
+        }
     }
 }

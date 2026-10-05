@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "scope": "Reviewed immutable snapshots for strategic-pegging-v1; new hashes require provenance review.",
+  "sources": {
+    "0554d64c390415cda4af247b82587ef87e185b5ff41795495b8536186c316db1": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model1323/evaluation-20260918/13.23-vs-13.215-10k/13.23-left/games.db"
+    },
+    "0d375e3a00f8dc99b205e110e472e66758e095ef25162c84e80418fd2889dabf": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model9-board-win-matrix-20260902/runtime/inputs/model91-left.db"
+    },
+    "1950e64b706044d8e0a152b7e89d6cf15fc261ed80c764b97be021f6dcd7661f": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/myrmidon/9.1-vs-myrmidon5-10k-20260829/myrmidon-left/games.db"
+    },
+    "1b0925a5e9633546c4fee3aa33089f756caa468f04d4901751d5ecdbb01cf54f": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model16-2b-eval-2026-08-03/against-13/13-vs-16/games.db"
+    },
+    "1d3c94808cc269d72deb2b3dff500e62c36d9629dde3393bbcad63f4e000783a": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model20/evaluation-20260926/20.1-vs-20.0-10k-resumed/20.0-left/games.db"
+    },
+    "2cafd4bcf89598dd544acc5d72260f16de2c03aba75b48680fcd3147f799ae32": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model20/evaluation-20260926/20.1-vs-20.0-10k-resumed/20.1-left/games.db"
+    },
+    "2eabeb02421ff20f15f826c0913175f260df1b87006eb1cd8917ba56c41d8557": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model9-vs13-10k-20260826/9-left.db"
+    },
+    "3aefefb8fb28c7f8fa482c7865aac13143d83fd0a347770f1c441b4cb01b8381": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/myrmidon/9.1-vs-myrmidon5-10k-20260829/9.1-left/games.db"
+    },
+    "4ebefdb0bbda8397c70d2e17bb814c179ff7a0c76342db9a5b31c7f3497af279": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model20/evaluation-20260924/20.0-vs-13.23-10k/20.0-left/games.db"
+    },
+    "5d6818407df2b5f427b5ad5a056415bbb7d53e91ee4a11403d01e417a4f055bf": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model131/evaluation-20260828/13.0-vs-13.1-discard-only-10k/13.1-left/games.db"
+    },
+    "6f1027247cef0a705ee87e1e5caccc08de3305c483d43fb99f99fb0e066d8427": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model131/evaluation-20260827/13.0-vs-13.1-10k/13.0-left/games.db"
+    },
+    "777076415d0455b5a550a48ee1580a123e3df1a0a9811f59ed681d690452d8cc": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model16-2b-eval-2026-08-03/against-13/16-vs-13/games.db"
+    },
+    "7e7f3b18920cb710a9340982e2713512bfdf7dd1b553e3b67c02e3967e726ca3": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model9-vs13-10k-20260826/13-left.db"
+    },
+    "8b44dc83c7794e9d1b574c80b81d7fa77e7eda2cf82d874d54c53586e95ec06c": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model20/evaluation-20260925/20.1-vs-20.0-10k/smoke/20.0-left/games.db"
+    },
+    "8d79453602b2a70f26aa8d1a9fd5a77a926e733694a15ae1c2856862535d3c5b": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model16-2b-13fallback-eval-2026-08-03/against-13/16-vs-13/games.db"
+    },
+    "909ea4e6e683e85c21bb1b488a1cb21261e785de31595a6e3874b3aa4a864cde": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model131/evaluation-20260827/13.0-vs-13.1-10k/13.1-left/games.db"
+    },
+    "967c38c3e9a6c30f2d08e479f05f2fe6a9fd74eea243942e0b75bd803bfb5641": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/myrmidon/13.0-vs-myrmidon5-10k-20260828/myrmidon-left/games.db"
+    },
+    "97cef36df960705a58dea8ab416844ef304e6bfaa2cccb4934859a6530466cb0": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model1323/evaluation-20260918/13.23-vs-13.215-10k/13.215-left/games.db"
+    },
+    "9fa069b9347960d54f34f1b7bdd8917650a1e2f627cfec05333994d5ec5cfb2a": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model9-board-win-matrix-20260902/runtime/inputs/model911-left.db"
+    },
+    "a8c514a18fa13ba6f2abe06f5efc68114866fea5a3562343a52ea4f4e9e1204e": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model9-vs13-10k-20260826/smoke-9-left.db"
+    },
+    "aa8ad21c1be8715c9e6c0f1354dd5dff6423991fbddc60af3949973b17b51b40": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model20/evaluation-20260924/20.0-vs-13.23-10k/13.23-left/games.db"
+    },
+    "ac704b08cf5816e91043611d86a2ac8118977d2a109a6127b44828b366ce800a": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model9-board-win-matrix-20260902/runtime/inputs/forward.db"
+    },
+    "aeb7b4ec37a6ee94ede5b52533f053c5671f431da327cd3bda38b0b9b8f59b8e": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model9-board-win-matrix-20260902/runtime/inputs/reverse.db"
+    },
+    "b69daf6e0dc1037d67c08af07250a5b267f5013b31fce8e06fc2030af404a755": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model131/evaluation-20260828/13.0-vs-13.1-discard-only-legal-leads-10k/13.0-left/games.db"
+    },
+    "b9f3b341e9a63a9dac9db2a33295a3bf4950579114ed27e3a577df8d581fc353": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model20/evaluation-20260925/20.1-vs-20.0-10k/smoke/20.1-left/games.db"
+    },
+    "bc446d25ec3da9cab17eddd9a9f8a488b6ff1a6084d29f2e895be13bba7a081a": {
+      "path": "/private/tmp/model203-decline-refresh-20260927-v1/20.0-left.db"
+    },
+    "d1b08e7245f1734e51874b32621e391e26702b275191ed946bc6ec0dbfb44edb": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model131/evaluation-20260828/13.0-vs-13.1-discard-only-10k/13.0-left/games.db"
+    },
+    "e233acd82e00fd361712a8953556dd768205d0a6effbea2d9adec4cd17a59409": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model131/evaluation-20260828/13.0-vs-13.1-discard-only-legal-leads-10k/13.1-left/games.db"
+    },
+    "e3dd9155487d3da322d42421d39fca441380f24de68dc7c9ab063662765cc8ac": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model16-2b-13fallback-eval-2026-08-03/against-13/13-vs-16/games.db"
+    },
+    "eb33fa7fcdcaedf5449401dc1a123506125241e608abd5776cdccfc2e9b1982e": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model9-vs13-10k-20260826/smoke-13-left.db"
+    },
+    "eebff9cd528dd1ca484efb84ea075261695b7bb2edf30379ff9aa54c615fc32f": {
+      "path": "/private/tmp/model203-decline-refresh-20260927-v1/20.2-left.db"
+    },
+    "ef61fc532784a7ca5dff29762f7016d67ef1272bd993f9196be9c1008781fb01": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/myrmidon/13.0-vs-myrmidon5-10k-20260828/13.0-left/games.db"
+    },
+    "f804f3bea8b10eacd1951b34ab70822664b789886e0081de68284872c4debeb1": {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/ai-db/rust-13.0-vs-15.2-10k-20260716.sqlite"
+    }
+  }
+}

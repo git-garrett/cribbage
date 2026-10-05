@@ -1,3 +1,4 @@
+mod frozen_engine;
 use cribbage_shadow_engine::game::Side;
 use cribbage_shadow_engine::model::{
     model16_policy_stats, reset_model16_policy_stats, Model16PolicyMode, Model16PolicySource,
@@ -24,6 +25,7 @@ struct Config {
     total_games: u32,
     seed: u32,
     model_root: String,
+    frozen_engine: Option<(String, String, String)>,
     max_steps: u32,
     workers: u32,
     out_dir: Option<PathBuf>,
@@ -132,10 +134,24 @@ fn run(config: Config) -> Result<Summary, String> {
         let worker_config = config.clone();
         let sender = sender.clone();
         thread::spawn(move || {
+            let mut frozen = match worker_config
+                .frozen_engine
+                .as_ref()
+                .map(|(binary, root, model)| {
+                    frozen_engine::FrozenEngine::start(binary, root, model)
+                })
+                .transpose()
+            {
+                Ok(engine) => engine,
+                Err(error) => {
+                    let _ = sender.send((worker_index, Err(error)));
+                    return;
+                }
+            };
             let mut index = worker_index;
             while index < worker_config.games {
                 let game_index = worker_config.start_index + index;
-                let result = run_game_index(&worker_config, game_index);
+                let result = run_game_index(&worker_config, game_index, frozen.as_mut());
                 if sender.send((index, result)).is_err() {
                     return;
                 }
@@ -183,7 +199,11 @@ fn run(config: Config) -> Result<Summary, String> {
     Ok(summary)
 }
 
-fn run_game_index(config: &Config, index: u32) -> Result<(u32, PlayoutResult), String> {
+fn run_game_index(
+    config: &Config,
+    index: u32,
+    frozen: Option<&mut frozen_engine::FrozenEngine>,
+) -> Result<(u32, PlayoutResult), String> {
     let first_deal = if index % 2 == 0 {
         Side::Left
     } else {
@@ -192,8 +212,14 @@ fn run_game_index(config: &Config, index: u32) -> Result<(u32, PlayoutResult), S
     let seed = config.seed.wrapping_add(index);
     let mut playout = ModelPlayout::new(seed, first_deal, config.left, config.right)?;
     playout.set_model16_policy_mode(config.model16_policy_mode);
-    let result = playout.play_to_end(&config.model_root, config.max_steps)
-        .map_err(|error| format!("game index {index}, seed {seed}: {error}"))?;
+    let result = if let Some(frozen) = frozen {
+        playout.play_to_end_with_override(&config.model_root, config.max_steps, &mut |input| {
+            frozen.decide(input)
+        })
+    } else {
+        playout.play_to_end(&config.model_root, config.max_steps)
+    }
+    .map_err(|error| format!("game index {index}, seed {seed}: {error}"))?;
     Ok((seed, result))
 }
 
@@ -217,6 +243,9 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
     let mut total_games: Option<u32> = None;
     let mut seed = 0x9e3779b9u32;
     let mut model_root = ".".to_string();
+    let mut frozen_binary = None;
+    let mut frozen_root = None;
+    let mut frozen_model = None;
     let mut max_steps = 10_000u32;
     let mut workers = 1u32;
     let mut out_dir: Option<PathBuf> = None;
@@ -242,6 +271,9 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
             "--total-games" => total_games = Some(parse_u32("--total-games", value)?),
             "--seed" => seed = parse_seed(value)?,
             "--model-root" => model_root = value.clone(),
+            "--frozen-engine" => frozen_binary = Some(value.clone()),
+            "--frozen-model-root" => frozen_root = Some(value.clone()),
+            "--frozen-model" => frozen_model = Some(value.clone()),
             "--max-steps" => max_steps = parse_u32("--max-steps", value)?,
             "--workers" => workers = parse_u32("--workers", value)?,
             "--out-dir" => out_dir = Some(PathBuf::from(value)),
@@ -281,6 +313,23 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
     });
     let resolved_matchup_id =
         matchup_id.unwrap_or_else(|| format!("{}__{}", model_slug(left), model_slug(right)));
+    let frozen_engine = match (frozen_binary, frozen_root, frozen_model) {
+        (None, None, None) => None,
+        (Some(binary), Some(root), Some(model)) => {
+            if model != cribbage_shadow_engine::model_id::MODEL_20_0
+                || (left.as_str() != model && right.as_str() != model)
+            {
+                return Err("frozen adapter requires Model 20.0 as a participant".into());
+            }
+            Some((binary, root, model))
+        }
+        _ => {
+            return Err(
+                "--frozen-engine, --frozen-model-root and --frozen-model are required together"
+                    .into(),
+            )
+        }
+    };
     Ok(Config {
         left,
         right,
@@ -289,6 +338,7 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
         total_games: resolved_total_games,
         seed,
         model_root,
+        frozen_engine,
         max_steps,
         workers,
         out_dir,
@@ -339,6 +389,7 @@ fn print_usage() {
         "--left <model> --right <model> --games <n> ",
         "[--start-index <n>] [--total-games <n>] ",
         "[--seed <u32|0xhex>] [--model-root <path>] [--max-steps <n>] ",
+        "[--frozen-engine <binary> --frozen-model-root <path> --frozen-model <id>] ",
         "[--workers <n>] [--out-dir <path>] [--db <path>] [--run-id <id>] ",
         "[--model16-policy-mode <argmax|sample|fallback>]"
     ));
@@ -454,16 +505,21 @@ fn initialize_db(db_path: &Path, config: &Config, started_at: &str) -> Result<()
                     .unwrap_or_default()
             ),
             sql_text(&env::args().collect::<Vec<_>>().join(" ")),
-            sql_text(""),
+            sql_text(&env::var("SOURCE_COMMIT").unwrap_or_default()),
             sql_text(&format!("{}", config.seed)),
             sql_text(started_at),
-            sql_text(&format!(
-                "{{\"left\":\"{}\",\"right\":\"{}\",\"workers\":{},\"model16PolicyMode\":\"{}\"}}",
-                json_escape(config.left.as_str()),
-                json_escape(config.right.as_str()),
-                config.workers,
-                model16_policy_mode_name(config.model16_policy_mode)
-            ))
+            sql_text(&serde_json::json!({
+                "left": config.left.as_str(), "right": config.right.as_str(),
+                "workers": config.workers,
+                "model16PolicyMode": model16_policy_mode_name(config.model16_policy_mode),
+                "sourceCommit": env::var("SOURCE_COMMIT").unwrap_or_default(),
+                "runnerSha256": env::var("EXPECTED_RUNNER_SHA256").unwrap_or_default(),
+                "frozenEngine": config.frozen_engine.as_ref().map(|(binary, root, model)| serde_json::json!({
+                    "model": model, "binary": binary, "modelRoot": root,
+                    "sourceCommit": env::var("OPPONENT_SOURCE_COMMIT").unwrap_or_default(),
+                    "sha256": env::var("FROZEN_ENGINE_SHA256").unwrap_or_default(),
+                })),
+            }).to_string())
         )
     );
     run_sqlite(db_path, &sql)?;

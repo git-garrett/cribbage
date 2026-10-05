@@ -398,6 +398,7 @@ pub struct CribRankHistogramEntry {
 pub struct CribRankDiscardTables {
     pub rank_scores: HashMap<(u8, String, u8), f64>,
     pub histograms: HashMap<(u8, String, u8), CribRankHistogramEntry>,
+    pub(crate) indexed: Option<crate::model203_crib::Model203CribTable>,
 }
 
 #[derive(Clone, Debug)]
@@ -1978,11 +1979,20 @@ impl Model13HoldTable {
 }
 
 impl CribRankDiscardTables {
+    pub(crate) fn load_model203(path: impl AsRef<Path>) -> Result<Self, String> {
+        Ok(Self {
+            rank_scores: HashMap::new(),
+            histograms: HashMap::new(),
+            indexed: Some(crate::model203_crib::Model203CribTable::load(path.as_ref())?),
+        })
+    }
+
     pub fn load(
         rank_score_path: impl AsRef<Path>,
         histogram_path: impl AsRef<Path>,
     ) -> Result<CribRankDiscardTables, String> {
         Ok(CribRankDiscardTables {
+            indexed: None,
             rank_scores: parse_crib_rank_scores(
                 &fs::read_to_string(rank_score_path.as_ref())
                     .map_err(|error| format!("read crib rank score table failed: {}", error))?,
@@ -1995,6 +2005,9 @@ impl CribRankDiscardTables {
     }
 
     pub fn rank_score(&self, role: u8, discard_key: &str, cut_rank: u8) -> Option<f64> {
+        if let Some(table) = &self.indexed {
+            return table.rank_mean(role, &rank_counts_from_key(discard_key).ok()?, cut_rank);
+        }
         self.rank_scores
             .get(&(role, discard_key.to_string(), cut_rank))
             .copied()

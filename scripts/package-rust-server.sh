@@ -46,6 +46,7 @@ COPYFILE_DISABLE=1 tar --no-xattrs -czf "$ARCHIVE" \
   scripts/build_rust_release.py \
   scripts/build_production_release.py \
   scripts/pgo-fixtures.json \
+  scripts/receive_model283_opening.py \
   scripts/migrate-legacy-leaderboard.py \
   scripts/repair_leaderboard_scores.py \
   scripts/repair_leaderboard_timestamps.py \

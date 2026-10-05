@@ -130,7 +130,7 @@ impl BoardDistributions {
 }
 
 pub struct BoardModel {
-    distributions: &'static BoardDistributions,
+    distributions: Option<&'static BoardDistributions>,
     memo: BoardMemo,
     board_matrix: Option<Arc<BoardWinMatrix>>,
     use_heuristic_before_90: bool,
@@ -206,9 +206,21 @@ impl BoardModel {
 
     /// Use empirical continuation values at the four supported phase seams.
     pub fn from_board_matrix(board_matrix: Arc<BoardWinMatrix>) -> BoardModel {
-        let mut board = BoardModel::with_options(false, false, false);
-        board.board_matrix = Some(board_matrix);
-        board
+        BoardModel {
+            distributions: None,
+            memo: BoardMemo::new(),
+            board_matrix: Some(board_matrix),
+            use_heuristic_before_90: false,
+            joint_future_pegging: false,
+            joint_only_when_terminal_ambiguity_possible: false,
+        }
+    }
+
+    fn distributions(&self) -> &'static BoardDistributions {
+        // Matrix-supported phases return before this is needed. Historical
+        // callers at other phases retain exactly the same standard priors.
+        self.distributions
+            .unwrap_or_else(BoardDistributions::standard)
     }
 
     pub fn matrix_win_probability_from_scores(
@@ -240,7 +252,7 @@ impl BoardModel {
         joint_only_when_terminal_ambiguity_possible: bool,
     ) -> BoardModel {
         BoardModel {
-            distributions: BoardDistributions::standard(),
+            distributions: Some(BoardDistributions::standard()),
             memo: BoardMemo::new(),
             board_matrix: None,
             use_heuristic_before_90,
@@ -333,7 +345,7 @@ impl BoardModel {
             ScorePhase::PeggingDealer | ScorePhase::HandDealer | ScorePhase::Crib => Role::Dealer,
         };
         let perspective_scores = perspective_role == scorer_role;
-        let distribution = self.distributions.distribution(phase);
+        let distribution = self.distributions().distribution(phase);
         let mut probability = 0.0;
         for (points, weight) in distribution {
             if perspective_scores {
@@ -377,7 +389,7 @@ impl BoardModel {
     ) -> f64 {
         let next_role = next_perspective_role(perspective_role, ScorePhase::Crib);
         let deltas = self
-            .distributions
+            .distributions()
             .cycle_delta_distribution(perspective_role);
         if !self.cycle_fast_path_allowed(my, opponent, next_role) {
             let mut probability = 0.0;
@@ -393,7 +405,7 @@ impl BoardModel {
             return probability;
         }
 
-        let paired_deltas = self.distributions.cycle_delta_distribution(next_role);
+        let paired_deltas = self.distributions().cycle_delta_distribution(next_role);
         let (base, zero_cycle_weight) =
             self.cycle_delta_continuation_value(deltas, my, opponent, next_role);
         let (paired_base, paired_zero_cycle_weight) =
@@ -447,8 +459,8 @@ impl BoardModel {
         opponent: u8,
         perspective_role: Role,
     ) -> f64 {
-        let pone_distribution = self.distributions.distribution(ScorePhase::PeggingPone);
-        let dealer_distribution = self.distributions.distribution(ScorePhase::PeggingDealer);
+        let pone_distribution = self.distributions().distribution(ScorePhase::PeggingPone);
+        let dealer_distribution = self.distributions().distribution(ScorePhase::PeggingDealer);
         let mut probability = 0.0;
         for (pone_points, pone_weight) in pone_distribution {
             for (dealer_points, dealer_weight) in dealer_distribution {
@@ -486,13 +498,13 @@ impl BoardModel {
     fn cycle_fast_path_allowed(&self, my: u8, opponent: u8, perspective_role: Role) -> bool {
         let (my_cutoff, opponent_cutoff) = if perspective_role == Role::Pone {
             (
-                self.distributions.cycle_fast_path_cutoffs.pone,
-                self.distributions.cycle_fast_path_cutoffs.dealer,
+                self.distributions().cycle_fast_path_cutoffs.pone,
+                self.distributions().cycle_fast_path_cutoffs.dealer,
             )
         } else {
             (
-                self.distributions.cycle_fast_path_cutoffs.dealer,
-                self.distributions.cycle_fast_path_cutoffs.pone,
+                self.distributions().cycle_fast_path_cutoffs.dealer,
+                self.distributions().cycle_fast_path_cutoffs.pone,
             )
         };
         (my as u16) + (my_cutoff as u16) < 121 && (opponent as u16) + (opponent_cutoff as u16) < 121
@@ -504,8 +516,8 @@ impl BoardModel {
         opponent: u8,
         perspective_role: Role,
     ) -> bool {
-        let pone_max = self.distributions.max_pegging_pone;
-        let dealer_max = self.distributions.max_pegging_dealer;
+        let pone_max = self.distributions().max_pegging_pone;
+        let dealer_max = self.distributions().max_pegging_dealer;
         let (my_max, opponent_max) = if perspective_role == Role::Pone {
             (pone_max, dealer_max)
         } else {
@@ -777,7 +789,9 @@ mod tests {
         distributions.insert(ScorePhase::HandDealer, vec![(dealer_hand, 1.0)]);
         distributions.insert(ScorePhase::Crib, vec![(crib, 1.0)]);
         BoardModel {
-            distributions: Box::leak(Box::new(BoardDistributions::from_phase_map(distributions))),
+            distributions: Some(Box::leak(Box::new(BoardDistributions::from_phase_map(
+                distributions,
+            )))),
             memo: BoardMemo::new(),
             board_matrix: None,
             use_heuristic_before_90: false,
@@ -789,8 +803,8 @@ mod tests {
     #[test]
     fn cycle_fast_path_uses_999th_percentile_cutoffs() {
         let board = BoardModel::joint_pegging_without_early_heuristic();
-        assert_eq!(board.distributions.cycle_fast_path_cutoffs.pone, 24);
-        assert_eq!(board.distributions.cycle_fast_path_cutoffs.dealer, 34);
+        assert_eq!(board.distributions().cycle_fast_path_cutoffs.pone, 24);
+        assert_eq!(board.distributions().cycle_fast_path_cutoffs.dealer, 34);
         assert!(board.cycle_fast_path_allowed(96, 86, Role::Pone));
         assert!(!board.cycle_fast_path_allowed(97, 86, Role::Pone));
         assert!(!board.cycle_fast_path_allowed(96, 87, Role::Pone));
@@ -848,11 +862,30 @@ mod tests {
             BoardMatrixSeam::AfterPegging => 0.3,
             BoardMatrixSeam::AfterPone => 0.4,
         }));
-        let mut board = BoardModel::from_board_matrix(matrix);
+        let mut board = BoardModel::from_board_matrix(Arc::clone(&matrix));
 
         let probability =
             board.future_win_probability_from_scores(10, 20, Role::Pone, ScorePhase::HandPone);
         assert!((probability - 0.7).abs() < 1e-12);
+
+        // Historical callers can still enter phases without a matrix seam.
+        // Delaying their priors must preserve the previous eager evaluation.
+        let mut eager = BoardModel::with_options(false, false, false);
+        eager.board_matrix = Some(matrix);
+        for phase in [ScorePhase::PeggingDealer, ScorePhase::Crib] {
+            for role in [Role::Pone, Role::Dealer] {
+                for (my, opponent) in [(10, 20), (118, 119), (120, 120)] {
+                    assert_eq!(
+                        board
+                            .future_win_probability_from_scores(my, opponent, role, phase)
+                            .to_bits(),
+                        eager
+                            .future_win_probability_from_scores(my, opponent, role, phase)
+                            .to_bits(),
+                    );
+                }
+            }
+        }
     }
 
     #[test]

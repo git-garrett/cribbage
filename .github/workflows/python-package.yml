@@ -34,6 +34,7 @@ jobs:
       - run: npm run --silent test:workbench
       - run: npm run --silent test:quiet-wrapper
       - run: npm run --silent test:release-build
+      - run: npm run --silent test:opening-assets
       - run: npm run --silent typecheck
       - run: npm run --silent test:web
       - run: npm test --silent

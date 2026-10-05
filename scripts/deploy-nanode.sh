@@ -199,6 +199,7 @@ Environment=HOST=${REMOTE_BIND_HOST}
 Environment=PORT=${REMOTE_PORT_APP}
 Environment=CRIBBAGE_MODEL_ROOT=${REMOTE_CURRENT_LINK}
 Environment=CRIBBAGE_DATA_DIR=${REMOTE_DATA_DIR}
+Environment=CRIBBAGE_283_FAST_ASSET=/var/lib/cribbage-assets/openings/current
 Environment=CRIBBAGE_REQUIRE_AUTH=true
 Environment=CRIBBAGE_ENGAGEMENT_ADMIN_USER_IDS=1,53
 Environment=CRIBBAGE_PUBLIC_ORIGIN=https://${GAME_DOMAIN}
