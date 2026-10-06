@@ -2,7 +2,9 @@ import itertools
 import json
 import math
 from pathlib import Path
+import plistlib
 import sqlite3
+import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -14,6 +16,36 @@ import benchmark_workbench as workbench
 from benchmark_workbench_stats import PairedRatio, Z95, confidence_sequence, log_capital, metric_histories, paired_history
 import cribbage_job_queue as queue
 from benchmark_workbench_assets import build_asset_report, history_rows
+
+
+class WorkbenchLauncherTests(unittest.TestCase):
+    def test_service_interpreter_reads_wal_database_without_sidecars(self):
+        launcher = Path(__file__).with_name('local-runtime.sh').read_text()
+        selector = 'workbench_python() {' + launcher.split('workbench_python() {', 1)[1].split('\n}', 1)[0] + '\n}\nworkbench_python\n'
+        interpreter = subprocess.check_output(['/bin/bash', '-c', selector], text=True).strip()
+        marker = '"$python" - "$WORKBENCH_DIR" "$WORKBENCH_LABEL" "$(workbench_hostname)" <<\'PY\'\n'
+        generate = launcher.split(marker, 1)[1].split('\nPY\n', 1)[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'games.db'
+            source = root / 'source.db'
+            db = sqlite3.connect(source)
+            db.execute('PRAGMA journal_mode=WAL')
+            db.execute('CREATE TABLE sample (value INTEGER)')
+            db.execute('INSERT INTO sample VALUES (7)')
+            db.commit()
+            db.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchall()
+            db.close()
+            path.write_bytes(source.read_bytes())
+            self.assertFalse(Path(str(path) + '-wal').exists())
+            subprocess.run([interpreter, '-', tmp, 'test.workbench', 'test.local'],
+                           input=generate, text=True, check=True, capture_output=True)
+            plist = plistlib.loads((root / 'service.plist').read_bytes())
+            read = 'import sqlite3,sys; db=sqlite3.connect(sys.argv[1]+"?mode=ro",uri=True); print(db.execute("SELECT value FROM sample").fetchone()[0]); db.close()'
+            result = subprocess.run([plist['ProgramArguments'][0], '-c', read, path.as_uri()],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), '7')
 
 
 class AssetWorkbenchTests(unittest.TestCase):

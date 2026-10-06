@@ -223,11 +223,26 @@ workbench_stop() {
   return 1
 }
 
+workbench_python() {
+  # Apple's bundled SQLite cannot open a read-only WAL database when its
+  # journal sidecars are absent. Prefer the installed Homebrew runtime.
+  local candidate
+  for candidate in /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+    if [[ -x "$candidate" ]]; then
+      echo "$candidate"
+      return
+    fi
+  done
+  command -v python3
+}
+
 workbench_start() {
   acquire_lock
   mkdir -p "$WORKBENCH_DIR"
+  local python
+  python="$(workbench_python)"
   if [[ -n "${1:-}" ]]; then
-    python3 "${ROOT_DIR}/scripts/benchmark_workbench.py" register "$1"
+    "$python" "${ROOT_DIR}/scripts/benchmark_workbench.py" register "$1"
   fi
   local fingerprint
   fingerprint="$(workbench_fingerprint)"
@@ -248,11 +263,11 @@ workbench_start() {
   mkdir -p "${WORKBENCH_DIR}/app/benchmark-workbench"
   cp "${ROOT_DIR}/scripts/benchmark_workbench.py" "${ROOT_DIR}/scripts/benchmark_workbench_stats.py" "${ROOT_DIR}/scripts/benchmark_workbench_assets.py" "${WORKBENCH_DIR}/app/"
   cp "${ROOT_DIR}/scripts/benchmark-workbench/"* "${WORKBENCH_DIR}/app/benchmark-workbench/"
-  python3 - "$WORKBENCH_DIR" "$WORKBENCH_LABEL" "$(workbench_hostname)" <<'PY'
+  "$python" - "$WORKBENCH_DIR" "$WORKBENCH_LABEL" "$(workbench_hostname)" <<'PY'
 from pathlib import Path
 import plistlib, sys
 root = Path(sys.argv[1])
-plist = {'Label': sys.argv[2], 'ProgramArguments': ['/usr/bin/python3', str(root / 'app/benchmark_workbench.py'), 'serve', '--lan-hostname', sys.argv[3]],
+plist = {'Label': sys.argv[2], 'ProgramArguments': [sys.executable, str(root / 'app/benchmark_workbench.py'), 'serve', '--lan-hostname', sys.argv[3]],
          'RunAtLoad': True, 'KeepAlive': False, 'ProcessType': 'Background',
          'StandardOutPath': str(root / 'server.log'), 'StandardErrorPath': str(root / 'server.log')}
 with (root / 'service.plist').open('wb') as handle:
