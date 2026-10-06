@@ -139,7 +139,7 @@ main {
 }
 .run-tab[aria-selected="true"] {
   background:var(--navy);
-  border-color:var(--navy);
+  border-color:var(--series);
   color:white;
 }
 .run-tab small {
@@ -322,7 +322,7 @@ h2 {
   margin-top:5px;
 }
 .evidence {
-  border-top:3px solid var(--navy);
+  border-top:3px solid var(--series);
 }
 .verdict {
   font-size:12px;
@@ -366,7 +366,7 @@ h2 {
   display:flex;
   flex-wrap:wrap;
   gap:6px 20px;
-  color:var(--navy);
+  color:var(--series);
   font-size:12px;
   line-height:1.6;
   margin-bottom:12px;
@@ -411,7 +411,7 @@ h2 {
   white-space:nowrap;
 }
 .chart-tools input {
-  accent-color:var(--navy);
+  accent-color:var(--series);
   vertical-align:middle;
 }
 .chart {
