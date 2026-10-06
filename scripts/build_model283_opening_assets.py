@@ -84,7 +84,8 @@ def build(config, index, coord):
         return value
     command = [config['binary'], config['assets'], str(run / 'full'), str(cut),
                str(pone), str(dealer), str(lead), str(run / 'production')]
-    if sys.platform == 'darwin': command = ['/usr/sbin/taskpolicy', '-b', '/usr/bin/nice', '-n', '20'] + command
+    if config.get('background', False) and sys.platform == 'darwin':
+        command = ['/usr/sbin/taskpolicy', '-b', '/usr/bin/nice', '-n', '20'] + command
     env = dict(os.environ, CRIBBAGE_283_BUILD_DEALER_PLAYS='4')
     env.pop('CRIBBAGE_283_FAST_ASSET', None)
     before = time.monotonic()
@@ -103,9 +104,16 @@ def build(config, index, coord):
 
 
 def archive_file(source, target, expected):
+    created = []
+    parent = target.parent
+    while not parent.exists():
+        created.append(parent); parent = parent.parent
     target.parent.mkdir(parents=True, exist_ok=True)
+    for directory in reversed(created):
+        sync_directory(directory.parent)
     if target.exists():
         if sha(target) != expected: raise ValueError('Immutable archive conflict')
+        sync_directory(target.parent)
         return
     temporary = target.with_suffix('.copying')
     with source.open('rb') as src, temporary.open('wb') as dst:
@@ -113,6 +121,14 @@ def archive_file(source, target, expected):
         dst.flush(); os.fsync(dst.fileno())
     if sha(temporary) != expected: raise ValueError('Archive copy digest differs')
     os.replace(temporary, target)
+    sync_directory(target.parent)
+
+
+def sync_directory(path):
+    """Persist renamed files and new directory entries before releasing a copy."""
+    fd = os.open(path, os.O_RDONLY)
+    try: os.fsync(fd)
+    finally: os.close(fd)
 
 
 def sync_chunk(config, value):
@@ -164,20 +180,57 @@ def run(config):
         leads = config.get('leads', list(range(13)))
         if sorted(leads) != list(range(13)): raise ValueError('All lead ranks must appear exactly once')
         limit = min(len(boards)*13, config.get('maxChunks', len(boards)*13))
+        if any(i < 0 or i >= limit for i in completed):
+            raise ValueError('Chunk limit excludes already completed work')
+        totals = list(database.execute('SELECT coalesce(sum(full_bytes),0),coalesce(sum(shallow_bytes),0) FROM completed').fetchone())
+        # Count verified publication receipts once at resume, not on every update.
+        published = sum(1 for (raw,) in database.execute('SELECT receipt FROM completed')
+                        if (lambda v: v.get('publication', {}).get('status') == 'published'
+                            and v['publication'].get('sha256') == v['production']['sha256'])(json.loads(raw)))
+        prefix = 0
+        while prefix in completed: prefix += 1
         def plan():
             for index in range(limit):
                 if index not in completed:
                     yield index, (*boards[index // 13], leads[index % 13])
         pending = iter(plan()); jobs = {}; exhausted = False
         started = time.monotonic(); initial_count = len(completed); last_status = 0
+        segment = time.time(); last_history = 0; last_state = None
+        rate_points = [(started, initial_count)]
+        reserve = config.get('diskReserveBytes', 20 * 1024**3)
+        def progress(state, capacity, workers):
+            nonlocal last_status, last_history, last_state
+            now = time.monotonic()
+            rate_points.append((now, len(completed)))
+            # A recent five-minute rate responds to board mix and worker changes.
+            while len(rate_points) > 2 and rate_points[1][0] < now - 300:
+                rate_points.pop(0)
+            seconds = now - rate_points[0][0]
+            rate = (len(completed) - rate_points[0][1]) / seconds if seconds >= 30 else None
+            value = dict(status=state, completed=len(completed), total=limit,
+                contiguousCompleted=prefix, published=published, workers=workers, workerLimit=capacity,
+                fullBytes=totals[0], shallowBytes=totals[1], diskFreeBytes=shutil.disk_usage(root).free,
+                diskReserveBytes=reserve, chunksPerHour=rate*3600 if rate is not None else None,
+                remainingHours=(limit-len(completed))/rate/3600 if rate and state == 'running' else None,
+                segmentStartedAt=segment, segmentCompleted=len(completed)-initial_count,
+                scheduling='background' if config.get('background', False) else 'normal',
+                etaBasis='Recent five-minute throughput; extrapolation changes with board mix and contention. Archive waits are excluded.',
+                updatedAt=time.time())
+            atomic_json(root / 'progress.json', value)
+            if now-last_history >= 30 or state != last_state:
+                with (root / 'history.jsonl').open('a') as history:
+                    history.write(json.dumps(value, separators=(',', ':')) + '\n')
+                last_history = now
+            last_state = state; last_status = now
+            return value
         with concurrent.futures.ThreadPoolExecutor(max_workers=config['maxWorkers']) as pool:
+            progress('running', config['maxWorkers'], 0)
             while jobs or not exhausted:
                 capacity = min(available_workers(config), len(jobs) + memory_slots())
-                # Bound staging and reserve 4 GiB internal headroom. Completed data
-                # are never discarded just because transfer/sync failed.
-                if shutil.disk_usage(root).free < 4 * 1024**3:
-                    raise ValueError('Internal build disk below 4 GiB headroom')
-                while not exhausted and len(jobs) < capacity:
+                # Drain in-flight chunks, then wait for verified foreground archiving.
+                # Never discard a completed shard to make room for another.
+                storage_wait = shutil.disk_usage(root).free < reserve
+                while not exhausted and not storage_wait and len(jobs) < capacity:
                     item = next(pending, None)
                     if item is None: exhausted = True; break
                     index, coord = item
@@ -192,24 +245,17 @@ def run(config):
                         (value['index'], value['elapsed'], value['full']['bytes'],
                          value['production']['bytes'], json.dumps(value, separators=(',', ':'))))
                     database.commit(); completed.add(value['index']); jobs.pop(job)
+                    totals[0] += value['full']['bytes']; totals[1] += value['production']['bytes']
+                    published += int(value.get('publication', {}).get('status') == 'published')
+                    while prefix in completed: prefix += 1
                     shutil.rmtree(root / 'pending' / str(value['index']))
-                    if len(completed) % 1000 == 0:
-                        backup = Path(config['archive']) / config['policy'] / 'queue-checkpoint.tmp'
-                        with sqlite3.connect(backup) as copy: database.backup(copy)
-                        os.replace(backup, backup.with_name('queue-checkpoint.db'))
-                if time.monotonic() - last_status > 10 or done:
-                    elapsed = time.monotonic()-started
-                    rate = (len(completed)-initial_count)/elapsed if elapsed else 0
-                    totals = database.execute('SELECT coalesce(sum(full_bytes),0),coalesce(sum(shallow_bytes),0) FROM completed').fetchone()
-                    atomic_json(root / 'progress.json', dict(status='running', completed=len(completed), total=limit,
-                        workers=len(jobs), workerLimit=capacity, fullBytes=totals[0], shallowBytes=totals[1],
-                        chunksPerHour=rate*3600, remainingHours=(limit-len(completed))/rate/3600 if rate else None,
-                        etaBasis='Observed current-run throughput; changes with board mix, contention and worker count',
-                        updatedAt=time.time()))
-                    last_status = time.monotonic()
+                if len(completed) == limit: exhausted = True
+                if time.monotonic() - last_status > 10:
+                    state = 'waiting_for_storage' if storage_wait else 'waiting_for_memory' if not capacity else 'running'
+                    progress(state, capacity, len(jobs))
         database.execute('PRAGMA wal_checkpoint(TRUNCATE)'); database.close()
         archive_file(root / 'queue.db', Path(config['archive']) / config['policy'] / f'completed-queue-{len(completed)}.db', sha(root / 'queue.db'))
-        final = dict(status='complete', completed=len(completed), total=limit)
+        final = progress('complete', 0, 0)
         atomic_json(root / 'complete.json', final)
         atomic_json(root / 'progress.json', final)
 

@@ -13,6 +13,69 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import benchmark_workbench as workbench
 from benchmark_workbench_stats import PairedRatio, Z95, confidence_sequence, log_capital, metric_histories, paired_history
 import cribbage_job_queue as queue
+from benchmark_workbench_assets import build_asset_report, history_rows
+
+
+class AssetWorkbenchTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.spec = self.root/'job.json'
+        self.settings = dict(root=str(self.root), target=1250000, policy='frozen', rankingSha256='rank', title='28.3 opening assets')
+        self.spec.write_text(json.dumps(dict(jobId='asset-test', jobRoot=str(self.root), assetBuild=self.settings)))
+        self.entry = workbench.register(self.spec, self.root/'runtime')
+        self.p = dict(total=1250000, completed=10000, contiguousCompleted=9000, published=9998,
+                      fullBytes=1300000000, shallowBytes=180000000, updatedAt=1000, workers=10,
+                      workerLimit=10, chunksPerHour=8000, status='running', diskFreeBytes=40000000000, diskReserveBytes=20000000000)
+        (self.root/'progress.json').write_text(json.dumps(self.p))
+        (self.root/'status.json').write_text(json.dumps(dict(state='running')))
+        (self.root/'coverage.json').write_text(json.dumps(dict(policy='frozen', rankingSha256='rank', curve=[
+            dict(chunks=0, heldOut=0), dict(chunks=8000, heldOut=.14), dict(chunks=10000, heldOut=.15), dict(chunks=1250000, heldOut=.995)])))
+
+    def test_asset_registration_coverage_holes_and_recent_eta(self):
+        self.assertEqual(self.entry['kind'], 'asset')
+        result = build_asset_report(self.entry, dict(state='running'), now=1010)
+        self.assertEqual(result['coverage']['current']['chunks'], 8000)
+        self.assertEqual(result['published'], 9998)
+        self.assertEqual(result['remainingSeconds'], 1240000/8000*3600)
+        self.assertIsNone(result['archive'])
+        self.assertEqual(workbench.list_jobs(self.root/'runtime', self.root/'unused')[0]['title'], '28.3 opening assets')
+
+    def test_stale_stopped_failed_and_changed_target_withhold_eta(self):
+        for state, now in [('running', 1200), ('stopped', 1010), ('failed', 1010)]:
+            result = build_asset_report(self.entry, dict(state=state), now=now)
+            self.assertIsNone(result['remainingSeconds'])
+            self.assertEqual(result['state'], 'stale' if state == 'running' else state)
+        self.p['total'] = 10000
+        (self.root/'progress.json').write_text(json.dumps(self.p))
+        result = build_asset_report(self.entry, dict(state='running'), now=1010)
+        self.assertFalse(result['fresh']); self.assertIsNone(result['remainingSeconds'])
+
+    def test_snapshot_report_does_not_open_queue_or_expose_config(self):
+        (self.root/'config.json').write_text(json.dumps(dict(remote=dict(key='secret-key-path'))))
+        with mock.patch.object(sqlite3, 'connect', side_effect=AssertionError('No queue reads')):
+            result = build_asset_report(self.entry, dict(state='running'), now=1010)
+        self.assertNotIn('secret', json.dumps(result))
+        (self.root/'archive-progress.json').write_text(json.dumps(dict(policy='other', completed=5000)))
+        self.assertIsNone(build_asset_report(self.entry, dict(state='running'), now=1010)['archive'])
+
+    def test_finished_calculation_is_not_finished_verification_or_archive(self):
+        self.p.update(completed=1250000, status='complete')
+        (self.root/'progress.json').write_text(json.dumps(self.p))
+        for stage, expected in [('verify-archive-and-publication', 'verifying'), ('await-durable-archive', 'waiting_for_archive')]:
+            result = build_asset_report(self.entry, dict(state='running', stages=[dict(name=stage, state='running')]), now=9999)
+            self.assertEqual(result['state'], expected)
+            self.assertIsNone(result['remainingSeconds'])
+            self.assertEqual(result['warnings'], [])
+        self.assertEqual(build_asset_report(self.entry, dict(state='complete'), now=9999)['warnings'], [])
+
+    def test_history_is_bounded_and_tolerates_partial_append(self):
+        path = self.root/'history.jsonl'
+        path.write_text(''.join(json.dumps(dict(updatedAt=i, completed=i))+'\n' for i in range(5001))+'{"partial":')
+        rows = history_rows(path)
+        self.assertLessEqual(len(rows), 500)
+        self.assertEqual(rows[0]['completed'], 0)
+        self.assertGreater(rows[-1]['completed'], 4950)
 
 
 class ConfidenceSequenceTests(unittest.TestCase):
