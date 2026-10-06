@@ -65,8 +65,8 @@ def orientation(scope, orientation, count, workers):
     out.mkdir(parents=True, exist_ok=True)
     db = out / 'games.db'
     existing = db_rows(db)
-    if any(i < 0 or i >= count for i, *_ in existing):
-        raise ValueError('unexpected existing game index')
+    if db.exists():
+        validate_orientation(scope, orientation, count, complete=False)
     binaries = [BASE / 'inputs/ace-f64', BASE / 'inputs/ace-f32']
     if orientation:
         binaries.reverse()
@@ -84,9 +84,22 @@ def orientation(scope, orientation, count, workers):
     save(f'{scope}/{orientation}/verified.json', {'status': 'passed', 'games': count})
 
 
-def validate_orientation(scope, orientation, count):
-    rows = db_rows(BASE / scope / str(orientation) / 'games.db')
-    if [r[0] for r in rows] != list(range(count)):
+def validate_orientation(scope, orientation, count, complete=True):
+    path = BASE / scope / str(orientation) / 'games.db'
+    rows = db_rows(path)
+    with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True) as db:
+        if db.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
+            raise ValueError('database integrity failure')
+        if db.execute('SELECT count(*) FROM compact_games WHERE left_engine != ? OR right_engine != ?', (MODEL, MODEL)).fetchone()[0]:
+            raise ValueError('unexpected policy model')
+        metadata = db.execute('SELECT metadata_json FROM ai_runs WHERE run_id=?', (f'{scope}-{orientation}',)).fetchone()
+        expected = [str(BASE / 'inputs/ace-f64'), str(BASE / 'inputs/ace-f32')]
+        if orientation: expected.reverse()
+        if not metadata or json.loads(metadata[0]).get('seatEngines') != expected:
+            raise ValueError('seat precision provenance mismatch')
+    if any(i < 0 or i >= count for i, *_ in rows):
+        raise ValueError('unexpected existing game index')
+    if complete and [r[0] for r in rows] != list(range(count)):
         raise ValueError('missing/duplicate game indices')
     for index, seed, winner, left, right, included in rows:
         if int(seed) != (CONFIG['seed'] + index) % 2**32 or included != 0:
@@ -198,10 +211,15 @@ def report():
                     row = timings.setdefault(f'f{precision}-{kind}', {'decisions': 0, 'wallUsIncludingIPC': 0})
                     row['decisions'] += count
                     row['wallUsIncludingIPC'] += micros
-    paired_margin = statistics.mean(((a[4]-a[3])+(b[3]-b[4]))/2 for a, b in zip(*rows))
+    margins = [((a[4]-a[3])+(b[3]-b[4]))/2 for a, b in zip(*rows)]
+    paired_margin = statistics.mean(margins)
+    margin_half = 1.96 * statistics.stdev(margins) / math.sqrt(n)
     result = {'status': 'passed', 'games': 2*n, 'pairs': n, 'f32WinRate': mean,
               'pairedApprox95CI': [max(0,mean-half), min(1,mean+half)],
-              'f32MeanScoreMargin': paired_margin, 'liveTiming': timings,
+              'f32MeanScoreMargin': paired_margin,
+              'pairedScoreMarginApprox95CI': [paired_margin-margin_half, paired_margin+margin_half],
+              'pairOutcomes': {'f32WinsBoth': pairs.count(1.0), 'split': pairs.count(0.5), 'f64WinsBoth': pairs.count(0.0)},
+              'liveTiming': timings,
               'precision': 'FP32 discard and pegging inference; integer game rules',
               'speed': json.loads((BASE/'matched-observation-report.json').read_text())}
     save('report.json', result)
@@ -213,6 +231,9 @@ def report():
 
 if __name__ == '__main__':
     CONFIG = json.loads((BASE / 'config.json').read_text())
+    expected_config = os.environ.get('EXPECTED_CONFIG_SHA256')
+    if expected_config and digest(BASE / 'config.json') != expected_config:
+        raise ValueError('frozen configuration changed')
     stage = sys.argv[1]
     if stage == 'verify-inputs': verify_inputs()
     elif stage == 'smoke': play('smoke', 1, 1)

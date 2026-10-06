@@ -519,7 +519,7 @@ fn initialize_db(db_path: &Path, config: &Config, started_at: &str) -> Result<()
             concat!(
                 "INSERT INTO ai_runs (run_id, out_dir, command, git_commit, run_seed, status, started_at, metadata_json, included_in_tables) ",
                 "VALUES ({}, {}, {}, {}, {}, 'running', {}, {}, {}) ",
-                "ON CONFLICT(run_id) DO UPDATE SET status='running', run_seed=excluded.run_seed, metadata_json=excluded.metadata_json, included_in_tables=excluded.included_in_tables;"
+                "ON CONFLICT(run_id) DO UPDATE SET status='running', run_seed=excluded.run_seed, metadata_json=excluded.metadata_json, included_in_tables=min(ai_runs.included_in_tables,excluded.included_in_tables);"
             ),
             sql_text(&config.run_id),
             sql_text(
