@@ -230,9 +230,10 @@ def report():
 
 
 if __name__ == '__main__':
-    CONFIG = json.loads((BASE / 'config.json').read_text())
+    config_path = Path(os.environ.get('FP32_CONFIG_PATH', BASE / 'config.json'))
+    CONFIG = json.loads(config_path.read_text())
     expected_config = os.environ.get('EXPECTED_CONFIG_SHA256')
-    if expected_config and digest(BASE / 'config.json') != expected_config:
+    if expected_config and digest(config_path) != expected_config:
         raise ValueError('frozen configuration changed')
     stage = sys.argv[1]
     if stage == 'verify-inputs': verify_inputs()

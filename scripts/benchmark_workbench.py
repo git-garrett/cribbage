@@ -234,7 +234,7 @@ def game_metrics(db, games, cache):
             del cache[game_id]
 
 
-def orientation(root, label, run_id, metric_cache=None):
+def orientation(root, label, run_id, metric_cache=None, variants=None):
     if not label or Path(label).name != label or label in ('.', '..'):
         raise ValueError('Manifest must name two orientation directories')
     status = read_json(root / label / 'status.json', {})
@@ -252,16 +252,27 @@ def orientation(root, label, run_id, metric_cache=None):
             if len(runs) > 1:
                 raise ValueError('Multiple run IDs: specify orientation run IDs in the manifest')
             run_id = runs[0][0] if runs else status.get('runId')
+        if variants:
+            metadata = db.execute('SELECT metadata_json FROM ai_runs WHERE run_id = ?', (run_id,)).fetchone()
+            if not metadata or json.loads(metadata[0]).get('seatEngines') != [v['binary'] for v in variants]:
+                raise ValueError('Frozen seat variant provenance mismatch')
         has_ids = 'game_id' in {row[1] for row in db.execute('PRAGMA table_info(compact_games)')}
         games = [dict(row) for row in db.execute(
             ('SELECT game_id, ' if has_ids else 'SELECT ') +
             'game_index, random_seed, left_engine, right_engine, winner, '
             'final_left_score, final_right_score, started_at, ended_at '
-            'FROM compact_games WHERE run_id = ? AND included_in_tables = 1 ORDER BY game_index', (run_id,))]
+            'FROM compact_games WHERE run_id = ? AND included_in_tables = ? ORDER BY game_index', (run_id, 0 if variants else 1))]
+        if variants and any((g['left_engine'], g['right_engine']) != tuple(v['model'] for v in variants) for g in games):
+            raise ValueError('Frozen seat variant policy mismatch')
         if has_ids:
             identity = (str(path), path.stat().st_ino, run_id)
             cache = metric_cache.setdefault(identity, {}) if metric_cache is not None else {}
             game_metrics(db, games, cache)
+        # Validate raw policy telemetry before giving each frozen worker its
+        # display identity. The experiment's database remains unchanged.
+        if variants:
+            for game in games:
+                game['left_engine'], game['right_engine'] = (v['label'] for v in variants)
     if status.get('runId') != run_id:
         status = {}
     return games, status, run_id
@@ -374,8 +385,16 @@ def build_report(entry, now=None, metric_cache=None):
     start = int(info.get('startIndex', 0))
     if target <= 0 or start < 0:
         raise ValueError('Manifest must specify a positive target and nonnegative startIndex')
-    data = [orientation(root, label, run_id, metric_cache) for label, run_id in zip(
-        (info['candidateLeft'], info['opponentLeft']), config(info))]
+    variants = json.loads(info.get('seatVariants', 'null'))
+    if variants is not None:
+        if (not isinstance(variants, dict) or set(variants) != {candidate, opponent}
+                or candidate == opponent or any(not isinstance(v, dict) or
+                not all(isinstance(v.get(k), str) and v[k] for k in ('model', 'binary')) for v in variants.values())):
+            raise ValueError('Manifest must identify both frozen seat variants')
+        variants = [{**variants[name], 'label': name} for name in (candidate, opponent)]
+    data = [orientation(root, label, run_id, metric_cache, variants if side == 0 or not variants else variants[::-1])
+            for side, (label, run_id) in enumerate(zip(
+                (info['candidateLeft'], info['opponentLeft']), config(info)))]
     indexed = [inspect_games(rows, candidate, opponent, i, target, start) for i, (rows, _, _) in enumerate(data)]
     matches = sorted(indexed[0].keys() & indexed[1].keys())
     for index in matches:

@@ -28,7 +28,7 @@ used in both, so timing measures uncached policy evaluation. Each worker records
 its arithmetic width, process CPU time, elapsed time and decisions. Frozen-seat
 experiments are excluded from the ordinary production benchmark tables.
 
-The initial contract is 1,000 matched seeds played in both orientations (2,000
+The initial contract is 5,000 matched seeds played in both orientations (10,000
 games), two workers per orientation. Report paired-seed uncertainty for FP32 win
 rate, score difference and ties in pair outcomes. A separate matched-observation
 replay compares both workers on the same observations, alternates evaluation
@@ -42,3 +42,10 @@ integrity verification, reports and final durable sync in separate stages.
 Resume enumerates missing index ranges, never starts at the row count. The build
 uses six workers, benchmark four, leaving two CPUs of scheduling headroom; macOS
 schedules these workers rather than hard-pinning physical cores.
+
+The workbench uses an explicit `benchmarkRoot`, a paired `manifest.txt`, and
+`seatVariants` mapping each display label to its actual policy and frozen binary.
+It checks worker provenance and policy telemetry before displaying these normally
+excluded experiment rows, and never changes the databases or ordinary exclusions.
+Versioned configuration files expand the game target without changing the frozen
+engines, seeds, assets, or completed game indices.

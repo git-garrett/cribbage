@@ -161,6 +161,42 @@ class WorkbenchTests(unittest.TestCase):
     def report(self):
         return workbench.build_report(self.entry, now=workbench.timestamp('2026-10-01T00:00:01Z'))
 
+    def install_seat_variants(self):
+        variants = {'A': {'model': 'Ace', 'binary': '/frozen/f32'},
+                    'B': {'model': 'Ace', 'binary': '/frozen/f64'}}
+        with (self.root / 'manifest.txt').open('a') as out:
+            out.write('seatVariants=' + json.dumps(variants) + '\n')
+        for side, label in enumerate(('left', 'right')):
+            self.add_game(label, 0, engines=('Ace', 'Ace'))
+            with sqlite3.connect(self.root / label / 'games.db') as db:
+                db.execute('UPDATE compact_games SET included_in_tables=0')
+                db.execute('CREATE TABLE ai_runs(run_id TEXT, metadata_json TEXT)')
+                engines = ['/frozen/f32', '/frozen/f64']
+                if side: engines.reverse()
+                db.execute('INSERT INTO ai_runs VALUES(?,?)', (('L', 'R')[side], json.dumps({'seatEngines': engines})))
+
+    def test_frozen_variants_display_excluded_experiment_without_changing_database(self):
+        self.install_seat_variants()
+        report = self.report()
+        self.assertEqual(report['saved'], 2)
+        self.assertEqual(report['orderedPairs'], 1)
+        self.assertEqual((report['candidate'], report['opponent']), ('A', 'B'))
+        with sqlite3.connect(self.root / 'left/games.db') as db:
+            self.assertEqual(db.execute('SELECT left_engine,right_engine,included_in_tables FROM compact_games').fetchone(), ('Ace', 'Ace', 0))
+
+    def test_frozen_variant_binary_mismatch_fails_closed(self):
+        self.install_seat_variants()
+        with sqlite3.connect(self.root / 'left/games.db') as db:
+            db.execute('UPDATE ai_runs SET metadata_json=?', (json.dumps({'seatEngines': ['/frozen/f64', '/frozen/f32']}),))
+        with self.assertRaisesRegex(ValueError, 'provenance mismatch'):
+            self.report()
+
+    def test_ordinary_exclusions_still_excluded(self):
+        self.add_game('left', 0)
+        with sqlite3.connect(self.root / 'left/games.db') as db:
+            db.execute('UPDATE compact_games SET included_in_tables=0')
+        self.assertEqual(self.report()['saved'], 0)
+
     def test_registration_and_live_status(self):
         self.assertEqual(self.entry['root'], str(self.root))
         jobs = workbench.list_jobs(self.root / 'runtime', self.root / 'supervisors')
