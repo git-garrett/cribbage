@@ -17,6 +17,7 @@
   --mono:"SFMono-Regular",Consolas,monospace;
 }
 .asset-headline { display:flex; align-items:baseline; gap:16px; margin:12px 0 24px; flex-wrap:wrap; }
+.asset-headline .hero-number { font:650 clamp(36px,5vw,58px)/1.1 var(--display); letter-spacing:-1px; }
 .asset-lane .section-heading { margin-bottom:7px; font-size:13px; }
 .asset-lane .lane-track { width:100%; }
 .asset-lane:nth-child(2) .lane-fill { background:var(--good); }

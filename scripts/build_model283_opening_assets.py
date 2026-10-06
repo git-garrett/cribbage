@@ -104,9 +104,16 @@ def build(config, index, coord):
 
 
 def archive_file(source, target, expected):
+    created = []
+    parent = target.parent
+    while not parent.exists():
+        created.append(parent); parent = parent.parent
     target.parent.mkdir(parents=True, exist_ok=True)
+    for directory in reversed(created):
+        sync_directory(directory.parent)
     if target.exists():
         if sha(target) != expected: raise ValueError('Immutable archive conflict')
+        sync_directory(target.parent)
         return
     temporary = target.with_suffix('.copying')
     with source.open('rb') as src, temporary.open('wb') as dst:
@@ -114,6 +121,14 @@ def archive_file(source, target, expected):
         dst.flush(); os.fsync(dst.fileno())
     if sha(temporary) != expected: raise ValueError('Archive copy digest differs')
     os.replace(temporary, target)
+    sync_directory(target.parent)
+
+
+def sync_directory(path):
+    """Persist renamed files and new directory entries before releasing a copy."""
+    fd = os.open(path, os.O_RDONLY)
+    try: os.fsync(fd)
+    finally: os.close(fd)
 
 
 def sync_chunk(config, value):

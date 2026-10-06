@@ -12,7 +12,7 @@ from pathlib import Path
 import sqlite3
 import time
 
-from build_model283_opening_assets import archive_file, sha
+from build_model283_opening_assets import archive_file, sha, sync_directory
 from cribbage_job_queue import atomic_json
 
 
@@ -36,7 +36,7 @@ def archive(config, destination, release=False):
             identity = json.loads(db.execute('SELECT value FROM identity').fetchone()[0])
             if identity['inputs'] != config['frozen']:
                 raise ValueError('Archive policy/input identity mismatch')
-            count = 0; total = 0
+            count = 0; total = 0; directories = set()
             for index, raw in db.execute('SELECT id,receipt FROM completed ORDER BY id'):
                 v = json.loads(raw)
                 relative = Path(v['relative'])
@@ -53,6 +53,7 @@ def archive(config, destination, release=False):
                     archive_file(src, dst, row['sha256'])
                     if dst.stat().st_size != row['bytes'] or sha(dst) != row['sha256']:
                         raise ValueError('Final archive bytes differ')
+                    directories.update(dst.parents)
                     total += row['bytes']
                 count += 1
             checkpoint = target / 'foreground-snapshots' / stamp / 'queue.db'
@@ -67,6 +68,11 @@ def archive(config, destination, release=False):
             receipt = record / 'receipt.json'
             atomic_json(receipt, result)
             archive_file(receipt, checkpoint.with_name('receipt.json'), sha(receipt))
+            directories.update(checkpoint.parents)
+            # Also cover directories retained from an earlier interrupted copy.
+            # Only ~3,200 distinct directories are needed for the full domain.
+            for directory in sorted(directories, key=lambda p: len(p.parts), reverse=True):
+                sync_directory(directory)
             atomic_json(run / 'archive-progress.json', result)
             if release:
                 for (raw,) in db.execute('SELECT receipt FROM completed ORDER BY id'):

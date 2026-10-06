@@ -82,6 +82,9 @@ class AssetPipelineTests(unittest.TestCase):
             root = Path(d); config = self.config(root)
             with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=2): build.run(config)
             target = root/'external'
+            with patch.object(archiver, 'sync_directory', side_effect=OSError('directory flush failed')):
+                with self.assertRaises(OSError): archiver.archive(config, target, release=True)
+            self.assertTrue((root/'staging'/POLICY/'full/cut0/pone0/dealer0-lead0.bin').is_file())
             first = archiver.archive(config, target, release=True)
             self.assertEqual(first['completed'], 3)
             self.assertGreater(first['releasedBytes'], 0)
