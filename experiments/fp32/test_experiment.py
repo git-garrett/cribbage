@@ -41,6 +41,17 @@ class ExperimentTest(unittest.TestCase):
             self.assertEqual(overall['perDecisionSpeedupF64OverF32'], 2)
             self.assertIn('FP64/FP32 2.000x', (base / 'report.txt').read_text())
 
+    def test_fp16_timing_keys_and_configuration(self):
+        with patch.object(run, 'CONFIG', {'candidateBits': 16}):
+            self.assertEqual(run.candidate_bits(), 16)
+        with patch.object(run, 'CONFIG', {'candidateBits': 8}):
+            with self.assertRaises(ValueError): run.candidate_bits()
+        timings = {f'f{bits}-{kind}': {'decisions': 10, 'wallUsIncludingIPC': bits * 1000}
+                   for bits in (16,64) for kind in ('discard','peg')}
+        result = run.live_speed(timings, 2, 16)
+        self.assertEqual(result['results']['overall']['perGameSpeedupF64OverF16'], 4)
+        self.assertNotIn('f32', result['results']['overall'])
+
     def test_generated_asset_reader_keeps_eight_byte_decode(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / 'source'

@@ -39,9 +39,10 @@ A small observed difference is not proof of strength equivalence.
 
 The one-shot supervisor runs input verification, full-game smoke, benchmark,
 integrity verification, reports and final durable sync in separate stages.
-Resume enumerates missing index ranges, never starts at the row count. The build
-uses six workers, benchmark four, leaving two CPUs of scheduling headroom; macOS
-schedules these workers rather than hard-pinning physical cores.
+Resume enumerates missing index ranges, never starts at the row count. The original build allocation was six workers plus four benchmark workers.
+The overnight FP16 comparison changes that to four build workers, four FP32
+game workers and four FP16 game workers; macOS schedules these workers rather
+than hard-pinning physical cores. See `../fp16/README.md` for the FP16 adaptations.
 
 The workbench uses an explicit `benchmarkRoot`, a paired `manifest.txt`, and
 `seatVariants` mapping each display label to its actual policy and frozen binary.

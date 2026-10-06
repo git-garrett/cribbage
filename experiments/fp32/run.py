@@ -16,6 +16,13 @@ CONFIG = None
 MODEL = 'schell_table-peg_table-28.3.fast'
 
 
+def candidate_bits():
+    bits = CONFIG.get('candidateBits', 32)
+    if bits not in (16, 32):
+        raise ValueError('candidate must use FP16 or FP32')
+    return bits
+
+
 def save(name, value):
     path = BASE / name
     tmp = path.with_suffix('.tmp')
@@ -67,7 +74,7 @@ def orientation(scope, orientation, count, workers):
     existing = db_rows(db)
     if db.exists():
         validate_orientation(scope, orientation, count, complete=False)
-    binaries = [BASE / 'inputs/ace-f64', BASE / 'inputs/ace-f32']
+    binaries = [BASE / 'inputs/ace-f64', BASE / f'inputs/ace-f{candidate_bits()}']
     if orientation:
         binaries.reverse()
     for start, end in missing_ranges([r[0] for r in existing], count):
@@ -76,7 +83,7 @@ def orientation(scope, orientation, count, workers):
                    '--games', str(end-start), '--start-index', str(start), '--total-games', str(count),
                    '--seed', str(CONFIG['seed']), '--workers', str(workers),
                    '--model-root', str(BASE / 'inputs/model'), '--out-dir', str(out), '--db', str(db),
-                   '--run-id', f'{scope}-{orientation}', '--matchup-id', f'ace-f32-orientation-{orientation}']
+                   '--run-id', f'{scope}-{orientation}', '--matchup-id', f'ace-f{candidate_bits()}-orientation-{orientation}']
         with (out / 'runner.log').open('a') as log:
             subprocess.run(command, check=True, stdout=log, stderr=subprocess.STDOUT,
                            env=environment(out / 'traces'))
@@ -93,7 +100,7 @@ def validate_orientation(scope, orientation, count, complete=True):
         if db.execute('SELECT count(*) FROM compact_games WHERE left_engine != ? OR right_engine != ?', (MODEL, MODEL)).fetchone()[0]:
             raise ValueError('unexpected policy model')
         metadata = db.execute('SELECT metadata_json FROM ai_runs WHERE run_id=?', (f'{scope}-{orientation}',)).fetchone()
-        expected = [str(BASE / 'inputs/ace-f64'), str(BASE / 'inputs/ace-f32')]
+        expected = [str(BASE / 'inputs/ace-f64'), str(BASE / f'inputs/ace-f{candidate_bits()}')]
         if orientation: expected.reverse()
         if not metadata or json.loads(metadata[0]).get('seatEngines') != expected:
             raise ValueError('seat precision provenance mismatch')
@@ -123,7 +130,7 @@ def verify_inputs():
             raise ValueError('frozen input changed: ' + name)
     samples = [f'kind=discard;model={MODEL};role=dealer;aiScore=0;humanScore=0;aiHand=0,1,2,16,30,44;turnCard=0',
                f'kind=peg;model={MODEL};role=pone;ownDiscards=1,6;aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore=119;humanScore=120;turnCard=10;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5;decisionSeed=123456789']
-    for precision in (64, 32):
+    for precision in (64, candidate_bits()):
         worker = Worker(precision)
         try:
             for sample in samples:
@@ -196,12 +203,12 @@ def replay():
                                            'scope': 'same CPU observations; warm complete sequences; concurrent asset build'})
 
 
-def live_speed(timings, games):
+def live_speed(timings, games, bits=32):
     results = {}
     for kind in ('discard', 'peg', 'overall'):
         kinds = ('discard', 'peg') if kind == 'overall' else (kind,)
         values = {}
-        for precision in (32, 64):
+        for precision in (bits, 64):
             rows = [timings[f'f{precision}-{k}'] for k in kinds]
             decisions = sum(row['decisions'] for row in rows)
             micros = sum(row['wallUsIncludingIPC'] for row in rows)
@@ -210,14 +217,15 @@ def live_speed(timings, games):
             values[f'f{precision}'] = {'decisions': decisions,
                                       'meanDecisionMs': micros / decisions / 1000,
                                       'decisionMsPerGame': micros / games / 1000}
-        values['perDecisionSpeedupF64OverF32'] = values['f64']['meanDecisionMs'] / values['f32']['meanDecisionMs']
-        values['perGameSpeedupF64OverF32'] = values['f64']['decisionMsPerGame'] / values['f32']['decisionMsPerGame']
+        values[f'perDecisionSpeedupF64OverF{bits}'] = values['f64']['meanDecisionMs'] / values[f'f{bits}']['meanDecisionMs']
+        values[f'perGameSpeedupF64OverF{bits}'] = values['f64']['decisionMsPerGame'] / values[f'f{bits}']['decisionMsPerGame']
         results[kind] = values
     return {'source': 'live-games', 'results': results,
             'scope': 'Decision wall time including worker transport and scheduling; paired games with a concurrent asset build. Game paths may differ.'}
 
 
 def report():
+    bits = candidate_bits()
     n = CONFIG['gamesPerOrientation']
     rows = [validate_orientation('benchmark', o, n) for o in range(2)]
     pairs = [((a[2] == 1) + (b[2] == 0))/2 for a, b in zip(*rows)]
@@ -228,28 +236,28 @@ def report():
         with sqlite3.connect(BASE / 'benchmark' / str(o) / 'games.db') as db:
             for table, kind in [('compact_discards', 'discard'), ('compact_peg_plays', 'peg')]:
                 for player, count, micros in db.execute(f'SELECT player,count(*),sum(decision_elapsed_us) FROM {table} WHERE decision_elapsed_us IS NOT NULL GROUP BY player'):
-                    precision = 32 if player == 1-o else 64
+                    precision = bits if player == 1-o else 64
                     row = timings.setdefault(f'f{precision}-{kind}', {'decisions': 0, 'wallUsIncludingIPC': 0})
                     row['decisions'] += count
                     row['wallUsIncludingIPC'] += micros
     margins = [((a[4]-a[3])+(b[3]-b[4]))/2 for a, b in zip(*rows)]
     paired_margin = statistics.mean(margins)
     margin_half = 1.96 * statistics.stdev(margins) / math.sqrt(n)
-    result = {'status': 'passed', 'games': 2*n, 'pairs': n, 'f32WinRate': mean,
+    result = {'status': 'passed', 'games': 2*n, 'pairs': n, f'f{bits}WinRate': mean,
               'pairedApprox95CI': [max(0,mean-half), min(1,mean+half)],
-              'f32MeanScoreMargin': paired_margin,
+              f'f{bits}MeanScoreMargin': paired_margin,
               'pairedScoreMarginApprox95CI': [paired_margin-margin_half, paired_margin+margin_half],
-              'pairOutcomes': {'f32WinsBoth': pairs.count(1.0), 'split': pairs.count(0.5), 'f64WinsBoth': pairs.count(0.0)},
+              'pairOutcomes': {f'f{bits}WinsBoth': pairs.count(1.0), 'split': pairs.count(0.5), 'f64WinsBoth': pairs.count(0.0)},
               'liveTiming': timings,
-              'precision': 'FP32 discard and pegging inference; integer game rules',
-              'speed': live_speed(timings, 2*n)}
+              'precision': f'FP{bits} discard and pegging inference; integer game rules',
+              'speed': live_speed(timings, 2*n, bits)}
     save('report.json', result)
-    (BASE / 'report.txt').write_text(f"Full FP32 Ace versus FP64 Ace: {2*n:,} games / {n:,} paired seeds\n"
-        f"FP32 wins {100*mean:.2f}% (paired approximate 95% CI {100*max(0,mean-half):.2f}–{100*min(1,mean+half):.2f}%).\n"
-        f"FP32 average score margin: {paired_margin:+.3f}.\n"
-        + ''.join(f"{kind}: FP32 {values['f32']['decisionMsPerGame']:.3f} ms/game; "
+    (BASE / 'report.txt').write_text(f"Full FP{bits} Ace versus FP64 Ace: {2*n:,} games / {n:,} paired seeds\n"
+        f"FP{bits} wins {100*mean:.2f}% (paired approximate 95% CI {100*max(0,mean-half):.2f}–{100*min(1,mean+half):.2f}%).\n"
+        f"FP{bits} average score margin: {paired_margin:+.3f}.\n"
+        + ''.join(f"{kind}: FP{bits} {values[f'f{bits}']['decisionMsPerGame']:.3f} ms/game; "
                   f"FP64 {values['f64']['decisionMsPerGame']:.3f} ms/game; "
-                  f"FP64/FP32 {values['perGameSpeedupF64OverF32']:.3f}x.\n"
+                  f"FP64/FP{bits} {values[f'perGameSpeedupF64OverF{bits}']:.3f}x.\n"
                   for kind, values in result['speed']['results'].items())
         + result['speed']['scope'] + '\nCPU experiment; no GPU speed claim.\n')
 
