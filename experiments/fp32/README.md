@@ -30,12 +30,12 @@ experiments are excluded from the ordinary production benchmark tables.
 
 The initial contract is 5,000 matched seeds played in both orientations (10,000
 games), two workers per orientation. Report paired-seed uncertainty for FP32 win
-rate, score difference and ties in pair outcomes. A separate matched-observation
-replay compares both workers on the same observations, alternates evaluation
-order, discards cold-start samples, and reports CPU and wall timing by decision
-kind plus action disagreement. Live-game timing is also retained, but differing
-trajectories and concurrent workload make it descriptive, not an isolated speed
-measurement. A small observed difference is not proof of strength equivalence.
+rate, score difference and ties in pair outcomes. The same games supply the speed
+comparison: decision wall time per game and per decision, split into discard,
+pegging and overall. Timings include worker transport and scheduling. Differing
+game paths and concurrent workload are part of this practical speed comparison.
+No separate timing replay precedes the benchmark or is required by its report.
+A small observed difference is not proof of strength equivalence.
 
 The one-shot supervisor runs input verification, full-game smoke, benchmark,
 integrity verification, reports and final durable sync in separate stages.

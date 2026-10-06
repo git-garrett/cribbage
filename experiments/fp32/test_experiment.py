@@ -3,7 +3,10 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+import sqlite3
 import prepare
+import run
 from run import missing_ranges
 
 
@@ -11,6 +14,32 @@ class ExperimentTest(unittest.TestCase):
     def test_resume_preserves_out_of_order_commits(self):
         self.assertEqual(missing_ranges([0, 2, 3, 6], 8), [[1, 2], [4, 6], [7, 8]])
         self.assertEqual(missing_ranges(range(8), 8), [])
+
+    def test_report_uses_paired_game_timings_without_replay(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            for orientation in range(2):
+                folder = base / 'benchmark' / str(orientation)
+                folder.mkdir(parents=True)
+                with sqlite3.connect(folder / 'games.db') as db:
+                    for table in ('compact_discards', 'compact_peg_plays'):
+                        db.execute(f'CREATE TABLE {table}(player INTEGER, decision_elapsed_us INTEGER)')
+                        db.executemany(f'INSERT INTO {table} VALUES (?,?)',
+                                       [(1-orientation, 1000), (orientation, 2000)])
+            rows = [[(0, 1, 1, 100, 121, 0), (1, 2, 0, 121, 110, 0)],
+                    [(0, 1, 0, 121, 100, 0), (1, 2, 0, 121, 110, 0)]]
+            with patch.object(run, 'BASE', base), patch.object(run, 'CONFIG', {'gamesPerOrientation': 2}), \
+                    patch.object(run, 'validate_orientation', side_effect=rows):
+                run.report()
+            result = json.loads((base / 'report.json').read_text())
+            self.assertEqual(result['f32WinRate'], .75)
+            self.assertEqual(result['speed']['source'], 'live-games')
+            overall = result['speed']['results']['overall']
+            self.assertEqual(overall['f32']['decisions'], 4)
+            self.assertEqual(overall['f32']['decisionMsPerGame'], 1)
+            self.assertEqual(overall['perGameSpeedupF64OverF32'], 2)
+            self.assertEqual(overall['perDecisionSpeedupF64OverF32'], 2)
+            self.assertIn('FP64/FP32 2.000x', (base / 'report.txt').read_text())
 
     def test_generated_asset_reader_keeps_eight_byte_decode(self):
         with tempfile.TemporaryDirectory() as tmp:

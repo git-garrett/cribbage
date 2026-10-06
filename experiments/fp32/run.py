@@ -196,6 +196,27 @@ def replay():
                                            'scope': 'same CPU observations; warm complete sequences; concurrent asset build'})
 
 
+def live_speed(timings, games):
+    results = {}
+    for kind in ('discard', 'peg', 'overall'):
+        kinds = ('discard', 'peg') if kind == 'overall' else (kind,)
+        values = {}
+        for precision in (32, 64):
+            rows = [timings[f'f{precision}-{k}'] for k in kinds]
+            decisions = sum(row['decisions'] for row in rows)
+            micros = sum(row['wallUsIncludingIPC'] for row in rows)
+            if decisions <= 0 or micros <= 0:
+                raise ValueError('missing live-game timing samples')
+            values[f'f{precision}'] = {'decisions': decisions,
+                                      'meanDecisionMs': micros / decisions / 1000,
+                                      'decisionMsPerGame': micros / games / 1000}
+        values['perDecisionSpeedupF64OverF32'] = values['f64']['meanDecisionMs'] / values['f32']['meanDecisionMs']
+        values['perGameSpeedupF64OverF32'] = values['f64']['decisionMsPerGame'] / values['f32']['decisionMsPerGame']
+        results[kind] = values
+    return {'source': 'live-games', 'results': results,
+            'scope': 'Decision wall time including worker transport and scheduling; paired games with a concurrent asset build. Game paths may differ.'}
+
+
 def report():
     n = CONFIG['gamesPerOrientation']
     rows = [validate_orientation('benchmark', o, n) for o in range(2)]
@@ -221,12 +242,16 @@ def report():
               'pairOutcomes': {'f32WinsBoth': pairs.count(1.0), 'split': pairs.count(0.5), 'f64WinsBoth': pairs.count(0.0)},
               'liveTiming': timings,
               'precision': 'FP32 discard and pegging inference; integer game rules',
-              'speed': json.loads((BASE/'matched-observation-report.json').read_text())}
+              'speed': live_speed(timings, 2*n)}
     save('report.json', result)
     (BASE / 'report.txt').write_text(f"Full FP32 Ace versus FP64 Ace: {2*n:,} games / {n:,} paired seeds\n"
         f"FP32 wins {100*mean:.2f}% (paired approximate 95% CI {100*max(0,mean-half):.2f}–{100*min(1,mean+half):.2f}%).\n"
         f"FP32 average score margin: {paired_margin:+.3f}.\n"
-        + json.dumps(result['speed']['results'], indent=2) + '\nCPU experiment; no GPU speed claim.\n')
+        + ''.join(f"{kind}: FP32 {values['f32']['decisionMsPerGame']:.3f} ms/game; "
+                  f"FP64 {values['f64']['decisionMsPerGame']:.3f} ms/game; "
+                  f"FP64/FP32 {values['perGameSpeedupF64OverF32']:.3f}x.\n"
+                  for kind, values in result['speed']['results'].items())
+        + result['speed']['scope'] + '\nCPU experiment; no GPU speed claim.\n')
 
 
 if __name__ == '__main__':
@@ -238,7 +263,7 @@ if __name__ == '__main__':
     stage = sys.argv[1]
     if stage == 'verify-inputs': verify_inputs()
     elif stage == 'smoke': play('smoke', 1, 1)
-    elif stage == 'benchmark': play('benchmark', CONFIG['gamesPerOrientation'], 2)
+    elif stage == 'benchmark': play('benchmark', CONFIG['gamesPerOrientation'], CONFIG['workersPerOrientation'])
     elif stage == 'verify-results':
         for o in range(2): validate_orientation('benchmark', o, CONFIG['gamesPerOrientation'])
         save('integrity.json', {'status': 'passed'})
