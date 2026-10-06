@@ -26,7 +26,8 @@
     "test:workbench": "scripts/run-quiet.sh \"Benchmark workbench tests\" python3 -m unittest discover -s scripts -p test_benchmark_workbench.py",
     "build:benchmark": "scripts/run-quiet.sh --show-warnings \"Benchmark release build\" python3 scripts/build_rust_release.py benchmark",
     "test:opening-assets": "scripts/run-quiet.sh \"Opening asset pipeline tests\" python3 -m unittest discover -s scripts -p test_opening_asset_pipeline.py",
-    "build:opening-assets": "scripts/run-quiet.sh --show-warnings \"Opening asset builder\" python3 scripts/build_rust_release.py opening"
+    "build:opening-assets": "scripts/run-quiet.sh --show-warnings \"Opening asset builder\" python3 scripts/build_rust_release.py opening",
+    "test:history": "scripts/run-quiet.sh \"History review tests\" python3 -m unittest scripts/test_history_review_inputs.py scripts/test_player_history.py"
   },
   "dependencies": {
     "@capacitor/core": "^7.4.4"

@@ -11,6 +11,8 @@ import sqlite3
 def apply_report(database, report, user_id, username, backup, apply=False):
     if report.get('schemaVersion') != 1 or report.get('status') != 'complete':
         raise ValueError('report is not verified')
+    if report.get('account') != {'userId': user_id, 'username': username}:
+        raise ValueError('report belongs to a different account')
     c = sqlite3.connect(f'file:{database}?mode={"rw" if apply else "ro"}', uri=True, timeout=30)
     actual = c.execute('SELECT username FROM auth_users WHERE id=?', (user_id,)).fetchone()
     if not actual or actual[0].casefold() != username.casefold():
@@ -26,6 +28,8 @@ def apply_report(database, report, user_id, username, backup, apply=False):
     # Check all recent uploads, including games with no eligible handicap cycle.
     ids = {g['gameId'] for g in report['reviewedGames']}
     current_ids = {g[0] for g in c.execute("SELECT game_id FROM cribbage_completed_game_uploads WHERE lower(json_extract(payload_json,'$.tag'))=lower(?)", (username,))}
+    current_ids.update(g[0] for g in c.execute("SELECT session_id FROM cribbage_game_sessions WHERE status='complete' AND json_extract(session_json,'$.owner_user_id')=?", (user_id,)))
+    current_ids.update(g[0] for g in c.execute('SELECT g.game_id FROM people_games g JOIN people_challenges p ON p.table_id=g.table_id WHERE g.completed_at IS NOT NULL AND (p.challenger_id=? OR p.challenged_id=?)', (user_id, user_id)))
     if not current_ids <= ids:
         raise ValueError('new completed games must be copied and reviewed before import')
     profile = json.loads(profile_row[0])
@@ -56,10 +60,8 @@ def apply_report(database, report, user_id, username, backup, apply=False):
               (user_id, compact(report['summary']), report['sourceSha256'], at))
     for game in report['reviewedGames']:
         # Original upload and server session rows remain unchanged.
-        c.execute('INSERT INTO player_reviewed_games VALUES (?,?,?) ON CONFLICT(game_id) DO UPDATE SET payload_json=excluded.payload_json WHERE player_reviewed_games.user_id=excluded.user_id',
+        c.execute('INSERT INTO player_reviewed_games VALUES (?,?,?) ON CONFLICT(user_id,game_id) DO UPDATE SET payload_json=excluded.payload_json',
                   (user_id, game['gameId'], compact(game['payload'])))
-        if c.execute('SELECT user_id FROM player_reviewed_games WHERE game_id=?', (game['gameId'],)).fetchone()[0] != user_id:
-            raise ValueError('reviewed game belongs to another account')
     for cycle in report['cycles']['historical']:
         # Retain earlier calibration evidence. New cycle keys also prevent a
         # later current-Ace review from counting the historical cycle twice.
@@ -84,7 +86,10 @@ def main():
     p.add_argument('--username', required=True)
     p.add_argument('--backup', type=Path, required=True)
     p.add_argument('--apply', action='store_true')
+    p.add_argument('--sha256', required=True)
     args = p.parse_args()
+    if hashlib.sha256(args.report.read_bytes()).hexdigest() != args.sha256:
+        raise ValueError('report hash differs from verified local artifact')
     result = apply_report(args.database, json.loads(args.report.read_text()), args.user_id, args.username, args.backup, args.apply)
     print(json.dumps(result))
 

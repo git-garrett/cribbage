@@ -12,7 +12,7 @@ from pathlib import Path
 import sqlite3
 
 from history_review_inputs import RANKS, SUITS, REVIEW_MODELS
-from review_player_history import LATEST, digest, encode, iso
+from review_player_history import LATEST, digest, encode, iso, merged_payloads
 
 
 def loss(record, result):
@@ -117,7 +117,7 @@ def event_review(record, result):
     return review
 
 
-def report(database, source_path):
+def report(database, source_path, worker, build_receipt, user_id, username):
     c = sqlite3.connect(f'file:{database}?mode=ro', uri=True)
     metadata = {k: json.loads(v) for k, v in c.execute('SELECT key,value FROM metadata')}
     if metadata['source']['sha256'] != digest(source_path):
@@ -125,9 +125,19 @@ def report(database, source_path):
     statuses = dict(c.execute('SELECT status,count(*) FROM reviews GROUP BY status'))
     if set(statuses) != {'complete'}:
         raise ValueError(f'review queue is incomplete: {statuses}')
+    if metadata['worker']['binarySha256'] != digest(worker) or metadata['worker']['buildReceiptSha256'] != digest(build_receipt):
+        raise ValueError('worker or build receipt changed')
     source = json.loads(source_path.read_text())
     sessions = {r['session_id']: json.loads(r['session_json']) for r in source['sessions']}
-    payloads = {r['game_id']: json.loads(r['payload_json']) for r in source['uploads']}
+    payloads = merged_payloads(source)
+    owners = {s['owner_user_id'] for s in sessions.values() if s.get('owner_user_id') is not None}
+    if owners != {user_id}:
+        raise ValueError('source sessions do not identify exactly the requested account')
+    for payload in payloads.values():
+        tag = payload.get('tag')
+        if tag and tag.casefold() != username.casefold():
+            raise ValueError('source upload is tagged to another player')
+        payload['tag'] = username
     cycles = {'historical': [], 'latest': []}
     game_results = {'historical': [], 'latest': []}
     lengths, reviewed_payloads = [], []
@@ -135,6 +145,16 @@ def report(database, source_path):
         meta, events = json.loads(meta_text), json.loads(events_text)
         records = {r['id']: r for (text,) in c.execute('SELECT record_json FROM decisions WHERE game_id=?', (gid,)) for r in [json.loads(text)]}
         reviews = {(i, m): json.loads(r) for i, m, r in c.execute('SELECT r.id,r.model,r.result_json FROM reviews r JOIN decisions d ON d.id=r.id WHERE d.game_id=?', (gid,))}
+        expected_models = {LATEST} | ({meta['opponent']} if meta['opponent'] in REVIEW_MODELS else set())
+        if set(reviews) != {(i, model) for i in records for model in expected_models}:
+            raise ValueError('review set differs from expected decisions/evaluators: ' + gid)
+        for (i, model), result in reviews.items():
+            if result.get('id') != i or result.get('model') != model or not result.get('ok'):
+                raise ValueError('review identity mismatch: ' + i)
+            if result.get('forced') != records[i]['forced'] and result.get('forced'):
+                raise ValueError('non-forced decision marked forced: ' + i)
+            if not result.get('forced') and sorted(result['review']['selected']['cardIds']) != sorted(records[i]['selected']):
+                raise ValueError('review selection mismatch: ' + i)
         hands, completed, assisted = hand_boundaries(gid, events, sessions.get(gid))
         # A final heels win can have no recorded decision; include that deal in length.
         hands = max(hands, meta['hands'])
@@ -206,7 +226,7 @@ def report(database, source_path):
     if historical['wpPerGame'] is None:
         raise ValueError('no historical handicap evidence')
     original_profile = next(r for r in source['profiles'] if r['evaluator_version'] == 'player-history')
-    return {'schemaVersion': 1, 'status': 'complete', 'sourceSha256': digest(source_path),
+    return {'schemaVersion': 1, 'status': 'complete', 'account': {'userId': user_id, 'username': username}, 'sourceSha256': digest(source_path),
             'worker': metadata['worker'], 'expectedProfile': original_profile, 'summary': summary,
             'profilePatch': {'handicap_cycles': historical['cycles'],
                              'ewma_cycle_handicap': historical['ewmaCycleHandicap'],
@@ -221,8 +241,12 @@ def main():
     parser.add_argument('--database', type=Path, required=True)
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--worker', type=Path, required=True)
+    parser.add_argument('--build-receipt', type=Path, required=True)
+    parser.add_argument('--user-id', type=int, required=True)
+    parser.add_argument('--username', required=True)
     args = parser.parse_args()
-    result = report(args.database, args.source)
+    result = report(args.database, args.source, args.worker, args.build_receipt, args.user_id, args.username)
     args.output.write_text(encode(result) + '\n')
     print(encode(result['summary']))
 

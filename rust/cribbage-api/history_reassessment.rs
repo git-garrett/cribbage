@@ -15,11 +15,11 @@ pub fn summary(connection: &Connection, user_id: i64) -> Result<Option<Value>, S
         .transpose()
 }
 
-pub fn payload(connection: &Connection, game_id: &str) -> Result<Option<String>, String> {
+pub fn payload(connection: &Connection, user_id: i64, game_id: &str) -> Result<Option<String>, String> {
     connection
         .query_row(
-            "SELECT payload_json FROM player_reviewed_games WHERE game_id=?1",
-            [game_id],
+            "SELECT payload_json FROM player_reviewed_games WHERE user_id=?1 AND game_id=?2",
+            params![user_id, game_id],
             |row| row.get(0),
         )
         .optional()
@@ -92,6 +92,8 @@ mod tests {
         assert_eq!(events[0]["review"]["model"], "latest");
         assert_eq!(events[1]["id"], "new-game");
         assert!(summary(&connection, 2).unwrap().is_none());
+        assert!(payload(&connection, 2, "game-1").unwrap().is_none());
+        assert!(payload(&connection, 1, "game-1").unwrap().is_some());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

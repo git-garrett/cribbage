@@ -8,10 +8,15 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).parent))
 from import_player_history import apply_report
+from review_player_history import merged_payloads
 from report_player_history import ewma, hand_boundaries, loss, summarize, wins_on_play
 
 
 class HistoryReportTest(unittest.TestCase):
+    def test_legacy_only_payload_is_available_to_reporting(self):
+        source = {'uploads': [], 'legacyUploads': [{'game_id':'old', 'model':'original', 'events_json':'[{"id":"choice"}]', 'final_result_json':'null'}]}
+        self.assertEqual(merged_payloads(source)['old']['events'], [{'id':'choice'}])
+
     def test_wp_and_half_life(self):
         self.assertAlmostEqual(ewma([.1] + [.2] * 18, 18), .15)
         cycles = [{'gameId': 'g', 'sample': {'total_regret': .02}}]
@@ -55,18 +60,21 @@ class HistoryImportTest(unittest.TestCase):
         self.backup = Path(self.temp.name) / 'backup.sqlite'
         with sqlite3.connect(self.path) as c:
             c.executescript('''PRAGMA journal_mode=WAL;
+              CREATE TABLE cribbage_game_sessions(session_id TEXT,status TEXT,session_json TEXT);
+              CREATE TABLE people_challenges(table_id TEXT,challenger_id INTEGER,challenged_id INTEGER);
+              CREATE TABLE people_games(game_id TEXT,table_id TEXT,completed_at INTEGER);
               CREATE TABLE auth_users(id INTEGER PRIMARY KEY, username TEXT);
               CREATE TABLE dynamic_player_profiles(user_id INTEGER,evaluator_version TEXT,profile_json TEXT,updated_at TEXT);
               CREATE TABLE cribbage_completed_game_uploads(game_id TEXT,payload_json TEXT);
               CREATE TABLE player_history_reassessments(user_id INTEGER PRIMARY KEY,summary_json TEXT,source_sha256 TEXT,applied_at TEXT);
-              CREATE TABLE player_reviewed_games(user_id INTEGER,game_id TEXT PRIMARY KEY,payload_json TEXT);
+              CREATE TABLE player_reviewed_games(user_id INTEGER,game_id TEXT,payload_json TEXT,PRIMARY KEY(user_id,game_id));
               CREATE TABLE dynamic_profile_cycles(user_id INTEGER,evaluator_version TEXT,session_id TEXT,first_hand_number INTEGER,sample_json TEXT,applied_at TEXT);
               CREATE TABLE dynamic_profile_games(user_id INTEGER,evaluator_version TEXT,session_id TEXT,sample_json TEXT,applied_at TEXT);
               INSERT INTO auth_users VALUES(1,'example');
               INSERT INTO cribbage_completed_game_uploads VALUES('g','{"tag":"example","events":[]}');''')
             self.profile = json.dumps({'strength': 120, 'complete_cycles': 92, 'handicap_cycles': 92})
             c.execute('INSERT INTO dynamic_player_profiles VALUES(1,?,?,?)', ('player-history', self.profile, 'before'))
-        self.report = {'schemaVersion': 1, 'status': 'complete', 'sourceSha256': 'sha',
+        self.report = {'schemaVersion': 1, 'status': 'complete', 'account': {'userId':1,'username':'example'}, 'sourceSha256': 'sha',
                        'expectedProfile': {'profile_json': self.profile, 'evaluator_version': 'player-history', 'updated_at': 'before'},
                        'profilePatch': {'handicap_cycles': 100, 'ewma_cycle_handicap': -.02, 'length_games': 10, 'ewma_cycles_per_game': 5},
                        'summary': {'historical': {'wpPerGame': -.1}},
@@ -88,6 +96,22 @@ class HistoryImportTest(unittest.TestCase):
             self.assertEqual(c.execute('SELECT count(*) FROM player_reviewed_games').fetchone()[0], 1)
         with sqlite3.connect(self.backup) as c:
             self.assertEqual(c.execute('SELECT profile_json FROM dynamic_player_profiles').fetchone()[0], self.profile)
+
+    def test_report_account_and_unuploaded_completed_games_are_checked(self):
+        changed = copy.deepcopy(self.report)
+        changed['account']['userId'] = 2
+        with self.assertRaisesRegex(ValueError, 'different account'):
+            apply_report(self.path, changed, 1, 'example', self.backup)
+        with sqlite3.connect(self.path) as c:
+            c.execute('INSERT INTO cribbage_game_sessions VALUES(?,?,?)', ('new-native','complete','{"owner_user_id":1}'))
+        with self.assertRaisesRegex(ValueError, 'new completed games'):
+            apply_report(self.path, self.report, 1, 'example', self.backup)
+        with sqlite3.connect(self.path) as c:
+            c.execute('DELETE FROM cribbage_game_sessions')
+            c.execute("INSERT INTO people_challenges VALUES('table',2,1)")
+            c.execute("INSERT INTO people_games VALUES('new-human','table',123)")
+        with self.assertRaisesRegex(ValueError, 'new completed games'):
+            apply_report(self.path, self.report, 1, 'example', self.backup)
 
     def test_dry_run_has_no_writes(self):
         self.assertFalse(apply_report(self.path, self.report, 1, 'example', self.backup)['applied'])

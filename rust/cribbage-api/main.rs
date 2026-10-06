@@ -1126,8 +1126,9 @@ fn initialize_game_database(data_dir: &Path) -> Result<(), String> {
              );
              CREATE TABLE IF NOT EXISTS player_reviewed_games (
                user_id INTEGER NOT NULL,
-               game_id TEXT PRIMARY KEY,
-               payload_json TEXT NOT NULL
+               game_id TEXT NOT NULL,
+               payload_json TEXT NOT NULL,
+               PRIMARY KEY(user_id, game_id)
              );
              CREATE INDEX IF NOT EXISTS player_reviewed_games_user ON player_reviewed_games(user_id);
              CREATE TABLE IF NOT EXISTS dynamic_player_profiles (
@@ -1904,7 +1905,8 @@ fn hydrate_upload_scoring(
     let connection = open_game_database(data_dir)?;
     let mut statement = connection
         .prepare("SELECT u.game_id, COALESCE(r.payload_json,u.payload_json) FROM cribbage_completed_game_uploads u
-                  LEFT JOIN player_reviewed_games r ON r.game_id=u.game_id")
+                  LEFT JOIN player_reviewed_games r ON r.game_id=u.game_id
+                  AND lower(json_extract(r.payload_json, '$.tag'))=lower(json_extract(u.payload_json, '$.tag'))")
         .map_err(|error| format!("read completed game scoring: {}", error))?;
     let rows = statement
         .query_map([], |row| {
@@ -3754,7 +3756,10 @@ fn upload_game(
             .and_then(Value::as_str)
             .map(str::to_string)
             .ok_or_else(|| "Missing completed game id.".to_string())?;
-        let reviewed_payload = history_reassessment::payload(&open_game_database(&server.data_dir)?, &game_id)?;
+        let connection = open_game_database(&server.data_dir)?;
+        let reviewed_payload = authenticated_user
+            .map(|user| history_reassessment::payload(&connection, user.id, &game_id))
+            .transpose()?.flatten();
         let body = reviewed_payload.as_deref().unwrap_or(body);
         let payload: Value = serde_json::from_str(body).map_err(|error| error.to_string())?;
         let player = payload

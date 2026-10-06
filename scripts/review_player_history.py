@@ -45,17 +45,21 @@ def cached_review(record,model):
         'selected':{'cardIds':selected,'ev':a.get('selectedEv'),'winProbability':a['selectedWinProbability']},
         'recommended':{'cardIds':recommended,'ev':a.get('recommendedEv'),'winProbability':a['recommendedWinProbability']}}}
 
-def prepare(args):
-    if args.database.exists():raise ValueError('refusing to replace an existing review database')
-    source=json.loads(args.source.read_text());sessions={r['session_id']:json.loads(r['session_json']) for r in source['sessions']}
+def merged_payloads(source):
     payloads={}
     for r in source['legacyUploads']:
-        payloads[r['game_id']]={'model':r['model'],'events':json.loads(r['events_json']),'finalResult':json.loads(r['final_result_json'] or 'null')}
+        payloads[r['game_id']]={'gameId':r['game_id'],'model':r['model'],'events':json.loads(r['events_json']),'finalResult':json.loads(r['final_result_json'] or 'null')}
     for r in source['uploads']:
         p=json.loads(r['payload_json']);old=payloads.get(r['game_id'],{})
         merged={e['id']:e for e in old.get('events',[])}
         for e in p.get('events',[]):merged[e['id']]={**merged.get(e['id'],{}),**e}
         p['events']=list(merged.values());payloads[r['game_id']]=p
+    return payloads
+
+def prepare(args):
+    if args.database.exists():raise ValueError('refusing to replace an existing review database')
+    source=json.loads(args.source.read_text());sessions={r['session_id']:json.loads(r['session_json']) for r in source['sessions']}
+    payloads=merged_payloads(source)
     c=connection(args.database)
     c.execute('INSERT INTO metadata VALUES (?,?)',('source',encode({'path':str(args.source),'sha256':digest(args.source),'capturedAt':source['capturedAt'],'deployment':source['deployment'],'latestModel':LATEST})))
     unavailable=collections.Counter();total=0
