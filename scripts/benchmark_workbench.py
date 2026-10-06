@@ -18,6 +18,7 @@ import time
 from urllib.parse import parse_qs, urlsplit
 
 from benchmark_workbench_stats import METRICS, metric_histories, paired_history
+from benchmark_workbench_assets import build_asset_report
 
 
 RUNTIME = Path('/private/tmp/strong-cribbage-local-runtime/workbench')
@@ -61,6 +62,13 @@ def job_entry(spec_path):
     spec = read_json(spec_path)
     if not spec or not re.fullmatch('[a-z0-9-]+', spec.get('jobId', '')):
         raise ValueError('A valid job specification is required')
+    asset = spec.get('assetBuild')
+    if asset:
+        if (not isinstance(asset, dict) or not isinstance(asset.get('target'), int)
+                or asset['target'] <= 0 or not asset.get('root') or not asset.get('policy')):
+            raise ValueError('Asset build requires root, policy and positive target')
+        return {'id': spec['jobId'], 'root': str(Path(asset['root']).resolve()),
+                'spec': str(spec_path), 'kind': 'asset', 'title': asset.get('title', 'Opening assets')}
     root = benchmark_root(spec)
     if root is None:
         return None
@@ -452,7 +460,8 @@ class WorkbenchServer(ThreadingHTTPServer):
             if cached and time.monotonic() - cached[0] < CACHE_SECONDS:
                 return cached[1]
             try:
-                report = build_report(entry, metric_cache=self.metric_cache)
+                report = (build_asset_report(entry, job_status(entry)) if entry.get('kind') == 'asset'
+                          else build_report(entry, metric_cache=self.metric_cache))
             except (OSError, ValueError, sqlite3.Error) as error:
                 report = {'id': entry['id'], 'error': str(error), 'integrity': 'unavailable',
                           'asOf': datetime.now(timezone.utc).isoformat()}

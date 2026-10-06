@@ -7,6 +7,52 @@ benchmark through its HTTP interface.
 
 ## Use
 
+### Opening asset builds
+
+The asset tab separates chunk completion, production publication, and verified
+TerraMaster archiving. It shows recent five-minute throughput, worker usage,
+milestone ETAs, disk headroom, build/rate histories, and observed opening coverage
+along the frozen heat ranking. It never changes a worker or reads the live asset
+queue. A stale, stopped, failed, or storage-waiting build has no active ETA.
+
+Register a supervised build using an `assetBuild` object in its versioned job
+spec: `root` (the internal run directory), `title`, `target`, `policy`, and
+`rankingSha256`. The controller writes atomic `progress.json` snapshots every ten
+seconds and `history.jsonl` approximately every thirty seconds. Coverage is a
+matching-policy/ranking `coverage.json` with `samples`, `basis`, and ordered
+`curve` rows (`chunks`, `heldOut`, `recent`). Current coverage uses only a
+checkpoint at or below the contiguous completed prefix; completion count alone
+is insufficient when workers finish out of order. The selected 1.25M target was
+informed by held-out coverage, so its approximately 99.5% figure is descriptive,
+not an independent guarantee for future openings.
+
+The build defaults to normal scheduling, supports ten workers, and waits at a
+20 GiB internal disk reserve while allowing in-flight shards to finish. It
+resumes automatically when space becomes available. Estimates exclude future
+archive waits. An explicit `background: true` config retains the optional older
+low-priority behavior. No solver, model assets, build ranking, or shard format
+changes accompany these scheduling/reporting changes.
+
+Foreground archiving is separate from the builder and HTTP interface:
+
+```bash
+python3 scripts/archive_model283_opening_assets.py CONFIG.json /absolute/archive/path --release-staging
+```
+
+This captures a consistent committed queue snapshot, verifies full and two-reply
+shards at the destination, and stores the checkpoint and receipt there before
+optionally removing those internal staging copies. Pending work is never
+removed. The local `archive-progress.json` records that evidence and is read by
+the workbench. Without `--release-staging`, internal copies remain. Background
+external-volume access is not required or granted. Archive operations are
+serialized independently of the running builder. They are explicit foreground
+operations, not an unattended archival service; the builder will wait safely if
+staging fills before the next archive. Final verification must accept an exact
+matching archived checkpoint for released shards, and final durable completion
+requires an archive snapshot covering the full target.
+
+### Paired benchmarks
+
 Installing a paired job with `python3 scripts/cribbage_job_queue.py install JOB.json`
 registers it and starts the workbench automatically. Open
 <http://127.0.0.1:8766/>. All browsers use the same service and cached snapshots.

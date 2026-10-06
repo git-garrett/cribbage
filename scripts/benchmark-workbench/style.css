@@ -16,6 +16,12 @@
   --display:"Avenir Next Condensed","Arial Narrow",var(--body);
   --mono:"SFMono-Regular",Consolas,monospace;
 }
+.asset-headline { display:flex; align-items:baseline; gap:16px; margin:12px 0 24px; flex-wrap:wrap; }
+.asset-lane .section-heading { margin-bottom:7px; font-size:13px; }
+.asset-lane .lane-track { width:100%; }
+.asset-lane:nth-child(2) .lane-fill { background:var(--good); }
+.asset-lane:nth-child(3) .lane-fill { background:var(--amber); }
+.asset-policy { overflow-wrap:anywhere; font-family:var(--mono); font-size:12px; }
 * {
   box-sizing:border-box;
 }

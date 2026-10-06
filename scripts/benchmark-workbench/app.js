@@ -14,7 +14,8 @@ let inspectedPairs = 0;
 let jobs = [];
 let jobsSignature = '';
 const previews = new Map();
-const visibleJobs = () => jobs.filter((job) => job.state === 'running' || job.state === 'pending' || job.id === selected);
+const visibleJobs = () => jobs.filter((job) => job.kind === 'asset' || job.state === 'running' || job.state === 'pending' || job.id === selected);
+const jobTitle = (job) => job.title || (job.candidate && job.opponent ? `${modelName(job.candidate)} vs ${modelName(job.opponent)}` : job.id);
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -24,7 +25,7 @@ function element(tag, text, className) {
 }
 
 function renderJobs() {
-  const signature = JSON.stringify(jobs.map(({ id, state, candidate, opponent }) => [id, state, candidate, opponent]));
+  const signature = JSON.stringify(jobs.map(({ id, state, candidate, opponent, title }) => [id, state, candidate, opponent, title]));
   const visible = visibleJobs();
   const tabs = $('run-tabs');
   const tabIds = visible.map((job) => job.id).join(',');
@@ -32,7 +33,7 @@ function renderJobs() {
     const focusedJob = tabs.contains(document.activeElement) ? document.activeElement.dataset.job : null;
     tabs.replaceChildren();
     for (const job of visible) {
-      const title = job.candidate && job.opponent ? `${modelName(job.candidate)} vs ${modelName(job.opponent)}` : job.id;
+      const title = jobTitle(job);
       const tab = element('button', null, 'run-tab');
       tab.type = 'button'; tab.id = `tab-${job.id}`; tab.dataset.job = job.id;
       tab.title = job.id;
@@ -56,7 +57,7 @@ function renderJobs() {
   if (signature !== jobsSignature) {
     picker.replaceChildren();
     for (const job of jobs) {
-      const title = job.candidate && job.opponent ? `${modelName(job.candidate)} vs ${modelName(job.opponent)}` : job.id;
+      const title = jobTitle(job);
       const option = element('option', `${title} · ${job.state} · ${job.id}`);
       option.value = job.id; picker.append(option);
     }
@@ -71,6 +72,17 @@ function renderPreviews() {
     const tab = document.getElementById(`tab-${job.id}`);
     if (!tab) continue;
     const snapshot = previews.get(job.id);
+    if (job.kind === 'asset' && snapshot && !snapshot.error && !snapshot.waiting) {
+      tab.querySelector('.tab-state').textContent = snapshot.state.replaceAll('_', ' ');
+      tab.querySelector('.tab-rate').textContent = `${snapshot.completed.toLocaleString()} / ${snapshot.target.toLocaleString()} chunks`;
+      tab.querySelector('.tab-progress').textContent = `${percent(snapshot.completed / snapshot.target)} built · ${snapshot.fresh && snapshot.chunksPerHour != null ? `${number.format(Math.round(snapshot.chunksPerHour))}/h` : 'rate unavailable'}`;
+      const history = snapshot.history || [];
+      const start = history[0]?.updatedAt || snapshot.asOf;
+      chart(`preview-${job.id}`, history, { compact: true, x: (r) => r.updatedAt-start,
+        y: (r) => r.completed / snapshot.target, percent: true, domain: [0, 1], empty: 'History starts with this run' });
+      tab.querySelector('svg').append(svgNode('title', {}, 'Verified asset build progress, 0–100% of selected target.'));
+      continue;
+    }
     const unavailable = snapshot?.error || snapshot?.waiting;
     const rows = unavailable ? [] : snapshot?.history || [];
     const rate = tab.querySelector('.tab-rate');
@@ -89,7 +101,7 @@ function renderPreviews() {
 
 function selectJob(id) {
   selected = id; followLatest = true; report = null;
-  $('report').hidden = true; $('notice').hidden = true;
+  $('report').hidden = true; $('asset-report').hidden = true; $('notice').hidden = true;
   renderJobs(); refresh();
 }
 
@@ -133,7 +145,7 @@ function chart(id, rows, options) {
       svg.append(svgNode('text', { x: x(xValue), y: height - 30, 'text-anchor': 'middle' }, options.xHours ? `${xValue.toFixed(1)}h` : number.format(Math.round(xValue))));
     }
   }
-  if (!options.compact) svg.append(svgNode('text', { x: (left + right) / 2, y: height - 7, 'text-anchor': 'middle' }, options.xHours ? 'Elapsed hours →' : 'Completed pairs in seed order →'));
+  if (!options.compact) svg.append(svgNode('text', { x: (left + right) / 2, y: height - 7, 'text-anchor': 'middle' }, options.xLabel || (options.xHours ? 'Elapsed hours →' : 'Completed pairs in seed order →')));
   const defs = svgNode('defs', {});
   const clip = svgNode('clipPath', { id: `${id}-clip` });
   clip.append(svgNode('rect', { x: left, y: top, width: right - left, height: bottom - top }));
@@ -163,6 +175,7 @@ function chart(id, rows, options) {
 
 function renderCharts() {
   if (!report || report.error || report.waiting) return;
+  if (report.kind === 'asset') return renderAssetCharts(report);
   const index = Number($('inspect').value);
   const bands = [];
   if ($('show-anytime').checked) bands.push({ key: 'anytime95', className: 'anytime-band' });
@@ -220,10 +233,12 @@ function renderMetric(prefix, key, pairs) {
 function render(value) {
   report = value;
   const error = value.error || value.waiting;
-  $('report').hidden = Boolean(error);
+  $('report').hidden = Boolean(error) || value.kind === 'asset';
+  $('asset-report').hidden = Boolean(error) || value.kind !== 'asset';
   $('notice').hidden = !error && !value.warnings?.length;
   $('notice').textContent = error || (value.warnings || []).join(' ');
   if (error) return;
+  if (value.kind === 'asset') return renderAsset(value);
   const candidate = modelName(value.candidate), opponent = modelName(value.opponent);
   $('matchup').textContent = `${candidate} vs ${opponent}`;
   $('experiment').textContent = value.experiment;
@@ -289,6 +304,67 @@ function render(value) {
   renderCharts();
 }
 
+const duration = (seconds) => seconds == null ? '—' : seconds < 3600 ? `${Math.ceil(seconds / 60)} min` : seconds < 86400 ? `${(seconds / 3600).toFixed(1)} hours` : `${(seconds / 86400).toFixed(1)} days`;
+const bytes = (value) => value == null ? '—' : value < 1024 ** 3 ? `${(value / 1024 ** 2).toFixed(1)} MiB` : `${(value / 1024 ** 3).toFixed(2)} GiB`;
+
+function renderAsset(value) {
+  $('asset-state').textContent = value.state.replaceAll('_', ' ');
+  $('asset-snapshot').textContent = `Snapshot ${new Date(value.updatedAt * 1000).toLocaleString()}`;
+  $('asset-completed').textContent = number.format(value.completed);
+  $('asset-target').textContent = `of ${number.format(value.target)} chunks`;
+  $('asset-fraction').textContent = `${percent(value.completed / value.target)} built`;
+  const lanes = $('asset-lanes'); lanes.replaceChildren();
+  for (const [label, count] of [['Built · full depth, local', value.completed], ['Published · two replies, Ace', value.published], ['Archived · TerraMaster', value.archive?.completed]]) {
+    const lane = element('div', null, 'asset-lane');
+    const title = element('div', null, 'section-heading');
+    title.append(element('span', label), element('span', count == null ? 'No verified snapshot' : number.format(count), 'numeric'));
+    const track = element('div', null, 'lane-track');
+    const fill = element('div', null, 'lane-fill');
+    fill.style.width = `${Math.min(100, 100 * (count || 0) / value.target)}%`;
+    track.append(fill); lane.append(title, track); lanes.append(lane);
+  }
+  $('asset-rate').textContent = value.fresh && value.chunksPerHour != null ? `${number.format(Math.round(value.chunksPerHour))} / hour` : 'Measuring…';
+  $('asset-eta').textContent = duration(value.remainingSeconds);
+  $('asset-finish').textContent = value.remainingSeconds == null ? 'ETA waits for fresh, active throughput' : `Around ${new Date((value.asOf + value.remainingSeconds) * 1000).toLocaleString()}`;
+  $('asset-workers').textContent = value.fresh ? `${value.workers} / ${value.workerLimit}` : '—';
+  $('asset-scheduling').textContent = `${value.scheduling || 'Unknown'} scheduling`;
+  $('asset-eta-note').textContent = value.etaBasis;
+  const coverage = value.coverage;
+  $('asset-coverage').textContent = `${percent(coverage?.current?.heldOut)} covered`;
+  const stats = $('asset-coverage-stats'); stats.replaceChildren();
+  for (const [label, stat] of [['Covered now · held-out openings', coverage?.current?.heldOut], ['At target · held-out openings', coverage?.target?.heldOut], ['At target · recent 28.3 openings', coverage?.target?.recent]]) {
+    const row = element('div'); row.append(element('span', label, 'label'), element('strong', percent(stat))); stats.append(row);
+  }
+  $('asset-coverage-note').textContent = coverage ? `${coverage.basis} ${number.format(coverage.samples?.heldOut || 0)} held-out openings; ${number.format(coverage.samples?.recent || 0)} recent 28.3 openings. Current coverage is a conservative checkpoint at or below the contiguous completed prefix (${number.format(value.contiguousCompleted || 0)} chunks).` : 'Coverage evidence is not available for this build ranking.';
+  const storage = $('asset-storage'); storage.replaceChildren();
+  for (const [label, stat] of [
+    ['Full-depth output built', bytes(value.fullBytes)], ['Two-reply output published', value.published === value.completed ? bytes(value.shallowBytes) : 'See publication count above'],
+    ['Verified on TerraMaster', value.archive ? `${bytes(value.archive.bytes)} · ${new Date(value.archive.updatedAt * 1000).toLocaleString()}` : 'No verified snapshot'],
+    ['Awaiting archive', value.archivePending == null ? 'Unknown' : `${number.format(value.archivePending)} chunks`],
+    ['Internal disk free / reserve', `${bytes(value.diskFreeBytes)} / ${bytes(value.diskReserveBytes)}`],
+  ]) storage.append(element('dt', label), element('dd', stat));
+  $('asset-storage-note').textContent = `Archiving to TerraMaster is a separate foreground step. The builder waits safely at the disk reserve. ${value.storageWaitHours == null ? '' : `At the current average shard size and rate, staging reaches the reserve in about ${duration(value.storageWaitHours * 3600)} without further archiving or space changes.`}`;
+  const milestones = $('asset-milestones'); milestones.replaceChildren();
+  for (const row of value.milestones) {
+    const tr = element('tr'); tr.append(element('td', number.format(row.chunks)), element('td', duration(row.seconds))); milestones.append(tr);
+  }
+  $('asset-policy').textContent = `Frozen policy: ${value.policy}`;
+  renderAssetCharts(value);
+}
+
+function renderAssetCharts(value) {
+  const curve = value.coverage?.curve || [];
+  chart('asset-coverage-chart', curve, { x: (r) => r.chunks, y: (r) => r.heldOut,
+    percent: true, domain: [0, 1], xLabel: 'Completed chunks in build order →',
+    inspected: curve.findLastIndex((r) => r.chunks <= (value.contiguousCompleted || 0)), empty: 'Waiting for coverage evidence' });
+  const rows = value.history || [], start = rows[0]?.updatedAt || value.asOf;
+  const options = { x: (r) => (r.updatedAt-start)/3600, xHours: true, zero: true, decimals: 0,
+    empty: 'Progress history starts with this controller version' };
+  chart('asset-progress-chart', rows, { ...options, y: (r) => r.completed });
+  chart('asset-rate-chart', rows.filter((r) => r.chunksPerHour != null), { ...options, y: (r) => r.chunksPerHour });
+  $('asset-history-note').textContent = rows.length ? `Recorded window begins ${new Date(start * 1000).toLocaleString()}. Saved totals include earlier work; the time axis includes any pauses. Up to 500 history points are shown.` : 'Earlier chunks are preserved; detailed history begins with this update.';
+}
+
 async function refresh() {
   clearTimeout(timer);
   request?.abort();
@@ -307,7 +383,7 @@ async function refresh() {
       $('run-tabs').dataset.jobs = '';
       $('benchmark-view').removeAttribute('aria-labelledby');
       $('jobs').replaceChildren(element('option', 'No paired benchmarks registered'));
-      $('empty').hidden = false; $('report').hidden = true; $('notice').hidden = true;
+      $('empty').hidden = false; $('report').hidden = true; $('asset-report').hidden = true; $('notice').hidden = true;
       $('connection').textContent = 'Connected';
       return;
     }

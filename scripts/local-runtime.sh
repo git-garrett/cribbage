@@ -193,6 +193,7 @@ workbench_fingerprint() {
   {
     shasum "${ROOT_DIR}/scripts/benchmark_workbench.py" \
       "${ROOT_DIR}/scripts/benchmark_workbench_stats.py" \
+      "${ROOT_DIR}/scripts/benchmark_workbench_assets.py" \
       "${ROOT_DIR}/scripts/local-runtime.sh" \
       "${ROOT_DIR}/scripts/benchmark-workbench/"*
     workbench_hostname
@@ -245,7 +246,7 @@ workbench_start() {
     return 1
   fi
   mkdir -p "${WORKBENCH_DIR}/app/benchmark-workbench"
-  cp "${ROOT_DIR}/scripts/benchmark_workbench.py" "${ROOT_DIR}/scripts/benchmark_workbench_stats.py" "${WORKBENCH_DIR}/app/"
+  cp "${ROOT_DIR}/scripts/benchmark_workbench.py" "${ROOT_DIR}/scripts/benchmark_workbench_stats.py" "${ROOT_DIR}/scripts/benchmark_workbench_assets.py" "${WORKBENCH_DIR}/app/"
   cp "${ROOT_DIR}/scripts/benchmark-workbench/"* "${WORKBENCH_DIR}/app/benchmark-workbench/"
   python3 - "$WORKBENCH_DIR" "$WORKBENCH_LABEL" "$(workbench_hostname)" <<'PY'
 from pathlib import Path

@@ -14,10 +14,35 @@
     <span class="connection" id="connection" role="status">Connecting…</span>
   </header>
   <main>
-    <div id="run-tabs" class="run-tabs" role="tablist" aria-label="Active benchmarks"></div>
+    <div id="run-tabs" class="run-tabs" role="tablist" aria-label="Benchmarks and asset builds"></div>
     <div class="run-picker"><label for="jobs">All experiments</label><select id="jobs"><option value="">Loading benchmarks…</option></select><button id="refresh" type="button">Refresh</button></div>
     <div id="benchmark-view" role="tabpanel" aria-label="Selected benchmark" tabindex="0">
     <div id="notice" class="notice" role="status" hidden></div>
+    <div id="asset-report" hidden>
+      <section class="run-heading"><div><p class="eyebrow">28.3.fast · opening acceleration</p><h1 id="asset-title">Building the hot path</h1><p class="muted">Full continuations stay local. The first two dealer replies are published to Ace.</p></div><div class="run-state"><span id="asset-state" class="state"></span><p id="asset-snapshot" class="muted"></p></div></section>
+      <section class="panel asset-hero" aria-labelledby="asset-progress-title">
+        <div class="section-heading"><div><p class="eyebrow">Verified chunks</p><h2 id="asset-progress-title">Opening asset build</h2></div><span id="asset-fraction" class="numeric"></span></div>
+        <div class="asset-headline"><strong id="asset-completed" class="hero-number"></strong><span id="asset-target" class="muted"></span></div>
+        <div id="asset-lanes" class="lanes"></div>
+        <div class="run-facts asset-facts"><div><span class="label">Recent throughput</span><strong id="asset-rate"></strong><small>Five-minute window after warm-up</small></div><div><span class="label">Estimated time remaining</span><strong id="asset-eta"></strong><small id="asset-finish"></small></div><div><span class="label">Workers</span><strong id="asset-workers"></strong><small id="asset-scheduling"></small></div></div>
+        <p class="caption" id="asset-eta-note"></p>
+      </section>
+      <section class="panel" aria-labelledby="asset-coverage-title">
+        <div class="section-heading"><div><p class="eyebrow">Heat-ranked build order</p><h2 id="asset-coverage-title">Opening coverage</h2></div><strong id="asset-coverage" class="metric"></strong></div>
+        <div class="metric-models" id="asset-coverage-stats"></div>
+        <svg id="asset-coverage-chart" class="chart main-chart" role="img" aria-label="Historical opening coverage by completed chunks, with current progress marked"></svg>
+        <p id="asset-coverage-note" class="caption"></p>
+        <p class="caption">Coverage counts a cut-and-board position only when all 13 lead chunks are complete. Partial positions can already help. Uncovered positions use the same exact solver; asset coverage does not change playing strength.</p>
+      </section>
+      <div class="chart-grid">
+        <section class="panel"><div class="section-heading"><div><p class="eyebrow">Saved work</p><h2>Build progress</h2></div></div><svg id="asset-progress-chart" class="chart" role="img" aria-label="Cumulative verified chunks over time"></svg><p id="asset-history-note" class="caption"></p></section>
+        <section class="panel"><div class="section-heading"><div><p class="eyebrow">Chunks per hour</p><h2>Build rate</h2></div></div><svg id="asset-rate-chart" class="chart" role="img" aria-label="Recent chunk throughput over time"></svg><p class="caption">Rate varies with board position, memory availability and other workloads. It is not a speed comparison between models.</p></section>
+        <section class="panel"><div class="section-heading"><div><p class="eyebrow">Verified archive and staging</p><h2>Storage</h2></div></div><dl id="asset-storage"></dl><p id="asset-storage-note" class="caption"></p></section>
+        <section class="panel"><div class="section-heading"><div><p class="eyebrow">At the recent build rate</p><h2>Next milestones</h2></div></div><table><thead><tr><th>Completed chunks</th><th>Time from now</th></tr></thead><tbody id="asset-milestones"></tbody></table><p class="caption">Estimates exclude future archive waits and verification. Hotter positions come first; later chunks may take a different amount of time.</p></section>
+      </div>
+      <details class="methods"><summary>What is being counted?</summary><div><p>One chunk fixes a starter rank, pone score, dealer score and lead rank, covering the model’s possible holds at that position. “Built” requires verified local full-depth bytes and, when publication is configured, a matching production acknowledgment. “Published” counts verified acknowledgments for two-reply chunks, not live cache hits. “Archived” counts a separate verified TerraMaster snapshot and may lag behind the build.</p><p>Build percentage is the fraction of the selected chunk target completed. Opening coverage is an empirical estimate from held-out games, not a guarantee about future play and not the fraction of all possible positions. Gaps in completion are excluded conservatively.</p><p id="asset-policy" class="asset-policy"></p></div></details>
+      <footer><span>Read-only · refreshes every 15 seconds while visible</span><span>Missing chunks fall back to exact calculation</span></footer>
+    </div>
     <section id="empty" class="empty" hidden><h1>Your next benchmark starts here.</h1><p>Install a paired benchmark with the job supervisor and it will appear automatically.</p><p>For an already running job, use <code>scripts/local-runtime.sh workbench-start /path/to/job.json</code>.</p></section>
     <div id="report" hidden>
       <section class="run-heading"><div><p class="eyebrow">Paired, with sides reversed</p><h1 id="matchup"></h1><p id="experiment" class="muted"></p></div><div class="run-state"><span class="state" id="state"></span><p id="stage" class="muted"></p></div></section>
