@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 import sqlite3
 import prepare
 import run
@@ -51,6 +51,21 @@ class ExperimentTest(unittest.TestCase):
         result = run.live_speed(timings, 2, 16)
         self.assertEqual(result['results']['overall']['perGameSpeedupF64OverF16'], 4)
         self.assertNotIn('f32', result['results']['overall'])
+
+    def test_mixed_worker_requires_both_precision_fields(self):
+        worker = run.Worker.__new__(run.Worker)
+        worker.precision = 32
+        worker.process = Mock()
+        config = {'candidateBits': 32, 'candidateAssetBits': 16}
+        with patch.object(run, 'CONFIG', config):
+            for response in ({'ok': True, 'arithmeticBits': 16, 'assetBits': 16},
+                             {'ok': True, 'arithmeticBits': 32},
+                             {'ok': True, 'arithmeticBits': 32, 'assetBits': 32}):
+                worker.process.stdout.readline.return_value = json.dumps(response)
+                with self.assertRaises(ValueError): worker.decide('{}')
+            response = {'ok': True, 'arithmeticBits': 32, 'assetBits': 16}
+            worker.process.stdout.readline.return_value = json.dumps(response)
+            self.assertEqual(worker.decide('{}'), response)
 
     def test_generated_asset_reader_keeps_eight_byte_decode(self):
         with tempfile.TemporaryDirectory() as tmp:

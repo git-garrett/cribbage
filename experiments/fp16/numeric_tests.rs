@@ -1,33 +1,27 @@
 #![feature(f16)]
-// Copied beside the generated fp16.rs; wider arithmetic is an independent
-// test oracle only, never part of the inference executable.
-mod fp16;
+#[path = "fp16.rs"] mod asset;
+
 #[test]
-fn integer_conversion_rounds_and_overflows_like_ieee_binary16() {
-    for n in 0..=65536_u128 {
-        assert_eq!(fp16::__floatuntihf(n).to_bits(), (n as f64 as f16).to_bits(), "{n}");
-    }
-    for n in [u64::MAX as u128, u128::MAX, 1_u128 << 127] {
-        assert!(fp16::__floatuntihf(n).is_infinite());
+fn asset_values_are_binary16_then_expanded_to_fp32() {
+    let value = 1.0_f64 / 3.0;
+    assert_eq!(asset::decode_le(value.to_le_bytes()), 0.333251953125_f32);
+    assert_eq!(asset::decode_bits(value.to_bits()), asset::round64(value));
+    assert_eq!(asset::decode32_le((value as f32).to_le_bytes()), asset::round32(value as f32));
+    assert_ne!(asset::round64(value), value as f32);
+    for bits in 0_u16..=0x7bff {
+        let value = f16::from_bits(bits) as f32;
+        assert_eq!(asset::round32(value), value);
     }
 }
+
 #[test]
-fn ratios_handle_exact_large_counts_without_infinity() {
-    for (n,d) in [(15505,69637),(1,1_000_000),(14597976,880056130146220),
-                  (u128::MAX,u128::MAX),(1_u128<<100,1_u128<<110)] {
-        let actual=fp16::ratio(n,d);
-        let expected=(n as f64 / d as f64) as f16;
-        assert!(actual.is_finite());
-        assert!((actual.to_bits() as i32-expected.to_bits() as i32).abs() <= 2);
-    }
-    assert!(fp16::ratio(1,0).is_nan());
-    assert_eq!(fp16::ratio(0,3),0.0);
-    assert_eq!(fp16::smoothed_rate(15505,69637,0.0,0.25),fp16::ratio(15505,69637));
-}
-#[test]
-fn arithmetic_really_rounds_at_half_precision() {
-    let one=std::hint::black_box(1.0_f16);
-    let small=std::hint::black_box(0.0001_f16);
-    assert_eq!(one+small,one);
-    assert_eq!(std::mem::size_of::<f16>(),2);
+fn accumulation_and_evidence_ratios_do_not_use_half_arithmetic() {
+    let p = asset::round32(0.5);
+    let sum: f32 = std::iter::repeat_n(p, 100_000).sum();
+    assert_eq!(sum, 50_000.0);
+    let total: f32 = 12_000_000_u64 as f32;
+    let weighted: f32 = 84_000_000_u64 as f32;
+    assert_eq!(weighted / total, 7.0);
+    assert_eq!((weighted / total * 100_000.0).round() / 100_000.0, 7.0);
+    assert!(asset::ASSET_TOLERANCE <= 0.001);
 }

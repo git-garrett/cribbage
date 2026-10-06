@@ -1,61 +1,35 @@
-# Full FP16 Ace experiment
+# Mixed FP16/FP32 Ace experiment
 
-The requested candidate uses native Rust `f16` throughout discard and pegging
-inference, including probability sums, expected values and decision comparisons.
-It faces the same frozen FP64 Ace as the FP32 experiment, over 5,000 paired seeds
-(10,000 games). Both seats disable opening accelerators that encode FP64 choices.
-The same games supply strength and wall-time measurements. This runs on CPU;
-it does not measure GPU throughput or change production Ace.
+The corrected candidate uses **FP16 asset precision with FP32 inference** in
+both discard and pegging. Probability products, sums, normalization, expected
+values and move comparisons use FP32. Integer evidence, game rules and fixed-point
+likelihood composition keep their original types. There is no FP16 accumulation.
 
-`prepare.py` extends the isolated FP32 generator. Disk assets retain their original
-formats and hashes; floating values round to FP16 immediately on decoding.
-Existing integer code—including card rules, evidence counts and fixed-point
-likelihood-factor composition—retains its original types. The frozen game
-controller also remains exact. “Full FP16” means every floating-point inference
-operation; integer algorithms are not rewritten as floating point.
-The installed Rust 1.96.1 Apple Silicon compiler supports native half arithmetic
-behind `#![feature(f16)]`; the experiment builds with `RUSTC_BOOTSTRAP=1` and a
-private, pinned serde_core copy that only adds JSON transport conversions.
-Native half add/multiply were confirmed in generated M3 assembly. The missing
-Darwin u128-to-half compiler builtin is supplied with integer bit manipulation
-and round-to-nearest, ties-to-even, tested exhaustively through the overflow edge.
+`prepare.py` starts from the FP32 generator. Binary floating asset values and
+floating calibration metadata round through native IEEE binary16 when loaded,
+then expand to FP32 for all calculations. Frozen files retain their original
+formats and hashes; the CPU caches hold expanded values. This measures playing
+strength from asset quantization, not packed-asset memory savings or GPU speed.
+Integer assets are not quantized. Current Ace's keep beliefs and decline factors
+are integer assets; board probabilities, discard probabilities and crib priors
+are floating assets. Binary16 underflow/rounding is part of the test, with no
+probability floor or clipping. Loader checks permit 1/1024 absolute error for
+asset rounding; FP32 counting and decision tolerances are unchanged.
 
-FP16's maximum finite value is 65,504. A mechanical cast overflowed Ace's large
-integer evidence and produced a nonfinite discard decision. The generated engine
-therefore makes these explicit numerical adaptations:
+The generator preserves normal FP32 large-count conversions and crib-mean
+rounding. It removes the pure-FP16 experiment's scaled counts, relaxed FP16
+calculation tolerances and private serde patch. Native half casts require
+`RUSTC_BOOTSTRAP=1`; arithmetic width and asset width are separately reported by
+the decision worker and checked by the harness.
 
-- Integer ratios are represented by rounded 11-bit significands and binary
-  exponents, then divided and scaled using FP16 arithmetic. Integer evidence is
-  never first cast to infinity. Fixed-point likelihoods in millionths use this
-  same conversion.
-- Empirical keep weights use a common per-row scale with maximum 16, preserving
-  their mathematical relative weights before rounding. Discard histogram moments
-  and suit-evidence validation likewise convert through scaled ratios.
-- Asset validation uses 16 FP16 epsilons for short sums and calibration, eight
-  for individual fitted rates, and 128 for the many joint-counting contributions.
-  Original asset integrity/native FP64 preflight is checked separately. NaN and
-  infinity at the decision boundary fail the run; no higher-precision retry exists.
-- The optional five-decimal crib-mean rounding loses its overflowing 100,000
-  multiplier. Its result stays FP16, whose spacing around these EVs is coarser.
+The candidate faces the same frozen FP64 Ace 28.3.fast policy, with opening
+accelerators disabled in both seats. A new series has independent databases and
+5,000 paired seeds (10,000-game ceiling), using four game workers. Eight asset
+workers run alongside it and reclaim the four slots when it ends. The existing
+35-pair early checkpoint applies to the replacement series alone.
 
-This tests the resulting scaled FP16 implementation, including underflow and
-rounding effects. It is not a claim that a naive type substitution is viable, or
-that FP16 alone necessarily runs faster. No clipping, minimum-probability floor,
-or wider-precision accumulation is introduced.
-
-Generate into a fresh internal-disk directory, build the decision-worker binary
-with `RUSTC_BOOTSTRAP=1 cargo build --release --offline`, and freeze its sources,
-lockfile, binary, assets and generator hashes. Copy `numeric_tests.rs` beside the
-generated `fp16.rs` and compile it with `RUSTC_BOOTSTRAP=1 rustc --test` for the
-independent conversion checks. Wider floats in that test are oracle values only.
-The common `experiments/fp32/run.py` harness accepts `candidateBits: 16` and
-uses the one-shot supervisor's verification, smoke, benchmark, integrity, report,
-and durable-sync stages. Main games cannot begin unless complete smoke games pass.
-
-The user stopped FP32 after 70 games (35 matched seeds). The current allocation
-is four FP16 game workers and eight asset-build workers. The asset controller
-automatically permits twelve workers when FP16 stops, fails or completes. These
-are worker slots; macOS schedules physical cores and the existing memory guard
-still applies. FP16 retains its 10,000-game ceiling, with a user-authorized early
-checkpoint after a comparable 35 matched seeds. The short-run stop decision is
-an engineering resource choice, not statistical proof of equal strength.
+The old pure-FP16 series remains stopped and archived as a distinct experiment;
+none of its observations contribute to this series. Its frozen generator and
+binary remain with that series, and its implementation is in Git history.
+The shared harness runs input checks, complete smoke games, benchmark, integrity,
+reports and final durable sync in separate one-shot supervisor stages.

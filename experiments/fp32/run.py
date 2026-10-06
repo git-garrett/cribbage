@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Frozen full-FP32 benchmark stages; called by the one-shot supervisor."""
+"""Frozen precision benchmark stages; called by the one-shot supervisor."""
 import concurrent.futures
 import hashlib
 import json
@@ -153,7 +153,9 @@ class Worker:
         self.process.stdin.write(request + '\n')
         self.process.stdin.flush()
         response = json.loads(self.process.stdout.readline())
-        if response.get('ok') is not True or response.get('arithmeticBits') != self.precision:
+        expected_assets = CONFIG.get('candidateAssetBits') if self.precision == candidate_bits() else None
+        if (response.get('ok') is not True or response.get('arithmeticBits') != self.precision
+                or (expected_assets is not None and response.get('assetBits') != expected_assets)):
             raise ValueError('worker failed or wrong precision: ' + str(response))
         return response
 
@@ -249,10 +251,13 @@ def report():
               'pairedScoreMarginApprox95CI': [paired_margin-margin_half, paired_margin+margin_half],
               'pairOutcomes': {f'f{bits}WinsBoth': pairs.count(1.0), 'split': pairs.count(0.5), 'f64WinsBoth': pairs.count(0.0)},
               'liveTiming': timings,
-              'precision': f'FP{bits} discard and pegging inference; integer game rules',
+              'precision': CONFIG.get('precision', f'FP{bits} discard and pegging inference; integer game rules'),
+              'candidateAssetBits': CONFIG.get('candidateAssetBits', bits),
+              'candidateArithmeticBits': bits,
               'speed': live_speed(timings, 2*n, bits)}
     save('report.json', result)
-    (BASE / 'report.txt').write_text(f"Full FP{bits} Ace versus FP64 Ace: {2*n:,} games / {n:,} paired seeds\n"
+    label = CONFIG.get('candidateLabel', f'Full FP{bits} Ace')
+    (BASE / 'report.txt').write_text(f"{label} versus FP64 Ace: {2*n:,} games / {n:,} paired seeds\n"
         f"FP{bits} wins {100*mean:.2f}% (paired approximate 95% CI {100*max(0,mean-half):.2f}–{100*min(1,mean+half):.2f}%).\n"
         f"FP{bits} average score margin: {paired_margin:+.3f}.\n"
         + ''.join(f"{kind}: FP{bits} {values[f'f{bits}']['decisionMsPerGame']:.3f} ms/game; "
