@@ -9,7 +9,10 @@ it does not measure GPU throughput or change production Ace.
 
 `prepare.py` extends the isolated FP32 generator. Disk assets retain their original
 formats and hashes; floating values round to FP16 immediately on decoding.
-Integer card rules, evidence counts and the frozen game controller remain exact.
+Existing integer code—including card rules, evidence counts and fixed-point
+likelihood-factor composition—retains its original types. The frozen game
+controller also remains exact. “Full FP16” means every floating-point inference
+operation; integer algorithms are not rewritten as floating point.
 The installed Rust 1.96.1 Apple Silicon compiler supports native half arithmetic
 behind `#![feature(f16)]`; the experiment builds with `RUSTC_BOOTSTRAP=1` and a
 private, pinned serde_core copy that only adds JSON transport conversions.
