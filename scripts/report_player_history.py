@@ -54,21 +54,39 @@ def wins_on_play(record):
 
 def hand_boundaries(gid, events, session):
     if session:
-        return (session['game']['hand_number'],
-                {e['hand_number']: iso(e['at']) for e in session['score_events'] if e['category'] == 'Crib'},
+        complete = {e['hand_number']: iso(e['at']) for e in session['score_events'] if e['category'] == 'Crib'}
+        for review in session['decision_reviews']:
+            hand = review['game']['hand_number']
+            if review['kind'] == 'Discard' and hand > 1:
+                complete.setdefault(hand - 1, iso(review['at']))
+        return (session['game']['hand_number'], complete,
                 {e['hand_number'] for e in session.get('help_events', [])})
     native = gid.startswith(('rust-', 'human-game-'))
     hand = 0
-    times, assisted = {}, set()
+    times, assisted, following_deals = {}, set(), {}
     for event in events:
-        if event.get('type') == 'hand' and event.get('action') == 'start':
+        starts_hand = event.get('type') == 'hand' and event.get('action') == 'start'
+        if starts_hand:
             hand = event.get('handNumber', hand + 1) if native else hand + 1
         elif native:
             hand = max(hand, event.get('handNumber', 0))
+        number = event.get('handNumber') if native else hand
+        # Older native analytics contain choices but no scoring events. A new
+        # deal proves the preceding hand was fully counted. Keep explicit crib
+        # timestamps when available; otherwise use the next deal as the known
+        # completion boundary. A game-end event alone proves no such thing.
+        if starts_hand or native and event.get('type') == 'discard':
+            if number is not None and number > 1:
+                following_deals.setdefault(number - 1, iso(event['at']))
         if event.get('type') == 'score' and event.get('category') == 'crib':
-            times[hand] = iso(event['at'])
+            if number is not None:
+                times[number] = iso(event['at'])
         if event.get('type') == 'help':
-            assisted.add(hand)
+            if number is None:
+                raise ValueError('help event lacks hand attribution')
+            assisted.add(number)
+    for number, at in following_deals.items():
+        times.setdefault(number, at)
     return hand, times, assisted
 
 

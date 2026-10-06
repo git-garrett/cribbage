@@ -35,15 +35,31 @@ class HistoryReportTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'invalid win probability'):
             loss({'id': 'x'}, result)
 
-    def test_only_explicit_crib_score_completes_a_cycle(self):
-        events = [dict(type='hand', action='start', handNumber=1),
+    def test_game_end_does_not_prove_a_fully_scored_hand(self):
+        events = [dict(type='hand', action='start', handNumber=1, at='2026-01-01T00:00:00Z'),
                   dict(type='score', category='crib', at='2026-01-01T00:00:00Z', handNumber=2),
                   dict(type='hand', action='end', handNumber=2),
-                  dict(type='hand', action='start', handNumber=3),
+                  dict(type='hand', action='start', handNumber=3, at='2026-01-01T00:02:00Z'),
                   dict(type='hand', action='end', handNumber=3)]
         hands, complete, _ = hand_boundaries('legacy', events, None)
         self.assertEqual(hands, 2)
         self.assertEqual(set(complete), {1})
+
+    def test_native_next_deal_proves_completion_when_scoring_log_is_absent(self):
+        events = [dict(type='discard',handNumber=n,at=f'2026-01-01T00:0{n}:00Z') for n in (1,2,3)]
+        events.append(dict(type='game',action='end',at='2026-01-01T00:04:00Z'))
+        hands, complete, _ = hand_boundaries('rust-old', events, None)
+        self.assertEqual(hands, 3)
+        self.assertEqual(complete, {1:'2026-01-01T00:02:00Z',2:'2026-01-01T00:03:00Z'})
+
+    def test_native_grouped_events_preserve_each_hand_identity(self):
+        events = [dict(type='score',category='crib',handNumber=3,at='2026-01-01T00:09:00Z')]
+        events += [dict(type='discard',handNumber=n,at=f'2026-01-01T00:0{n}:00Z') for n in (1,2,3)]
+        events.append(dict(type='help',handNumber=1,at='2026-01-01T00:01:10Z'))
+        hands, complete, assisted = hand_boundaries('rust-old', events, None)
+        self.assertEqual(hands, 3)
+        self.assertEqual(complete, {1:'2026-01-01T00:02:00Z',2:'2026-01-01T00:03:00Z',3:'2026-01-01T00:09:00Z'})
+        self.assertEqual(assisted, {1})
 
     def test_winning_play_is_excluded_from_cycle_regret(self):
         record = {'fields': {'kind': 'peg', 'plays': [9], 'aiScore': 119}, 'selected': [4]}

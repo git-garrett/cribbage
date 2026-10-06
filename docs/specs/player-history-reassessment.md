@@ -15,6 +15,9 @@ comparison separately.
   Hidden opponent cards and future draws must not enter an observation.
 - Rebuild the existing 18-game-half-life handicap from chronological, completed,
   unassisted, role-balanced two-hand cycles; retain its game-length normalization.
+  A following deal proves the prior hand completed when older logs omit scoring;
+  retain explicit crib timestamps when available. A game ending alone does not
+  prove its final hand was fully scored.
   Rebuild the handicap fields without altering Dynamic's strength calibration.
 - Show a separately labelled latest-Ace moving average, all-game mean, date, and
   complete/partial/unavailable coverage. Update decision reviews and mistake
