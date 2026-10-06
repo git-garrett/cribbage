@@ -1,3 +1,4 @@
+import { historyReviewCopy, type HistoryReviewSummary } from "./history-review";
 import { AceProgressPoller, type AceProgress } from "./ace-progress";
 import { Capacitor } from "@capacitor/core";
 import { cardSounds } from "./card-sounds";
@@ -1164,6 +1165,7 @@ let engagementReport: EngagementReport | null = null;
 let engagementTab: "overview" | "people" | "experience" | "data" = "overview";
 
 interface PeopleProfile {
+  historyReview?: HistoryReviewSummary | null;
   username: string;
   displayName: string;
   email?: string;
@@ -2598,6 +2600,10 @@ function renderPeopleProfile(profile: PeopleProfile): void {
   els.peopleProfileHandicap.textContent = handicap
     ? `Ace handicap: ${dynamicHandicapPointsCopy(handicap.wpPerGame)} · ${handicap.cycles} calibrated cycle${handicap.cycles === 1 ? "" : "s"}`
     : "";
+  if (profile.historyReview) {
+    els.peopleProfileHandicap.hidden = false;
+    els.peopleProfileHandicap.textContent += ` · ${historyReviewCopy(profile.historyReview)}`;
+  }
   els.peopleProfilePlay.hidden = profile.isSelf || !profile.online;
   els.peopleProfilePlay.textContent = authenticatedUser ? "Play now" : "Sign in to play";
   renderPeopleHeadToHead(profile);
@@ -8125,8 +8131,10 @@ function decisionContext(
     rows.push([`${reviewName} played`, event.review.selected.join(" ")]);
     rows.push([`${DECISION_REVIEWER_NAME} advised`, event.review.recommended.join(" ")]);
   }
-  rows.push([`${possessive} point EV`, formatEvPoints(event.review.selectedEv)]);
-  rows.push(["Advised point EV", formatEvPoints(event.review.recommendedEv)]);
+  if (typeof event.review.selectedEv === "number" && typeof event.review.recommendedEv === "number") {
+    rows.push([`${possessive} point EV`, formatEvPoints(event.review.selectedEv)]);
+    rows.push(["Advised point EV", formatEvPoints(event.review.recommendedEv)]);
+  }
   rows.push(["Point EV impact", formatEvPoints(-Math.max(0, event.review.delta))]);
   if (event.review.selectedWinProbability !== undefined && event.review.recommendedWinProbability !== undefined) {
     rows.push([`${possessive} win probability`, formatWinProbability(event.review.selectedWinProbability)]);
@@ -8473,7 +8481,9 @@ function cardValueFromLabel(label: string | undefined): number {
 
 function decisionReviewText(event: DecisionReviewEvent, reviewName = playerDisplayName()): string {
   const review = event.review;
-  const pointEv = `${reviewName} EV ${formatEvPoints(review.selectedEv)}, advised EV ${formatEvPoints(review.recommendedEv)}`;
+  const pointEv = typeof review.selectedEv === "number" && typeof review.recommendedEv === "number"
+    ? `${reviewName} EV ${formatEvPoints(review.selectedEv)}, advised EV ${formatEvPoints(review.recommendedEv)}`
+    : "Point EV unavailable";
   const delta = review.winProbabilityDelta !== undefined
     ? `; win% impact ${formatPercentagePointDelta(decisionErrorWinProbabilityImpact(event))}; ${pointEv}`
     : review.delta !== 0
@@ -8651,6 +8661,11 @@ function renderMyStats(events: AnalyticsEvent[]): void {
       : "Loading merged production history…";
   els.analyticsTotals.innerHTML = "";
   els.analyticsTotals.classList.add("my-stats-comparison");
+  if (ownPeopleProfile?.historyReview) {
+    const comparison = document.createElement("p");
+    comparison.textContent = historyReviewCopy(ownPeopleProfile.historyReview);
+    els.analyticsTotals.append(comparison);
+  }
   els.analyticsTotals.append(myStatsComparisonTable(
     lifetime.player,
     totals,

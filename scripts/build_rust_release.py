@@ -19,6 +19,7 @@ TARGETS = {
     'benchmark': [('cribbage-runner', 'cribbage-runner'),
                   ('cribbage-shadow-engine', 'cribbage-decision-worker')],
     'shadow': [('cribbage-shadow-engine', 'cribbage-shadow-engine')],
+    'review': [('cribbage-shadow-engine', 'cribbage-review-worker')],
     'opening': [('cribbage-shadow-engine', 'build-model283-opening'),
                 ('cribbage-shadow-engine', 'model283-hands')],
 }
@@ -172,7 +173,7 @@ def build(options):
         if ('cribbage-shadow-engine', 'cribbage-decision-worker') not in selected and options.kind != 'shadow':
             cargo.extend(['-p', 'cribbage-shadow-engine'])
         cargo.extend(['--bin', 'pgo-workload', '--target', target])
-        kind = 'reviews' if options.kind == 'api' else 'play'
+        kind = 'reviews' if options.kind in ('api', 'review') else 'play'
 
         def compile_variant(name, extra):
             before = time.monotonic()

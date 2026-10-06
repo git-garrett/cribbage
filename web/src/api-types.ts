@@ -78,8 +78,8 @@ export interface AnalyticsDecisionReview {
   model: Opponent;
   selected: string[];
   recommended: string[];
-  selectedEv: number;
-  recommendedEv: number;
+  selectedEv?: number;
+  recommendedEv?: number;
   delta: number;
   selectedWinProbability?: number;
   recommendedWinProbability?: number;
