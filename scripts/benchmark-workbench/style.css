@@ -12,6 +12,12 @@
   --amber-fill:#f5e4c8;
   --good:#236957;
   --bad:#a83e3e;
+  --control-border:#b7cbdc;
+  --focus:#137faa;
+  --state-border:#98b7cc;
+  --track:#e6edf3;
+  --reference:#7690a5;
+  --series:var(--navy);
   --body:"Avenir Next",Avenir,"Segoe UI",sans-serif;
   --display:"Avenir Next Condensed","Arial Narrow",var(--body);
   --mono:"SFMono-Regular",Consolas,monospace;
@@ -42,9 +48,9 @@ button,select,input {
   font:inherit;
 }
 button,select {
-  border:1px solid #b7cbdc;
+  border:1px solid var(--control-border);
   border-radius:6px;
-  background:white;
+  background:var(--panel);
   color:var(--ink);
   padding:9px 12px;
 }
@@ -56,7 +62,7 @@ button:hover {
   background:var(--page);
 }
 :focus-visible {
-  outline:3px solid #137faa;
+  outline:3px solid var(--focus);
   outline-offset:3px;
 }
 .masthead {
@@ -229,7 +235,7 @@ h2 {
 }
 .state {
   display:inline-block;
-  border:1px solid #98b7cc;
+  border:1px solid var(--state-border);
   padding:4px 14px;
   border-radius:30px;
   font-size:12px;
@@ -278,7 +284,7 @@ h2 {
 }
 .lane-track {
   height:14px;
-  background:repeating-linear-gradient(90deg,#e6edf3 0,#e6edf3 7px,transparent 7px,transparent 10px);
+  background:repeating-linear-gradient(90deg,var(--track) 0,var(--track) 7px,transparent 7px,transparent 10px);
   border-radius:6px;
   overflow:hidden;
 }
@@ -288,7 +294,7 @@ h2 {
   min-width:0;
 }
 .lane:nth-child(2) .lane-fill {
-  background:var(--navy);
+  background:var(--series);
 }
 .lane-count {
   text-align:right;
@@ -423,12 +429,12 @@ h2 {
   stroke-width:1;
 }
 .chart .reference {
-  stroke:#7690a5;
+  stroke:var(--reference);
   stroke-width:1.5;
   stroke-dasharray:5 4;
 }
 .chart .line {
-  stroke:var(--navy);
+  stroke:var(--series);
   stroke-width:2.5;
   fill:none;
   stroke-linejoin:round;
@@ -454,14 +460,14 @@ h2 {
   stroke-dasharray:3 3;
 }
 .chart .point {
-  fill:white;
+  fill:var(--panel);
   stroke:var(--blue);
   stroke-width:2;
 }
 .tab-chart {
   height:76px;
   margin-top:6px;
-  background:white;
+  background:var(--panel);
   border-radius:3px;
   overflow:hidden;
 }
@@ -785,6 +791,28 @@ footer {
   }
   .connection {
     font-size:11px;
+  }
+}
+@media(prefers-color-scheme:dark) {
+  :root {
+    color-scheme:dark;
+    --page:#0d1823;
+    --panel:#152636;
+    --ink:#e2edf6;
+    --muted:#a7bdd0;
+    --line:#344b5f;
+    --blue:#72c7e4;
+    --blue-fill:#244e63;
+    --amber:#edbb72;
+    --amber-fill:#4b3821;
+    --good:#7dd6b5;
+    --bad:#f09d9d;
+    --control-border:#58718a;
+    --focus:#72c7e4;
+    --state-border:#6c89a2;
+    --track:#263d50;
+    --reference:#809ab0;
+    --series:#c5deef;
   }
 }
 @media(prefers-reduced-motion:reduce) {
