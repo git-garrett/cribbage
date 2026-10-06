@@ -59,6 +59,16 @@ class AssetWorkbenchTests(unittest.TestCase):
         (self.root/'archive-progress.json').write_text(json.dumps(dict(policy='other', completed=5000)))
         self.assertIsNone(build_asset_report(self.entry, dict(state='running'), now=1010)['archive'])
 
+    def test_finished_calculation_is_not_finished_verification_or_archive(self):
+        self.p.update(completed=1250000, status='complete')
+        (self.root/'progress.json').write_text(json.dumps(self.p))
+        for stage, expected in [('verify-archive-and-publication', 'verifying'), ('await-durable-archive', 'waiting_for_archive')]:
+            result = build_asset_report(self.entry, dict(state='running', stages=[dict(name=stage, state='running')]), now=9999)
+            self.assertEqual(result['state'], expected)
+            self.assertIsNone(result['remainingSeconds'])
+            self.assertEqual(result['warnings'], [])
+        self.assertEqual(build_asset_report(self.entry, dict(state='complete'), now=9999)['warnings'], [])
+
     def test_history_is_bounded_and_tolerates_partial_append(self):
         path = self.root/'history.jsonl'
         path.write_text(''.join(json.dumps(dict(updatedAt=i, completed=i))+'\n' for i in range(5001))+'{"partial":')

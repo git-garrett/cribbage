@@ -58,8 +58,12 @@ def build_asset_report(entry, status, now=None):
     result['fresh'] = fresh
     result['snapshotAgeSeconds'] = max(0, now-p.get('updatedAt', 0))
     if result['state'] == 'running':
-        result['state'] = p.get('status', 'running') if fresh else 'stale'
-    if not fresh:
+        stage = next((s.get('name', '') for s in status.get('stages', []) if s.get('state') == 'running'), '')
+        if p.get('status') == 'complete' and p.get('total') == target:
+            result['state'] = 'waiting_for_archive' if stage == 'await-durable-archive' else 'verifying'
+        else:
+            result['state'] = p.get('status', 'running') if fresh else 'stale'
+    if not fresh and (result['state'] == 'stale' or p.get('total') != target):
         result['warnings'].append('Build telemetry is stale or belongs to the previous target. Counts are the last saved snapshot; ETA is withheld.')
     rate = p.get('chunksPerHour')
     active = fresh and result['state'] == 'running' and rate is not None and rate > 0
