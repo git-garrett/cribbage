@@ -70,17 +70,21 @@ def hand_boundaries(gid, events, session):
             hand = event.get('handNumber', hand + 1) if native else hand + 1
         elif native:
             hand = max(hand, event.get('handNumber', 0))
+        number = event.get('handNumber') if native else hand
         # Older native analytics contain choices but no scoring events. A new
         # deal proves the preceding hand was fully counted. Keep explicit crib
         # timestamps when available; otherwise use the next deal as the known
         # completion boundary. A game-end event alone proves no such thing.
         if starts_hand or native and event.get('type') == 'discard':
-            if hand > 1:
-                following_deals.setdefault(hand - 1, iso(event['at']))
+            if number is not None and number > 1:
+                following_deals.setdefault(number - 1, iso(event['at']))
         if event.get('type') == 'score' and event.get('category') == 'crib':
-            times[hand] = iso(event['at'])
+            if number is not None:
+                times[number] = iso(event['at'])
         if event.get('type') == 'help':
-            assisted.add(hand)
+            if number is None:
+                raise ValueError('help event lacks hand attribution')
+            assisted.add(number)
     for number, at in following_deals.items():
         times.setdefault(number, at)
     return hand, times, assisted

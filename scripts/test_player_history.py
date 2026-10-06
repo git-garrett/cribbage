@@ -52,6 +52,15 @@ class HistoryReportTest(unittest.TestCase):
         self.assertEqual(hands, 3)
         self.assertEqual(complete, {1:'2026-01-01T00:02:00Z',2:'2026-01-01T00:03:00Z'})
 
+    def test_native_grouped_events_preserve_each_hand_identity(self):
+        events = [dict(type='score',category='crib',handNumber=3,at='2026-01-01T00:09:00Z')]
+        events += [dict(type='discard',handNumber=n,at=f'2026-01-01T00:0{n}:00Z') for n in (1,2,3)]
+        events.append(dict(type='help',handNumber=1,at='2026-01-01T00:01:10Z'))
+        hands, complete, assisted = hand_boundaries('rust-old', events, None)
+        self.assertEqual(hands, 3)
+        self.assertEqual(complete, {1:'2026-01-01T00:02:00Z',2:'2026-01-01T00:03:00Z',3:'2026-01-01T00:09:00Z'})
+        self.assertEqual(assisted, {1})
+
     def test_winning_play_is_excluded_from_cycle_regret(self):
         record = {'fields': {'kind': 'peg', 'plays': [9], 'aiScore': 119}, 'selected': [4]}
         self.assertTrue(wins_on_play(record))
