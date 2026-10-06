@@ -61,6 +61,11 @@ describe("completed game history recovery", () => {
     expect(mergeStoredAnalyticsEvents([stale], [end])).toEqual([end]);
   });
 
+  it("clears an obsolete review when an authoritative assessment marks it unavailable", () => {
+    const unavailable = { ...reviewedDiscard, review: undefined, reviewUnavailable: true };
+    expect(mergeStoredAnalyticsEvents([reviewedDiscard], [unavailable])).toEqual([unavailable]);
+  });
+
   it("never downgrades a reviewed decision when a stale game snapshot is merged", () => {
     const stale = { ...reviewedDiscard, review: undefined };
 

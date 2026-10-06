@@ -41,6 +41,7 @@ mod email_audit;
 mod engagement;
 mod feedback;
 mod handicap_backfill;
+mod history_reassessment;
 mod people;
 mod pegging_work;
 mod player_profile;
@@ -1117,6 +1118,19 @@ fn initialize_game_database(data_dir: &Path) -> Result<(), String> {
                received_at TEXT NOT NULL,
                payload_json TEXT NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS player_history_reassessments (
+               user_id INTEGER PRIMARY KEY,
+               summary_json TEXT NOT NULL,
+               source_sha256 TEXT NOT NULL,
+               applied_at TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS player_reviewed_games (
+               user_id INTEGER NOT NULL,
+               game_id TEXT NOT NULL,
+               payload_json TEXT NOT NULL,
+               PRIMARY KEY(user_id, game_id)
+             );
+             CREATE INDEX IF NOT EXISTS player_reviewed_games_user ON player_reviewed_games(user_id);
              CREATE TABLE IF NOT EXISTS dynamic_player_profiles (
                user_id INTEGER NOT NULL,
                evaluator_version TEXT NOT NULL,
@@ -1890,7 +1904,9 @@ fn hydrate_upload_scoring(
     }
     let connection = open_game_database(data_dir)?;
     let mut statement = connection
-        .prepare("SELECT game_id, payload_json FROM cribbage_completed_game_uploads")
+        .prepare("SELECT u.game_id, COALESCE(r.payload_json,u.payload_json) FROM cribbage_completed_game_uploads u
+                  LEFT JOIN player_reviewed_games r ON r.game_id=u.game_id
+                  AND lower(json_extract(r.payload_json, '$.tag'))=lower(json_extract(u.payload_json, '$.tag'))")
         .map_err(|error| format!("read completed game scoring: {}", error))?;
     let rows = statement
         .query_map([], |row| {
@@ -1902,6 +1918,11 @@ fn hydrate_upload_scoring(
             row.map_err(|error| format!("read completed game scoring: {}", error))?;
         if let Some(upload) = uploads.get_mut(&game_id) {
             let (human, ai) = scoring_totals_from_upload(&payload);
+            if let Ok(value) = serde_json::from_str::<Value>(&payload) {
+                if let Some(model) = value["model"].as_str() {
+                    upload.model = model.to_string();
+                }
+            }
             upload.human_scoring = human;
             upload.ai_scoring = ai;
             let (analyzed, errors) = decision_errors_from_upload(&payload);
@@ -3597,6 +3618,7 @@ fn game_history(server: &Server, authenticated_user: Option<&auth::AuthUser>) ->
             );
         }
         events.extend(people::completed_game_history(server, user.id)?);
+        history_reassessment::overlay_events(&connection, user.id, &mut events)?;
         Ok(events)
     })();
     match result {
@@ -3734,6 +3756,12 @@ fn upload_game(
             .and_then(Value::as_str)
             .map(str::to_string)
             .ok_or_else(|| "Missing completed game id.".to_string())?;
+        let connection = open_game_database(&server.data_dir)?;
+        let reviewed_payload = authenticated_user
+            .map(|user| history_reassessment::payload(&connection, user.id, &game_id))
+            .transpose()?.flatten();
+        let body = reviewed_payload.as_deref().unwrap_or(body);
+        let payload: Value = serde_json::from_str(body).map_err(|error| error.to_string())?;
         let player = payload
             .get("tag")
             .and_then(Value::as_str)

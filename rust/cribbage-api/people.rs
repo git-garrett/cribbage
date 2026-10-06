@@ -498,6 +498,9 @@ fn profile_value(
         "isSelf": is_self,
     });
     if include_private && is_self {
+        value["historyReview"] = crate::history_reassessment::summary(&connection, profile.0)
+            .map_err(|error| PeopleError::internal("read history comparison", error))?
+            .unwrap_or(Value::Null);
         value["email"] = Value::String(profile.3);
         value["textSize"] = Value::String(profile.5);
     }

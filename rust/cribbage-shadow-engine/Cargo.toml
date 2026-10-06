@@ -22,6 +22,10 @@ name = "cribbage-decision-worker"
 path = "bin/decision-worker.rs"
 
 [[bin]]
+name = "cribbage-review-worker"
+path = "bin/review-worker.rs"
+
+[[bin]]
 name = "pgo-workload"
 path = "bin/pgo-workload.rs"
 

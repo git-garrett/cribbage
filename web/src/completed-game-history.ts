@@ -8,6 +8,8 @@ export function preferredAnalyticsEvent(
   existing: AnalyticsEvent,
   incoming: AnalyticsEvent,
 ): AnalyticsEvent {
+  // An authoritative re-review can explicitly invalidate an older analysis.
+  if ("reviewUnavailable" in incoming && incoming.reviewUnavailable === true) return incoming;
   if (hasDecisionReview(existing) && !hasDecisionReview(incoming)) return existing;
   return incoming;
 }
