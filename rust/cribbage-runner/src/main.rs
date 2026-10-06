@@ -26,6 +26,7 @@ struct Config {
     seed: u32,
     model_root: String,
     frozen_engine: Option<(String, String, String)>,
+    seat_engines: Option<(String, String)>,
     max_steps: u32,
     workers: u32,
     out_dir: Option<PathBuf>,
@@ -148,10 +149,19 @@ fn run(config: Config) -> Result<Summary, String> {
                     return;
                 }
             };
+            let mut seats = match worker_config.seat_engines.as_ref().map(|(left, right)| {
+                Ok::<_, String>([
+                    frozen_engine::FrozenEngine::start(left, &worker_config.model_root, worker_config.left.as_str())?,
+                    frozen_engine::FrozenEngine::start(right, &worker_config.model_root, worker_config.right.as_str())?,
+                ])
+            }).transpose() {
+                Ok(engines) => engines,
+                Err(error) => { let _ = sender.send((worker_index, Err(error))); return; }
+            };
             let mut index = worker_index;
             while index < worker_config.games {
                 let game_index = worker_config.start_index + index;
-                let result = run_game_index(&worker_config, game_index, frozen.as_mut());
+                let result = run_game_index(&worker_config, game_index, frozen.as_mut(), seats.as_mut());
                 if sender.send((index, result)).is_err() {
                     return;
                 }
@@ -203,6 +213,7 @@ fn run_game_index(
     config: &Config,
     index: u32,
     frozen: Option<&mut frozen_engine::FrozenEngine>,
+    seats: Option<&mut [frozen_engine::FrozenEngine; 2]>,
 ) -> Result<(u32, PlayoutResult), String> {
     let first_deal = if index % 2 == 0 {
         Side::Left
@@ -212,7 +223,11 @@ fn run_game_index(
     let seed = config.seed.wrapping_add(index);
     let mut playout = ModelPlayout::new(seed, first_deal, config.left, config.right)?;
     playout.set_model16_policy_mode(config.model16_policy_mode);
-    let result = if let Some(frozen) = frozen {
+    let result = if let Some(seats) = seats {
+        playout.play_to_end_with_side_override(&config.model_root, config.max_steps, &mut |side, input| {
+            seats[if side == Side::Left { 0 } else { 1 }].decide(input)
+        })
+    } else if let Some(frozen) = frozen {
         playout.play_to_end_with_override(&config.model_root, config.max_steps, &mut |input| {
             frozen.decide(input)
         })
@@ -246,6 +261,8 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
     let mut frozen_binary = None;
     let mut frozen_root = None;
     let mut frozen_model = None;
+    let mut left_engine = None;
+    let mut right_engine = None;
     let mut max_steps = 10_000u32;
     let mut workers = 1u32;
     let mut out_dir: Option<PathBuf> = None;
@@ -271,6 +288,8 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
             "--total-games" => total_games = Some(parse_u32("--total-games", value)?),
             "--seed" => seed = parse_seed(value)?,
             "--model-root" => model_root = value.clone(),
+            "--left-engine" => left_engine = Some(value.clone()),
+            "--right-engine" => right_engine = Some(value.clone()),
             "--frozen-engine" => frozen_binary = Some(value.clone()),
             "--frozen-model-root" => frozen_root = Some(value.clone()),
             "--frozen-model" => frozen_model = Some(value.clone()),
@@ -330,6 +349,11 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
             )
         }
     };
+    let seat_engines = match (left_engine, right_engine) {
+        (None, None) => None,
+        (Some(left), Some(right)) if frozen_engine.is_none() => Some((left, right)),
+        _ => return Err("--left-engine and --right-engine are required together and exclude --frozen-engine".into()),
+    };
     Ok(Config {
         left,
         right,
@@ -339,6 +363,7 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
         seed,
         model_root,
         frozen_engine,
+        seat_engines,
         max_steps,
         workers,
         out_dir,
@@ -492,9 +517,9 @@ fn initialize_db(db_path: &Path, config: &Config, started_at: &str) -> Result<()
         compact_schema_sql(),
         format!(
             concat!(
-                "INSERT INTO ai_runs (run_id, out_dir, command, git_commit, run_seed, status, started_at, metadata_json) ",
-                "VALUES ({}, {}, {}, {}, {}, 'running', {}, {}) ",
-                "ON CONFLICT(run_id) DO UPDATE SET status='running', run_seed=excluded.run_seed, metadata_json=excluded.metadata_json;"
+                "INSERT INTO ai_runs (run_id, out_dir, command, git_commit, run_seed, status, started_at, metadata_json, included_in_tables) ",
+                "VALUES ({}, {}, {}, {}, {}, 'running', {}, {}, {}) ",
+                "ON CONFLICT(run_id) DO UPDATE SET status='running', run_seed=excluded.run_seed, metadata_json=excluded.metadata_json, included_in_tables=excluded.included_in_tables;"
             ),
             sql_text(&config.run_id),
             sql_text(
@@ -514,12 +539,14 @@ fn initialize_db(db_path: &Path, config: &Config, started_at: &str) -> Result<()
                 "model16PolicyMode": model16_policy_mode_name(config.model16_policy_mode),
                 "sourceCommit": env::var("SOURCE_COMMIT").unwrap_or_default(),
                 "runnerSha256": env::var("EXPECTED_RUNNER_SHA256").unwrap_or_default(),
+                "seatEngines": config.seat_engines,
                 "frozenEngine": config.frozen_engine.as_ref().map(|(binary, root, model)| serde_json::json!({
                     "model": model, "binary": binary, "modelRoot": root,
                     "sourceCommit": env::var("OPPONENT_SOURCE_COMMIT").unwrap_or_default(),
                     "sha256": env::var("FROZEN_ENGINE_SHA256").unwrap_or_default(),
                 })),
-            }).to_string())
+            }).to_string()),
+            u8::from(config.seat_engines.is_none())
         )
     );
     run_sqlite(db_path, &sql)?;
@@ -561,7 +588,7 @@ fn insert_game(
         concat!(
             "INSERT INTO compact_games (game_id, run_id, matchup_id, game_index, random_seed, left_engine, right_engine, ",
             "winner, result, final_left_score, final_right_score, started_at, ended_at, reproducible, included_in_tables, source_log_path, log_detail, notes) ",
-            "VALUES ({}, {}, {}, {}, {}, {}, {}, {}, 0, {}, {}, {}, {}, 1, 1, NULL, 'rust-compact', '');\n"
+            "VALUES ({}, {}, {}, {}, {}, {}, {}, {}, 0, {}, {}, {}, {}, 1, {}, NULL, 'rust-compact', '');\n"
         ),
         sql_text(&game_id),
         sql_text(&config.run_id),
@@ -574,7 +601,8 @@ fn insert_game(
         result.left_score,
         result.right_score,
         sql_text(started_at),
-        sql_text(ended_at)
+        sql_text(ended_at),
+        u8::from(config.seat_engines.is_none())
     ));
     append_hand_rows(&mut sql, &game_id, &result.record);
     append_discard_rows(&mut sql, &game_id, &result.record);

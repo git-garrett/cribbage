@@ -248,6 +248,15 @@ impl ModelPlayout {
         &mut self, root: &str, max_steps: u32,
         decide: &mut dyn FnMut(&DecisionInput) -> Result<Option<Decision>, String>,
     ) -> Result<PlayoutResult, String> {
+        self.play_to_end_with_side_override(root, max_steps, &mut |_, input| decide(input))
+    }
+
+    /// Same legal observation boundary, with the seat used only to route two
+    /// independent frozen workers. The seat is not sent to either policy.
+    pub fn play_to_end_with_side_override(
+        &mut self, root: &str, max_steps: u32,
+        decide: &mut dyn FnMut(Side, &DecisionInput) -> Result<Option<Decision>, String>,
+    ) -> Result<PlayoutResult, String> {
         for step in 0..max_steps {
             match self.game.phase {
                 Phase::Discard => self.play_discard_round_with_override(root, decide)?,
@@ -289,18 +298,18 @@ impl ModelPlayout {
     }
 
     fn play_discard_round(&mut self, root: &str) -> Result<(), String> {
-        self.play_discard_round_with_override(root, &mut |_| Ok(None))
+        self.play_discard_round_with_override(root, &mut |_, _| Ok(None))
     }
 
     fn play_discard_round_with_override(
         &mut self, root: &str,
-        decide: &mut dyn FnMut(&DecisionInput) -> Result<Option<Decision>, String>,
+        decide: &mut dyn FnMut(Side, &DecisionInput) -> Result<Option<Decision>, String>,
     ) -> Result<(), String> {
         for side in [Side::Left, Side::Right] {
             if self.game.phase == Phase::Discard && self.game.player(side).hand.len() == 6 {
                 let input = self.decision_input(side, DecisionKind::Discard);
                 let decision_started = Instant::now();
-                let decision = match decide(&input)? {
+                let decision = match decide(side, &input)? {
                     Some(decision) => decision,
                     None => evaluate_decision(&input, root)?,
                 };
@@ -354,12 +363,12 @@ impl ModelPlayout {
     }
 
     fn play_pegging_step(&mut self, root: &str) -> Result<(), String> {
-        self.play_pegging_step_with_override(root, &mut |_| Ok(None))
+        self.play_pegging_step_with_override(root, &mut |_, _| Ok(None))
     }
 
     fn play_pegging_step_with_override(
         &mut self, root: &str,
-        decide: &mut dyn FnMut(&DecisionInput) -> Result<Option<Decision>, String>,
+        decide: &mut dyn FnMut(Side, &DecisionInput) -> Result<Option<Decision>, String>,
     ) -> Result<(), String> {
         if self.game.pegging_reset_pending {
             let count_before = self.game.count;
@@ -463,7 +472,7 @@ impl ModelPlayout {
         let model13_cache = self
             .model13_hand_cache_enabled
             .then_some(&self.model13_hand_caches[side.index()]);
-        let decision = match decide(&input)? {
+        let decision = match decide(side, &input)? {
             Some(decision) => decision,
             None => evaluate_decision_with_caches(
                 &input, root, Some(&self.model911_hand_caches[side.index()]), model13_cache,
@@ -849,6 +858,24 @@ fn elapsed_micros(started: Instant) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn side_override_routes_each_players_discard_without_exposing_other_cards() {
+        let mut game = ModelPlayout::new(123, Side::Left, ModelId::Schell13, ModelId::Schell13).unwrap();
+        let mut seen = Vec::new();
+        let result = game.play_to_end_with_side_override(".", 1, &mut |side, input| {
+            assert_eq!(input.kind, DecisionKind::Discard);
+            assert_eq!(input.ai_hand.len(), 6);
+            assert!(input.human_table.is_empty());
+            seen.push(side);
+            Ok(Some(Decision::Discard {
+                card_ids: input.ai_hand[..2].iter().map(|c| c.id).collect(),
+                best_lead: None, ev: None, win_probability: None,
+            }))
+        });
+        assert!(result.unwrap_err().contains("exceeded 1 steps"));
+        assert_eq!(seen, vec![Side::Left, Side::Right]);
+    }
 
     #[test]
     fn playout_accepts_native_models() {
