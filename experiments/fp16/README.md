@@ -52,6 +52,10 @@ The common `experiments/fp32/run.py` harness accepts `candidateBits: 16` and
 uses the one-shot supervisor's verification, smoke, benchmark, integrity, report,
 and durable-sync stages. Main games cannot begin unless complete smoke games pass.
 
-The overnight allocation is four FP16 game workers, four existing FP32 game
-workers, and four asset-build workers. These are worker slots; macOS schedules
-physical cores. Both benchmarks target 10,000 games independently.
+The user stopped FP32 after 70 games (35 matched seeds). The current allocation
+is four FP16 game workers and eight asset-build workers. The asset controller
+automatically permits twelve workers when FP16 stops, fails or completes. These
+are worker slots; macOS schedules physical cores and the existing memory guard
+still applies. FP16 retains its 10,000-game ceiling, with a user-authorized early
+checkpoint after a comparable 35 matched seeds. The short-run stop decision is
+an engineering resource choice, not statistical proof of equal strength.
