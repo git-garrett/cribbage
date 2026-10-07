@@ -252,3 +252,16 @@ progress and graphs of key figures including ordinary confidence intervals and
 confidence sequences, without materially slowing the benchmark. Preserve active
 runs. The initial scope is local read-only observation of paired game benchmarks;
 it does not change model policy, scoring, or the full command-line report.
+
+## Analysis jobs
+
+An exact replay/analysis supervisor can register an `analysisJob` object with
+`root`, positive integer `target`, and `title`. Its root supplies `progress.json`
+(completed, target, reused, workers, workerLimit, updatedAt, status,
+remainingSeconds, etaBasis, groups) and `history.jsonl` (updatedAt, completed).
+Each group supplies kind, role, cohort, completed and total. The workbench reads
+these small snapshots, not the results database. Snapshot age over 90 seconds or
+a stopped/failed job withholds ETA. A completed computation remains “reporting”
+until the supervisor's verification, report and sync stages finish.
+
+Register it through `scripts/local-runtime.sh workbench-start /path/to/job.json`.
