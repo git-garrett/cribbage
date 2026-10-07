@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from benchmark_workbench_stats import METRICS, metric_histories, paired_history
 from benchmark_workbench_assets import build_asset_report
+from benchmark_workbench_analysis import build_analysis_report
 
 
 RUNTIME = Path('/private/tmp/strong-cribbage-local-runtime/workbench')
@@ -62,6 +63,13 @@ def job_entry(spec_path):
     spec = read_json(spec_path)
     if not spec or not re.fullmatch('[a-z0-9-]+', spec.get('jobId', '')):
         raise ValueError('A valid job specification is required')
+    analysis = spec.get('analysisJob')
+    if analysis:
+        if (not isinstance(analysis, dict) or type(analysis.get('target')) is not int
+                or analysis['target'] <= 0 or not analysis.get('root')):
+            raise ValueError('Analysis job requires root and positive target')
+        return {'id': spec['jobId'], 'root': str(Path(analysis['root']).resolve()),
+                'spec': str(spec_path), 'kind': 'analysis', 'title': analysis.get('title', 'Analysis')}
     asset = spec.get('assetBuild')
     if asset:
         if (not isinstance(asset, dict) or not isinstance(asset.get('target'), int)
@@ -461,6 +469,7 @@ class WorkbenchServer(ThreadingHTTPServer):
                 return cached[1]
             try:
                 report = (build_asset_report(entry, job_status(entry)) if entry.get('kind') == 'asset'
+                          else build_analysis_report(entry, job_status(entry)) if entry.get('kind') == 'analysis'
                           else build_report(entry, metric_cache=self.metric_cache))
             except (OSError, ValueError, sqlite3.Error) as error:
                 report = {'id': entry['id'], 'error': str(error), 'integrity': 'unavailable',

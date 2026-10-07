@@ -14,7 +14,7 @@ let inspectedPairs = 0;
 let jobs = [];
 let jobsSignature = '';
 const previews = new Map();
-const visibleJobs = () => jobs.filter((job) => job.kind === 'asset' || job.state === 'running' || job.state === 'pending' || job.id === selected);
+const visibleJobs = () => jobs.filter((job) => ['asset', 'analysis'].includes(job.kind) || job.state === 'running' || job.state === 'pending' || job.id === selected);
 const jobTitle = (job) => job.title || (job.candidate && job.opponent ? `${modelName(job.candidate)} vs ${modelName(job.opponent)}` : job.id);
 
 function element(tag, text, className) {
@@ -72,6 +72,14 @@ function renderPreviews() {
     const tab = document.getElementById(`tab-${job.id}`);
     if (!tab) continue;
     const snapshot = previews.get(job.id);
+    if (job.kind === 'analysis' && snapshot && !snapshot.error && !snapshot.waiting) {
+      tab.querySelector('.tab-state').textContent = snapshot.state.replaceAll('_', ' ');
+      tab.querySelector('.tab-rate').textContent = `${number.format(snapshot.completed)} / ${number.format(snapshot.target)} replays`;
+      tab.querySelector('.tab-progress').textContent = `${percent(snapshot.completed / snapshot.target)} complete`;
+      const rows = snapshot.history || [], start = rows[0]?.updatedAt || snapshot.asOf;
+      chart(`preview-${job.id}`, rows, { compact: true, x: (r) => r.updatedAt-start, y: (r) => r.completed / snapshot.target, percent: true, domain: [0, 1], empty: 'Waiting for progress' });
+      continue;
+    }
     if (job.kind === 'asset' && snapshot && !snapshot.error && !snapshot.waiting) {
       tab.querySelector('.tab-state').textContent = snapshot.state.replaceAll('_', ' ');
       tab.querySelector('.tab-rate').textContent = `${snapshot.completed.toLocaleString()} / ${snapshot.target.toLocaleString()} chunks`;
@@ -101,7 +109,7 @@ function renderPreviews() {
 
 function selectJob(id) {
   selected = id; followLatest = true; report = null;
-  $('report').hidden = true; $('asset-report').hidden = true; $('notice').hidden = true;
+  $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('notice').hidden = true;
   renderJobs(); refresh();
 }
 
@@ -176,6 +184,7 @@ function chart(id, rows, options) {
 function renderCharts() {
   if (!report || report.error || report.waiting) return;
   if (report.kind === 'asset') return renderAssetCharts(report);
+  if (report.kind === 'analysis') return renderAnalysisChart(report);
   const index = Number($('inspect').value);
   const bands = [];
   if ($('show-anytime').checked) bands.push({ key: 'anytime95', className: 'anytime-band' });
@@ -233,12 +242,14 @@ function renderMetric(prefix, key, pairs) {
 function render(value) {
   report = value;
   const error = value.error || value.waiting;
-  $('report').hidden = Boolean(error) || value.kind === 'asset';
+  $('report').hidden = Boolean(error) || ['asset', 'analysis'].includes(value.kind);
+  $('analysis-report').hidden = Boolean(error) || value.kind !== 'analysis';
   $('asset-report').hidden = Boolean(error) || value.kind !== 'asset';
   $('notice').hidden = !error && !value.warnings?.length;
   $('notice').textContent = error || (value.warnings || []).join(' ');
   if (error) return;
   if (value.kind === 'asset') return renderAsset(value);
+  if (value.kind === 'analysis') return renderAnalysis(value);
   const candidate = modelName(value.candidate), opponent = modelName(value.opponent);
   $('matchup').textContent = `${candidate} vs ${opponent}`;
   $('experiment').textContent = value.experiment;
@@ -383,7 +394,7 @@ async function refresh() {
       $('run-tabs').dataset.jobs = '';
       $('benchmark-view').removeAttribute('aria-labelledby');
       $('jobs').replaceChildren(element('option', 'No paired benchmarks registered'));
-      $('empty').hidden = false; $('report').hidden = true; $('asset-report').hidden = true; $('notice').hidden = true;
+      $('empty').hidden = false; $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('notice').hidden = true;
       $('connection').textContent = 'Connected';
       return;
     }
@@ -455,3 +466,33 @@ refresh();
 
 let resizeFrame;
 window.addEventListener('resize', () => { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(() => { renderCharts(); renderPreviews(); }); });
+
+function renderAnalysisChart(value) {
+  const rows = value.history || [], start = rows[0]?.updatedAt || value.asOf;
+  chart('analysis-progress-chart', rows, { x: (r) => (r.updatedAt-start)/3600, y: (r) => r.completed,
+    xHours: true, zero: true, decimals: 0, empty: 'Waiting for progress history' });
+}
+function renderAnalysis(value) {
+  $('analysis-title').textContent = value.title;
+  $('analysis-state').textContent = value.state.replaceAll('_', ' ');
+  $('analysis-stage').textContent = value.stage.replaceAll('-', ' ');
+  $('analysis-snapshot').textContent = `Snapshot ${new Date(value.updatedAt*1000).toLocaleString()}`;
+  $('analysis-total').textContent = `${number.format(value.completed)} / ${number.format(value.target)} · ${percent(value.completed/value.target)}`;
+  const track = element('div', null, 'lane-track'), fill = element('div', null, 'lane-fill');
+  fill.style.width = `${Math.min(100, value.completed/value.target*100)}%`; track.append(fill); $('analysis-lanes').replaceChildren(track);
+  $('analysis-workers').textContent = value.fresh && value.state === 'running' ? `${value.workers} / ${value.workerLimit}` : `0 / ${value.workerLimit}`;
+  $('analysis-reused').textContent = `${number.format(value.reused)} earlier exact replays preserved`;
+  $('analysis-eta').textContent = duration(value.remainingSeconds);
+  $('analysis-finish').textContent = value.remainingSeconds == null ? 'ETA waits for active compute telemetry' : `Around ${new Date((value.asOf+value.remainingSeconds)*1000).toLocaleString()}`;
+  $('analysis-eta-note').textContent = value.etaBasis;
+  const groups = new Map(), labels = { pair: 'Pairs', triple: 'Pair royals', run3: 'Runs of 3', run4: 'Runs of 4', run5: 'Runs of 5', run6: 'Runs of 6', fifteen: 'Fifteens' };
+  for (const g of value.groups || []) {
+    const key = `${labels[g.kind] || g.kind} / ${g.role}`, row = groups.get(key) || { completed: 0, total: 0 };
+    row.completed += g.completed; row.total += g.total; groups.set(key, row);
+  }
+  const table = $('analysis-groups'); table.replaceChildren();
+  for (const [name, g] of groups) {
+    const row = element('tr'); row.append(element('td', name), element('td', `${number.format(g.completed)} / ${number.format(g.total)}`), element('td', percent(g.completed/g.total))); table.append(row);
+  }
+  renderAnalysisChart(value);
+}
