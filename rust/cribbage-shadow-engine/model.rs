@@ -652,6 +652,19 @@ pub fn parse_decision_input(input_text: &str) -> Result<DecisionInput, String> {
     })
 }
 
+// The versioned 28.3 policy can use the same optional, fingerprint-checked
+// accelerator as Ace. An absent directory/shard still uses the exact solver.
+// Normalize only execution; the game retains its recorded model identity.
+fn with_progressive_opening(input: &DecisionInput) -> Option<DecisionInput> {
+    if input.kind != DecisionKind::Peg || input.model != MODEL_28_3
+        || !std::env::var_os("CRIBBAGE_283_FAST_ASSET").is_some_and(|p| !p.is_empty()) {
+        return None;
+    }
+    let mut accelerated = input.clone();
+    accelerated.model = MODEL_28_3_FAST.into();
+    Some(accelerated)
+}
+
 pub fn evaluate_decision(input: &DecisionInput, root: &str) -> Result<Decision, String> {
     evaluate_decision_with_caches(input, root, None, None)
 }
@@ -670,6 +683,8 @@ pub fn evaluate_decision_with_caches(
     model911_cache: Option<&Model911HandCache>,
     model13_cache: Option<&Model13HandCache>,
 ) -> Result<Decision, String> {
+    let accelerated = with_progressive_opening(input);
+    let input = accelerated.as_ref().unwrap_or(input);
     match input.kind {
         DecisionKind::Discard => recommend_discard(input, root),
         DecisionKind::Peg => recommend_peg(input, root, model911_cache, model13_cache),
@@ -682,6 +697,8 @@ pub fn review_decision(
     selected_card_ids: &[u8],
     root: &str,
 ) -> Result<DecisionReview, String> {
+    let accelerated = with_progressive_opening(input);
+    let input = accelerated.as_ref().unwrap_or(input);
     if input.kind == DecisionKind::Peg
         && input.player == PlayerKey::Ai
         && input.turn == PlayerKey::Ai
@@ -719,6 +736,8 @@ pub fn evaluate_selected_decision(
     selected_card_ids: &[u8],
     root: &str,
 ) -> Result<Decision, String> {
+    let accelerated = with_progressive_opening(input);
+    let input = accelerated.as_ref().unwrap_or(input);
     if !matches!(input.model.as_str(), MODEL_13_0 | MODEL_13_215 | MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3 | MODEL_20_4 | MODEL_20_5 | MODEL_20_6 | MODEL_20_7 | MODEL_28_3 | MODEL_28_3_FAST | MODEL_20_5_PEGGING | MODEL_20_5_PEGGING2) {
         return Err("saved decision review currently supports Ace models only".to_string());
     }
