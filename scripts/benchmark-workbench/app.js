@@ -15,7 +15,7 @@ let inspectedPairs = 0;
 let jobs = [];
 let jobsSignature = '';
 const previews = new Map();
-const visibleJobs = () => jobs.filter((job) => ['asset', 'analysis'].includes(job.kind) || job.state === 'running' || job.state === 'pending' || job.id === selected);
+const visibleJobs = () => jobs.filter((job) => ['asset', 'analysis', 'gpu'].includes(job.kind) || job.state === 'running' || job.state === 'pending' || job.id === selected);
 const jobTitle = (job) => job.title || (job.candidate && job.opponent ? `${modelName(job.candidate)} vs ${modelName(job.opponent)}` : job.id);
 
 function element(tag, text, className) {
@@ -73,6 +73,14 @@ function renderPreviews() {
     const tab = document.getElementById(`tab-${job.id}`);
     if (!tab) continue;
     const snapshot = previews.get(job.id);
+    if (job.kind === 'gpu' && snapshot && !snapshot.error && !snapshot.waiting) {
+      tab.querySelector('.tab-state').textContent = snapshot.state.replaceAll('_', ' ');
+      tab.querySelector('.tab-rate').textContent = `${number.format(snapshot.completed)} / ${number.format(snapshot.target)} ${snapshot.unit}`;
+      tab.querySelector('.tab-progress').textContent = `${percent(snapshot.completed / snapshot.target)} saved · ${snapshot.ratePerSecond != null ? `${number.format(Math.round(snapshot.ratePerSecond))}/s` : 'measuring rate'}`;
+      const rows = snapshot.history || [], start = rows[0]?.updatedAt || snapshot.asOf;
+      chart(`preview-${job.id}`, rows, { compact: true, x: (r) => r.updatedAt-start, y: (r) => r.completed / snapshot.target, percent: true, domain: [0, 1], empty: 'Waiting for GPU checkpoints' });
+      continue;
+    }
     if (job.kind === 'analysis' && snapshot && !snapshot.error && !snapshot.waiting) {
       tab.querySelector('.tab-state').textContent = snapshot.state.replaceAll('_', ' ');
       tab.querySelector('.tab-rate').textContent = `${number.format(snapshot.completed)} / ${number.format(snapshot.target)} replays`;
@@ -110,7 +118,7 @@ function renderPreviews() {
 
 function selectJob(id) {
   selected = id; followLatest = true; report = null;
-  $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('notice').hidden = true;
+  $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('gpu-report').hidden = true; $('notice').hidden = true;
   renderJobs(); refresh();
 }
 
@@ -186,6 +194,7 @@ function renderCharts() {
   if (!report || report.error || report.waiting) return;
   if (report.kind === 'asset') return renderAssetCharts(report);
   if (report.kind === 'analysis') return renderAnalysisChart(report);
+  if (report.kind === 'gpu') return renderGpuCharts(report);
   const index = Number($('inspect').value);
   const bands = [];
   if ($('show-anytime').checked) bands.push({ key: 'anytime95', className: 'anytime-band' });
@@ -243,14 +252,16 @@ function renderMetric(prefix, key, pairs) {
 function render(value) {
   report = value;
   const error = value.error || value.waiting;
-  $('report').hidden = Boolean(error) || ['asset', 'analysis'].includes(value.kind);
+  $('report').hidden = Boolean(error) || ['asset', 'analysis', 'gpu'].includes(value.kind);
   $('analysis-report').hidden = Boolean(error) || value.kind !== 'analysis';
   $('asset-report').hidden = Boolean(error) || value.kind !== 'asset';
+  $('gpu-report').hidden = Boolean(error) || value.kind !== 'gpu';
   $('notice').hidden = !error && !value.warnings?.length;
   $('notice').textContent = error || (value.warnings || []).join(' ');
   if (error) return;
   if (value.kind === 'asset') return renderAsset(value);
   if (value.kind === 'analysis') return renderAnalysis(value);
+  if (value.kind === 'gpu') return renderGpu(value);
   const candidate = modelName(value.candidate), opponent = modelName(value.opponent);
   $('matchup').textContent = `${candidate} vs ${opponent}`;
   $('experiment').textContent = value.experiment;
@@ -377,6 +388,47 @@ function renderAssetCharts(value) {
   $('asset-history-note').textContent = rows.length ? `Recorded window begins ${new Date(start * 1000).toLocaleString()}. Saved totals include earlier work; the time axis includes any pauses. Up to 500 history points are shown.` : 'Earlier chunks are preserved; detailed history begins with this update.';
 }
 
+function renderGpu(value) {
+  $('gpu-title').textContent = value.title;
+  $('gpu-scope').textContent = value.scope;
+  $('gpu-state').textContent = value.state.replaceAll('_', ' ');
+  $('gpu-stage').textContent = value.state === 'complete' ? 'Build, verification and archive complete' : value.stage.replaceAll('-', ' ');
+  $('gpu-completed').textContent = number.format(value.completed);
+  $('gpu-target').textContent = `of ${number.format(value.target)} ${value.unit}`;
+  $('gpu-fraction').textContent = `${percent(value.completed / value.target)} saved`;
+  $('gpu-progress').setAttribute('aria-valuemax', value.target);
+  $('gpu-progress').setAttribute('aria-valuenow', value.completed);
+  $('gpu-fill').style.width = `${100 * value.completed / value.target}%`;
+  $('gpu-rate').textContent = value.ratePerSecond == null ? 'Measuring…' : `${number.format(Math.round(value.ratePerSecond))} / second`;
+  $('gpu-snapshot').textContent = `Updated ${new Date(value.updatedAt * 1000).toLocaleTimeString()}`;
+  $('gpu-eta').textContent = value.completed === value.target ? 'Computation complete' : duration(value.remainingSeconds);
+  $('gpu-finish').textContent = value.remainingSeconds == null ? 'ETA uses fresh, active throughput' : `Around ${new Date((value.asOf + value.remainingSeconds) * 1000).toLocaleString()}`;
+  $('gpu-workers').textContent = value.fresh && value.state === 'running' ? `${value.workers ?? '—'} / ${value.workerLimit ?? '—'}` : '—';
+  $('gpu-backend').textContent = value.backend || 'GPU backend';
+  $('gpu-eta-note').textContent = value.etaBasis || 'Compute ETA excludes final verification and archiving.';
+  const details = $('gpu-details'); details.replaceChildren();
+  for (const [label, stat] of [
+    ['Priority pass', value.priorityTarget ? `${number.format(value.priorityCompleted || 0)} / ${number.format(value.priorityTarget)} decisions` : 'Not specified'],
+    ['Observed frequency covered first', value.priorityCoverage == null ? 'Not specified' : percent(value.priorityCoverage)],
+    ['Sampled hands', value.handTarget == null ? 'Not specified' : number.format(value.handTarget)],
+    ['Score positions per hand and role', value.scoreCells == null ? 'Not specified' : number.format(value.scoreCells)],
+    ['GPU execution time', value.gpuSeconds == null ? 'Not recorded' : duration(value.gpuSeconds)],
+  ]) details.append(element('dt', label), element('dd', stat));
+  const checks = $('gpu-checks'); checks.replaceChildren();
+  for (const [label, stat] of [['Computation', value.completed === value.target ? 'Complete' : 'In progress'], ['Asset verification', value.verification], ['Verified archive', value.archive]]) {
+    checks.append(element('dt', label), element('dd', stat));
+  }
+  $('gpu-policy').textContent = `Frozen policy: ${value.policy}`;
+  renderGpuCharts(value);
+}
+
+function renderGpuCharts(value) {
+  const rows = value.history || [], start = rows[0]?.updatedAt || value.asOf;
+  const options = { x: (r) => (r.updatedAt-start)/3600, xHours: true, zero: true, decimals: 0, empty: 'Waiting for GPU checkpoints' };
+  chart('gpu-progress-chart', rows, { ...options, y: (r) => r.completed });
+  chart('gpu-rate-chart', rows.filter((r) => r.ratePerSecond != null), { ...options, y: (r) => r.ratePerSecond });
+}
+
 async function refresh() {
   clearTimeout(timer);
   request?.abort();
@@ -399,7 +451,7 @@ async function refresh() {
       $('run-tabs').dataset.jobs = '';
       $('benchmark-view').removeAttribute('aria-labelledby');
       $('jobs').replaceChildren(element('option', 'No paired benchmarks registered'));
-      $('empty').hidden = false; $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('notice').hidden = true;
+      $('empty').hidden = false; $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('gpu-report').hidden = true; $('notice').hidden = true;
       $('connection').textContent = 'Connected';
       return;
     }

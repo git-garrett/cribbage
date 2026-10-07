@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, urlsplit
 from benchmark_workbench_stats import METRICS, metric_histories, paired_history
 from benchmark_workbench_assets import build_asset_report
 from benchmark_workbench_analysis import build_analysis_report
+from benchmark_workbench_gpu import build_gpu_report
 
 
 RUNTIME = Path('/private/tmp/strong-cribbage-local-runtime/workbench')
@@ -66,6 +67,13 @@ def job_entry(spec_path):
     spec = read_json(spec_path)
     if not spec or not re.fullmatch('[a-z0-9-]+', spec.get('jobId', '')):
         raise ValueError('A valid job specification is required')
+    gpu = spec.get('gpuBuild')
+    if gpu:
+        if (not isinstance(gpu, dict) or type(gpu.get('target')) is not int
+                or gpu['target'] <= 0 or not gpu.get('root') or not gpu.get('policy')):
+            raise ValueError('GPU build requires root, policy and positive target')
+        return {'id': spec['jobId'], 'root': str(Path(gpu['root']).resolve()),
+                'spec': str(spec_path), 'kind': 'gpu', 'title': gpu.get('title', 'GPU assets')}
     analysis = spec.get('analysisJob')
     if analysis:
         if (not isinstance(analysis, dict) or type(analysis.get('target')) is not int
@@ -472,6 +480,7 @@ class WorkbenchServer(ThreadingHTTPServer):
                 return cached[1]
             try:
                 report = (build_asset_report(entry, job_status(entry)) if entry.get('kind') == 'asset'
+                          else build_gpu_report(entry, job_status(entry)) if entry.get('kind') == 'gpu'
                           else build_analysis_report(entry, job_status(entry)) if entry.get('kind') == 'analysis'
                           else build_report(entry, metric_cache=self.metric_cache))
             except (OSError, ValueError, sqlite3.Error) as error:
@@ -515,7 +524,7 @@ class Handler(BaseHTTPRequestHandler):
             if not entry:
                 return self.respond({'error': 'Unknown benchmark'}, 404)
             client_version = parse_qs(url.query).get('uiVersion', [''])[0]
-            if entry.get('kind') in ('asset', 'analysis') and client_version != UI_VERSION:
+            if entry.get('kind') in ('asset', 'analysis', 'gpu') and client_version != UI_VERSION:
                 return self.respond({'id': entry['id'], 'error': 'Workbench updated. Reload this browser page once to load the new views. Background jobs are still running.'})
             return self.respond(self.server.report(entry))
         files = {'/favicon.svg': ('favicon.svg', 'image/svg+xml'), '/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
