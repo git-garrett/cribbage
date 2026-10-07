@@ -1,5 +1,6 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
+const uiVersion = document.querySelector('meta[name=workbench-version]').content;
 const number = new Intl.NumberFormat();
 const percent = (value) => value == null ? '—' : `${(value * 100).toFixed(2)}%`;
 const interval = (values) => values ? `${percent(values[0])} – ${percent(values[1])}` : 'More pairs needed';
@@ -387,6 +388,10 @@ async function refresh() {
     if (!response.ok) throw new Error(`Workbench returned ${response.status}`);
     const value = await response.json();
     if (controller.signal.aborted) return;
+    if (value.uiVersion && value.uiVersion !== uiVersion) {
+      location.reload();
+      return;
+    }
     jobs = value.jobs;
     for (const id of previews.keys()) if (!jobs.some((job) => job.id === id)) previews.delete(id);
     if (!jobs.length) {
@@ -409,7 +414,7 @@ async function refresh() {
       let snapshot;
       try {
         const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]);
-        const data = await fetch(`/api/report?job=${encodeURIComponent(job.id)}`, { signal });
+        const data = await fetch(`/api/report?job=${encodeURIComponent(job.id)}&uiVersion=${encodeURIComponent(uiVersion)}`, { signal });
         if (!data.ok) throw new Error(`Benchmark returned ${data.status}`);
         snapshot = await data.json();
       } catch (error) {

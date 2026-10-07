@@ -43,3 +43,27 @@ class AnalysisTests(unittest.TestCase):
         with self.assertRaises(ValueError):job_entry(self.spec)
 
 if __name__=='__main__':unittest.main()
+
+class ClientCompatibilityTests(unittest.TestCase):
+    def handler(self, kind, version=None):
+        from types import SimpleNamespace
+        from unittest import mock
+        import benchmark_workbench as wb
+        h=object.__new__(wb.Handler)
+        h.server=SimpleNamespace(allowed_hosts={'localhost:8766'},runtime=Path('/unused'),report=mock.Mock(return_value={'kind':kind}))
+        h.path='/api/report?job=analysis-test'+('' if version is None else '&uiVersion='+version)
+        h.headers={'Host':'localhost:8766'};h.respond=mock.Mock()
+        with mock.patch.object(wb,'list_jobs',return_value=[dict(id='analysis-test',kind=kind,aliases=[])]):h.do_GET()
+        return h
+    def test_older_pages_do_not_receive_unknown_nonbenchmark_shape(self):
+        for kind in ('analysis','asset'):
+            h=self.handler(kind)
+            self.assertIn('Reload',h.respond.call_args.args[0].get('error',''))
+            h.server.report.assert_not_called()
+    def test_matching_page_receives_analysis(self):
+        import benchmark_workbench as wb
+        h=self.handler('analysis',getattr(wb,'UI_VERSION','current'))
+        self.assertEqual(h.respond.call_args.args[0],{'kind':'analysis'})
+    def test_outdated_version_requests_reload(self):
+        h=self.handler('analysis','old-version')
+        self.assertIn('Reload',h.respond.call_args.args[0].get('error',''))
