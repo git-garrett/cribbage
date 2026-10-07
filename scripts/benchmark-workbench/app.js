@@ -400,7 +400,7 @@ function renderGpu(value) {
   $('gpu-progress').setAttribute('aria-valuenow', value.completed);
   $('gpu-fill').style.width = `${100 * value.completed / value.target}%`;
   $('gpu-rate').textContent = value.ratePerSecond == null ? 'Measuring…' : `${number.format(Math.round(value.ratePerSecond))} / second`;
-  $('gpu-snapshot').textContent = `Updated ${new Date(value.updatedAt * 1000).toLocaleTimeString()}`;
+  $('gpu-snapshot').textContent = value.updatedAt == null ? 'Awaiting the first saved checkpoint' : `Updated ${new Date(value.updatedAt * 1000).toLocaleTimeString()}`;
   $('gpu-eta').textContent = value.completed === value.target ? 'Computation complete' : duration(value.remainingSeconds);
   $('gpu-finish').textContent = value.remainingSeconds == null ? 'ETA uses fresh, active throughput' : `Around ${new Date((value.asOf + value.remainingSeconds) * 1000).toLocaleString()}`;
   $('gpu-workers').textContent = value.fresh && value.state === 'running' ? `${value.workers ?? '—'} / ${value.workerLimit ?? '—'}` : '—';
@@ -415,7 +415,7 @@ function renderGpu(value) {
     ['GPU execution time', value.gpuSeconds == null ? 'Not recorded' : duration(value.gpuSeconds)],
   ]) details.append(element('dt', label), element('dd', stat));
   const checks = $('gpu-checks'); checks.replaceChildren();
-  for (const [label, stat] of [['Computation', value.completed === value.target ? 'Complete' : 'In progress'], ['Asset verification', value.verification], ['Verified archive', value.archive]]) {
+  for (const [label, stat] of [['Computation', value.completed === value.target ? 'Complete' : value.state === 'running' ? 'In progress' : value.state.replaceAll('_', ' ')], ['Asset verification', value.verification], ['Verified archive', value.archive]]) {
     checks.append(element('dt', label), element('dd', stat));
   }
   $('gpu-policy').textContent = `Frozen policy: ${value.policy}`;

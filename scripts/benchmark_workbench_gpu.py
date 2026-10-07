@@ -16,7 +16,11 @@ def build_gpu_report(entry, status, now=None):
                   warnings=[], stages=status.get('stages', []))
     progress = read_json(root / 'progress.json')
     if not progress:
-        return {**result, 'waiting': 'Waiting for the first GPU build checkpoint.'}
+        return {**result, 'state': status.get('state', 'prepared'),
+                'stage': 'Waiting for the first GPU build checkpoint',
+                'completed': 0, 'updatedAt': None, 'fresh': False,
+                'ratePerSecond': None, 'remainingSeconds': None, 'history': [],
+                'verification': 'pending', 'archive': 'pending'}
     if progress.get('target') != settings['target']:
         raise ValueError('GPU snapshot belongs to a different build target')
     completed = progress.get('completed')
@@ -43,7 +47,10 @@ def build_gpu_report(entry, status, now=None):
         elif progress.get('status') == 'waiting':
             result['state'] = 'waiting'
         elif rate:
-            result['remainingSeconds'] = (result['target'] - completed) / rate
+            seconds = progress.get('remainingSeconds')
+            if seconds is not None and (not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or seconds < 0):
+                raise ValueError('Invalid GPU remaining time')
+            result['remainingSeconds'] = seconds
     if result['state'] not in ('running', 'complete'):
         result['ratePerSecond'] = None
     result['history'] = history_rows(root / 'history.jsonl')
