@@ -20,6 +20,9 @@ def build_gpu_report(entry, status, now=None):
                 'stage': 'Waiting for the first GPU build checkpoint',
                 'completed': 0, 'updatedAt': None, 'fresh': False,
                 'ratePerSecond': None, 'remainingSeconds': None, 'history': [],
+                'priorityCompleted': 0, 'priorityTarget': settings.get('priorityTarget'),
+                'priorityCoverage': settings.get('priorityCoverage'),
+                'handTarget': settings.get('handTarget'), 'scoreCells': settings.get('scoreCells'),
                 'verification': 'pending', 'archive': 'pending'}
     if progress.get('target') != settings['target']:
         raise ValueError('GPU snapshot belongs to a different build target')

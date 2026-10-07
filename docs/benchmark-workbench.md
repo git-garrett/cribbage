@@ -150,7 +150,9 @@ analysis when nobody is viewing. Games and their telemetry are read in one
 transaction per orientation; the runner commits them atomically. The WAL reader
 closes immediately after collecting rows. A shared 15-second cache avoids duplicate work across
 browser tabs. The UI shows the measured time to read and calculate each snapshot.
-The launchd service runs at background priority, from an internal-disk copy.
+The launchd service runs from an internal-disk copy with interactive priority
+so macOS background I/O throttling does not stall the live dashboard while
+builders are busy. This does not change the compute jobs' priorities.
 
 Each orientation is read consistently in its own SQLite SELECT. Different
 orientations can have different completion counts. Rows are matched by index,

@@ -255,7 +255,9 @@ from pathlib import Path
 import plistlib, sys
 root = Path(sys.argv[1])
 plist = {'Label': sys.argv[2], 'ProgramArguments': ['/usr/bin/python3', str(root / 'app/benchmark_workbench.py'), 'serve', '--lan-hostname', sys.argv[3]],
-         'RunAtLoad': True, 'KeepAlive': False, 'ProcessType': 'Background',
+         # This serves the live user interface; background I/O throttling can
+         # otherwise stall even small snapshots while the builders are busy.
+         'RunAtLoad': True, 'KeepAlive': False, 'ProcessType': 'Interactive',
          'StandardOutPath': str(root / 'server.log'), 'StandardErrorPath': str(root / 'server.log')}
 with (root / 'service.plist').open('wb') as handle:
     plistlib.dump(plist, handle)

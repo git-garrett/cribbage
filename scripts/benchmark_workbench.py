@@ -133,7 +133,7 @@ def list_jobs(runtime=RUNTIME, jobs_runtime=JOBS_RUNTIME):
         info = manifest(Path(entry['root']))
         status = job_status(entry)
         jobs.append({**entry, 'candidate': info.get('candidate'), 'opponent': info.get('opponent') or info.get('baseline'),
-                     'state': status.get('state', 'unavailable'), 'updatedAt': status.get('updatedAt', '')})
+                     'state': status.get('state', 'prepared' if entry.get('kind') == 'gpu' else 'unavailable'), 'updatedAt': status.get('updatedAt', '')})
     # A resume changes the supervisor ID, not the experiment's databases.
     # Keep the active/latest supervisor and resolve old bookmarks to it.
     experiments = {}
