@@ -25,15 +25,17 @@ def watch(config, destination, state_path, interval=60, batch_chunks=4096, max_a
         while True:
             if mount is not None and not mount.is_mount():
                 raise RuntimeError('Archive volume is not mounted; resume explicitly after reconnecting it')
-            with sqlite3.connect((run / 'queue.db').as_uri() + '?mode=ro', uri=True) as db:
-                count, low, high = db.execute('SELECT count(*),min(id),max(id) FROM completed').fetchone()
-            if count > target or (count and (low < 0 or high >= target)):
-                raise ValueError('Queue exceeds the frozen archive target')
+            # Read published archive evidence first. A concurrent foreground
+            # pass may advance it, but its receipts must already be in the queue.
             path = run / 'archive-progress.json'
             prior = json.loads(path.read_text()) if path.exists() else {}
             if prior and (prior.get('status') != 'complete' or prior.get('policy') != config['policy']
                           or Path(prior['location']).resolve() != location):
                 raise ValueError('Archive checkpoint does not match this worker')
+            with sqlite3.connect((run / 'queue.db').as_uri() + '?mode=ro', uri=True) as db:
+                count, low, high = db.execute('SELECT count(*),min(id),max(id) FROM completed').fetchone()
+            if count > target or (count and (low < 0 or high >= target)):
+                raise ValueError('Queue exceeds the frozen archive target')
             archived = prior.get('completed', 0)
             if archived > count: raise ValueError('Live queue lost archived receipts')
             pending = count - archived
@@ -41,9 +43,10 @@ def watch(config, destination, state_path, interval=60, batch_chunks=4096, max_a
             due = pending and (pending >= batch_chunks or count == target
                 or time.time() - prior.get('updatedAt', 0) >= max_age
                 or free < config.get('diskReserveBytes', 20 * 1024**3) + headroom)
+            cleanup_pending = bool(prior) and not prior.get('releaseComplete', False)
             state = dict(status='waiting', completed=count, archived=archived, pending=pending,
                          target=target, freeBytes=free, updatedAt=time.time())
-            if due or (count == target and archived == target):
+            if due or cleanup_pending or (count == target and archived == target):
                 state['status'] = 'archiving'
                 atomic_json(state_path, state)
                 try:

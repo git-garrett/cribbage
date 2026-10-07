@@ -188,6 +188,64 @@ class AssetPipelineTests(unittest.TestCase):
             self.assertEqual(copy.call_count, 1)
             sleep.assert_not_called()
 
+    def test_archive_worker_resumes_cleanup_without_new_work_below_target(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); config = self.config(root); config['maxChunks'] = 2
+            with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=2):
+                build.run(config)
+            first = archiver.archive(config, root/'external', release=False)
+            self.assertFalse(first['releaseComplete'])
+            config['maxChunks'] = 3
+            class Finished(Exception): pass
+            def stop_after_cleanup(_):
+                self.assertFalse((root/'staging'/POLICY/'full/cut0/pone0/dealer0-lead0.bin').exists())
+                self.assertTrue(json.loads((root/'run/archive-progress.json').read_text())['releaseComplete'])
+                raise Finished()
+            with patch.object(archive_worker.shutil, 'disk_usage', return_value=SimpleNamespace(free=1)), patch.object(archive_worker.time, 'sleep', side_effect=stop_after_cleanup):
+                with self.assertRaises(Finished):
+                    archive_worker.watch(config, root/'external', root/'worker.json')
+
+    def test_archive_worker_accepts_concurrent_foreground_checkpoint_advance(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); config = self.config(root); config['maxChunks'] = 2
+            with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=2):
+                build.run(config)
+            archiver.archive(config, root/'external', release=True)
+            config['maxChunks'] = 3
+            read_text = Path.read_text
+            advanced = False
+            def advance_before_read(path, *args, **kwargs):
+                nonlocal advanced
+                if path == root/'run/archive-progress.json' and not advanced:
+                    advanced = True
+                    with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=2):
+                        build.run(config)
+                    archiver.archive(config, root/'external', release=True, incremental=True)
+                return read_text(path, *args, **kwargs)
+            with patch.object(Path, 'read_text', new=advance_before_read):
+                result = archive_worker.watch(config, root/'external', root/'worker.json')
+            self.assertTrue(advanced)
+            self.assertEqual(result['status'], 'complete')
+
+    def test_progress_directory_flush_precedes_release_and_checkpoint_retirement(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); config = self.config(root)
+            with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=2):
+                build.run(config)
+            first = archiver.archive(config, root/'external', release=False)
+            sync = archiver.sync_directory
+            def fail_published_progress_flush(path):
+                published = json.loads((root/'run/archive-progress.json').read_text())
+                if path == root/'run' and published['localCheckpoint'] != first['localCheckpoint']:
+                    raise OSError('progress directory flush failed')
+                return sync(path)
+            with patch.object(archiver, 'sync_directory', side_effect=fail_published_progress_flush):
+                with self.assertRaisesRegex(OSError, 'progress directory flush'):
+                    archiver.archive(config, root/'external', release=True, incremental=True)
+            self.assertTrue(Path(first['localCheckpoint']).exists())
+            self.assertTrue((root/'staging'/POLICY/'full/cut0/pone0/dealer0-lead0.bin').exists())
+
     def test_receiver_rejects_deep_wrong_context_and_corruption(self):
         receive.inspect_shard(shard(), POLICY, REL)
         for data, policy, relative in [(shard(4), POLICY, REL), (shard(), 'b'*64, REL),

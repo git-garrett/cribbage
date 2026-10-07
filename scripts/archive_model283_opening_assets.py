@@ -8,6 +8,7 @@ The separate archive lock permits concurrent building, not concurrent archivers.
 import argparse
 import fcntl
 import json
+import os
 from pathlib import Path
 import sqlite3
 import time
@@ -79,6 +80,8 @@ def archive(config, destination, release=False, incremental=False, mount=None):
         snapshot = record / 'queue.db'
         with sqlite3.connect((run / 'queue.db').as_uri() + '?mode=ro', uri=True) as live:
             with sqlite3.connect(snapshot) as copy: live.backup(copy)
+        with snapshot.open('rb') as handle: os.fsync(handle.fileno())
+        for directory in (record, record.parent, run): sync_directory(directory)
         with sqlite3.connect(snapshot.as_uri() + '?mode=ro&immutable=1', uri=True) as db:
             if db.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
                 raise ValueError('Queue snapshot integrity failed')
@@ -124,11 +127,12 @@ def archive(config, destination, release=False, incremental=False, mount=None):
                           bytes=total, updatedAt=time.time(), location=str(target),
                           checkpoint=str(checkpoint), localCheckpoint=str(snapshot),
                           queueSha256=digest, releasedBytes=0,
-                          reusedChunks=prior['completed'] if prior else 0)
+                          reusedChunks=prior['completed'] if prior else 0, releaseComplete=False)
             # Evidence is durable before releasing any staging bytes. A crash
             # while releasing merely leaves additional staging copies behind.
             receipt = record / 'receipt.json'
             atomic_json(receipt, result)
+            sync_directory(record)
             archive_file(receipt, checkpoint.with_name('receipt.json'), sha(receipt))
             directories.update(checkpoint.parents)
             # Also cover directories retained from an earlier interrupted copy.
@@ -137,6 +141,7 @@ def archive(config, destination, release=False, incremental=False, mount=None):
                 sync_directory(directory)
             check_mount(mount, target)
             atomic_json(run / 'archive-progress.json', result)
+            sync_directory(run)
             if release:
                 atomic_json(run / 'archive-transfer-progress.json', dict(
                     status='releasing', completed=count, snapshot=str(snapshot), updatedAt=time.time()))
@@ -154,7 +159,9 @@ def archive(config, destination, release=False, incremental=False, mount=None):
                             if sha(src) != v[kind]['sha256']:
                                 raise ValueError('Staging changed after archive verification')
                             src.unlink(); result['releasedBytes'] += v[kind]['bytes']
+                result['releaseComplete'] = True
                 atomic_json(run / 'archive-progress.json', result)
+                sync_directory(run)
             atomic_json(run / 'archive-transfer-progress.json', dict(
                 status='complete', completed=count, snapshot=str(snapshot), updatedAt=time.time()))
             if prior:
