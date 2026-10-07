@@ -143,12 +143,16 @@ def archive(config, destination, release=False, incremental=False, mount=None):
             atomic_json(run / 'archive-progress.json', result)
             sync_directory(run)
             if release:
+                staging_directories = set()
                 atomic_json(run / 'archive-transfer-progress.json', dict(
                     status='releasing', completed=count, snapshot=str(snapshot), updatedAt=time.time()))
                 for index, raw, reused in db.execute(query):
                     v = json.loads(raw)
                     for kind in ('full', 'production'):
                         src = source / kind / v['relative']
+                        # Include directories whose files were already removed
+                        # by an interrupted pass but whose unlink was not flushed.
+                        if src.parent.is_dir(): staging_directories.add(src.parent)
                         if src.exists():
                             check_mount(mount, target)
                             # A previous pass may have published its checkpoint
@@ -159,6 +163,7 @@ def archive(config, destination, release=False, incremental=False, mount=None):
                             if sha(src) != v[kind]['sha256']:
                                 raise ValueError('Staging changed after archive verification')
                             src.unlink(); result['releasedBytes'] += v[kind]['bytes']
+                for directory in staging_directories: sync_directory(directory)
                 result['releaseComplete'] = True
                 atomic_json(run / 'archive-progress.json', result)
                 sync_directory(run)

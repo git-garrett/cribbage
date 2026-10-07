@@ -246,6 +246,24 @@ class AssetPipelineTests(unittest.TestCase):
             self.assertTrue(Path(first['localCheckpoint']).exists())
             self.assertTrue((root/'staging'/POLICY/'full/cut0/pone0/dealer0-lead0.bin').exists())
 
+    def test_cleanup_marker_requires_durable_unlinks_including_resumed_cleanup(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); config = self.config(root)
+            with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=2):
+                build.run(config)
+            sync = archiver.sync_directory
+            def fail_staging_flush(path):
+                if path.is_relative_to(root/'staging'):
+                    raise OSError('staging directory flush failed')
+                return sync(path)
+            for _ in range(2):
+                with patch.object(archiver, 'sync_directory', side_effect=fail_staging_flush):
+                    with self.assertRaisesRegex(OSError, 'staging directory flush'):
+                        archiver.archive(config, root/'external', release=True, incremental=True)
+                self.assertFalse(json.loads((root/'run/archive-progress.json').read_text())['releaseComplete'])
+            result = archiver.archive(config, root/'external', release=True, incremental=True)
+            self.assertTrue(result['releaseComplete'])
+
     def test_receiver_rejects_deep_wrong_context_and_corruption(self):
         receive.inspect_shard(shard(), POLICY, REL)
         for data, policy, relative in [(shard(4), POLICY, REL), (shard(), 'b'*64, REL),
