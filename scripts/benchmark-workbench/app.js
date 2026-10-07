@@ -480,7 +480,7 @@ function renderAnalysis(value) {
   $('analysis-total').textContent = `${number.format(value.completed)} / ${number.format(value.target)} · ${percent(value.completed/value.target)}`;
   const track = element('div', null, 'lane-track'), fill = element('div', null, 'lane-fill');
   fill.style.width = `${Math.min(100, value.completed/value.target*100)}%`; track.append(fill); $('analysis-lanes').replaceChildren(track);
-  $('analysis-workers').textContent = value.fresh && value.state === 'running' ? `${value.workers} / ${value.workerLimit}` : `0 / ${value.workerLimit}`;
+  $('analysis-workers').textContent = value.fresh && value.state === 'running' ? `${value.workers} / ${value.workerLimit}` : `${['stale', 'unavailable'].includes(value.state) ? '—' : '0'} / ${value.workerLimit}`;
   $('analysis-reused').textContent = `${number.format(value.reused)} earlier exact replays preserved`;
   $('analysis-eta').textContent = duration(value.remainingSeconds);
   $('analysis-finish').textContent = value.remainingSeconds == null ? 'ETA waits for active compute telemetry' : `Around ${new Date((value.asOf+value.remainingSeconds)*1000).toLocaleString()}`;
