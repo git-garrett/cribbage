@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parent))
 import build_model283_opening_assets as build
 import archive_model283_opening_assets as archiver
+import watch_model283_archive as archive_worker
 import receive_model283_opening as receive
 from benchmark_confidence_stop import winner
 
@@ -108,6 +109,160 @@ class AssetPipelineTests(unittest.TestCase):
             self.assertEqual(rows[:13], [(c, 0, 2 if c == 10 else 0) for c in range(13)])
             self.assertEqual(rows[13:26], [(c, 15, 11) for c in range(13)])
             self.assertFalse(any(c == 10 and d < 2 for c, p, d in rows))
+
+    def test_incremental_archive_preserves_holes_and_copies_only_new_receipts(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); config = self.config(root)
+            with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=2):
+                build.run(config)
+            with sqlite3.connect(root/'run/queue.db') as db:
+                missing = db.execute('SELECT * FROM completed WHERE id=1').fetchone()
+                db.execute('DELETE FROM completed WHERE id=1')
+            first = archiver.archive(config, root/'external', release=True)
+            with sqlite3.connect(root/'run/queue.db') as db:
+                db.execute('INSERT INTO completed VALUES (?,?,?,?,?)', missing)
+            with patch.object(archiver, 'archive_file', wraps=archiver.archive_file) as copy:
+                result = archiver.archive(config, root/'external', release=True, incremental=True)
+            self.assertEqual((result['completed'], result['reusedChunks']), (3, 2))
+            shard_copies = [call for call in copy.call_args_list if call.args[1].suffix == '.bin']
+            self.assertEqual(len(shard_copies), 2)
+            self.assertTrue(all('lead1.bin' in str(call.args[1]) for call in shard_copies))
+            self.assertFalse(Path(first['localCheckpoint']).exists())
+            self.assertTrue(Path(first['checkpoint']).exists())
+
+    def test_incremental_archive_rejects_changed_receipts_and_durable_checkpoint(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); config = self.config(root)
+            with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=2):
+                build.run(config)
+            first = archiver.archive(config, root/'external')
+            with sqlite3.connect(root/'run/queue.db') as db:
+                original = db.execute('SELECT receipt FROM completed WHERE id=0').fetchone()[0]
+                db.execute('UPDATE completed SET receipt=? WHERE id=0', (original+' ',))
+            with self.assertRaisesRegex(ValueError, 'receipt changed'):
+                archiver.archive(config, root/'external', release=True, incremental=True)
+            with sqlite3.connect(root/'run/queue.db') as db:
+                db.execute('UPDATE completed SET receipt=? WHERE id=0', (original,))
+            Path(first['checkpoint']).write_bytes(b'corrupt checkpoint')
+            with self.assertRaisesRegex(ValueError, 'checkpoint digest'):
+                archiver.archive(config, root/'external', release=True, incremental=True)
+            self.assertTrue((root/'staging'/POLICY/'full/cut0/pone0/dealer0-lead0.bin').exists())
+
+    def test_incremental_cleanup_rechecks_survivors_after_an_interrupted_release(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); config = self.config(root)
+            with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=2):
+                build.run(config)
+            archiver.archive(config, root/'external', release=False)
+            path = root/'external'/POLICY/'full/cut0/pone0/dealer0-lead0.bin'
+            path.write_bytes(b'corrupt durable shard')
+            with self.assertRaisesRegex(ValueError, 'Retained archive shard changed'):
+                archiver.archive(config, root/'external', release=True, incremental=True)
+            self.assertTrue((root/'staging'/POLICY/'full/cut0/pone0/dealer0-lead0.bin').exists())
+
+    def test_archive_worker_waits_for_foreground_owner_then_finishes_and_releases(self):
+        import fcntl
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); config = self.config(root)
+            with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=2):
+                build.run(config)
+            lock = (root/'run/archive.lock').open('a')
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            def release(_):
+                self.assertEqual(json.loads((root/'worker.json').read_text())['status'], 'waiting_for_archive_lock')
+                lock.close()
+            with patch.object(archive_worker.time, 'sleep', side_effect=release):
+                result = archive_worker.watch(config, root/'external', root/'worker.json')
+            self.assertEqual(result['status'], 'complete')
+            self.assertEqual(result['archived'], 3)
+            self.assertFalse((root/'staging'/POLICY/'full/cut0/pone0/dealer0-lead0.bin').exists())
+
+    def test_archive_worker_stops_on_permission_error_without_retrying(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); config = self.config(root)
+            with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=2):
+                build.run(config)
+            with patch.object(archive_worker, 'archive', side_effect=PermissionError('permission denied')) as copy, patch.object(archive_worker.time, 'sleep') as sleep:
+                with self.assertRaises(PermissionError):
+                    archive_worker.watch(config, root/'external', root/'worker.json')
+            self.assertEqual(copy.call_count, 1)
+            sleep.assert_not_called()
+
+    def test_archive_worker_resumes_cleanup_without_new_work_below_target(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); config = self.config(root); config['maxChunks'] = 2
+            with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=2):
+                build.run(config)
+            first = archiver.archive(config, root/'external', release=False)
+            self.assertFalse(first['releaseComplete'])
+            config['maxChunks'] = 3
+            class Finished(Exception): pass
+            def stop_after_cleanup(_):
+                self.assertFalse((root/'staging'/POLICY/'full/cut0/pone0/dealer0-lead0.bin').exists())
+                self.assertTrue(json.loads((root/'run/archive-progress.json').read_text())['releaseComplete'])
+                raise Finished()
+            with patch.object(archive_worker.shutil, 'disk_usage', return_value=SimpleNamespace(free=1)), patch.object(archive_worker.time, 'sleep', side_effect=stop_after_cleanup):
+                with self.assertRaises(Finished):
+                    archive_worker.watch(config, root/'external', root/'worker.json')
+
+    def test_archive_worker_accepts_concurrent_foreground_checkpoint_advance(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); config = self.config(root); config['maxChunks'] = 2
+            with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=2):
+                build.run(config)
+            archiver.archive(config, root/'external', release=True)
+            config['maxChunks'] = 3
+            read_text = Path.read_text
+            advanced = False
+            def advance_before_read(path, *args, **kwargs):
+                nonlocal advanced
+                if path == root/'run/archive-progress.json' and not advanced:
+                    advanced = True
+                    with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=2):
+                        build.run(config)
+                    archiver.archive(config, root/'external', release=True, incremental=True)
+                return read_text(path, *args, **kwargs)
+            with patch.object(Path, 'read_text', new=advance_before_read):
+                result = archive_worker.watch(config, root/'external', root/'worker.json')
+            self.assertTrue(advanced)
+            self.assertEqual(result['status'], 'complete')
+
+    def test_progress_directory_flush_precedes_release_and_checkpoint_retirement(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); config = self.config(root)
+            with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=2):
+                build.run(config)
+            first = archiver.archive(config, root/'external', release=False)
+            sync = archiver.sync_directory
+            def fail_published_progress_flush(path):
+                published = json.loads((root/'run/archive-progress.json').read_text())
+                if path == root/'run' and published['localCheckpoint'] != first['localCheckpoint']:
+                    raise OSError('progress directory flush failed')
+                return sync(path)
+            with patch.object(archiver, 'sync_directory', side_effect=fail_published_progress_flush):
+                with self.assertRaisesRegex(OSError, 'progress directory flush'):
+                    archiver.archive(config, root/'external', release=True, incremental=True)
+            self.assertTrue(Path(first['localCheckpoint']).exists())
+            self.assertTrue((root/'staging'/POLICY/'full/cut0/pone0/dealer0-lead0.bin').exists())
+
+    def test_cleanup_marker_requires_durable_unlinks_including_resumed_cleanup(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); config = self.config(root)
+            with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=2):
+                build.run(config)
+            sync = archiver.sync_directory
+            def fail_staging_flush(path):
+                if path.is_relative_to(root/'staging'):
+                    raise OSError('staging directory flush failed')
+                return sync(path)
+            for _ in range(2):
+                with patch.object(archiver, 'sync_directory', side_effect=fail_staging_flush):
+                    with self.assertRaisesRegex(OSError, 'staging directory flush'):
+                        archiver.archive(config, root/'external', release=True, incremental=True)
+                self.assertFalse(json.loads((root/'run/archive-progress.json').read_text())['releaseComplete'])
+            result = archiver.archive(config, root/'external', release=True, incremental=True)
+            self.assertTrue(result['releaseComplete'])
 
     def test_receiver_rejects_deep_wrong_context_and_corruption(self):
         receive.inspect_shard(shard(), POLICY, REL)
