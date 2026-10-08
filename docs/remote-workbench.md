@@ -6,12 +6,20 @@ must be awake, logged in, and online. A launch agent reconnects its outbound SSH
 tunnel after network interruptions and login. The gateway starts at server boot.
 The Nanode does not run benchmarks or copy their databases.
 
-The browser's native username/password prompt uses the generic realm `Access`.
-All HTTPS paths, including assets, health and APIs, require authentication before
-proxying. Passwords are stored only as bcrypt hashes on the server; authentication
-headers are stripped before forwarding. Anonymous responses contain no workbench
-content. Offline upstreams return `Unavailable` after authentication. The chosen
-hostname itself remains publicly visible in DNS and certificate records.
+The public `/login` page contains only a generic sign-in form. All other HTTPS
+paths, including assets, health and APIs, require a valid session before proxying.
+A loopback Flask/Gunicorn service verifies credentials and signs a Secure,
+HttpOnly, SameSite=Strict, host-only cookie with a 12-hour absolute lifetime.
+The server stores only a PBKDF2-SHA256 password hash and a random session signing
+key. Cookies and legacy authorization headers are stripped before forwarding to
+the workbench. Anonymous requests redirect to the form without a native browser
+authentication challenge. Incorrect credentials show an inline error.
+
+The form checks a session-bound CSRF token and its exact HTTPS origin. Password
+checks are limited to 10 per IP per minute and 100 overall per minute; the single
+Gunicorn worker shares this limit across its four threads. A verifier failure
+blocks access. Offline upstreams return a generic temporary-unavailability
+message. The hostname itself remains visible in DNS and certificate records.
 
 ## Installation
 
@@ -25,17 +33,26 @@ this gateway.
    an administrator SSH public key, and a cloud firewall allowing inbound TCP
    22, 80 and 443 only; default inbound DROP, outbound ACCEPT. The plan is
    $5/month at initial provisioning. Do not change the game server.
-2. On the new server, install Caddy using its official RPM repository:
+2. Install Caddy using its official RPM repository:
    `dnf install -y dnf-plugins-core`, `dnf copr enable -y @caddy/caddy`, then
-   `dnf install -y caddy`. Apply Rocky security updates during setup.
-3. Generate a unique random browser password locally. Stream it to
-   `caddy hash-password` over SSH stdin; store a line containing the username and
-   returned hash in `/etc/caddy/access.caddy`, root:caddy, mode 0640. Keep the
-   plaintext out of Git, shell command arguments and server files.
+   `dnf install -y caddy`. Apply Rocky security updates during setup. Install
+   `python3.11 python3.11-pip`, create `/opt/workbench-access/venv` with
+   `python3.11 -m venv`, and install `scripts/remote-workbench/requirements.txt`
+   using that venv's pip.
+3. Generate a unique random browser password locally. Use Werkzeug's
+   `generate_password_hash(password, method='pbkdf2:sha256:1000000')` locally,
+   and stream JSON containing `username`, `passwordHash` and a new random
+   `secretKey` (e.g. `secrets.token_urlsafe(48)`) over SSH stdin to
+   `/etc/workbench-access/credentials.json`. Initially create the directory
+   mode 0700 and file mode 0600. Keep plaintext credentials and the signing key
+   out of Git, command arguments and logs. Keep the browser password in the
+   owner's private local access record; never save it on the server.
 4. Generate a dedicated Ed25519 tunnel key on the Mac. Copy only its public key
-   as `tunnel.pub` alongside the three server configuration files from
-   `scripts/remote-workbench/`, and run `configure-server.sh` on the Nanode.
-   Its SSH user can bind only the loopback tunnel port; shells, commands,
+   as `tunnel.pub` alongside the files from `scripts/remote-workbench/`, keeping
+   the `templates/` subdirectory. Run `configure-server.sh` on the Nanode.
+   It installs the unprivileged sign-in service on `127.0.0.1:18767` and sets
+   credential ownership to root:workbench-access, directory 0750, file 0640.
+   Its SSH tunnel user can bind only `127.0.0.1:18766`; shells, commands,
    additional listen ports and local forwarding are disabled. Keep the separate
    administrator key for maintenance.
 5. Create the Cloudflare A record pointing `workbench.strongcribbage.com` at the
@@ -48,22 +65,29 @@ this gateway.
 
 ## Verification and maintenance
 
-Verify anonymous and incorrect-password requests to `/`, `/health`, `/api/jobs`,
-`/api/report`, `/app.js`, `/style.css` and `/favicon.svg` all return 401 and no
-application data. Verify authenticated page and API requests, at least one live
-report, and that POST is rejected. Verify the tunnel binds only to 127.0.0.1 and
-unauthorized SSH listen ports and shell commands fail. Restart the tunnel to
-check reconnection, then confirm a fresh live report. Do not print credentials
-in command output during these checks.
+Install the sign-in requirements in the test environment, then run
+`scripts/run-quiet.sh 'Sign-in tests' python -m pytest -q scripts/remote-workbench/test_access.py`.
+Verify anonymous requests to `/`, `/health`, `/api/jobs`, `/api/report`, `/app.js`,
+`/style.css` and `/favicon.svg` redirect to `/login` without application data or
+`WWW-Authenticate`. In WebKit and Chromium, submit an incorrect password followed
+by the correct one; verify an inline error, successful navigation and a working
+refresh. Check the secure cookie flags, a live report, and that authenticated
+POST requests to the workbench are rejected. Check the verifier failing closed.
+Verify the tunnel binds only to 127.0.0.1 and unauthorized SSH listen ports and
+shell commands fail. Restart the tunnel to check reconnection, then confirm a
+fresh live report. Do not print credentials or session cookies during checks.
 
-For status, use `systemctl status caddy` on the Nanode and
+For status, use `systemctl status caddy workbench-access` on the Nanode and
 `launchctl print gui/$(id -u)/com.strongcribbage.workbench-tunnel` on the Mac.
 The tunnel error log is `~/.config/strongcribbage-workbench/tunnel.log`.
-To rotate browser access, replace the hash in `/etc/caddy/access.caddy`, validate
-the Caddyfile and reload Caddy. Browsers may need to close their session to forget
-cached Basic authentication credentials. To revoke remote access, stop Caddy or
-unload the tunnel; neither action affects compute jobs. Remove the dedicated DNS
-record and Nanode when retiring the gateway to stop hosting charges.
+To rotate browser access, atomically replace the password hash in the credential
+JSON while retaining its permissions, and restart `workbench-access`. A changed
+hash or signing key invalidates existing sessions. Remove the obsolete
+`/etc/caddy/access.caddy` file after migrating from Basic authentication.
+To revoke remote access, stop Caddy or unload the tunnel; neither action affects
+compute jobs. Remove the dedicated DNS record and Nanode when retiring the
+gateway to stop hosting charges.
 
-References: [Caddy authentication](https://caddyserver.com/docs/caddyfile/directives/basic_auth),
-[Caddy RPM installation](https://caddyserver.com/docs/install#fedora-redhat-centos).
+References: [Caddy forward authentication](https://caddyserver.com/docs/caddyfile/directives/forward_auth),
+[Caddy RPM installation](https://caddyserver.com/docs/install#fedora-redhat-centos),
+[Flask security](https://flask.palletsprojects.com/en/stable/web-security/).

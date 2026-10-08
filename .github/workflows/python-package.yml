@@ -29,6 +29,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium webkit
       - run: pip install -e '.[dev]'
+      - run: pip install -r scripts/remote-workbench/requirements.txt
       - run: scripts/run-quiet.sh "Python lint" flake8 src tests scripts webapp.py --count --select=E9,F63,F7,F82 --show-source --statistics
       - run: scripts/run-quiet.sh "Python tests" pytest
       - run: npm run --silent test:workbench
