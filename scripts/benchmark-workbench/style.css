@@ -830,3 +830,33 @@ footer {
     scroll-behavior:auto!important;
   }
 }
+
+.table-scroll { overflow-x:auto; }
+.training-stages { display:flex; flex-wrap:wrap; gap:8px 16px; margin-top:18px; font-size:12px; color:var(--muted); }
+.training-stages .active-stage { color:var(--ink); font-weight:700; }
+#training-trial { min-width:0; max-width:100%; }
+#training-trials .selected-trial { background:var(--blue-fill); }
+#training-report table { font-size:12px; }
+#training-report th { white-space:normal; }
+#training-report h3 { font-size:14px; }
+
+.tab-purpose { display:block; color:var(--muted); font-size:11px; margin:6px 0; line-height:1.4; }
+.study-overview { border-top:4px solid var(--blue); }
+.study-overview h1 { font:650 clamp(22px,3vw,32px)/1.15 var(--display); margin:5px 0 0; }
+.study-steps { display:grid; grid-template-columns:repeat(auto-fit,minmax(195px,1fr)); gap:12px; padding:0; margin:22px 0 16px; list-style:none; }
+.study-step { border-left:3px solid var(--line); padding:10px 12px; background:var(--page); }
+.study-step.running { border-color:var(--blue); background:var(--blue-fill); }
+.study-step.complete { border-color:var(--good); }
+.study-step.failed,.study-step.blocked,.study-step.stopped { border-color:var(--bad); }
+.step-status { display:block; font:600 10px/1.4 var(--mono); text-transform:uppercase; letter-spacing:.04em; margin-bottom:7px; color:var(--muted); }
+.study-step.running .step-status { color:var(--ink); }
+.study-step a { font-weight:650; color:var(--ink); text-underline-offset:3px; }
+.study-step p { font-size:12px; line-height:1.5; color:var(--muted); margin:6px 0 0; }
+@media(max-width:540px) { .study-steps { grid-template-columns:1fr; } .study-overview .section-heading { align-items:flex-start; gap:12px; flex-wrap:wrap; } }
+
+/* Each experiment block states its purpose and activity before its mini chart. */
+.run-tab .tab-heading { flex-direction:column; align-items:flex-start; gap:4px; }
+.run-tab .tab-heading>span { white-space:normal; overflow:visible; line-height:1.35; }
+.run-tab .tab-progress { white-space:normal; overflow:visible; line-height:1.4; }
+.run-tab .tab-meaning { font-size:10px; margin-top:5px; }
+.run-tab[aria-selected="true"] .tab-purpose { color:inherit; }
