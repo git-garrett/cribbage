@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="workbench-version" content="__WORKBENCH_UI_VERSION__">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Benchmark workbench · Strong Cribbage</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -42,6 +43,12 @@
       </div>
       <details class="methods"><summary>What is being counted?</summary><div><p>One chunk fixes a starter rank, pone score, dealer score and lead rank, covering the model’s possible holds at that position. “Built” requires verified local full-depth bytes and, when publication is configured, a matching production acknowledgment. “Published” counts verified acknowledgments for two-reply chunks, not live cache hits. “Archived” counts a separate verified TerraMaster snapshot and may lag behind the build.</p><p>Build percentage is the fraction of the selected chunk target completed. Opening coverage is an empirical estimate from held-out games, not a guarantee about future play and not the fraction of all possible positions. Gaps in completion are excluded conservatively.</p><p id="asset-policy" class="asset-policy"></p></div></details>
       <footer><span>Read-only · refreshes every 15 seconds while visible</span><span>Missing chunks fall back to exact calculation</span></footer>
+    </div>
+    <div id="analysis-report" hidden>
+      <section class="run-heading"><div><p class="eyebrow">Exact decisions at the original score positions</p><h1 id="analysis-title"></h1><p id="analysis-snapshot" class="muted"></p></div><div class="run-state"><span id="analysis-state" class="state"></span><p id="analysis-stage" class="muted"></p></div></section>
+      <section class="panel"><div class="section-heading"><h2>Heatmap refresh</h2><strong id="analysis-total" class="numeric"></strong></div><div id="analysis-lanes" class="lanes"></div><div class="run-facts"><div><span class="label">Workers active / limit</span><strong id="analysis-workers"></strong><small id="analysis-reused"></small></div><div><span class="label">Estimated compute remaining</span><strong id="analysis-eta"></strong><small id="analysis-finish"></small></div></div><p id="analysis-eta-note" class="caption"></p></section>
+      <div class="chart-grid"><section class="panel"><h2>Completed replays</h2><svg id="analysis-progress-chart" class="chart" role="img" aria-label="Cumulative completed analysis cases over elapsed hours"></svg><p class="caption">Includes preserved earlier results. Time includes any pauses. Reporting and verification follow computation.</p></section><section class="panel"><h2>Coverage by scoring opportunity</h2><table><thead><tr><th>Opportunity / role</th><th>Completed / target</th><th>Progress</th></tr></thead><tbody id="analysis-groups"></tbody></table></section></div>
+      <details class="methods"><summary>What is being measured?</summary><div><p>Every original confirmation case is replayed with model 28.3.fast. Saved exact 28.3 results are retained after parity checks. Observed-game and generated-case banks remain separate in the data and add in the final graphics.</p><p>Heat measures material modeled WP preference for declining a scoring opportunity that maximizes net-point EV. These are model estimates, not measured game wins. Completing the original sample does not imply 95% confidence at every score position or a new 1-by-1 score survey.</p></div></details><footer><span>Read-only · refreshes every 15 seconds while visible</span><span>Four workers; results are resumable</span></footer>
     </div>
     <section id="empty" class="empty" hidden><h1>Your next benchmark starts here.</h1><p>Install a paired benchmark with the job supervisor and it will appear automatically.</p><p>For an already running job, use <code>scripts/local-runtime.sh workbench-start /path/to/job.json</code>.</p></section>
     <div id="report" hidden>

@@ -8,6 +8,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import hashlib
 import math
 import os
 from pathlib import Path
@@ -19,11 +20,14 @@ from urllib.parse import parse_qs, urlsplit
 
 from benchmark_workbench_stats import METRICS, metric_histories, paired_history
 from benchmark_workbench_assets import build_asset_report
+from benchmark_workbench_analysis import build_analysis_report
 
 
 RUNTIME = Path('/private/tmp/strong-cribbage-local-runtime/workbench')
 JOBS_RUNTIME = Path('/private/tmp/cribbage-jobs')
 STATIC = Path(__file__).resolve().parent / 'benchmark-workbench'
+UI_VERSION = hashlib.sha256(b''.join((STATIC / name).read_bytes()
+                            for name in ('index.html', 'app.js', 'style.css'))).hexdigest()[:16]
 PORT = 8766
 CACHE_SECONDS = 15
 
@@ -62,6 +66,13 @@ def job_entry(spec_path):
     spec = read_json(spec_path)
     if not spec or not re.fullmatch('[a-z0-9-]+', spec.get('jobId', '')):
         raise ValueError('A valid job specification is required')
+    analysis = spec.get('analysisJob')
+    if analysis:
+        if (not isinstance(analysis, dict) or type(analysis.get('target')) is not int
+                or analysis['target'] <= 0 or not analysis.get('root')):
+            raise ValueError('Analysis job requires root and positive target')
+        return {'id': spec['jobId'], 'root': str(Path(analysis['root']).resolve()),
+                'spec': str(spec_path), 'kind': 'analysis', 'title': analysis.get('title', 'Analysis')}
     asset = spec.get('assetBuild')
     if asset:
         if (not isinstance(asset, dict) or not isinstance(asset.get('target'), int)
@@ -461,6 +472,7 @@ class WorkbenchServer(ThreadingHTTPServer):
                 return cached[1]
             try:
                 report = (build_asset_report(entry, job_status(entry)) if entry.get('kind') == 'asset'
+                          else build_analysis_report(entry, job_status(entry)) if entry.get('kind') == 'analysis'
                           else build_report(entry, metric_cache=self.metric_cache))
             except (OSError, ValueError, sqlite3.Error) as error:
                 report = {'id': entry['id'], 'error': str(error), 'integrity': 'unavailable',
@@ -495,18 +507,24 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ('/api/jobs', '/api/report'):
             jobs = list_jobs(self.server.runtime)
         if url.path == '/api/jobs':
-            return self.respond({'jobs': jobs, 'refreshSeconds': CACHE_SECONDS})
+            return self.respond({'jobs': jobs, 'refreshSeconds': CACHE_SECONDS, 'uiVersion': UI_VERSION})
         if url.path == '/api/report':
             selected = parse_qs(url.query).get('job', [''])[0]
             entry = next((job for job in jobs
                           if job['id'] == selected or selected in job['aliases']), None)
             if not entry:
                 return self.respond({'error': 'Unknown benchmark'}, 404)
+            client_version = parse_qs(url.query).get('uiVersion', [''])[0]
+            if entry.get('kind') in ('asset', 'analysis') and client_version != UI_VERSION:
+                return self.respond({'id': entry['id'], 'error': 'Workbench updated. Reload this browser page once to load the new views. Background jobs are still running.'})
             return self.respond(self.server.report(entry))
         files = {'/favicon.svg': ('favicon.svg', 'image/svg+xml'), '/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
         if url.path in files:
             filename, content_type = files[url.path]
-            return self.respond((STATIC / filename).read_bytes(), content_type=content_type)
+            body = (STATIC / filename).read_bytes()
+            if filename == 'index.html':
+                body = body.replace(b'__WORKBENCH_UI_VERSION__', UI_VERSION.encode())
+            return self.respond(body, content_type=content_type)
         return self.respond({'error': 'Not found'}, 404)
 
 
