@@ -78,15 +78,15 @@
     <div id="gpu-report" hidden>
       <section class="run-heading"><div><p class="eyebrow">GPU asset building</p><h1 id="gpu-title"></h1><p id="gpu-scope" class="muted"></p></div><div class="run-state"><span id="gpu-state" class="state"></span><p id="gpu-stage" class="muted"></p></div></section>
       <section class="panel" aria-labelledby="gpu-progress-title">
-        <div class="section-heading"><h2 id="gpu-progress-title">Saved GPU work</h2><strong id="gpu-fraction" class="numeric"></strong></div>
+        <div class="section-heading"><h2 id="gpu-progress-title">Saved asset work</h2><strong id="gpu-fraction" class="numeric"></strong></div>
         <div class="asset-headline"><strong id="gpu-completed" class="hero-number"></strong><span id="gpu-target" class="muted"></span></div>
         <div id="gpu-progress" class="lane-track" role="progressbar" aria-label="GPU asset build progress" aria-valuemin="0"><div id="gpu-fill" class="lane-fill"></div></div>
-        <div class="run-facts"><div><span class="label">Recent throughput</span><strong id="gpu-rate"></strong><small id="gpu-snapshot"></small></div><div><span class="label">Estimated compute remaining</span><strong id="gpu-eta"></strong><small id="gpu-finish"></small></div><div><span class="label">CPU preparation workers</span><strong id="gpu-workers"></strong><small id="gpu-backend"></small></div></div>
+        <div class="run-facts"><div><span class="label">Recent throughput</span><strong id="gpu-rate"></strong><small id="gpu-snapshot"></small></div><div><span class="label">Estimated compute remaining</span><strong id="gpu-eta"></strong><small id="gpu-finish"></small></div><div><span class="label">Reserved CPU slots</span><strong id="gpu-workers"></strong><small id="gpu-backend"></small></div></div>
         <p id="gpu-eta-note" class="caption"></p>
       </section>
       <div class="chart-grid">
-        <section class="panel"><h2>Build progress</h2><svg id="gpu-progress-chart" class="chart" role="img" aria-label="Saved GPU work over elapsed hours"></svg><p class="caption">Only completed checkpoints count. Saved work is retained on resume.</p></section>
-        <section class="panel"><h2>Build throughput</h2><svg id="gpu-rate-chart" class="chart" role="img" aria-label="GPU build throughput per second over elapsed hours"></svg><p class="caption">Includes CPU preparation and saving results. This is build throughput, not GPU hardware utilization.</p></section>
+        <section class="panel"><h2>Build progress</h2><svg id="gpu-progress-chart" class="chart" role="img" aria-label="Saved asset work over elapsed hours"></svg><p class="caption">Only completed checkpoints count. Saved work is retained on resume.</p></section>
+        <section class="panel"><h2>Build throughput</h2><svg id="gpu-rate-chart" class="chart" role="img" aria-label="GPU build throughput per second over elapsed hours"></svg><p class="caption">Includes CPU and GPU decisions, preparation and saving results. This is build throughput, not GPU hardware utilization.</p></section>
         <section class="panel"><h2>Build scope</h2><dl id="gpu-details"></dl></section>
         <section class="panel"><h2>Completion checks</h2><dl id="gpu-checks"></dl><p class="caption">Finishing computation is followed by asset verification and a verified archive copy.</p></section>
       </div>

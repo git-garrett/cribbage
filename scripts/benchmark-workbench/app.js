@@ -419,6 +419,8 @@ function renderGpu(value) {
   $('gpu-eta-note').textContent = value.etaBasis || 'Compute ETA excludes final verification and archiving.';
   const details = $('gpu-details'); details.replaceChildren();
   for (const [label, stat] of [
+    ['Saved by GPU', value.gpuCompleted == null ? 'Not separately recorded' : `${number.format(value.gpuCompleted)} decisions`],
+    ['Saved by CPU', value.cpuCompleted == null ? 'Not separately recorded' : `${number.format(value.cpuCompleted)} decisions`],
     ['Priority pass', value.priorityTarget ? `${number.format(value.priorityCompleted || 0)} / ${number.format(value.priorityTarget)} decisions` : 'Not specified'],
     ['Observed frequency covered first', value.priorityCoverage == null ? 'Not specified' : percent(value.priorityCoverage)],
     ['Sampled hands', value.handTarget == null ? 'Not specified' : number.format(value.handTarget)],

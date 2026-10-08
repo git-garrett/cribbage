@@ -32,7 +32,7 @@ def build_gpu_report(entry, status, now=None):
         raise ValueError('Invalid GPU completion count')
     for key in ('completed', 'updatedAt', 'workers', 'workerLimit', 'gpuSeconds',
                 'elapsedSeconds', 'ratePerSecond', 'completedHands', 'handTarget',
-                'scoreCells', 'backend', 'etaBasis', 'gpuCommandDuty'):
+                'scoreCells', 'backend', 'etaBasis', 'gpuCommandDuty', 'cpuCompleted', 'gpuCompleted'):
         result[key] = progress.get(key)
     for key in ('priorityCompleted', 'priorityTarget', 'priorityCoverage'):
         result[key] = progress.get(key)

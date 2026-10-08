@@ -81,7 +81,8 @@ def job_entry(spec_path):
                 or gpu['target'] <= 0 or not gpu.get('root') or not gpu.get('policy')):
             raise ValueError('GPU build requires root, policy and positive target')
         return {'id': spec['jobId'], 'root': str(Path(gpu['root']).resolve()),
-                'spec': str(spec_path), 'kind': 'gpu', 'title': gpu.get('title', 'GPU assets')}
+                'spec': str(spec_path), 'kind': 'gpu', 'title': gpu.get('title', 'GPU assets'),
+                'experimentRoot': str(Path(gpu.get('experimentRoot', gpu['root'])).resolve())}
     analysis = spec.get('analysisJob')
     if analysis:
         if (not isinstance(analysis, dict) or type(analysis.get('target')) is not int
@@ -147,10 +148,11 @@ def list_jobs(runtime=RUNTIME, jobs_runtime=JOBS_RUNTIME):
     experiments = {}
     for job in sorted(jobs, key=lambda x: (x['state'] == 'running', x['updatedAt']), reverse=True):
         root = str(Path(job['root']).resolve())
-        if root in experiments:
-            experiments[root]['aliases'].append(job['id'])
+        experiment = str(Path(job.get('experimentRoot', root)).resolve())
+        if experiment in experiments:
+            experiments[experiment]['aliases'].append(job['id'])
         else:
-            experiments[root] = {**job, 'root': root, 'aliases': []}
+            experiments[experiment] = {**job, 'root': root, 'aliases': []}
     return list(experiments.values())
 
 

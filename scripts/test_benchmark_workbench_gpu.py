@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parent))
-from benchmark_workbench import job_entry
+from benchmark_workbench import job_entry, register, list_jobs
 from benchmark_workbench_gpu import build_gpu_report
 
 
@@ -22,6 +22,20 @@ class GpuWorkbenchTests(unittest.TestCase):
         with patch('sqlite3.connect',side_effect=AssertionError('UI must not query worker data')):
             result=build_gpu_report(self.entry,dict(state='running'),now=1010)
         self.assertEqual(result['kind'],'gpu');self.assertEqual(result['remainingSeconds'],20)
+
+    def test_hybrid_resume_retains_saved_counts_and_old_bookmark(self):
+        self.progress.update(cpuCompleted=3,gpuCompleted=17)
+        (self.root/'progress.json').write_text(json.dumps(self.progress))
+        result=build_gpu_report(self.entry,dict(state='running'),now=1010)
+        self.assertEqual((result['cpuCompleted'],result['gpuCompleted']),(3,17))
+        runtime=self.root/'runtime';register(self.spec,runtime)
+        spec=json.loads(self.spec.read_text());spec['jobId']='gpu-resumed'
+        spec['gpuBuild'].update(root=str(self.root/'resumed'),experimentRoot=str(self.root))
+        resumed=self.root/'resumed.json';resumed.write_text(json.dumps(spec));register(resumed,runtime)
+        def status(entry):return dict(state='running' if entry['id']=='gpu-resumed' else 'stopped',updatedAt='now')
+        with patch('benchmark_workbench.job_status',side_effect=status):jobs=list_jobs(runtime,self.root/'empty')
+        self.assertEqual(len(jobs),1);self.assertEqual(jobs[0]['id'],'gpu-resumed')
+        self.assertEqual(jobs[0]['root'],str((self.root/'resumed').resolve()));self.assertEqual(jobs[0]['aliases'],['gpu-test'])
 
     def test_prepared_build_keeps_scope_visible_before_launch(self):
         (self.root/'progress.json').unlink()
