@@ -22,6 +22,7 @@ from benchmark_workbench_stats import METRICS, metric_histories, paired_history
 from benchmark_workbench_assets import build_asset_report
 from benchmark_workbench_analysis import build_analysis_report
 from benchmark_workbench_gpu import build_gpu_report
+from benchmark_workbench_training import build_training_report
 
 
 RUNTIME = Path('/private/tmp/strong-cribbage-local-runtime/workbench')
@@ -67,6 +68,13 @@ def job_entry(spec_path):
     spec = read_json(spec_path)
     if not spec or not re.fullmatch('[a-z0-9-]+', spec.get('jobId', '')):
         raise ValueError('A valid job specification is required')
+    training = spec.get('trainingStudy')
+    if training:
+        if (not isinstance(training, dict) or type(training.get('target')) is not int
+                or training['target'] <= 0 or not training.get('root')):
+            raise ValueError('Training study requires root and positive fit target')
+        return {'id': spec['jobId'], 'root': str(Path(training['root']).resolve()),
+                'spec': str(spec_path), 'kind': 'training', 'title': training.get('title', 'Pegging training')}
     gpu = spec.get('gpuBuild')
     if gpu:
         if (not isinstance(gpu, dict) or type(gpu.get('target')) is not int
@@ -480,6 +488,7 @@ class WorkbenchServer(ThreadingHTTPServer):
                 return cached[1]
             try:
                 report = (build_asset_report(entry, job_status(entry)) if entry.get('kind') == 'asset'
+                          else build_training_report(entry, job_status(entry)) if entry.get('kind') == 'training'
                           else build_gpu_report(entry, job_status(entry)) if entry.get('kind') == 'gpu'
                           else build_analysis_report(entry, job_status(entry)) if entry.get('kind') == 'analysis'
                           else build_report(entry, metric_cache=self.metric_cache))
@@ -524,7 +533,7 @@ class Handler(BaseHTTPRequestHandler):
             if not entry:
                 return self.respond({'error': 'Unknown benchmark'}, 404)
             client_version = parse_qs(url.query).get('uiVersion', [''])[0]
-            if entry.get('kind') in ('asset', 'analysis', 'gpu') and client_version != UI_VERSION:
+            if entry.get('kind') in ('asset', 'analysis', 'gpu', 'training') and client_version != UI_VERSION:
                 return self.respond({'id': entry['id'], 'error': 'Workbench updated. Reload this browser page once to load the new views. Background jobs are still running.'})
             return self.respond(self.server.report(entry))
         files = {'/favicon.svg': ('favicon.svg', 'image/svg+xml'), '/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}

@@ -267,3 +267,39 @@ a stopped/failed job withholds ETA. A completed computation remains “reporting
 until the supervisor's verification, report and sync stages finish.
 
 Register it through `scripts/local-runtime.sh workbench-start /path/to/job.json`.
+
+## Pegging training studies
+
+Register a separate, small `workbench.json` alongside a frozen training job so
+observing it does not change the supervisor specification or restart training:
+
+```json
+{
+  "jobId": "pegging-corpus-20261007-v1",
+  "jobRoot": "/private/tmp/cribbage-pegging-corpus-20261007-v1/job",
+  "trainingStudy": {
+    "root": "/private/tmp/cribbage-pegging-corpus-20261007-v1",
+    "title": "Pegging training",
+    "target": 50,
+    "maxEpochs": 32,
+    "precision": "FP32",
+    "architectures": [{"hidden": [64, 64], "parameters": 91418}],
+    "stages": ["extract", "check-data", "smoke", "fit", "evaluate", "speed", "verify", "report", "sync"]
+  }
+}
+```
+
+List every architecture in the actual study. Pass this manifest to
+`scripts/local-runtime.sh workbench-start /absolute/path/to/workbench.json`.
+The training adapter reads corpus counts, fit/epoch receipts and compact JSON
+results from the pegging corpus experiment. It never loads records, SQLite
+inputs, model weights or prediction arrays. It shares the 15-second report cache.
+
+The tab shows completed fits, the active epoch, natural 28.3 validation curves,
+per-fit model size/data/curriculum comparisons, and later sealed-test results,
+inference speed and data-scaling scenarios. Epoch numbers shown are one-based.
+Model selection follows validation cross-entropy; high agreement alone does not
+select a checkpoint. Agreement is choice imitation, not game win rate. Inference
+measurements do not imply full-game throughput. Fit completion does not imply
+verification or archive completion. No ETA is inferred from fit counts because
+model sizes, training-set sizes and early stopping have different costs.

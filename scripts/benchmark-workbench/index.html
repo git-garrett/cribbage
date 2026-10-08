@@ -15,10 +15,35 @@
     <span class="connection" id="connection" role="status">Connecting…</span>
   </header>
   <main>
-    <div id="run-tabs" class="run-tabs" role="tablist" aria-label="Benchmarks and asset builds"></div>
+    <div id="run-tabs" class="run-tabs" role="tablist" aria-label="Benchmarks, assets and training"></div>
     <div class="run-picker"><label for="jobs">All experiments</label><select id="jobs"><option value="">Loading benchmarks…</option></select><button id="refresh" type="button">Refresh</button></div>
     <div id="benchmark-view" role="tabpanel" aria-label="Selected benchmark" tabindex="0">
     <div id="notice" class="notice" role="status" hidden></div>
+    <div id="training-report" hidden>
+      <section class="run-heading"><div><p class="eyebrow">FP32 · recorded pegging decisions</p><h1 id="training-title">Pegging training</h1><p class="muted">Model capacity, data volume and training cycles.</p></div><div class="run-state"><span id="training-state" class="state"></span><p id="training-stage" class="muted"></p></div></section>
+      <section class="panel">
+        <div class="section-heading"><h2>Training study progress</h2><span id="training-fraction" class="numeric"></span></div>
+        <div class="asset-headline"><strong id="training-completed" class="hero-number"></strong><span id="training-target" class="muted"></span></div>
+        <div id="training-progress" class="lane-track" role="progressbar" aria-label="Completed model fits" aria-valuemin="0"><div id="training-fill" class="lane-fill"></div></div>
+        <div class="run-facts asset-facts"><div><span class="label">Current fit</span><strong id="training-current"></strong><small id="training-epoch"></small></div><div><span class="label">Recorded decisions</span><strong id="training-decisions"></strong><small id="training-games"></small></div><div><span class="label">Validation-selected model</span><strong id="training-best"></strong><small id="training-best-note"></small></div></div>
+        <p id="training-update" class="caption"></p><p class="caption">Fits vary greatly in cost and stop early when validation stops improving; the fraction of fits completed is not a time estimate. Agreement measures matching 28.3’s recorded card choice, not win rate or playing strength.</p>
+        <div id="training-stages" class="training-stages"></div>
+      </section>
+      <section class="panel"><div class="section-heading"><div><p class="eyebrow">Natural 28.3 validation decisions</p><h2>Learning through epochs</h2></div></div>
+        <div class="run-picker"><label for="training-trial">Model fit</label><select id="training-trial"></select></div>
+        <p id="training-curve-note" class="caption"></p>
+        <div class="chart-grid"><div><h3>Choice agreement</h3><svg id="training-agreement-chart" class="chart" role="img" aria-label="Validation choice agreement by epoch"></svg></div><div><h3>Prediction loss · lower is better</h3><svg id="training-loss-chart" class="chart" role="img" aria-label="Validation cross entropy by epoch"></svg></div></div>
+      </section>
+      <section class="panel"><div class="section-heading"><div><p class="eyebrow">Each completed fit · selected checkpoint</p><h2>Model size and data comparisons</h2></div></div><p id="training-test-note" class="caption"></p>
+        <div class="table-scroll"><table><thead><tr><th>Parameters</th><th>Training</th><th>Examples</th><th>Seed</th><th>Epoch selected / run</th><th>Validation agreement</th><th>Validation loss</th><th>Test agreement</th><th>Fit time</th></tr></thead><tbody id="training-trials"></tbody></table></div>
+      </section>
+      <div class="chart-grid">
+        <section class="panel"><h2>Corpus and checks</h2><dl id="training-data"></dl><p class="caption">Inputs come directly from saved hands, discards, cut, scores and the pegging series prefix. Each player receives only their own cards and public information. Whole deal-seed groups and identical inputs stay in one data partition.</p><details><summary>Decisions by teacher</summary><dl id="training-teachers"></dl></details></section>
+        <section class="panel"><h2>Inference speed</h2><p id="training-speed-note" class="caption"></p><div class="table-scroll"><table><thead><tr><th>Parameters</th><th>Batch</th><th>Device</th><th>Decisions/s</th></tr></thead><tbody id="training-speed"></tbody></table></div><p class="caption">Full-game throughput and playing strength have not been measured for these trained models.</p></section>
+      </div>
+      <section class="panel"><h2>Data scaling scenarios</h2><p id="training-frontier-note" class="caption"></p><div class="table-scroll"><table><thead><tr><th>Parameters</th><th>2× data</th><th>4× data</th><th>10× data</th></tr></thead><tbody id="training-frontier"></tbody></table></div></section>
+      <footer><span>Read-only · refreshes every 15 seconds while visible</span><span id="training-source"></span></footer>
+    </div>
     <div id="asset-report" hidden>
       <section class="run-heading"><div><p class="eyebrow">28.3.fast · opening acceleration</p><h1 id="asset-title">Building the hot path</h1><p class="muted">Full continuations stay local. The first two dealer replies are published to Ace.</p></div><div class="run-state"><span id="asset-state" class="state"></span><p id="asset-snapshot" class="muted"></p></div></section>
       <section class="panel asset-hero" aria-labelledby="asset-progress-title">

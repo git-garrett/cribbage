@@ -15,7 +15,7 @@ let inspectedPairs = 0;
 let jobs = [];
 let jobsSignature = '';
 const previews = new Map();
-const visibleJobs = () => jobs.filter((job) => ['asset', 'analysis', 'gpu'].includes(job.kind) || job.state === 'running' || job.state === 'pending' || job.id === selected);
+const visibleJobs = () => jobs.filter((job) => ['asset', 'analysis', 'gpu', 'training'].includes(job.kind) || job.state === 'running' || job.state === 'pending' || job.id === selected);
 const jobTitle = (job) => job.title || (job.candidate && job.opponent ? `${modelName(job.candidate)} vs ${modelName(job.opponent)}` : job.id);
 
 function element(tag, text, className) {
@@ -73,6 +73,14 @@ function renderPreviews() {
     const tab = document.getElementById(`tab-${job.id}`);
     if (!tab) continue;
     const snapshot = previews.get(job.id);
+    if (job.kind === 'training' && snapshot && !snapshot.error) {
+      tab.querySelector('.tab-state').textContent = snapshot.state;
+      tab.querySelector('.tab-rate').textContent = `${snapshot.completed} / ${snapshot.target} model fits`;
+      tab.querySelector('.tab-progress').textContent = snapshot.current ? `Epoch ${snapshot.current.epoch} · ${percent(snapshot.current.validation?.agreement)} validation agreement` : `${snapshot.stage || snapshot.state} · strength not measured`;
+      const rows = snapshot.current?.history || snapshot.trials.find((r) => r.id === snapshot.preferred)?.history || [];
+      chart(`preview-${job.id}`, rows, { compact: true, x: (r) => r.epoch, y: (r) => r.agreement, percent: true, domain: [0, 1], empty: 'Waiting for training metrics' });
+      continue;
+    }
     if (job.kind === 'gpu' && snapshot && !snapshot.error && !snapshot.waiting) {
       tab.querySelector('.tab-state').textContent = snapshot.state.replaceAll('_', ' ');
       tab.querySelector('.tab-rate').textContent = `${number.format(snapshot.completed)} / ${number.format(snapshot.target)} ${snapshot.unit}`;
@@ -118,7 +126,7 @@ function renderPreviews() {
 
 function selectJob(id) {
   selected = id; followLatest = true; report = null;
-  $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('gpu-report').hidden = true; $('notice').hidden = true;
+  $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('gpu-report').hidden = true; $('training-report').hidden = true; $('notice').hidden = true;
   renderJobs(); refresh();
 }
 
@@ -195,6 +203,7 @@ function renderCharts() {
   if (report.kind === 'asset') return renderAssetCharts(report);
   if (report.kind === 'analysis') return renderAnalysisChart(report);
   if (report.kind === 'gpu') return renderGpuCharts(report);
+  if (report.kind === 'training') return renderTrainingCharts(report);
   const index = Number($('inspect').value);
   const bands = [];
   if ($('show-anytime').checked) bands.push({ key: 'anytime95', className: 'anytime-band' });
@@ -252,16 +261,18 @@ function renderMetric(prefix, key, pairs) {
 function render(value) {
   report = value;
   const error = value.error || value.waiting;
-  $('report').hidden = Boolean(error) || ['asset', 'analysis', 'gpu'].includes(value.kind);
+  $('report').hidden = Boolean(error) || ['asset', 'analysis', 'gpu', 'training'].includes(value.kind);
   $('analysis-report').hidden = Boolean(error) || value.kind !== 'analysis';
   $('asset-report').hidden = Boolean(error) || value.kind !== 'asset';
   $('gpu-report').hidden = Boolean(error) || value.kind !== 'gpu';
+  $('training-report').hidden = Boolean(error) || value.kind !== 'training';
   $('notice').hidden = !error && !value.warnings?.length;
   $('notice').textContent = error || (value.warnings || []).join(' ');
   if (error) return;
   if (value.kind === 'asset') return renderAsset(value);
   if (value.kind === 'analysis') return renderAnalysis(value);
   if (value.kind === 'gpu') return renderGpu(value);
+  if (value.kind === 'training') return renderTraining(value);
   const candidate = modelName(value.candidate), opponent = modelName(value.opponent);
   $('matchup').textContent = `${candidate} vs ${opponent}`;
   $('experiment').textContent = value.experiment;
@@ -452,7 +463,7 @@ async function refresh() {
       $('run-tabs').dataset.jobs = '';
       $('benchmark-view').removeAttribute('aria-labelledby');
       $('jobs').replaceChildren(element('option', 'No paired benchmarks registered'));
-      $('empty').hidden = false; $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('gpu-report').hidden = true; $('notice').hidden = true;
+      $('empty').hidden = false; $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('gpu-report').hidden = true; $('training-report').hidden = true; $('notice').hidden = true;
       $('connection').textContent = 'Connected';
       return;
     }
@@ -554,3 +565,100 @@ function renderAnalysis(value) {
   }
   renderAnalysisChart(value);
 }
+
+let inspectedTrainingTrial = null;
+const trainingMode = (value) => ({ broad: 'Broad corpus', 'target-only': '28.3 only', 'fine-tuned': 'Broad → 28.3' }[value] || value);
+const trainingCount = (value) => value == null ? '—' : number.format(value);
+const trainingLoss = (value) => value == null ? '—' : value.toFixed(4);
+const trainingLabel = (row) => `${trainingCount(row.parameters)} parameters · ${trainingMode(row.mode)} · ${trainingCount(row.positions)} examples`;
+
+function renderTraining(value) {
+  $('training-title').textContent = value.title;
+  $('training-state').textContent = value.state.replaceAll('_', ' ');
+  $('training-stage').textContent = value.stage || value.state;
+  $('training-completed').textContent = value.completed;
+  $('training-target').textContent = `of ${value.target} model fits complete`;
+  $('training-fraction').textContent = percent(value.completed / value.target);
+  $('training-progress').setAttribute('aria-valuemax', value.target);
+  $('training-progress').setAttribute('aria-valuenow', value.completed);
+  $('training-fill').style.width = `${100 * value.completed / value.target}%`;
+  const active = value.current;
+  $('training-current').textContent = active ? `${trainingCount(active.parameters)} parameters` : value.stage === 'fit' ? 'Between saved fit receipts' : 'Fitting complete or pending';
+  $('training-epoch').textContent = active ? `${trainingMode(active.mode)} · epoch ${active.epoch} / ${value.maxEpochs} maximum · best so far ${active.bestEpoch}` : `Stage: ${value.stage || value.state}`;
+  $('training-decisions').textContent = trainingCount(value.data.decisions);
+  $('training-games').textContent = `${trainingCount(value.data.games)} eligible natural game records, plus saved 28.3.fast labels`;
+  const best = value.trials.find((row) => row.id === value.preferred);
+  $('training-best').textContent = best ? `${percent(best.validation.agreement)} agreement` : 'Waiting for a completed fit';
+  $('training-best-note').textContent = best ? `${trainingCount(best.parameters)} parameters · lowest validation loss · ${value.selectionFrozen ? 'selection frozen' : 'provisional'}` : '';
+  $('training-update').textContent = active ? `Epoch saved ${new Date(active.updatedAt * 1000).toLocaleString()} · fit elapsed ${duration(active.seconds)} · GPU peak memory ${bytes(active.gpuPeakBytes)} · ${value.precision}` : `Snapshot ${new Date(value.asOf * 1000).toLocaleTimeString()} · ${value.precision}`;
+  $('training-stages').replaceChildren();
+  for (const row of value.stages) $('training-stages').append(element('span', `${row.name}: ${row.state}`, row.state === 'running' ? 'active-stage' : ''));
+  const picker = $('training-trial');
+  const choices = [...(active ? [active] : []), ...value.trials];
+  const chosen = choices.find((row) => row.id === inspectedTrainingTrial)?.id || active?.id || value.preferred;
+  const signature = choices.map((row) => row.id).join(',');
+  if (picker.dataset.choices !== signature) {
+    picker.replaceChildren();
+    for (const row of choices) {
+      const option = element('option', `${row.id === active?.id ? 'Current · ' : ''}${trainingLabel(row)} · ${row.id.split('-s').pop()}`);
+      option.value = row.id; picker.append(option);
+    }
+    picker.dataset.choices = signature;
+  }
+  picker.value = chosen || ''; picker.disabled = !choices.length;
+  $('training-trials').replaceChildren();
+  for (const row of value.trials) {
+    const tr = element('tr', null, row.id === value.preferred ? 'selected-trial' : '');
+    const td = element('td'), button = element('button', trainingCount(row.parameters));
+    button.type = 'button'; button.dataset.trainingTrial = row.id;
+    button.title = `Show learning curves for ${row.id}`;
+    td.append(button); tr.append(td);
+    for (const text of [trainingMode(row.mode), trainingCount(row.positions), row.seed,
+      `${row.chosenEpoch} / ${row.lastEpoch}`, percent(row.validation.agreement), trainingLoss(row.validation.crossEntropy),
+      row.test?.agreement == null ? 'Pending' : `${percent(row.test.agreement)}${row.test95 ? ` (95%: ${interval(row.test95)})` : ''}`, duration(row.seconds)]) tr.append(element('td', text));
+    $('training-trials').append(tr);
+  }
+  $('training-test-note').textContent = `${value.testAvailable ? 'Test results are now available. Intervals resample whole deal-seed groups.' : 'Test results remain pending until all fits finish and validation freezes selection.'} Highlighted row has the lowest natural 28.3 validation cross-entropy. Checkpoints use that loss, not peak agreement. Click a parameter count to inspect its learning curves.`;
+  const data = $('training-data'); data.replaceChildren();
+  for (const [label, stat] of [['Training split', trainingCount(value.data.splits?.train)], ['Validation split', trainingCount(value.data.splits?.validation)], ['Test split', trainingCount(value.data.splits?.test)], ['Result verification', value.verification], ['Durable archive', value.archive]]) data.append(element('dt', label), element('dd', stat));
+  const teachers = $('training-teachers'); teachers.replaceChildren();
+  for (const [teacher, count] of Object.entries(value.data.teachers || {})) teachers.append(element('dt', teacher), element('dd', trainingCount(count)));
+  $('training-speed-note').textContent = value.speed.status === 'complete' ? `${value.speed.includes} ${value.speed.sharedGpu}` : 'Scheduled after fitting and held-out evaluation. These measurements will include input encoding, inference and legal choice selection.';
+  $('training-speed').replaceChildren();
+  for (const row of value.speed.rows || []) {
+    const tr = element('tr');
+    for (const text of [trainingCount(row.parameters), trainingCount(row.batch), row.device, trainingCount(Math.round(row.decisionsPerSecond))]) tr.append(element('td', text));
+    $('training-speed').append(tr);
+  }
+  $('training-frontier-note').textContent = value.frontier.limitation || 'Produced after the study finishes. More-data scenarios describe this model family; they do not establish a playing-strength ceiling.';
+  $('training-frontier').replaceChildren();
+  for (const row of value.frontier.curves || []) {
+    const tr = element('tr'); tr.append(element('td', trainingCount(row.parameters)));
+    for (const scale of ['2', '4', '10']) {
+      const point = row.powerLawScenario?.[scale];
+      tr.append(element('td', point ? `${percent(point.bestAgreement)} (${interval(point.agreementRange)})` : 'No stable projection'));
+    }
+    $('training-frontier').append(tr);
+  }
+  $('training-source').textContent = value.id;
+  renderTrainingCharts(value);
+}
+
+function renderTrainingCharts(value) {
+  const chosen = $('training-trial').value;
+  const row = value.current?.id === chosen ? value.current : value.trials.find((trial) => trial.id === chosen);
+  const history = row?.history || [];
+  const epoch = row?.chosenEpoch ?? row?.bestEpoch;
+  const options = { x: (r) => r.epoch, xLabel: 'Completed training epochs →', empty: 'Waiting for the first saved epoch', inspected: history.findIndex((r) => r.epoch === epoch) };
+  chart('training-agreement-chart', history.filter((r) => r.agreement != null), { ...options, y: (r) => r.agreement, percent: true });
+  chart('training-loss-chart', history.filter((r) => r.crossEntropy != null), { ...options, y: (r) => r.crossEntropy, decimals: 3, minSpan: .01 });
+  $('training-curve-note').textContent = row ? `${trainingLabel(row)}. ${trainingCount(history[0]?.decisions)} natural 28.3 validation decisions per epoch. Marked epoch: ${epoch ?? 'pending'}, selected by lowest prediction loss. Later epochs can lose accuracy through overfitting.` : 'Training metrics appear after each completed epoch.';
+}
+
+$('training-trial').addEventListener('change', () => { inspectedTrainingTrial = $('training-trial').value; if (report?.kind === 'training') renderTrainingCharts(report); });
+$('training-trials').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-training-trial]');
+  if (!button || report?.kind !== 'training') return;
+  inspectedTrainingTrial = button.dataset.trainingTrial; $('training-trial').value = inspectedTrainingTrial;
+  renderTrainingCharts(report); $('training-trial').scrollIntoView({ behavior: 'smooth', block: 'center' });
+});

@@ -820,3 +820,12 @@ footer {
     scroll-behavior:auto!important;
   }
 }
+
+.table-scroll { overflow-x:auto; }
+.training-stages { display:flex; flex-wrap:wrap; gap:8px 16px; margin-top:18px; font-size:12px; color:var(--muted); }
+.training-stages .active-stage { color:var(--ink); font-weight:700; }
+#training-trial { min-width:0; max-width:100%; }
+#training-trials .selected-trial { background:var(--blue-fill); }
+#training-report table { font-size:12px; }
+#training-report th { white-space:normal; }
+#training-report h3 { font-size:14px; }
