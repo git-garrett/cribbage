@@ -1,0 +1,29 @@
+workbench.strongcribbage.com {
+	header {
+		-Server
+		Cache-Control "no-store"
+		X-Robots-Tag "noindex, nofollow, noarchive"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Strict-Transport-Security "max-age=31536000"
+	}
+	route {
+		basic_auth bcrypt Access {
+			import /etc/caddy/access.caddy
+		}
+		@write not method GET HEAD
+		respond @write "Method not allowed" 405
+		reverse_proxy 127.0.0.1:18766 {
+			header_up Host 127.0.0.1:8766
+			header_up -Authorization
+			header_down -Server
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 60s
+			}
+		}
+	}
+	handle_errors {
+		respond "Unavailable" {err.status_code}
+	}
+}
