@@ -2,7 +2,9 @@ import itertools
 import json
 import math
 from pathlib import Path
+import plistlib
 import sqlite3
+import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -14,6 +16,36 @@ import benchmark_workbench as workbench
 from benchmark_workbench_stats import PairedRatio, Z95, confidence_sequence, log_capital, metric_histories, paired_history
 import cribbage_job_queue as queue
 from benchmark_workbench_assets import build_asset_report, history_rows
+
+
+class WorkbenchLauncherTests(unittest.TestCase):
+    def test_service_interpreter_reads_wal_database_without_sidecars(self):
+        launcher = Path(__file__).with_name('local-runtime.sh').read_text()
+        selector = 'workbench_python() {' + launcher.split('workbench_python() {', 1)[1].split('\n}', 1)[0] + '\n}\nworkbench_python\n'
+        interpreter = subprocess.check_output(['/bin/bash', '-c', selector], text=True).strip()
+        marker = '"$python" - "$WORKBENCH_DIR" "$WORKBENCH_LABEL" "$(workbench_hostname)" <<\'PY\'\n'
+        generate = launcher.split(marker, 1)[1].split('\nPY\n', 1)[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'games.db'
+            source = root / 'source.db'
+            db = sqlite3.connect(source)
+            db.execute('PRAGMA journal_mode=WAL')
+            db.execute('CREATE TABLE sample (value INTEGER)')
+            db.execute('INSERT INTO sample VALUES (7)')
+            db.commit()
+            db.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchall()
+            db.close()
+            path.write_bytes(source.read_bytes())
+            self.assertFalse(Path(str(path) + '-wal').exists())
+            subprocess.run([interpreter, '-', tmp, 'test.workbench', 'test.local'],
+                           input=generate, text=True, check=True, capture_output=True)
+            plist = plistlib.loads((root / 'service.plist').read_bytes())
+            read = 'import sqlite3,sys; db=sqlite3.connect(sys.argv[1]+"?mode=ro",uri=True); print(db.execute("SELECT value FROM sample").fetchone()[0]); db.close()'
+            result = subprocess.run([plist['ProgramArguments'][0], '-c', read, path.as_uri()],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), '7')
 
 
 class AssetWorkbenchTests(unittest.TestCase):
@@ -160,6 +192,42 @@ class WorkbenchTests(unittest.TestCase):
 
     def report(self):
         return workbench.build_report(self.entry, now=workbench.timestamp('2026-10-01T00:00:01Z'))
+
+    def install_seat_variants(self):
+        variants = {'A': {'model': 'Ace', 'binary': '/frozen/f32'},
+                    'B': {'model': 'Ace', 'binary': '/frozen/f64'}}
+        with (self.root / 'manifest.txt').open('a') as out:
+            out.write('seatVariants=' + json.dumps(variants) + '\n')
+        for side, label in enumerate(('left', 'right')):
+            self.add_game(label, 0, engines=('Ace', 'Ace'))
+            with sqlite3.connect(self.root / label / 'games.db') as db:
+                db.execute('UPDATE compact_games SET included_in_tables=0')
+                db.execute('CREATE TABLE ai_runs(run_id TEXT, metadata_json TEXT)')
+                engines = ['/frozen/f32', '/frozen/f64']
+                if side: engines.reverse()
+                db.execute('INSERT INTO ai_runs VALUES(?,?)', (('L', 'R')[side], json.dumps({'seatEngines': engines})))
+
+    def test_frozen_variants_display_excluded_experiment_without_changing_database(self):
+        self.install_seat_variants()
+        report = self.report()
+        self.assertEqual(report['saved'], 2)
+        self.assertEqual(report['orderedPairs'], 1)
+        self.assertEqual((report['candidate'], report['opponent']), ('A', 'B'))
+        with sqlite3.connect(self.root / 'left/games.db') as db:
+            self.assertEqual(db.execute('SELECT left_engine,right_engine,included_in_tables FROM compact_games').fetchone(), ('Ace', 'Ace', 0))
+
+    def test_frozen_variant_binary_mismatch_fails_closed(self):
+        self.install_seat_variants()
+        with sqlite3.connect(self.root / 'left/games.db') as db:
+            db.execute('UPDATE ai_runs SET metadata_json=?', (json.dumps({'seatEngines': ['/frozen/f64', '/frozen/f32']}),))
+        with self.assertRaisesRegex(ValueError, 'provenance mismatch'):
+            self.report()
+
+    def test_ordinary_exclusions_still_excluded(self):
+        self.add_game('left', 0)
+        with sqlite3.connect(self.root / 'left/games.db') as db:
+            db.execute('UPDATE compact_games SET included_in_tables=0')
+        self.assertEqual(self.report()['saved'], 0)
 
     def test_registration_and_live_status(self):
         self.assertEqual(self.entry['root'], str(self.root))
