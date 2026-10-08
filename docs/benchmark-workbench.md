@@ -7,6 +7,14 @@ benchmark through its HTTP interface.
 
 ## Use
 
+Archive, beside a job's status, hides its tab and keeps it in All experiments.
+Selecting an archived job shows its results without restoring its tab; Elevate
+restores the tab. These preferences are shared across browsers, survive service
+restarts and supervisor resumes, and never change job execution or saved results.
+Existing older benchmarks start in the dropdown; new active jobs start as tabs.
+Finishing a job does not override an explicit Archive or Elevate choice.
+Preferences live under the workbench runtime's `visibility/` directory.
+
 ### Opening asset builds
 
 The asset tab separates chunk completion, production publication, and verified

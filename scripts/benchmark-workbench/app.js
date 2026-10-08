@@ -13,8 +13,9 @@ let followLatest = true;
 let inspectedPairs = 0;
 let jobs = [];
 let jobsSignature = '';
+let savingVisibility = false;
 const previews = new Map();
-const visibleJobs = () => jobs.filter((job) => job.kind === 'asset' || job.state === 'running' || job.state === 'pending' || job.id === selected);
+const visibleJobs = () => jobs.filter((job) => !job.archived);
 const jobTitle = (job) => job.title || (job.candidate && job.opponent ? `${modelName(job.candidate)} vs ${modelName(job.opponent)}` : job.id);
 
 function element(tag, text, className) {
@@ -25,7 +26,7 @@ function element(tag, text, className) {
 }
 
 function renderJobs() {
-  const signature = JSON.stringify(jobs.map(({ id, state, candidate, opponent, title }) => [id, state, candidate, opponent, title]));
+  const signature = JSON.stringify(jobs.map(({ id, state, candidate, opponent, title, archived }) => [id, state, candidate, opponent, title, archived]));
   const visible = visibleJobs();
   const tabs = $('run-tabs');
   const tabIds = visible.map((job) => job.id).join(',');
@@ -50,21 +51,60 @@ function renderJobs() {
   }
   for (const tab of tabs.children) {
     const active = tab.dataset.job === selected;
-    tab.setAttribute('aria-selected', String(active)); tab.tabIndex = active ? 0 : -1;
+    tab.setAttribute('aria-selected', String(active)); tab.tabIndex = active || (!visible.some((job) => job.id === selected) && tab === tabs.firstElementChild) ? 0 : -1;
   }
-  if (selected) $('benchmark-view').setAttribute('aria-labelledby', `tab-${selected}`);
+  if (visible.some((job) => job.id === selected)) $('benchmark-view').setAttribute('aria-labelledby', `tab-${selected}`);
+  else $('benchmark-view').removeAttribute('aria-labelledby');
   const picker = $('jobs');
   if (signature !== jobsSignature) {
     picker.replaceChildren();
     for (const job of jobs) {
       const title = jobTitle(job);
-      const option = element('option', `${title} · ${job.state} · ${job.id}`);
+      const option = element('option', `${title} · ${job.state}${job.archived ? ' · Archived' : ''} · ${job.id}`);
       option.value = job.id; picker.append(option);
     }
     jobsSignature = signature;
   }
   picker.value = selected;
+  renderVisibilityControls();
   renderPreviews();
+}
+
+function renderVisibilityControls() {
+  const job = jobs.find((item) => item.id === selected);
+  document.querySelectorAll('.job-visibility').forEach((button) => {
+    button.textContent = job?.archived ? 'Elevate' : 'Archive';
+    button.title = job?.archived ? 'Show this job in the tabs' : 'Hide this tab; keep the job in All experiments';
+    button.disabled = savingVisibility || !job;
+  });
+  $('job-fallback').hidden = !job || [...document.querySelectorAll('.run-heading')].some((heading) => !heading.closest('[hidden]'));
+  $('job-status').textContent = job?.state || '';
+}
+
+async function toggleVisibility() {
+  const job = jobs.find((item) => item.id === selected);
+  if (!job || savingVisibility) return;
+  savingVisibility = true;
+  $('visibility-error').hidden = true;
+  renderVisibilityControls();
+  try {
+    const response = await fetch('/api/job-visibility', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench-Request': '1' },
+      body: JSON.stringify({ job: job.id, archived: !job.archived }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok || response.redirected) throw new Error('Could not save tab visibility. Refresh and try again.');
+    const value = await response.json();
+    for (const item of jobs) if (item.id === value.id || item.aliases?.includes(value.id)) item.archived = value.archived;
+    renderJobs();
+    refresh();
+  } catch (error) {
+    $('visibility-error').textContent = error.message;
+    $('visibility-error').hidden = false;
+  } finally {
+    savingVisibility = false;
+    renderVisibilityControls();
+  }
 }
 
 function renderPreviews() {
@@ -102,6 +142,7 @@ function renderPreviews() {
 function selectJob(id) {
   selected = id; followLatest = true; report = null;
   $('report').hidden = true; $('asset-report').hidden = true; $('notice').hidden = true;
+  $('visibility-error').hidden = true;
   renderJobs(); refresh();
 }
 
@@ -237,6 +278,7 @@ function render(value) {
   $('asset-report').hidden = Boolean(error) || value.kind !== 'asset';
   $('notice').hidden = !error && !value.warnings?.length;
   $('notice').textContent = error || (value.warnings || []).join(' ');
+  renderVisibilityControls();
   if (error) return;
   if (value.kind === 'asset') return renderAsset(value);
   const candidate = modelName(value.candidate), opponent = modelName(value.opponent);
@@ -379,7 +421,7 @@ async function refresh() {
     jobs = value.jobs;
     for (const id of previews.keys()) if (!jobs.some((job) => job.id === id)) previews.delete(id);
     if (!jobs.length) {
-      selected = ''; jobsSignature = ''; $('run-tabs').replaceChildren();
+      selected = ''; jobsSignature = ''; renderVisibilityControls(); $('run-tabs').replaceChildren();
       $('run-tabs').dataset.jobs = '';
       $('benchmark-view').removeAttribute('aria-labelledby');
       $('jobs').replaceChildren(element('option', 'No paired benchmarks registered'));
@@ -389,12 +431,12 @@ async function refresh() {
     }
     $('empty').hidden = true;
     const current = jobs.find((job) => job.id === selected || job.aliases?.includes(selected));
-    selected = (current || jobs[0]).id;
+    selected = (current || visibleJobs()[0] || jobs[0]).id;
     renderJobs();
     history.replaceState(null, '', `/?job=${encodeURIComponent(selected)}`);
     // Reuse each snapshot for both its preview and the selected detail panel.
     // A slow or unavailable run must not block the other tabs from updating.
-    await Promise.all(visibleJobs().map(async (job) => {
+    await Promise.all(jobs.filter((job) => !job.archived || job.id === selected).map(async (job) => {
       let snapshot;
       try {
         const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]);
@@ -428,6 +470,14 @@ async function refresh() {
   }
 }
 
+// Add the same action beside every job view's main status badge.
+document.querySelectorAll('.run-heading .run-state > .state').forEach((badge) => {
+  const actions = element('div', null, 'state-actions');
+  badge.before(actions); actions.append(badge);
+  const button = element('button', 'Archive', 'job-visibility');
+  button.type = 'button'; actions.append(button);
+});
+document.querySelectorAll('.job-visibility').forEach((button) => button.addEventListener('click', toggleVisibility));
 $('jobs').addEventListener('change', () => selectJob($('jobs').value));
 $('run-tabs').addEventListener('click', (event) => {
   const tab = event.target.closest('[role="tab"]');

@@ -242,6 +242,16 @@ h2 {
   text-transform:uppercase;
   letter-spacing:1px;
 }
+.state-actions {
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.state-actions[hidden] { display:none; }
+.job-visibility { padding:5px 12px; font-size:12px; }
+.job-visibility:disabled { opacity:.6; cursor:wait; }
 .run-state p {
   margin-top:7px;
 }

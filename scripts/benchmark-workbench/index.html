@@ -17,6 +17,8 @@
     <div id="run-tabs" class="run-tabs" role="tablist" aria-label="Benchmarks and asset builds"></div>
     <div class="run-picker"><label for="jobs">All experiments</label><select id="jobs"><option value="">Loading benchmarks…</option></select><button id="refresh" type="button">Refresh</button></div>
     <div id="benchmark-view" role="tabpanel" aria-label="Selected benchmark" tabindex="0">
+    <div id="job-fallback" class="state-actions" hidden><span id="job-status" class="state"></span><button type="button" class="job-visibility">Archive</button></div>
+    <p id="visibility-error" class="notice" role="alert" hidden></p>
     <div id="notice" class="notice" role="status" hidden></div>
     <div id="asset-report" hidden>
       <section class="run-heading"><div><p class="eyebrow">28.3.fast · opening acceleration</p><h1 id="asset-title">Building the hot path</h1><p class="muted">Full continuations stay local. The first two dealer replies are published to Ace.</p></div><div class="run-state"><span id="asset-state" class="state"></span><p id="asset-snapshot" class="muted"></p></div></section>

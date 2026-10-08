@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only, on-demand browser workbench for the one-shot benchmark supervisor."""
+"""On-demand browser workbench for the one-shot benchmark supervisor."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from contextlib import closing
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import hashlib
+import tempfile
 import math
 import os
 from pathlib import Path
@@ -94,6 +96,27 @@ def job_status(entry):
     return read_json(root / 'status.json', {})
 
 
+def visibility_path(entry, runtime):
+    # Supervisor IDs change on resume; the experiment identity stays the same.
+    identity = str(Path(entry.get('experimentRoot', entry['root'])).resolve())
+    return runtime / 'visibility' / (hashlib.sha256(identity.encode()).hexdigest() + '.json')
+
+
+def set_archived(entry, archived, runtime=RUNTIME):
+    path = visibility_path(entry, runtime)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False) as file:
+            temporary = Path(file.name)
+            json.dump({'archived': archived}, file)
+            file.write('\n')
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def list_jobs(runtime=RUNTIME, jobs_runtime=JOBS_RUNTIME):
     entries = {}
     for path in (runtime / 'jobs').glob('*.json'):
@@ -124,6 +147,11 @@ def list_jobs(runtime=RUNTIME, jobs_runtime=JOBS_RUNTIME):
             experiments[root]['aliases'].append(job['id'])
         else:
             experiments[root] = {**job, 'root': root, 'aliases': []}
+    for job in experiments.values():
+        # Preserve the existing dropdown-only placement of older benchmarks.
+        default = not (job.get('kind') in ('asset', 'analysis', 'gpu', 'training')
+                       or job['state'] in ('running', 'pending'))
+        job['archived'] = read_json(visibility_path(job, runtime), {}).get('archived', default)
     return list(experiments.values())
 
 
@@ -483,6 +511,37 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Security-Policy', "default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'")
         self.end_headers()
         self.wfile.write(body)
+
+    def do_POST(self):
+        if self.headers.get('Host', '').lower() not in self.server.allowed_hosts:
+            return self.respond({'error': 'Unknown workbench address'}, 403)
+        if urlsplit(self.path).path != '/api/job-visibility':
+            return self.respond({'error': 'Not found'}, 404)
+        # This non-simple header requires a CORS preflight from other origins;
+        # the workbench never permits those preflights. It also works through
+        # the authenticated remote proxy, which rewrites the upstream Host.
+        if (self.headers.get('X-Workbench-Request') != '1'
+                or self.headers.get('Content-Type') != 'application/json'):
+            return self.respond({'error': 'Use the workbench archive control'}, 403)
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+            if not 0 < length <= 4096:
+                raise ValueError('Invalid body size')
+            value = json.loads(self.rfile.read(length))
+            if (not isinstance(value, dict) or not isinstance(value.get('job'), str)
+                    or type(value.get('archived')) is not bool):
+                raise ValueError('Expected job and archived boolean')
+        except (ValueError, UnicodeError):
+            return self.respond({'error': 'Invalid visibility request'}, 400)
+        entry = next((job for job in list_jobs(self.server.runtime)
+                      if job['id'] == value['job'] or value['job'] in job['aliases']), None)
+        if entry is None:
+            return self.respond({'error': 'Unknown benchmark'}, 404)
+        try:
+            set_archived(entry, value['archived'], self.server.runtime)
+        except OSError:
+            return self.respond({'error': 'Could not save tab visibility. Try again.'}, 500)
+        return self.respond({'id': entry['id'], 'archived': value['archived']})
 
     def do_GET(self):
         # Reject DNS rebinding and cross-origin access to local experiment data.
