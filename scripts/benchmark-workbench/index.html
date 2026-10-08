@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="workbench-version" content="__WORKBENCH_UI_VERSION__">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Benchmark workbench · Strong Cribbage</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -14,10 +15,42 @@
     <span class="connection" id="connection" role="status">Connecting…</span>
   </header>
   <main>
-    <div id="run-tabs" class="run-tabs" role="tablist" aria-label="Benchmarks and asset builds"></div>
+    <div id="run-tabs" class="run-tabs" role="tablist" aria-label="Benchmarks, assets and training"></div>
     <div class="run-picker"><label for="jobs">All experiments</label><select id="jobs"><option value="">Loading benchmarks…</option></select><button id="refresh" type="button">Refresh</button></div>
     <div id="benchmark-view" role="tabpanel" aria-label="Selected benchmark" tabindex="0">
+    <div id="job-fallback" class="state-actions" hidden><span id="job-status" class="state"></span><button type="button" class="job-visibility">Archive</button></div>
+    <p id="visibility-error" class="notice" role="alert" hidden></p>
     <div id="notice" class="notice" role="status" hidden></div>
+    <section id="study-overview" class="panel study-overview" hidden aria-labelledby="study-title">
+      <div class="section-heading"><div><p class="eyebrow" id="study-title"></p><h1 id="study-now"></h1></div><strong id="study-completed" class="numeric"></strong></div>
+      <ol id="study-steps" class="study-steps"></ol>
+      <p id="study-next" class="caption"></p><p id="study-note" class="caption"></p>
+    </section>
+    <div id="training-report" hidden>
+      <section class="run-heading"><div><p class="eyebrow" id="training-kind">FP32 · learning from recorded decisions</p><h1 id="training-title">Pegging training</h1><p class="muted" id="training-purpose">Learn card choices from saved Ace games.</p></div><div class="run-state"><span id="training-state" class="state"></span><p id="training-stage" class="muted"></p></div></section>
+      <section class="panel">
+        <div class="section-heading"><h2>Model fitting progress</h2><span id="training-fraction" class="numeric"></span></div>
+        <div class="asset-headline"><strong id="training-completed" class="hero-number"></strong><span id="training-target" class="muted"></span></div>
+        <div id="training-progress" class="lane-track" role="progressbar" aria-label="Completed model fits" aria-valuemin="0"><div id="training-fill" class="lane-fill"></div></div>
+        <div class="run-facts asset-facts"><div><span class="label">Activity in this block</span><strong id="training-current"></strong><small id="training-epoch"></small></div><div><span class="label">Recorded decisions</span><strong id="training-decisions"></strong><small id="training-games"></small></div><div><span class="label">Best match to saved choices</span><strong id="training-best"></strong><small id="training-best-note"></small></div></div>
+        <p id="training-activity-detail" class="caption"></p><p id="training-update" class="caption"></p><p class="caption">Fits vary greatly in cost and stop early when validation stops improving; the fraction of fits completed is not a time estimate. Agreement measures matching 28.3’s recorded card choice, not win rate or playing strength.</p>
+        <div id="training-stages" class="training-stages" aria-label="Steps in model fitting"></div>
+      </section>
+      <section class="panel"><div class="section-heading"><div><p class="eyebrow" id="training-metric-label">Natural 28.3 validation decisions</p><h2>Does another training pass improve choice accuracy?</h2></div></div>
+        <div class="run-picker"><label for="training-trial">Model fit</label><select id="training-trial"></select></div>
+        <p id="training-curve-note" class="caption"></p>
+        <div class="chart-grid"><div><h3>Choice agreement</h3><svg id="training-agreement-chart" class="chart" role="img" aria-label="Validation choice agreement by epoch"></svg></div><div><h3>Prediction loss · lower is better</h3><svg id="training-loss-chart" class="chart" role="img" aria-label="Validation cross entropy by epoch"></svg></div></div>
+      </section>
+      <section class="panel"><div class="section-heading"><div><p class="eyebrow">Each completed fit · selected checkpoint</p><h2>Model size and data comparisons</h2></div></div><p id="training-test-note" class="caption"></p>
+        <div class="table-scroll"><table><thead><tr><th>Parameters</th><th>Training</th><th>Examples</th><th>Seed</th><th>Epoch selected / run</th><th>Validation agreement</th><th>Validation loss</th><th>Test agreement</th><th>Fit time</th></tr></thead><tbody id="training-trials"></tbody></table></div>
+      </section>
+      <div class="chart-grid">
+        <section class="panel"><h2>Corpus and checks</h2><dl id="training-data"></dl><p class="caption" id="training-input-note">Inputs come directly from saved hands, discards, cut, scores and the pegging series prefix. Each player receives only their own cards and public information. Whole deal-seed groups and identical inputs stay in one data partition.</p><details><summary>Decisions by teacher</summary><dl id="training-teachers"></dl></details></section>
+        <section class="panel"><h2>Complete-game pace</h2><p class="caption">Use the full-game win-learning study for games per second and games per hour. This fitting block learns saved choices and does not play new games.</p><details><summary id="training-speed-label">Pegging choice speed · diagnostic only</summary><p id="training-speed-note" class="caption"></p><div class="table-scroll"><table><thead><tr><th>Parameters</th><th>Batch</th><th>Device</th><th id="training-speed-unit">Pegging choices / sec</th></tr></thead><tbody id="training-speed"></tbody></table></div><p class="caption">Each item is one card choice. This diagnostic excludes game execution and weight updates and cannot be converted directly to game pace.</p></details></section>
+      </div>
+      <section class="panel" id="training-frontier-panel"><h2>Data scaling scenarios</h2><p id="training-frontier-note" class="caption"></p><div class="table-scroll"><table><thead><tr><th>Parameters</th><th>2× data</th><th>4× data</th><th>10× data</th></tr></thead><tbody id="training-frontier"></tbody></table></div></section>
+      <footer><span>Read-only · refreshes every 15 seconds while visible</span><span id="training-source"></span></footer>
+    </div>
     <div id="asset-report" hidden>
       <section class="run-heading"><div><p class="eyebrow">28.3.fast · opening acceleration</p><h1 id="asset-title">Building the hot path</h1><p class="muted">Full continuations stay local. The first two dealer replies are published to Ace.</p></div><div class="run-state"><span id="asset-state" class="state"></span><p id="asset-snapshot" class="muted"></p></div></section>
       <section class="panel asset-hero" aria-labelledby="asset-progress-title">
@@ -42,6 +75,48 @@
       </div>
       <details class="methods"><summary>What is being counted?</summary><div><p>One chunk fixes a starter rank, pone score, dealer score and lead rank, covering the model’s possible holds at that position. “Built” requires verified local full-depth bytes and, when publication is configured, a matching production acknowledgment. “Published” counts verified acknowledgments for two-reply chunks, not live cache hits. “Archived” counts a separate verified TerraMaster snapshot and may lag behind the build.</p><p>Build percentage is the fraction of the selected chunk target completed. Opening coverage is an empirical estimate from held-out games, not a guarantee about future play and not the fraction of all possible positions. Gaps in completion are excluded conservatively.</p><p id="asset-policy" class="asset-policy"></p></div></details>
       <footer><span>Read-only · refreshes every 15 seconds while visible</span><span>Missing chunks fall back to exact calculation</span></footer>
+    </div>
+    <div id="selfplay-report" hidden>
+      <section class="run-heading"><div><p class="eyebrow">Full-game win learning · FP32</p><h1 id="selfplay-title"></h1><p id="selfplay-models" class="muted"></p></div><div class="run-state"><span id="selfplay-state" class="state"></span><p id="selfplay-stage" class="muted"></p></div></section>
+      <section class="panel"><div class="section-heading"><div><p class="eyebrow" id="selfplay-activity-kind"></p><h2 id="selfplay-activity"></h2></div><strong id="selfplay-activity-progress"></strong></div>
+        <p id="selfplay-activity-detail" class="muted"></p><p id="selfplay-activity-context" class="caption"></p>
+        <div class="run-facts"><div><span class="label">Self-play training totals only</span><strong id="selfplay-games"></strong><small id="selfplay-rounds"></small><p id="selfplay-current" class="caption"></p></div><div><strong id="selfplay-workers"></strong><p id="selfplay-gpu" class="muted"></p></div></div><p id="selfplay-objective" class="caption"></p><div id="selfplay-stages" class="training-stages" aria-label="Steps in the game study"></div></section>
+      <section class="panel"><h2>Complete-game pace</h2>
+        <div class="run-facts">
+          <div><span class="label">Training · games + weight updates</span><strong id="selfplay-training-rate"></strong><small id="selfplay-training-hourly"></small></div>
+          <div><span class="label">Self-play · playing games only</span><strong id="selfplay-rollout-rate"></strong><small id="selfplay-rollout-hourly"></small></div>
+          <div><span class="label" id="selfplay-live-rate-label">Current comparison average</span><strong id="selfplay-live-rate"></strong><small id="selfplay-live-hourly"></small></div>
+        </div>
+        <p class="caption">Training pace counts complete games divided by recorded game-generation and weight-update time across completed rounds. It excludes evaluation, checkpoint saving, waiting and archiving. Playing pace includes discard, pegging, scoring, both players and game-runner overhead. Each game counts once; a paired deal contributes two games.</p>
+      </section>
+      <section class="panel" id="selfplay-role-panel" hidden><h2>Four-role model sizes and stability</h2><table><thead><tr><th>Size</th><th>Total parameters</th><th>Pone peg / dealer peg / pone discard / dealer discard</th><th>Rounds</th><th>Latest round</th><th>Decision change</th><th>WP drift</th><th>Status</th></tr></thead><tbody id="selfplay-role-sizes"></tbody></table><p class="caption">Size names refer to one pegging network. Stability is measured across three consecutive cycles after at least eight rounds; it does not establish playing strength. The initial budget is 32 rounds per size.</p></section>
+      <section class="panel" id="selfplay-history-panel"><h2>Self-play learning history</h2><p class="caption">Smaller model’s win rate against the larger model during training.</p><svg id="selfplay-chart" class="chart" role="img" aria-label="Training win rate by round"></svg><p class="caption">Both opponents change between rounds. This score alone cannot show improvement; use the frozen-opponent evaluations below.</p></section>
+      <section class="panel" id="selfplay-speed-panel"><div class="section-heading"><h2>Speed test · fixed models</h2><span id="selfplay-speed-state" class="state"></span></div><p class="caption">This block measures full-game throughput. No learning occurs during these timed games.</p><table><thead><tr><th>Case</th><th>Games</th><th>Games / sec</th><th>Games / hour</th><th>Mean CPU cores</th><th>CPU environment</th><th>Neural inference</th></tr></thead><tbody id="selfplay-speed"></tbody></table><p class="caption">Includes each case’s discard policy, game rules, encoding and inference. Timings include shared-machine scheduling. GPU submission time is not exclusive GPU utilization.</p></section>
+      <section class="panel" id="selfplay-quality-panel" hidden><div class="section-heading"><h2>Discard test · against native Ace</h2><span id="selfplay-quality-state" class="state"></span></div><p id="selfplay-quality-progress" class="caption"></p><table><thead><tr><th>Candidate</th><th>Wins / games</th><th>Win rate</th><th>Paired 95% interval</th><th>Games / hour</th></tr></thead><tbody id="selfplay-quality"></tbody></table><p class="caption">Both seats use identical frozen neural pegging. Only discard differs. This isolates discard quality; it is not full native-Ace playing strength.</p></section>
+      <section class="panel"><div class="section-heading"><h2>Improvement test · against the starting models</h2><span id="selfplay-evals-state" class="state"></span></div><table><thead><tr><th>Round</th><th>Candidate</th><th>Wins / games</th><th>Win rate</th><th id="selfplay-evals-interval">Paired 95% interval</th><th>Games / hour</th></tr></thead><tbody id="selfplay-evals"></tbody></table><p class="caption" id="selfplay-evals-note">Greedy play on paired holdout seeds. These evaluations never feed training. Intervals describe each checkpoint; this pilot does not establish strength relative to Ace.</p></section>
+    </div>
+    <div id="analysis-report" hidden>
+      <section class="run-heading"><div><p class="eyebrow">Exact decisions at the original score positions</p><h1 id="analysis-title"></h1><p id="analysis-snapshot" class="muted"></p></div><div class="run-state"><span id="analysis-state" class="state"></span><p id="analysis-stage" class="muted"></p></div></section>
+      <section class="panel"><div class="section-heading"><h2>Heatmap refresh</h2><strong id="analysis-total" class="numeric"></strong></div><div id="analysis-lanes" class="lanes"></div><div class="run-facts"><div><span class="label">Workers active / limit</span><strong id="analysis-workers"></strong><small id="analysis-reused"></small></div><div><span class="label">Estimated compute remaining</span><strong id="analysis-eta"></strong><small id="analysis-finish"></small></div></div><p id="analysis-eta-note" class="caption"></p></section>
+      <div class="chart-grid"><section class="panel"><h2>Completed replays</h2><svg id="analysis-progress-chart" class="chart" role="img" aria-label="Cumulative completed analysis cases over elapsed hours"></svg><p class="caption">Includes preserved earlier results. Time includes any pauses. Reporting and verification follow computation.</p></section><section class="panel"><h2>Coverage by scoring opportunity</h2><table><thead><tr><th>Opportunity / role</th><th>Completed / target</th><th>Progress</th></tr></thead><tbody id="analysis-groups"></tbody></table></section></div>
+      <details class="methods"><summary>What is being measured?</summary><div><p>Every original confirmation case is replayed with model 28.3.fast. Saved exact 28.3 results are retained after parity checks. Observed-game and generated-case banks remain separate in the data and add in the final graphics.</p><p>Heat measures material modeled WP preference for declining a scoring opportunity that maximizes net-point EV. These are model estimates, not measured game wins. Completing the original sample does not imply 95% confidence at every score position or a new 1-by-1 score survey.</p></div></details><footer><span>Read-only · refreshes every 15 seconds while visible</span><span>Four workers; results are resumable</span></footer>
+    </div>
+    <div id="gpu-report" hidden>
+      <section class="run-heading"><div><p class="eyebrow">GPU asset building</p><h1 id="gpu-title"></h1><p id="gpu-scope" class="muted"></p></div><div class="run-state"><span id="gpu-state" class="state"></span><p id="gpu-stage" class="muted"></p></div></section>
+      <section class="panel" aria-labelledby="gpu-progress-title">
+        <div class="section-heading"><h2 id="gpu-progress-title">Saved asset work</h2><strong id="gpu-fraction" class="numeric"></strong></div>
+        <div class="asset-headline"><strong id="gpu-completed" class="hero-number"></strong><span id="gpu-target" class="muted"></span></div>
+        <div id="gpu-progress" class="lane-track" role="progressbar" aria-label="GPU asset build progress" aria-valuemin="0"><div id="gpu-fill" class="lane-fill"></div></div>
+        <div class="run-facts"><div><span class="label">Recent throughput</span><strong id="gpu-rate"></strong><small id="gpu-snapshot"></small></div><div><span class="label">Estimated compute remaining</span><strong id="gpu-eta"></strong><small id="gpu-finish"></small></div><div><span class="label">Reserved CPU slots</span><strong id="gpu-workers"></strong><small id="gpu-backend"></small></div></div>
+        <p id="gpu-eta-note" class="caption"></p>
+      </section>
+      <div class="chart-grid">
+        <section class="panel"><h2>Build progress</h2><svg id="gpu-progress-chart" class="chart" role="img" aria-label="Saved asset work over elapsed hours"></svg><p class="caption">Only completed checkpoints count. Saved work is retained on resume.</p></section>
+        <section class="panel"><h2>Build throughput</h2><svg id="gpu-rate-chart" class="chart" role="img" aria-label="GPU build throughput per second over elapsed hours"></svg><p class="caption">Includes CPU and GPU evaluations, preparation and saving results. This asset-building step does not play complete games; its work units cannot be converted directly to games per hour.</p></section>
+        <section class="panel"><h2>Build scope</h2><dl id="gpu-details"></dl></section>
+        <section class="panel"><h2>Completion checks</h2><dl id="gpu-checks"></dl><p class="caption">Finishing computation is followed by asset verification and a verified archive copy.</p></section>
+      </div>
+      <footer><span>Read-only · refreshes every 15 seconds while visible</span><span id="gpu-policy"></span></footer>
     </div>
     <section id="empty" class="empty" hidden><h1>Your next benchmark starts here.</h1><p>Install a paired benchmark with the job supervisor and it will appear automatically.</p><p>For an already running job, use <code>scripts/local-runtime.sh workbench-start /path/to/job.json</code>.</p></section>
     <div id="report" hidden>

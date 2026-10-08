@@ -7,6 +7,14 @@ benchmark through its HTTP interface.
 
 ## Use
 
+Archive, beside a job's status, hides its tab and keeps it in All experiments.
+Selecting an archived job shows its results without restoring its tab; Elevate
+restores the tab. These preferences are shared across browsers, survive service
+restarts and supervisor resumes, and never change job execution or saved results.
+Existing older benchmarks start in the dropdown; new active jobs start as tabs.
+Finishing a job does not override an explicit Archive or Elevate choice.
+Preferences live under the workbench runtime's `visibility/` directory.
+
 ### Opening asset builds
 
 The asset tab separates chunk completion, production publication, and verified
@@ -150,7 +158,9 @@ analysis when nobody is viewing. Games and their telemetry are read in one
 transaction per orientation; the runner commits them atomically. The WAL reader
 closes immediately after collecting rows. A shared 15-second cache avoids duplicate work across
 browser tabs. The UI shows the measured time to read and calculate each snapshot.
-The launchd service runs at background priority, from an internal-disk copy.
+The launchd service runs from an internal-disk copy with interactive priority
+so macOS background I/O throttling does not stall the live dashboard while
+builders are busy. This does not change the compute jobs' priorities.
 
 Each orientation is read consistently in its own SQLite SELECT. Different
 orientations can have different completion counts. Rows are matched by index,
@@ -252,3 +262,52 @@ progress and graphs of key figures including ordinary confidence intervals and
 confidence sequences, without materially slowing the benchmark. Preserve active
 runs. The initial scope is local read-only observation of paired game benchmarks;
 it does not change model policy, scoring, or the full command-line report.
+
+## Analysis jobs
+
+An exact replay/analysis supervisor can register an `analysisJob` object with
+`root`, positive integer `target`, and `title`. Its root supplies `progress.json`
+(completed, target, reused, workers, workerLimit, updatedAt, status,
+remainingSeconds, etaBasis, groups) and `history.jsonl` (updatedAt, completed).
+Each group supplies kind, role, cohort, completed and total. The workbench reads
+these small snapshots, not the results database. Snapshot age over 90 seconds or
+a stopped/failed job withholds ETA. A completed computation remains “reporting”
+until the supervisor's verification, report and sync stages finish.
+
+Register it through `scripts/local-runtime.sh workbench-start /path/to/job.json`.
+
+## Pegging training studies
+
+Register a separate, small `workbench.json` alongside a frozen training job so
+observing it does not change the supervisor specification or restart training:
+
+```json
+{
+  "jobId": "pegging-corpus-20261007-v1",
+  "jobRoot": "/private/tmp/cribbage-pegging-corpus-20261007-v1/job",
+  "trainingStudy": {
+    "root": "/private/tmp/cribbage-pegging-corpus-20261007-v1",
+    "title": "Pegging training",
+    "target": 50,
+    "maxEpochs": 32,
+    "precision": "FP32",
+    "architectures": [{"hidden": [64, 64], "parameters": 91418}],
+    "stages": ["extract", "check-data", "smoke", "fit", "evaluate", "speed", "verify", "report", "sync"]
+  }
+}
+```
+
+List every architecture in the actual study. Pass this manifest to
+`scripts/local-runtime.sh workbench-start /absolute/path/to/workbench.json`.
+The training adapter reads corpus counts, fit/epoch receipts and compact JSON
+results from the pegging corpus experiment. It never loads records, SQLite
+inputs, model weights or prediction arrays. It shares the 15-second report cache.
+
+The tab shows completed fits, the active epoch, natural 28.3 validation curves,
+per-fit model size/data/curriculum comparisons, and later sealed-test results,
+inference speed and data-scaling scenarios. Epoch numbers shown are one-based.
+Model selection follows validation cross-entropy; high agreement alone does not
+select a checkpoint. Agreement is choice imitation, not game win rate. Inference
+measurements do not imply full-game throughput. Fit completion does not imply
+verification or archive completion. No ETA is inferred from fit counts because
+model sizes, training-set sizes and early stopping have different costs.

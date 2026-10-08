@@ -28,7 +28,7 @@ restart  Rebuild and replace the runtime unconditionally.
 stop     Stop only the two repository-owned launchd services.
 status   Show service, listener, health, version, and source-staleness status.
 
-workbench-start   Register a paired benchmark and start/reuse its browser UI.
+workbench-start   Register an experiment and start/reuse its browser UI.
 workbench-stop    Stop the browser UI only; benchmark workers are unaffected.
 workbench-status Show the workbench service and stable LAN URL (port 8766).
 
@@ -194,6 +194,9 @@ workbench_fingerprint() {
     shasum "${ROOT_DIR}/scripts/benchmark_workbench.py" \
       "${ROOT_DIR}/scripts/benchmark_workbench_stats.py" \
       "${ROOT_DIR}/scripts/benchmark_workbench_assets.py" \
+      "${ROOT_DIR}/scripts/benchmark_workbench_analysis.py" \
+      "${ROOT_DIR}/scripts/benchmark_workbench_gpu.py" \
+      "${ROOT_DIR}/scripts/benchmark_workbench_training.py" \
       "${ROOT_DIR}/scripts/local-runtime.sh" \
       "${ROOT_DIR}/scripts/benchmark-workbench/"*
     workbench_hostname
@@ -246,14 +249,16 @@ workbench_start() {
     return 1
   fi
   mkdir -p "${WORKBENCH_DIR}/app/benchmark-workbench"
-  cp "${ROOT_DIR}/scripts/benchmark_workbench.py" "${ROOT_DIR}/scripts/benchmark_workbench_stats.py" "${ROOT_DIR}/scripts/benchmark_workbench_assets.py" "${WORKBENCH_DIR}/app/"
+  cp "${ROOT_DIR}/scripts/benchmark_workbench.py" "${ROOT_DIR}/scripts/benchmark_workbench_stats.py" "${ROOT_DIR}/scripts/benchmark_workbench_assets.py" "${ROOT_DIR}/scripts/benchmark_workbench_analysis.py" "${ROOT_DIR}/scripts/benchmark_workbench_gpu.py" "${ROOT_DIR}/scripts/benchmark_workbench_training.py" "${WORKBENCH_DIR}/app/"
   cp "${ROOT_DIR}/scripts/benchmark-workbench/"* "${WORKBENCH_DIR}/app/benchmark-workbench/"
   python3 - "$WORKBENCH_DIR" "$WORKBENCH_LABEL" "$(workbench_hostname)" <<'PY'
 from pathlib import Path
 import plistlib, sys
 root = Path(sys.argv[1])
 plist = {'Label': sys.argv[2], 'ProgramArguments': ['/usr/bin/python3', str(root / 'app/benchmark_workbench.py'), 'serve', '--lan-hostname', sys.argv[3]],
-         'RunAtLoad': True, 'KeepAlive': False, 'ProcessType': 'Background',
+         # This serves the live user interface; background I/O throttling can
+         # otherwise stall even small snapshots while the builders are busy.
+         'RunAtLoad': True, 'KeepAlive': False, 'ProcessType': 'Interactive',
          'StandardOutPath': str(root / 'server.log'), 'StandardErrorPath': str(root / 'server.log')}
 with (root / 'service.plist').open('wb') as handle:
     plistlib.dump(plist, handle)
