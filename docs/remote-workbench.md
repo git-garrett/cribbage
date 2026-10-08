@@ -1,5 +1,10 @@
 # Remote workbench
 
+The gateway's Caddyfile imports optional root-owned
+`/etc/caddy/status-logging*.caddy` files managed by the status-monitor project.
+Keep this import during gateway reconfiguration so request collection survives.
+An empty glob is allowed on servers without the monitoring configuration.
+
 `https://workbench.strongcribbage.com` is a dedicated Rocky Linux 9 Nanode
 gateway for the existing live workbench. The Mac remains the data source and
 must be awake, logged in, and online. A launch agent reconnects its outbound SSH
