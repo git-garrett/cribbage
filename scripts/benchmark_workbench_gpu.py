@@ -23,6 +23,7 @@ def build_gpu_report(entry, status, now=None):
                 'priorityCompleted': 0, 'priorityTarget': settings.get('priorityTarget'),
                 'priorityCoverage': settings.get('priorityCoverage'),
                 'handTarget': settings.get('handTarget'), 'scoreCells': settings.get('scoreCells'),
+                'gpuCommandDuty': settings.get('gpuCommandDuty'),
                 'verification': 'pending', 'archive': 'pending'}
     if progress.get('target') != settings['target']:
         raise ValueError('GPU snapshot belongs to a different build target')
@@ -31,7 +32,7 @@ def build_gpu_report(entry, status, now=None):
         raise ValueError('Invalid GPU completion count')
     for key in ('completed', 'updatedAt', 'workers', 'workerLimit', 'gpuSeconds',
                 'elapsedSeconds', 'ratePerSecond', 'completedHands', 'handTarget',
-                'scoreCells', 'backend', 'etaBasis'):
+                'scoreCells', 'backend', 'etaBasis', 'gpuCommandDuty'):
         result[key] = progress.get(key)
     for key in ('priorityCompleted', 'priorityTarget', 'priorityCoverage'):
         result[key] = progress.get(key)

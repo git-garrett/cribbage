@@ -412,7 +412,8 @@ function renderGpu(value) {
     ['Observed frequency covered first', value.priorityCoverage == null ? 'Not specified' : percent(value.priorityCoverage)],
     ['Sampled hands', value.handTarget == null ? 'Not specified' : number.format(value.handTarget)],
     ['Score positions per hand and role', value.scoreCells == null ? 'Not specified' : number.format(value.scoreCells)],
-    ['GPU execution time', value.gpuSeconds == null ? 'Not recorded' : duration(value.gpuSeconds)],
+    ['GPU command elapsed time', value.gpuSeconds == null ? 'Not recorded' : duration(value.gpuSeconds)],
+    ['GPU sharing target', value.gpuCommandDuty == null ? 'Not specified' : `${percent(value.gpuCommandDuty)} command duty`],
   ]) details.append(element('dt', label), element('dd', stat));
   const checks = $('gpu-checks'); checks.replaceChildren();
   for (const [label, stat] of [['Computation', value.completed === value.target ? 'Complete' : value.state === 'running' ? 'In progress' : value.state.replaceAll('_', ' ')], ['Asset verification', value.verification], ['Verified archive', value.archive]]) {
