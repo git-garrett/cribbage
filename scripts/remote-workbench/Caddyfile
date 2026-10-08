@@ -21,7 +21,13 @@ workbench.strongcribbage.com {
 				uri /verify
 				header_up -Authorization
 			}
-			@write not method GET HEAD
+			@write {
+				not method GET HEAD
+				not {
+					method POST
+					path /api/job-visibility
+				}
+			}
 			respond @write "Method not allowed" 405
 			reverse_proxy 127.0.0.1:18766 {
 				header_up Host 127.0.0.1:8766
