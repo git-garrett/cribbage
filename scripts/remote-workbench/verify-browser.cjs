@@ -8,7 +8,12 @@ let passwordForRedaction = '';
 
 async function verify() {
   if (!process.argv[2]) throw new Error('Usage: node verify-browser.cjs PRIVATE_ACCESS_JSON');
-  const account = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+  let account;
+  try {
+    account = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+  } catch {
+    throw new Error('Could not read valid private credential JSON.');
+  }
   assert.equal(typeof account.username, 'string');
   assert.equal(typeof account.password, 'string');
   passwordForRedaction = account.password;
