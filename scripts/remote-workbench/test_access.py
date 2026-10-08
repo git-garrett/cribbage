@@ -120,3 +120,14 @@ def test_missing_or_weak_configuration_is_rejected():
 def test_untrusted_host_is_rejected_without_server_error(app):
     response = app.test_client().get('/login', base_url='https://untrusted.example')
     assert response.status_code == 400
+
+
+def test_authenticated_form_posts_do_not_extend_absolute_session(app, monkeypatch):
+    client = app.test_client()
+    login(client)
+    now = time.time()
+    monkeypatch.setattr(time, 'time', lambda: now + 10 * 3600)
+    response = client.post('/login', base_url=ORIGIN, headers={'Origin': ORIGIN})
+    assert 'Set-Cookie' not in response.headers
+    monkeypatch.setattr(time, 'time', lambda: now + 13 * 3600)
+    assert client.get('/verify', base_url=ORIGIN).status_code == 303

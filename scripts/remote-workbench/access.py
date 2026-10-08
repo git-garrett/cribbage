@@ -83,8 +83,10 @@ def create_app(credentials=None):
 
     @app.route('/login', methods=['GET', 'POST'])
     def login():
+        if authenticated():
+            return redirect('/', 303)
         if request.method == 'GET':
-            return redirect('/', 303) if authenticated() else form()
+            return form()
         expected = session.get('csrf', '')
         supplied = request.form.get('csrf', '')
         if (request.headers.get('Origin') != origin or not expected
