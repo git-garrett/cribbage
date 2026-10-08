@@ -80,7 +80,9 @@ refresh. With the project Playwright browsers installed, run
 `node scripts/remote-workbench/verify-browser.cjs PRIVATE_ACCESS_JSON` for that
 public smoke check; the JSON contains the existing `username` and `password`.
 Check the secure cookie flags, a live report, and that authenticated
-POST requests to the workbench are rejected. Check the verifier failing closed.
+POST `/api/job-visibility` can archive and elevate a registered job with the
+workbench's JSON and custom request header. Other writes remain rejected; a
+cross-origin form cannot change visibility. Check the verifier failing closed.
 Verify the tunnel binds only to 127.0.0.1 and unauthorized SSH listen ports and
 shell commands fail. Restart the tunnel to check reconnection, then confirm a
 fresh live report. Do not print credentials or session cookies during checks.
