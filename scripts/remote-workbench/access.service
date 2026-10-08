@@ -7,7 +7,7 @@ User=workbench-access
 Group=workbench-access
 WorkingDirectory=/opt/workbench-access/app
 Environment=ACCESS_CONFIG=/etc/workbench-access/credentials.json
-ExecStart=/opt/workbench-access/venv/bin/gunicorn --bind 127.0.0.1:18767 --workers 1 --threads 4 --timeout 15 --limit-request-line 4096 --limit-request-fields 30 --limit-request-field_size 4096 "access:create_app()"
+ExecStart=/opt/workbench-access/venv/bin/gunicorn --bind 127.0.0.1:18767 --workers 1 --threads 4 --timeout 15 --no-control-socket --limit-request-line 4096 --limit-request-fields 30 --limit-request-field_size 4096 "access:create_app()"
 Restart=always
 RestartSec=3
 UMask=0077

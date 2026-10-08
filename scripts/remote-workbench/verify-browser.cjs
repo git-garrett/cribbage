@@ -4,12 +4,14 @@ const fs = require('node:fs');
 const assert = require('node:assert/strict');
 
 const origin = 'https://workbench.strongcribbage.com';
+let passwordForRedaction = '';
 
 async function verify() {
   if (!process.argv[2]) throw new Error('Usage: node verify-browser.cjs PRIVATE_ACCESS_JSON');
   const account = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
   assert.equal(typeof account.username, 'string');
   assert.equal(typeof account.password, 'string');
+  passwordForRedaction = account.password;
   for (const engine of [webkit, chromium]) {
     const browser = await engine.launch({ headless: true });
     try {
@@ -46,4 +48,8 @@ async function verify() {
     }
   }
 }
-verify().catch(error => { console.error(error.message); process.exitCode = 1; });
+verify().catch(error => {
+  const message = passwordForRedaction ? error.message.split(passwordForRedaction).join('<redacted>') : error.message;
+  console.error(message);
+  process.exitCode = 1;
+});
