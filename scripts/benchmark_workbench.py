@@ -8,6 +8,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import hashlib
 import math
 import os
 from pathlib import Path
@@ -19,11 +20,16 @@ from urllib.parse import parse_qs, urlsplit
 
 from benchmark_workbench_stats import METRICS, metric_histories, paired_history
 from benchmark_workbench_assets import build_asset_report
+from benchmark_workbench_analysis import build_analysis_report
+from benchmark_workbench_gpu import build_gpu_report
+from benchmark_workbench_training import build_training_report
 
 
 RUNTIME = Path('/private/tmp/strong-cribbage-local-runtime/workbench')
 JOBS_RUNTIME = Path('/private/tmp/cribbage-jobs')
 STATIC = Path(__file__).resolve().parent / 'benchmark-workbench'
+UI_VERSION = hashlib.sha256(b''.join((STATIC / name).read_bytes()
+                            for name in ('index.html', 'app.js', 'style.css'))).hexdigest()[:16]
 PORT = 8766
 CACHE_SECONDS = 15
 
@@ -62,6 +68,28 @@ def job_entry(spec_path):
     spec = read_json(spec_path)
     if not spec or not re.fullmatch('[a-z0-9-]+', spec.get('jobId', '')):
         raise ValueError('A valid job specification is required')
+    training = spec.get('trainingStudy')
+    if training:
+        if (not isinstance(training, dict) or type(training.get('target')) is not int
+                or training['target'] <= 0 or not training.get('root')):
+            raise ValueError('Training study requires root and positive fit target')
+        return {'id': spec['jobId'], 'root': str(Path(training['root']).resolve()),
+                'spec': str(spec_path), 'kind': 'training', 'title': training.get('title', 'Pegging training')}
+    gpu = spec.get('gpuBuild')
+    if gpu:
+        if (not isinstance(gpu, dict) or type(gpu.get('target')) is not int
+                or gpu['target'] <= 0 or not gpu.get('root') or not gpu.get('policy')):
+            raise ValueError('GPU build requires root, policy and positive target')
+        return {'id': spec['jobId'], 'root': str(Path(gpu['root']).resolve()),
+                'spec': str(spec_path), 'kind': 'gpu', 'title': gpu.get('title', 'GPU assets'),
+                'experimentRoot': str(Path(gpu.get('experimentRoot', gpu['root'])).resolve())}
+    analysis = spec.get('analysisJob')
+    if analysis:
+        if (not isinstance(analysis, dict) or type(analysis.get('target')) is not int
+                or analysis['target'] <= 0 or not analysis.get('root')):
+            raise ValueError('Analysis job requires root and positive target')
+        return {'id': spec['jobId'], 'root': str(Path(analysis['root']).resolve()),
+                'spec': str(spec_path), 'kind': 'analysis', 'title': analysis.get('title', 'Analysis')}
     asset = spec.get('assetBuild')
     if asset:
         if (not isinstance(asset, dict) or not isinstance(asset.get('target'), int)
@@ -114,16 +142,17 @@ def list_jobs(runtime=RUNTIME, jobs_runtime=JOBS_RUNTIME):
         info = manifest(Path(entry['root']))
         status = job_status(entry)
         jobs.append({**entry, 'candidate': info.get('candidate'), 'opponent': info.get('opponent') or info.get('baseline'),
-                     'state': status.get('state', 'unavailable'), 'updatedAt': status.get('updatedAt', '')})
+                     'state': status.get('state', 'prepared' if entry.get('kind') == 'gpu' else 'unavailable'), 'updatedAt': status.get('updatedAt', '')})
     # A resume changes the supervisor ID, not the experiment's databases.
     # Keep the active/latest supervisor and resolve old bookmarks to it.
     experiments = {}
     for job in sorted(jobs, key=lambda x: (x['state'] == 'running', x['updatedAt']), reverse=True):
         root = str(Path(job['root']).resolve())
-        if root in experiments:
-            experiments[root]['aliases'].append(job['id'])
+        experiment = str(Path(job.get('experimentRoot', root)).resolve())
+        if experiment in experiments:
+            experiments[experiment]['aliases'].append(job['id'])
         else:
-            experiments[root] = {**job, 'root': root, 'aliases': []}
+            experiments[experiment] = {**job, 'root': root, 'aliases': []}
     return list(experiments.values())
 
 
@@ -461,6 +490,9 @@ class WorkbenchServer(ThreadingHTTPServer):
                 return cached[1]
             try:
                 report = (build_asset_report(entry, job_status(entry)) if entry.get('kind') == 'asset'
+                          else build_training_report(entry, job_status(entry)) if entry.get('kind') == 'training'
+                          else build_gpu_report(entry, job_status(entry)) if entry.get('kind') == 'gpu'
+                          else build_analysis_report(entry, job_status(entry)) if entry.get('kind') == 'analysis'
                           else build_report(entry, metric_cache=self.metric_cache))
             except (OSError, ValueError, sqlite3.Error) as error:
                 report = {'id': entry['id'], 'error': str(error), 'integrity': 'unavailable',
@@ -495,18 +527,24 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ('/api/jobs', '/api/report'):
             jobs = list_jobs(self.server.runtime)
         if url.path == '/api/jobs':
-            return self.respond({'jobs': jobs, 'refreshSeconds': CACHE_SECONDS})
+            return self.respond({'jobs': jobs, 'refreshSeconds': CACHE_SECONDS, 'uiVersion': UI_VERSION})
         if url.path == '/api/report':
             selected = parse_qs(url.query).get('job', [''])[0]
             entry = next((job for job in jobs
                           if job['id'] == selected or selected in job['aliases']), None)
             if not entry:
                 return self.respond({'error': 'Unknown benchmark'}, 404)
+            client_version = parse_qs(url.query).get('uiVersion', [''])[0]
+            if entry.get('kind') in ('asset', 'analysis', 'gpu', 'training') and client_version != UI_VERSION:
+                return self.respond({'id': entry['id'], 'error': 'Workbench updated. Reload this browser page once to load the new views. Background jobs are still running.'})
             return self.respond(self.server.report(entry))
         files = {'/favicon.svg': ('favicon.svg', 'image/svg+xml'), '/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
         if url.path in files:
             filename, content_type = files[url.path]
-            return self.respond((STATIC / filename).read_bytes(), content_type=content_type)
+            body = (STATIC / filename).read_bytes()
+            if filename == 'index.html':
+                body = body.replace(b'__WORKBENCH_UI_VERSION__', UI_VERSION.encode())
+            return self.respond(body, content_type=content_type)
         return self.respond({'error': 'Not found'}, 404)
 
 

@@ -1,5 +1,6 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
+const uiVersion = document.querySelector('meta[name=workbench-version]').content;
 const number = new Intl.NumberFormat();
 const percent = (value) => value == null ? '—' : `${(value * 100).toFixed(2)}%`;
 const interval = (values) => values ? `${percent(values[0])} – ${percent(values[1])}` : 'More pairs needed';
@@ -14,7 +15,7 @@ let inspectedPairs = 0;
 let jobs = [];
 let jobsSignature = '';
 const previews = new Map();
-const visibleJobs = () => jobs.filter((job) => job.kind === 'asset' || job.state === 'running' || job.state === 'pending' || job.id === selected);
+const visibleJobs = () => jobs.filter((job) => ['asset', 'analysis', 'gpu', 'training'].includes(job.kind) || job.state === 'running' || job.state === 'pending' || job.id === selected);
 const jobTitle = (job) => job.title || (job.candidate && job.opponent ? `${modelName(job.candidate)} vs ${modelName(job.opponent)}` : job.id);
 
 function element(tag, text, className) {
@@ -72,6 +73,30 @@ function renderPreviews() {
     const tab = document.getElementById(`tab-${job.id}`);
     if (!tab) continue;
     const snapshot = previews.get(job.id);
+    if (job.kind === 'training' && snapshot && !snapshot.error) {
+      tab.querySelector('.tab-state').textContent = snapshot.state;
+      tab.querySelector('.tab-rate').textContent = `${snapshot.completed} / ${snapshot.target} model fits`;
+      tab.querySelector('.tab-progress').textContent = snapshot.current ? `Epoch ${snapshot.current.epoch} · ${percent(snapshot.current.validation?.agreement)} validation agreement` : `${snapshot.stage || snapshot.state} · strength not measured`;
+      const rows = snapshot.current?.history || snapshot.trials.find((r) => r.id === snapshot.preferred)?.history || [];
+      chart(`preview-${job.id}`, rows, { compact: true, x: (r) => r.epoch, y: (r) => r.agreement, percent: true, domain: [0, 1], empty: 'Waiting for training metrics' });
+      continue;
+    }
+    if (job.kind === 'gpu' && snapshot && !snapshot.error && !snapshot.waiting) {
+      tab.querySelector('.tab-state').textContent = snapshot.state.replaceAll('_', ' ');
+      tab.querySelector('.tab-rate').textContent = `${number.format(snapshot.completed)} / ${number.format(snapshot.target)} ${snapshot.unit}`;
+      tab.querySelector('.tab-progress').textContent = `${percent(snapshot.completed / snapshot.target)} saved · ${snapshot.ratePerSecond != null ? `${number.format(Math.round(snapshot.ratePerSecond))}/s` : 'measuring rate'}`;
+      const rows = snapshot.history || [], start = rows[0]?.updatedAt || snapshot.asOf;
+      chart(`preview-${job.id}`, rows, { compact: true, x: (r) => r.updatedAt-start, y: (r) => r.completed / snapshot.target, percent: true, domain: [0, 1], empty: 'Waiting for GPU checkpoints' });
+      continue;
+    }
+    if (job.kind === 'analysis' && snapshot && !snapshot.error && !snapshot.waiting) {
+      tab.querySelector('.tab-state').textContent = snapshot.state.replaceAll('_', ' ');
+      tab.querySelector('.tab-rate').textContent = `${number.format(snapshot.completed)} / ${number.format(snapshot.target)} replays`;
+      tab.querySelector('.tab-progress').textContent = `${percent(snapshot.completed / snapshot.target)} complete`;
+      const rows = snapshot.history || [], start = rows[0]?.updatedAt || snapshot.asOf;
+      chart(`preview-${job.id}`, rows, { compact: true, x: (r) => r.updatedAt-start, y: (r) => r.completed / snapshot.target, percent: true, domain: [0, 1], empty: 'Waiting for progress' });
+      continue;
+    }
     if (job.kind === 'asset' && snapshot && !snapshot.error && !snapshot.waiting) {
       tab.querySelector('.tab-state').textContent = snapshot.state.replaceAll('_', ' ');
       tab.querySelector('.tab-rate').textContent = `${snapshot.completed.toLocaleString()} / ${snapshot.target.toLocaleString()} chunks`;
@@ -101,7 +126,7 @@ function renderPreviews() {
 
 function selectJob(id) {
   selected = id; followLatest = true; report = null;
-  $('report').hidden = true; $('asset-report').hidden = true; $('notice').hidden = true;
+  $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('gpu-report').hidden = true; $('training-report').hidden = true; $('notice').hidden = true;
   renderJobs(); refresh();
 }
 
@@ -176,6 +201,9 @@ function chart(id, rows, options) {
 function renderCharts() {
   if (!report || report.error || report.waiting) return;
   if (report.kind === 'asset') return renderAssetCharts(report);
+  if (report.kind === 'analysis') return renderAnalysisChart(report);
+  if (report.kind === 'gpu') return renderGpuCharts(report);
+  if (report.kind === 'training') return renderTrainingCharts(report);
   const index = Number($('inspect').value);
   const bands = [];
   if ($('show-anytime').checked) bands.push({ key: 'anytime95', className: 'anytime-band' });
@@ -233,12 +261,18 @@ function renderMetric(prefix, key, pairs) {
 function render(value) {
   report = value;
   const error = value.error || value.waiting;
-  $('report').hidden = Boolean(error) || value.kind === 'asset';
+  $('report').hidden = Boolean(error) || ['asset', 'analysis', 'gpu', 'training'].includes(value.kind);
+  $('analysis-report').hidden = Boolean(error) || value.kind !== 'analysis';
   $('asset-report').hidden = Boolean(error) || value.kind !== 'asset';
+  $('gpu-report').hidden = Boolean(error) || value.kind !== 'gpu';
+  $('training-report').hidden = Boolean(error) || value.kind !== 'training';
   $('notice').hidden = !error && !value.warnings?.length;
   $('notice').textContent = error || (value.warnings || []).join(' ');
   if (error) return;
   if (value.kind === 'asset') return renderAsset(value);
+  if (value.kind === 'analysis') return renderAnalysis(value);
+  if (value.kind === 'gpu') return renderGpu(value);
+  if (value.kind === 'training') return renderTraining(value);
   const candidate = modelName(value.candidate), opponent = modelName(value.opponent);
   $('matchup').textContent = `${candidate} vs ${opponent}`;
   $('experiment').textContent = value.experiment;
@@ -365,6 +399,50 @@ function renderAssetCharts(value) {
   $('asset-history-note').textContent = rows.length ? `Recorded window begins ${new Date(start * 1000).toLocaleString()}. Saved totals include earlier work; the time axis includes any pauses. Up to 500 history points are shown.` : 'Earlier chunks are preserved; detailed history begins with this update.';
 }
 
+function renderGpu(value) {
+  $('gpu-title').textContent = value.title;
+  $('gpu-scope').textContent = value.scope;
+  $('gpu-state').textContent = value.state.replaceAll('_', ' ');
+  $('gpu-stage').textContent = value.state === 'complete' ? 'Build, verification and archive complete' : value.stage.replaceAll('-', ' ');
+  $('gpu-completed').textContent = number.format(value.completed);
+  $('gpu-target').textContent = `of ${number.format(value.target)} ${value.unit}`;
+  $('gpu-fraction').textContent = `${percent(value.completed / value.target)} saved`;
+  $('gpu-progress').setAttribute('aria-valuemax', value.target);
+  $('gpu-progress').setAttribute('aria-valuenow', value.completed);
+  $('gpu-fill').style.width = `${100 * value.completed / value.target}%`;
+  $('gpu-rate').textContent = value.ratePerSecond == null ? 'Measuring…' : `${number.format(Math.round(value.ratePerSecond))} / second`;
+  $('gpu-snapshot').textContent = value.updatedAt == null ? 'Awaiting the first saved checkpoint' : `Updated ${new Date(value.updatedAt * 1000).toLocaleTimeString()}`;
+  $('gpu-eta').textContent = value.completed === value.target ? 'Computation complete' : duration(value.remainingSeconds);
+  $('gpu-finish').textContent = value.remainingSeconds == null ? 'ETA uses fresh, active throughput' : `Around ${new Date((value.asOf + value.remainingSeconds) * 1000).toLocaleString()}`;
+  $('gpu-workers').textContent = value.fresh && value.state === 'running' ? `${value.workers ?? '—'} / ${value.workerLimit ?? '—'}` : '—';
+  $('gpu-backend').textContent = value.backend || 'GPU backend';
+  $('gpu-eta-note').textContent = value.etaBasis || 'Compute ETA excludes final verification and archiving.';
+  const details = $('gpu-details'); details.replaceChildren();
+  for (const [label, stat] of [
+    ['Saved by GPU', value.gpuCompleted == null ? 'Not separately recorded' : `${number.format(value.gpuCompleted)} decisions`],
+    ['Saved by CPU', value.cpuCompleted == null ? 'Not separately recorded' : `${number.format(value.cpuCompleted)} decisions`],
+    ['Priority pass', value.priorityTarget ? `${number.format(value.priorityCompleted || 0)} / ${number.format(value.priorityTarget)} decisions` : 'Not specified'],
+    ['Observed frequency covered first', value.priorityCoverage == null ? 'Not specified' : percent(value.priorityCoverage)],
+    ['Sampled hands', value.handTarget == null ? 'Not specified' : number.format(value.handTarget)],
+    ['Score positions per hand and role', value.scoreCells == null ? 'Not specified' : number.format(value.scoreCells)],
+    ['GPU command elapsed time', value.gpuSeconds == null ? 'Not recorded' : duration(value.gpuSeconds)],
+    ['GPU sharing target', value.gpuCommandDuty == null ? 'Not specified' : `${percent(value.gpuCommandDuty)} command duty`],
+  ]) details.append(element('dt', label), element('dd', stat));
+  const checks = $('gpu-checks'); checks.replaceChildren();
+  for (const [label, stat] of [['Computation', value.completed === value.target ? 'Complete' : value.state === 'running' ? 'In progress' : value.state.replaceAll('_', ' ')], ['Asset verification', value.verification], ['Verified archive', value.archive]]) {
+    checks.append(element('dt', label), element('dd', stat));
+  }
+  $('gpu-policy').textContent = `Frozen policy: ${value.policy}`;
+  renderGpuCharts(value);
+}
+
+function renderGpuCharts(value) {
+  const rows = value.history || [], start = rows[0]?.updatedAt || value.asOf;
+  const options = { x: (r) => (r.updatedAt-start)/3600, xHours: true, zero: true, decimals: 0, empty: 'Waiting for GPU checkpoints' };
+  chart('gpu-progress-chart', rows, { ...options, y: (r) => r.completed });
+  chart('gpu-rate-chart', rows.filter((r) => r.ratePerSecond != null), { ...options, y: (r) => r.ratePerSecond });
+}
+
 async function refresh() {
   clearTimeout(timer);
   request?.abort();
@@ -376,6 +454,10 @@ async function refresh() {
     if (!response.ok) throw new Error(`Workbench returned ${response.status}`);
     const value = await response.json();
     if (controller.signal.aborted) return;
+    if (value.uiVersion && value.uiVersion !== uiVersion) {
+      location.reload();
+      return;
+    }
     jobs = value.jobs;
     for (const id of previews.keys()) if (!jobs.some((job) => job.id === id)) previews.delete(id);
     if (!jobs.length) {
@@ -383,7 +465,7 @@ async function refresh() {
       $('run-tabs').dataset.jobs = '';
       $('benchmark-view').removeAttribute('aria-labelledby');
       $('jobs').replaceChildren(element('option', 'No paired benchmarks registered'));
-      $('empty').hidden = false; $('report').hidden = true; $('asset-report').hidden = true; $('notice').hidden = true;
+      $('empty').hidden = false; $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('gpu-report').hidden = true; $('training-report').hidden = true; $('notice').hidden = true;
       $('connection').textContent = 'Connected';
       return;
     }
@@ -398,7 +480,7 @@ async function refresh() {
       let snapshot;
       try {
         const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]);
-        const data = await fetch(`/api/report?job=${encodeURIComponent(job.id)}`, { signal });
+        const data = await fetch(`/api/report?job=${encodeURIComponent(job.id)}&uiVersion=${encodeURIComponent(uiVersion)}`, { signal });
         if (!data.ok) throw new Error(`Benchmark returned ${data.status}`);
         snapshot = await data.json();
       } catch (error) {
@@ -455,3 +537,130 @@ refresh();
 
 let resizeFrame;
 window.addEventListener('resize', () => { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(() => { renderCharts(); renderPreviews(); }); });
+
+function renderAnalysisChart(value) {
+  const rows = value.history || [], start = rows[0]?.updatedAt || value.asOf;
+  chart('analysis-progress-chart', rows, { x: (r) => (r.updatedAt-start)/3600, y: (r) => r.completed,
+    xHours: true, zero: true, decimals: 0, empty: 'Waiting for progress history' });
+}
+function renderAnalysis(value) {
+  $('analysis-title').textContent = value.title;
+  $('analysis-state').textContent = value.state.replaceAll('_', ' ');
+  $('analysis-stage').textContent = value.stage.replaceAll('-', ' ');
+  $('analysis-snapshot').textContent = `Snapshot ${new Date(value.updatedAt*1000).toLocaleString()}`;
+  $('analysis-total').textContent = `${number.format(value.completed)} / ${number.format(value.target)} · ${percent(value.completed/value.target)}`;
+  const track = element('div', null, 'lane-track'), fill = element('div', null, 'lane-fill');
+  fill.style.width = `${Math.min(100, value.completed/value.target*100)}%`; track.append(fill); $('analysis-lanes').replaceChildren(track);
+  $('analysis-workers').textContent = value.fresh && value.state === 'running' ? `${value.workers} / ${value.workerLimit}` : `${['stale', 'unavailable'].includes(value.state) ? '—' : '0'} / ${value.workerLimit}`;
+  $('analysis-reused').textContent = `${number.format(value.reused)} earlier exact replays preserved`;
+  $('analysis-eta').textContent = duration(value.remainingSeconds);
+  $('analysis-finish').textContent = value.remainingSeconds == null ? 'ETA waits for active compute telemetry' : `Around ${new Date((value.asOf+value.remainingSeconds)*1000).toLocaleString()}`;
+  $('analysis-eta-note').textContent = value.etaBasis;
+  const groups = new Map(), labels = { pair: 'Pairs', triple: 'Pair royals', run3: 'Runs of 3', run4: 'Runs of 4', run5: 'Runs of 5', run6: 'Runs of 6', fifteen: 'Fifteens' };
+  for (const g of value.groups || []) {
+    const key = `${labels[g.kind] || g.kind} / ${g.role}`, row = groups.get(key) || { completed: 0, total: 0 };
+    row.completed += g.completed; row.total += g.total; groups.set(key, row);
+  }
+  const table = $('analysis-groups'); table.replaceChildren();
+  for (const [name, g] of groups) {
+    const row = element('tr'); row.append(element('td', name), element('td', `${number.format(g.completed)} / ${number.format(g.total)}`), element('td', percent(g.completed/g.total))); table.append(row);
+  }
+  renderAnalysisChart(value);
+}
+
+let inspectedTrainingTrial = null;
+const trainingMode = (value) => ({ broad: 'Broad corpus', 'target-only': '28.3 only', 'fine-tuned': 'Broad → 28.3' }[value] || value);
+const trainingCount = (value) => value == null ? '—' : number.format(value);
+const trainingLoss = (value) => value == null ? '—' : value.toFixed(4);
+const trainingLabel = (row) => `${trainingCount(row.parameters)} parameters · ${trainingMode(row.mode)} · ${trainingCount(row.positions)} examples`;
+
+function renderTraining(value) {
+  $('training-title').textContent = value.title;
+  $('training-state').textContent = value.state.replaceAll('_', ' ');
+  $('training-stage').textContent = value.stage || value.state;
+  $('training-completed').textContent = value.completed;
+  $('training-target').textContent = `of ${value.target} model fits complete`;
+  $('training-fraction').textContent = percent(value.completed / value.target);
+  $('training-progress').setAttribute('aria-valuemax', value.target);
+  $('training-progress').setAttribute('aria-valuenow', value.completed);
+  $('training-fill').style.width = `${100 * value.completed / value.target}%`;
+  const active = value.current;
+  $('training-current').textContent = active ? `${trainingCount(active.parameters)} parameters` : value.stage === 'fit' ? 'Between saved fit receipts' : 'Fitting complete or pending';
+  $('training-epoch').textContent = active ? `${trainingMode(active.mode)} · epoch ${active.epoch} / ${value.maxEpochs} maximum · best so far ${active.bestEpoch}` : `Stage: ${value.stage || value.state}`;
+  $('training-decisions').textContent = trainingCount(value.data.decisions);
+  $('training-games').textContent = `${trainingCount(value.data.games)} eligible natural game records, plus saved 28.3.fast labels`;
+  const best = value.trials.find((row) => row.id === value.preferred);
+  $('training-best').textContent = best ? `${percent(best.validation.agreement)} agreement` : 'Waiting for a completed fit';
+  $('training-best-note').textContent = best ? `${trainingCount(best.parameters)} parameters · lowest validation loss · ${value.selectionFrozen ? 'selection frozen' : 'provisional'}` : '';
+  $('training-update').textContent = active ? `Epoch saved ${new Date(active.updatedAt * 1000).toLocaleString()} · fit elapsed ${duration(active.seconds)} · GPU peak memory ${bytes(active.gpuPeakBytes)} · ${value.precision}` : `Snapshot ${new Date(value.asOf * 1000).toLocaleTimeString()} · ${value.precision}`;
+  $('training-stages').replaceChildren();
+  for (const row of value.stages) $('training-stages').append(element('span', `${row.name}: ${row.state}`, row.state === 'running' ? 'active-stage' : ''));
+  const picker = $('training-trial');
+  const choices = [...(active ? [active] : []), ...value.trials];
+  const chosen = choices.find((row) => row.id === inspectedTrainingTrial)?.id || active?.id || value.preferred;
+  const signature = choices.map((row) => row.id).join(',');
+  if (picker.dataset.choices !== signature) {
+    picker.replaceChildren();
+    for (const row of choices) {
+      const option = element('option', `${row.id === active?.id ? 'Current · ' : ''}${trainingLabel(row)} · ${row.id.split('-s').pop()}`);
+      option.value = row.id; picker.append(option);
+    }
+    picker.dataset.choices = signature;
+  }
+  picker.value = chosen || ''; picker.disabled = !choices.length;
+  $('training-trials').replaceChildren();
+  for (const row of value.trials) {
+    const tr = element('tr', null, row.id === value.preferred ? 'selected-trial' : '');
+    const td = element('td'), button = element('button', trainingCount(row.parameters));
+    button.type = 'button'; button.dataset.trainingTrial = row.id;
+    button.title = `Show learning curves for ${row.id}`;
+    td.append(button); tr.append(td);
+    for (const text of [trainingMode(row.mode), trainingCount(row.positions), row.seed,
+      `${row.chosenEpoch} / ${row.lastEpoch}`, percent(row.validation.agreement), trainingLoss(row.validation.crossEntropy),
+      row.test?.agreement == null ? 'Pending' : `${percent(row.test.agreement)}${row.test95 ? ` (95%: ${interval(row.test95)})` : ''}`, duration(row.seconds)]) tr.append(element('td', text));
+    $('training-trials').append(tr);
+  }
+  $('training-test-note').textContent = `${value.testAvailable ? 'Test results are now available. Intervals resample whole deal-seed groups.' : 'Test results remain pending until all fits finish and validation freezes selection.'} Highlighted row has the lowest natural 28.3 validation cross-entropy. Checkpoints use that loss, not peak agreement. Click a parameter count to inspect its learning curves.`;
+  const data = $('training-data'); data.replaceChildren();
+  for (const [label, stat] of [['Training split', trainingCount(value.data.splits?.train)], ['Validation split', trainingCount(value.data.splits?.validation)], ['Test split', trainingCount(value.data.splits?.test)], ['Result verification', value.verification], ['Durable archive', value.archive]]) data.append(element('dt', label), element('dd', stat));
+  const teachers = $('training-teachers'); teachers.replaceChildren();
+  for (const [teacher, count] of Object.entries(value.data.teachers || {})) teachers.append(element('dt', teacher), element('dd', trainingCount(count)));
+  $('training-speed-note').textContent = value.speed.status === 'complete' ? `${value.speed.includes} ${value.speed.sharedGpu}` : 'Scheduled after fitting and held-out evaluation. These measurements will include input encoding, inference and legal choice selection.';
+  $('training-speed').replaceChildren();
+  for (const row of value.speed.rows || []) {
+    const tr = element('tr');
+    for (const text of [trainingCount(row.parameters), trainingCount(row.batch), row.device, trainingCount(Math.round(row.decisionsPerSecond))]) tr.append(element('td', text));
+    $('training-speed').append(tr);
+  }
+  $('training-frontier-note').textContent = value.frontier.limitation || 'Produced after the study finishes. More-data scenarios describe this model family; they do not establish a playing-strength ceiling.';
+  $('training-frontier').replaceChildren();
+  for (const row of value.frontier.curves || []) {
+    const tr = element('tr'); tr.append(element('td', trainingCount(row.parameters)));
+    for (const scale of ['2', '4', '10']) {
+      const point = row.powerLawScenario?.[scale];
+      tr.append(element('td', point ? `${percent(point.bestAgreement)} (${interval(point.agreementRange)})` : 'No stable projection'));
+    }
+    $('training-frontier').append(tr);
+  }
+  $('training-source').textContent = value.id;
+  renderTrainingCharts(value);
+}
+
+function renderTrainingCharts(value) {
+  const chosen = $('training-trial').value;
+  const row = value.current?.id === chosen ? value.current : value.trials.find((trial) => trial.id === chosen);
+  const history = row?.history || [];
+  const epoch = row?.chosenEpoch ?? row?.bestEpoch;
+  const options = { x: (r) => r.epoch, xLabel: 'Completed training epochs →', empty: 'Waiting for the first saved epoch', inspected: history.findIndex((r) => r.epoch === epoch) };
+  chart('training-agreement-chart', history.filter((r) => r.agreement != null), { ...options, y: (r) => r.agreement, percent: true });
+  chart('training-loss-chart', history.filter((r) => r.crossEntropy != null), { ...options, y: (r) => r.crossEntropy, decimals: 3, minSpan: .01 });
+  $('training-curve-note').textContent = row ? `${trainingLabel(row)}. ${trainingCount(history[0]?.decisions)} natural 28.3 validation decisions per epoch. Marked epoch: ${epoch ?? 'pending'}, selected by lowest prediction loss. Later epochs can lose accuracy through overfitting.` : 'Training metrics appear after each completed epoch.';
+}
+
+$('training-trial').addEventListener('change', () => { inspectedTrainingTrial = $('training-trial').value; if (report?.kind === 'training') renderTrainingCharts(report); });
+$('training-trials').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-training-trial]');
+  if (!button || report?.kind !== 'training') return;
+  inspectedTrainingTrial = button.dataset.trainingTrial; $('training-trial').value = inspectedTrainingTrial;
+  renderTrainingCharts(report); $('training-trial').scrollIntoView({ behavior: 'smooth', block: 'center' });
+});

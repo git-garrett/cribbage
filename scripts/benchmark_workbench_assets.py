@@ -32,7 +32,7 @@ def history_rows(path):
         try:
             row = json.loads(lines[i])
             if isinstance(row.get('updatedAt'), (int, float)) and isinstance(row.get('completed'), int):
-                rows.append({key: row.get(key) for key in ('updatedAt', 'completed', 'chunksPerHour', 'segmentStartedAt', 'status')})
+                rows.append({key: row.get(key) for key in ('updatedAt', 'completed', 'chunksPerHour', 'ratePerSecond', 'segmentStartedAt', 'status')})
         except (ValueError, AttributeError):
             continue
     return rows
