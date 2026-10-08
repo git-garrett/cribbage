@@ -1,4 +1,5 @@
 workbench.strongcribbage.com {
+	import /etc/caddy/status-logging*.caddy
 	header {
 		-Server
 		Cache-Control "no-store"

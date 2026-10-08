@@ -243,6 +243,7 @@ SERVICE
 
   "${SSH_BASE[@]}" "$REMOTE" "cat > '$caddy_candidate'" <<CADDY
 ${GAME_DOMAIN} {
+	import /etc/caddy/status-logging*.caddy
 	encode zstd gzip
 	@api path /api/* /health
 	handle @api {
@@ -264,6 +265,7 @@ ${GAME_DOMAIN} {
 }
 
 ${MARKETING_DOMAIN} {
+	import /etc/caddy/status-logging*.caddy
 	encode zstd gzip
 	root * ${REMOTE_CURRENT_LINK}/dist
 	try_files {path} /coming-soon.html
