@@ -26,6 +26,10 @@ install -m 644 Caddyfile /etc/caddy/Caddyfile
 restorecon /etc/caddy/Caddyfile /etc/caddy/access.caddy
 # Keep SELinux enforcing; permit the proxy to connect to its loopback upstream.
 setsebool -P httpd_can_network_connect 1
+if systemctl is-active --quiet firewalld; then
+  firewall-cmd --permanent --add-service=http --add-service=https
+  firewall-cmd --add-service=http --add-service=https
+fi
 systemctl enable --now caddy
 systemctl reload caddy
 echo 'Remote access configuration installed.'
