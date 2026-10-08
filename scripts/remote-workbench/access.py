@@ -70,7 +70,8 @@ def create_app(credentials=None):
         response.headers['Cache-Control'] = 'no-store'
         response.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive'
         response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['Referrer-Policy'] = 'no-referrer'
+        # no-referrer makes native form POSTs send Origin: null in browsers.
+        response.headers['Referrer-Policy'] = 'same-origin'
         response.headers['Content-Security-Policy'] = (
             "default-src 'none'; style-src 'nonce-" + getattr(g, 'style_nonce', '') +
             "'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")

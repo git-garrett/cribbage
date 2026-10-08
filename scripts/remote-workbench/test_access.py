@@ -108,7 +108,7 @@ def test_login_discloses_no_workbench_and_sets_security_headers(app):
         assert text not in response.text.lower()
     assert response.headers['Cache-Control'] == 'no-store'
     assert "frame-ancestors 'none'" in response.headers['Content-Security-Policy']
-    assert response.headers['Referrer-Policy'] == 'no-referrer'
+    assert response.headers['Referrer-Policy'] == 'same-origin'
     assert 'autocapitalize="none"' in response.text
 
 

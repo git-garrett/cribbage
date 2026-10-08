@@ -4,7 +4,7 @@ workbench.strongcribbage.com {
 		Cache-Control "no-store"
 		X-Robots-Tag "noindex, nofollow, noarchive"
 		X-Content-Type-Options "nosniff"
-		Referrer-Policy "no-referrer"
+		Referrer-Policy "same-origin"
 		Strict-Transport-Security "max-age=31536000"
 	}
 	handle /login {

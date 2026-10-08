@@ -71,7 +71,10 @@ Verify anonymous requests to `/`, `/health`, `/api/jobs`, `/api/report`, `/app.j
 `/style.css` and `/favicon.svg` redirect to `/login` without application data or
 `WWW-Authenticate`. In WebKit and Chromium, submit an incorrect password followed
 by the correct one; verify an inline error, successful navigation and a working
-refresh. Check the secure cookie flags, a live report, and that authenticated
+refresh. With the project Playwright browsers installed, run
+`node scripts/remote-workbench/verify-browser.cjs PRIVATE_ACCESS_JSON` for that
+public smoke check; the JSON contains the existing `username` and `password`.
+Check the secure cookie flags, a live report, and that authenticated
 POST requests to the workbench are rejected. Check the verifier failing closed.
 Verify the tunnel binds only to 127.0.0.1 and unauthorized SSH listen ports and
 shell commands fail. Restart the tunnel to check reconnection, then confirm a
