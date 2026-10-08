@@ -32,7 +32,7 @@ def main():
         if source.resolve() != destination.resolve():
             shutil.copyfile(source, destination)
         destination.chmod(0o600)
-    arguments = ['/usr/bin/ssh', '-NT', '-i', str(root / 'tunnel_ed25519'),
+    arguments = ['/usr/bin/ssh', '-F', '/dev/null', '-NT', '-i', str(root / 'tunnel_ed25519'),
         '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=yes',
         '-o', f'UserKnownHostsFile={root / "known_hosts"}', '-o', 'ExitOnForwardFailure=yes',
         '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3', '-o', 'ConnectTimeout=15',
