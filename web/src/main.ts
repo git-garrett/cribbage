@@ -8661,11 +8661,6 @@ function renderMyStats(events: AnalyticsEvent[]): void {
       : "Loading merged production history…";
   els.analyticsTotals.innerHTML = "";
   els.analyticsTotals.classList.add("my-stats-comparison");
-  if (ownPeopleProfile?.historyReview) {
-    const comparison = document.createElement("p");
-    comparison.textContent = historyReviewCopy(ownPeopleProfile.historyReview);
-    els.analyticsTotals.append(comparison);
-  }
   els.analyticsTotals.append(myStatsComparisonTable(
     lifetime.player,
     totals,
