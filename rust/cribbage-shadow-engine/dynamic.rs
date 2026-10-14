@@ -42,8 +42,25 @@ impl DynamicRegretBuckets {
     }
 }
 
+/// Frozen when a game starts so restoring older games cannot change their weighting.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HandicapWeighting {
+    #[default]
+    Legacy,
+    SampleAware,
+}
+
+impl HandicapWeighting {
+    pub fn is_legacy(&self) -> bool {
+        *self == Self::Legacy
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct DynamicCycleSample {
+    #[serde(default, skip_serializing_if = "HandicapWeighting::is_legacy")]
+    pub handicap_weighting: HandicapWeighting,
     pub dealer_discard_regret: f64,
     pub dealer_pegging_regret: f64,
     pub pone_discard_regret: f64,
@@ -198,7 +215,15 @@ impl DynamicProfile {
             if self.handicap_cycles == 0 {
                 self.ewma_cycle_handicap = cycle_handicap;
             } else {
-                let handicap_alpha = 1.0 - 0.5_f64.powf(1.0 / HANDICAP_HALF_LIFE_CYCLES);
+                let steady_alpha = 1.0 - 0.5_f64.powf(1.0 / HANDICAP_HALF_LIFE_CYCLES);
+                // Average early evidence evenly, then retain the established decay.
+                // Existing aggregates remain the baseline; no history is replayed.
+                let handicap_alpha = match sample.handicap_weighting {
+                    HandicapWeighting::Legacy => steady_alpha,
+                    HandicapWeighting::SampleAware => {
+                        steady_alpha.max(1.0 / (f64::from(self.handicap_cycles) + 1.0))
+                    }
+                };
                 self.ewma_cycle_handicap +=
                     handicap_alpha * (cycle_handicap - self.ewma_cycle_handicap);
             }

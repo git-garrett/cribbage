@@ -1,5 +1,5 @@
 use cribbage_shadow_engine::dynamic::{
-    DynamicCycleSample, DynamicProfile, DynamicState, DYNAMIC_EVALUATOR_VERSION,
+    DynamicCycleSample, DynamicProfile, DynamicState, HandicapWeighting, DYNAMIC_EVALUATOR_VERSION,
     EASY_CALIBRATED_REGRET_PER_DECISION, HANDICAP_HALF_LIFE_CYCLES, MIN_COMPLETE_CYCLES,
     MOVING_AVERAGE_HALF_LIFE_CYCLES, REGRET_DEADBAND, UNIVERSAL_CYCLES_PER_GAME,
 };
@@ -8,6 +8,7 @@ use cribbage_shadow_engine::model_id::{ModelId, ACE_MODEL, ACE_MODEL_ID};
 
 fn sample(regret: f64) -> DynamicCycleSample {
     DynamicCycleSample {
+        handicap_weighting: Default::default(),
         dealer_discard_regret: regret,
         dealer_pegging_regret: regret,
         pone_discard_regret: regret,
@@ -45,6 +46,7 @@ fn dynamic_uses_the_production_ace_for_evaluation_and_top_strength() {
 fn four_buckets_are_combined_evenly() {
     let mut profile = DynamicProfile::default();
     profile.observe_cycle(DynamicCycleSample {
+        handicap_weighting: Default::default(),
         dealer_discard_regret: 0.04,
         dealer_pegging_regret: 0.0,
         pone_discard_regret: 0.0,
@@ -189,4 +191,71 @@ fn game_based_profile_preserves_its_published_handicap_during_migration() {
     let migrated = profile.into_current();
     assert_eq!(migrated.handicap_cycles, 20);
     assert!((migrated.handicap_per_game().unwrap() - -0.125).abs() < 1e-12);
+}
+
+#[test]
+fn sample_aware_handicap_does_not_anchor_calibration_to_the_first_cycle() {
+    for regrets in [
+        [0.0, 0.01, 0.02, 0.03, 0.04, 0.05],
+        [0.05, 0.04, 0.03, 0.02, 0.01, 0.0],
+    ] {
+        let mut profile = DynamicProfile::default();
+        for regret in regrets {
+            profile.observe_cycle(DynamicCycleSample {
+                handicap_weighting: HandicapWeighting::SampleAware,
+                ..sample(regret)
+            });
+        }
+        assert_eq!(profile.handicap_cycles, 6);
+        assert!((profile.ewma_cycle_handicap - -0.1).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn sample_aware_handicap_preserves_the_saved_baseline_until_new_evidence() {
+    let baseline = DynamicProfile {
+        complete_cycles: 8,
+        handicap_cycles: 8,
+        ewma_cycle_handicap: -0.003,
+        ..DynamicProfile::default()
+    };
+    let saved = serde_json::to_string(&baseline).unwrap();
+    let mut restored: DynamicProfile = serde_json::from_str(&saved).unwrap();
+    restored = restored.into_play_profile();
+    assert_eq!(restored, baseline);
+    assert_eq!(restored.handicap_per_game(), baseline.handicap_per_game());
+    restored.observe_cycle(DynamicCycleSample {
+        handicap_weighting: HandicapWeighting::SampleAware,
+        ..sample(0.02)
+    });
+    assert!((restored.ewma_cycle_handicap - (-0.003 * 8.0 - 0.08) / 9.0).abs() < 1e-12);
+}
+
+#[test]
+fn sample_aware_handicap_keeps_the_established_decay_after_warmup() {
+    let mut profile = DynamicProfile {
+        complete_cycles: 120,
+        handicap_cycles: 120,
+        ewma_cycle_handicap: -0.02,
+        ..DynamicProfile::default()
+    };
+    profile.observe_cycle(DynamicCycleSample {
+        handicap_weighting: HandicapWeighting::SampleAware,
+        ..sample(0.01)
+    });
+    let alpha = 1.0 - 0.5_f64.powf(1.0 / HANDICAP_HALF_LIFE_CYCLES);
+    assert!((profile.ewma_cycle_handicap - (-0.02 + alpha * (-0.04 + 0.02))).abs() < 1e-12);
+}
+
+#[test]
+fn historical_cycle_samples_keep_the_legacy_handicap_update() {
+    let legacy: DynamicCycleSample = serde_json::from_str(
+        r#"{"dealer_discard_regret":0.02,"dealer_pegging_regret":0.02,"pone_discard_regret":0.02,"pone_pegging_regret":0.02,"total_regret":0.08}"#
+    ).unwrap();
+    assert_eq!(legacy.handicap_weighting, HandicapWeighting::Legacy);
+    let mut profile = DynamicProfile::default();
+    profile.observe_cycle(sample(0.0));
+    profile.observe_cycle(legacy);
+    let alpha = 1.0 - 0.5_f64.powf(1.0 / HANDICAP_HALF_LIFE_CYCLES);
+    assert!((profile.ewma_cycle_handicap - -0.08 * alpha).abs() < 1e-12);
 }

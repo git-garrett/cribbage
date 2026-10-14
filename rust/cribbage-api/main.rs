@@ -21,7 +21,7 @@ use cribbage_shadow_engine::decision::{
 #[cfg(test)]
 use cribbage_shadow_engine::decision::recommend_peg_for_side_with_caches;
 use cribbage_shadow_engine::dynamic::{
-    DynamicCycleSample, DynamicProfile, DynamicState, DYNAMIC_EVALUATOR_VERSION,
+    DynamicCycleSample, DynamicProfile, DynamicState, HandicapWeighting, DYNAMIC_EVALUATOR_VERSION,
     MIN_COMPLETE_CYCLES,
 };
 use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
@@ -60,6 +60,7 @@ static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone)]
 struct Session {
+    handicap_weighting: HandicapWeighting,
     id: String,
     tag: Option<String>,
     owner_user_id: Option<i64>,
@@ -211,6 +212,8 @@ struct SavedScoreEvent {
 /// as a recovery source.
 #[derive(Deserialize, Serialize)]
 struct PersistedSession {
+    #[serde(default, skip_serializing_if = "HandicapWeighting::is_legacy")]
+    handicap_weighting: HandicapWeighting,
     version: u8,
     id: String,
     tag: Option<String>,
@@ -1039,6 +1042,7 @@ fn new_session_from_seed(model: ModelId, tag: Option<String>, seed: u32, counter
     let dynamic = (model == ModelId::Dynamic)
         .then(|| DynamicState::new(DynamicProfile::default(), seed, score_snapshot(&game)));
     Session {
+        handicap_weighting: HandicapWeighting::SampleAware,
         id: format!("rust-{:x}-{:x}", unix_millis(), counter),
         tag,
         owner_user_id: None,
@@ -1161,6 +1165,7 @@ fn initialize_game_database(data_dir: &Path) -> Result<(), String> {
 
 fn persisted_session(session: &Session) -> PersistedSession {
     PersistedSession {
+        handicap_weighting: session.handicap_weighting,
         version: 1,
         id: session.id.clone(),
         tag: session.tag.clone(),
@@ -1194,6 +1199,7 @@ fn restore_persisted_session(stored: PersistedSession) -> Result<Session, String
     }
     let model = ModelId::from_str(&stored.model)?;
     let mut session = Session {
+        handicap_weighting: stored.handicap_weighting,
         id: stored.id,
         tag: stored.tag,
         owner_user_id: stored.owner_user_id,
@@ -1531,6 +1537,7 @@ impl CycleRegretAccumulators {
 
     fn sample(self, total_regret: f64) -> Option<DynamicCycleSample> {
         Some(DynamicCycleSample {
+            handicap_weighting: HandicapWeighting::Legacy,
             dealer_discard_regret: self.dealer_discard.mean()?,
             dealer_pegging_regret: self.dealer_pegging.mean()?,
             pone_discard_regret: self.pone_discard.mean()?,
@@ -1619,7 +1626,8 @@ fn eligible_dynamic_cycle_samples(session: &Session) -> Vec<EligibleDynamicCycle
                 total_regret += regret;
             }
         }
-        if let Some(sample) = buckets.sample(total_regret) {
+        if let Some(mut sample) = buckets.sample(total_regret) {
+            sample.handicap_weighting = session.handicap_weighting;
             samples.push(EligibleDynamicCycle {
                 first_hand,
                 strength_sample: sample,
@@ -6480,6 +6488,97 @@ mod tests {
     }
 
     #[test]
+    fn handicap_weighting_is_frozen_when_the_game_starts() {
+        let session = new_session_from_seed(ModelId::Dynamic, None, 17, 1);
+        assert_eq!(session.handicap_weighting, HandicapWeighting::SampleAware);
+        let stored = serde_json::to_value(persisted_session(&session)).unwrap();
+        let restored =
+            restore_persisted_session(serde_json::from_value(stored.clone()).unwrap()).unwrap();
+        assert_eq!(restored.handicap_weighting, HandicapWeighting::SampleAware);
+        let mut legacy = stored;
+        legacy.as_object_mut().unwrap().remove("handicap_weighting");
+        let restored = restore_persisted_session(serde_json::from_value(legacy).unwrap()).unwrap();
+        assert_eq!(restored.handicap_weighting, HandicapWeighting::Legacy);
+    }
+
+    #[test]
+    fn handicap_correction_only_applies_to_new_game_evidence_once() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "cribbage-handicap-future-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let connection = open_game_database(&data_dir).unwrap();
+        let baseline = DynamicProfile {
+            started_dynamic: true,
+            complete_cycles: 8,
+            handicap_cycles: 8,
+            ewma_cycle_handicap: -0.003,
+            length_games: 2,
+            ..DynamicProfile::default()
+        };
+        for (user_id, weighting) in [
+            (901, HandicapWeighting::Legacy),
+            (902, HandicapWeighting::SampleAware),
+        ] {
+            player_profile::save(&connection, user_id, &baseline).unwrap();
+            let saved_json = || {
+                connection.query_row(
+                "SELECT profile_json FROM dynamic_player_profiles WHERE user_id=?1 AND evaluator_version=?2",
+                params![user_id, PLAYER_HISTORY_KEY], |row| row.get::<_, String>(0),
+            ).unwrap()
+            };
+            let before = saved_json();
+            assert_eq!(
+                load_dynamic_profile(&data_dir, user_id).unwrap().unwrap(),
+                baseline
+            );
+            let empty = new_session_from_seed(ModelId::Dynamic, None, 19, user_id as u64);
+            assert!(sync_dynamic_player_profile(&data_dir, user_id, &empty)
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                saved_json(),
+                before,
+                "opening a game must not rewrite its player's handicap"
+            );
+            let mut session =
+                reviewed_cycle_session(ModelId::Dynamic, &format!("future-test-{user_id}"));
+            session.handicap_weighting = weighting;
+            let actual = sync_dynamic_player_profile(&data_dir, user_id, &session)
+                .unwrap()
+                .unwrap();
+            let legacy_alpha = 1.0
+                - 0.5_f64.powf(1.0 / cribbage_shadow_engine::dynamic::HANDICAP_HALF_LIFE_CYCLES);
+            let alpha = if weighting == HandicapWeighting::Legacy {
+                legacy_alpha
+            } else {
+                1.0 / 9.0
+            };
+            assert!(
+                (actual.ewma_cycle_handicap - (-0.003 + alpha * (-0.09 + 0.003))).abs() < 1e-12
+            );
+            assert_eq!(actual.handicap_cycles, 9);
+            let after = saved_json();
+            assert!(sync_dynamic_player_profile(&data_dir, user_id, &session)
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                saved_json(),
+                after,
+                "reloading completed evidence must not apply it again"
+            );
+            let ledger: DynamicCycleSample = serde_json::from_str(&connection.query_row(
+                "SELECT sample_json FROM dynamic_profile_cycles WHERE user_id=?1 AND session_id=?2",
+                params![user_id, session.id], |row| row.get::<_, String>(0),
+            ).unwrap()).unwrap();
+            assert_eq!(ledger.handicap_weighting, weighting);
+        }
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
     fn ace_upgrade_blends_new_cycles_into_existing_handicap() {
         let data_dir = std::env::temp_dir().join(format!(
             "cribbage-continuous-handicap-{}-{}",
@@ -6511,7 +6610,7 @@ mod tests {
         );
         let alpha =
             1.0 - 0.5_f64.powf(1.0 / cribbage_shadow_engine::dynamic::HANDICAP_HALF_LIFE_CYCLES);
-        let expected = -0.02 + alpha * (-0.09 - -0.02);
+        let expected = -0.02 + alpha.max(1.0 / 59.0) * (-0.09 - -0.02);
         assert!((effective.ewma_cycle_handicap - expected).abs() < 1e-12);
         assert_eq!(effective.length_games, 14);
         let length_alpha = 1.0 - 0.5_f64.powf(1.0 / 18.0);
