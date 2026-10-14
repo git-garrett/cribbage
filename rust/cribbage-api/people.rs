@@ -11,7 +11,7 @@ use cribbage_shadow_engine::decision::{
     DecisionReview as EngineDecisionReview,
 };
 use cribbage_shadow_engine::dynamic::{
-    DynamicCycleSample, DYNAMIC_EVALUATOR_VERSION, MIN_COMPLETE_CYCLES,
+    DynamicCycleSample, HandicapWeighting, DYNAMIC_EVALUATOR_VERSION, MIN_COMPLETE_CYCLES,
     MIN_COMPLETE_GAMES_FOR_PERSONAL_LENGTH, UNIVERSAL_CYCLES_PER_GAME,
 };
 use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
@@ -250,6 +250,8 @@ struct HumanGameWatchSelection {
 
 #[derive(Clone, Deserialize, Serialize)]
 struct HumanGameRecord {
+    #[serde(default, skip_serializing_if = "HandicapWeighting::is_legacy")]
+    handicap_weighting: HandicapWeighting,
     version: u8,
     game_id: String,
     game: CribbageGame,
@@ -1198,6 +1200,7 @@ fn ensure_human_game(
         Side::Right
     };
     let record = HumanGameRecord {
+        handicap_weighting: HandicapWeighting::SampleAware,
         version: 1,
         game_id: random_id("human-game"),
         game: CribbageGame::new_with_seed(seed, first_deal),
@@ -1911,6 +1914,7 @@ fn eligible_human_dynamic_cycle_samples(
         samples.push(EligibleDynamicCycle {
             first_hand,
             strength_sample: DynamicCycleSample {
+                handicap_weighting: record.handicap_weighting,
                 dealer_discard_regret: sums[0] / f64::from(counts[0]),
                 dealer_pegging_regret: sums[1] / f64::from(counts[1]),
                 pone_discard_regret: sums[2] / f64::from(counts[2]),
@@ -3119,6 +3123,7 @@ mod tests {
         check(&expected);
         for index in 0..8 {
             let sample = crate::DynamicCycleSample {
+                handicap_weighting: Default::default(),
                 dealer_discard_regret: 0.0025,
                 dealer_pegging_regret: 0.0025,
                 pone_discard_regret: 0.0025,
@@ -3681,6 +3686,7 @@ mod tests {
                 let mut game = CribbageGame::new_with_seed(123, Side::Left);
                 game.phase = phase;
                 let record = HumanGameRecord {
+                    handicap_weighting: HandicapWeighting::Legacy,
                     version: 1,
                     game_id: "counting-test".to_string(),
                     game,
@@ -4389,7 +4395,27 @@ mod tests {
                         recommended_win_probability: Some(0.5),
                     });
                 }
+                assert_eq!(reviewed.handicap_weighting, HandicapWeighting::SampleAware);
+                let mut legacy_json = serde_json::to_value(&reviewed).unwrap();
+                legacy_json
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("handicap_weighting");
+                let legacy: HumanGameRecord = serde_json::from_value(legacy_json).unwrap();
+                assert_eq!(legacy.handicap_weighting, HandicapWeighting::Legacy);
                 for viewer in [Side::Left, Side::Right] {
+                    let current_samples = eligible_human_dynamic_cycle_samples(&reviewed, viewer);
+                    assert!(!current_samples.is_empty());
+                    assert!(current_samples
+                        .iter()
+                        .all(|cycle| cycle.strength_sample.handicap_weighting
+                            == HandicapWeighting::SampleAware));
+                    let old_samples = eligible_human_dynamic_cycle_samples(&legacy, viewer);
+                    assert_eq!(old_samples.len(), current_samples.len());
+                    assert!(old_samples
+                        .iter()
+                        .all(|cycle| cycle.strength_sample.handicap_weighting
+                            == HandicapWeighting::Legacy));
                     let analytics = human_game_analytics(&reviewed, &row, viewer);
                     let score_events = analytics.as_array().unwrap().iter().filter(|event| event["type"] == "score").collect::<Vec<_>>();
                     for side in [viewer, viewer.other()] {

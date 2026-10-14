@@ -213,6 +213,7 @@ mod tests {
 
     fn sample(regret: f64) -> DynamicCycleSample {
         DynamicCycleSample {
+            handicap_weighting: Default::default(),
             dealer_discard_regret: regret / 4.0,
             dealer_pegging_regret: regret / 4.0,
             pone_discard_regret: regret / 4.0,
