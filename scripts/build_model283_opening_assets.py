@@ -131,6 +131,26 @@ def sync_directory(path):
     finally: os.close(fd)
 
 
+def valid_publication(value, allow_local=False):
+    publication = value.get('publication', {})
+    if publication.get('sha256') != value['production']['sha256']:
+        return False
+    return (publication.get('status') == 'published' or
+            (allow_local and publication.get('status') == 'local_only'
+             and publication.get('reason') == 'asset_volume_capacity'))
+
+
+def production_capacity(config):
+    path = Path(config['run']) / 'production-capacity.json'
+    if not path.exists(): return None
+    value = json.loads(path.read_text())
+    remote = config.get('remote', {})
+    if (value.get('policy') != config['policy'] or value.get('host') != remote.get('host')
+            or value.get('status') != 'capacity'):
+        raise ValueError('Production capacity checkpoint identity differs')
+    return value
+
+
 def sync_chunk(config, value):
     # Explicit final sync for this chunk: no calculation writes on the archive drive.
     archive = Path(config['archive']) / config['policy']
@@ -140,19 +160,35 @@ def sync_chunk(config, value):
     remote = config.get('remote')
     if remote:
         row = value['production']
+        allow_local = remote.get('onCapacity') == 'retain_local'
+        capacity = production_capacity(config)
+        if capacity:
+            if not allow_local: raise ValueError('Production capacity reached; local-only continuation is disabled')
+            value['publication'] = dict(status='local_only', reason='asset_volume_capacity', sha256=row['sha256'])
+            return value
         command = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15',
                    '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3',
                    '-o', 'ControlMaster=auto', '-o', 'ControlPersist=60',
-                   '-o', 'ControlPath=' + str(Path(config['run']) / 'ssh-control'),
+                   '-o', 'ControlPath=' + remote.get('controlPath', str(Path(config['run']) / 'ssh-control')),
                    '-i', remote['key'], remote['host'], 'python3', remote['receiver'],
                    config['policy'], value['relative'], row['sha256']]
         with Path(row['path']).open('rb') as data:
             # Failed publication preserves this completed chunk for an explicit resume.
             out = subprocess.run(command, stdin=data, capture_output=True, check=True, timeout=120)
         result = json.loads(out.stdout)
-        if result.get('status') != 'published' or result.get('sha256') != row['sha256']:
+        if result.get('sha256') != row['sha256']:
             raise ValueError('Production publication acknowledgment differs')
-        value['publication'] = result
+        if result.get('status') == 'capacity' and allow_local:
+            if result.get('policy') != config['policy'] or result.get('reason') not in ('bytes', 'inodes'):
+                raise ValueError('Production capacity acknowledgment differs')
+            result.update(host=remote['host'], firstUnpublishedIndex=value['index'], updatedAt=time.time())
+            atomic_json(Path(config['run']) / 'production-capacity.json', result)
+            sync_directory(Path(config['run']))
+            value['publication'] = dict(status='local_only', reason='asset_volume_capacity', sha256=row['sha256'])
+        elif result.get('status') == 'published':
+            value['publication'] = result
+        else:
+            raise ValueError('Production publication acknowledgment differs')
     return value
 
 
@@ -208,7 +244,8 @@ def run(config):
             seconds = now - rate_points[0][0]
             rate = (len(completed) - rate_points[0][1]) / seconds if seconds >= 30 else None
             value = dict(status=state, completed=len(completed), total=limit,
-                contiguousCompleted=prefix, published=published, workers=workers, workerLimit=capacity,
+                contiguousCompleted=prefix, published=published, localOnly=len(completed)-published,
+                productionCapacity=production_capacity(config), workers=workers, workerLimit=capacity,
                 fullBytes=totals[0], shallowBytes=totals[1], diskFreeBytes=shutil.disk_usage(root).free,
                 diskReserveBytes=reserve, chunksPerHour=rate*3600 if rate is not None else None,
                 remainingHours=(limit-len(completed))/rate/3600 if rate and state == 'running' else None,

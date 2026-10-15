@@ -50,11 +50,13 @@ def build_asset_report(entry, status, now=None):
     p = read_json(root / 'progress.json')
     if not p:
         return {**result, 'waiting': 'Waiting for the first asset-build snapshot.'}
-    for key in ('completed', 'contiguousCompleted', 'published', 'fullBytes', 'shallowBytes',
+    for key in ('completed', 'contiguousCompleted', 'published', 'localOnly', 'productionCapacity', 'fullBytes', 'shallowBytes',
                 'workers', 'workerLimit', 'diskFreeBytes', 'diskReserveBytes', 'chunksPerHour',
                 'updatedAt', 'scheduling', 'etaBasis'):
         result[key] = p.get(key)
     fresh = 0 <= now - p.get('updatedAt', 0) < 90 and p.get('total') == target
+    if result.get('productionCapacity'):
+        result['warnings'].append('Production publication reached the asset volume capacity; the complete local asset continues building and archiving.')
     result['fresh'] = fresh
     result['snapshotAgeSeconds'] = max(0, now-p.get('updatedAt', 0))
     if result['state'] == 'running':

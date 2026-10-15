@@ -18,7 +18,7 @@ grant to the configured archive folder through the macOS folder picker.
 Build a local, ad-hoc signed helper once at a stable internal location:
 
 ```sh
-scripts/run-quiet.sh --show-warnings 'Archive access helper' python3 scripts/build_archive_access_app.py '/private/tmp/ARCHIVE-RUNTIME/Cribbage Archive.app'
+scripts/run-quiet.sh --show-warnings 'Archive access helper' python3 scripts/build_archive_access_app.py '/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ARCHIVE-RUNTIME/Cribbage Archive.app'
 ```
 
 While unlocked, run the helper's `authorize BOOKMARK DESTINATION` mode. Select
@@ -31,12 +31,12 @@ Run a **separate one-shot supervisor probe** with this stage command before
 enabling the archive worker:
 
 ```text
-/private/tmp/ARCHIVE-RUNTIME/Cribbage Archive.app/Contents/MacOS/ArchiveAccess
+/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ARCHIVE-RUNTIME/Cribbage Archive.app/Contents/MacOS/ArchiveAccess
 access
-/private/tmp/ARCHIVE-RUNTIME/archive.bookmark
+/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ARCHIVE-RUNTIME/archive.bookmark
 /Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model28/ace283-production-20261005
 /usr/bin/python3
-/private/tmp/ARCHIVE-RUNTIME/probe.py
+/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ARCHIVE-RUNTIME/probe.py
 ```
 
 The probe must verify a read/write round trip in the chosen folder and remove its
@@ -59,10 +59,10 @@ job. Its archive stage invokes the signed helper in `access` mode, followed by:
 
 ```text
 /usr/bin/python3
-/private/tmp/ARCHIVE-RUNTIME/watch_model283_archive.py
-/private/tmp/ARCHIVE-RUNTIME/config.json
+/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ARCHIVE-RUNTIME/watch_model283_archive.py
+/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ARCHIVE-RUNTIME/config.json
 /Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model28/ace283-production-20261005
-/private/tmp/ARCHIVE-RUNTIME/worker-state.json
+/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ARCHIVE-RUNTIME/worker-state.json
 --mount
 /Volumes/TerraMasterWDBlue
 ```
@@ -70,7 +70,10 @@ job. Its archive stage invokes the signed helper in `access` mode, followed by:
 Keep all executables, supervisor state, mutable output, and configuration on the
 internal disk. The stage's completion check requires `worker-state.json` status
 `complete` and its `archived` field equal to the frozen `maxChunks`. Verify that
-the installed job uses one supervisor under `/private/tmp` and `KeepAlive=false`.
+the installed job uses one supervisor with `KeepAlive=false`, and that its scripts,
+configuration, bookmark, and state all resolve to persistent internal storage.
+Do not stage these dependencies in `/tmp`, `/private/tmp`, or an OS cache: cleanup
+can remove files that a running process will need on its next restart.
 The job ends when the finite build target has been durably archived. Stop it with
 the supervisor's `stop` command, preserving the same job specification for resume.
 
@@ -111,3 +114,29 @@ snapshots is a separate user-approved operation.
 Apple references: [security-scoped folder bookmarks](https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox),
 [removable-volume consent](https://developer.apple.com/documentation/bundleresources/information-property-list/nsremovablevolumesusagedescription),
 and [sleep settings](https://support.apple.com/guide/mac-help/set-sleep-and-wake-settings-mchle41a6ccd/mac).
+
+## Full coverage and production capacity
+
+The complete opening-asset domain contains 190,091 supported cut/score combinations
+and all 13 lead ranks: **2,471,183 chunks**. This covers all 14,641 score positions,
+excluding impossible post-cut Jack positions where the dealer has fewer than two
+points. Preserve the frozen ranking and native inputs when extending a smaller
+job; resume from the actual completed IDs, including holes.
+
+Keep both the full four-reply asset and the smaller two-reply projection in the
+local durable archive. Only the two-reply projection is eligible for production.
+Setting `remote.onCapacity` to `retain_local` lets the build finish when the
+production volume reaches its capacity. The receiver checks the dedicated mount,
+keeps 1 GiB and 1,024 inodes free, and serializes capacity checks with publication.
+It validates existing shards even after the volume is full.
+
+A verified capacity response creates `production-capacity.json` in the run
+folder. Subsequent chunks are retained locally without further uploads, including
+after a restart. Network, integrity, and permission errors still fail the stage.
+Queue receipts and progress distinguish `published` from `localOnly` chunks;
+local completion and archival require the full target, not full production coverage.
+The archive verifies both local projections even for chunks omitted from production.
+
+An expanded volume does not silently republish previously omitted chunks. Such a
+publication backfill requires a separate explicit operation; do not delete the
+capacity marker while treating all completed chunks as already published.

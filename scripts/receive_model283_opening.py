@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Receive one verified shallow opening shard on the dedicated asset mount."""
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -46,29 +47,39 @@ def receive(root, policy, relative, expected_sha, data):
     digest = hashlib.sha256(data).hexdigest()
     if digest != expected_sha:
         raise ValueError('Transport digest differs')
-    version = root / 'openings' / policy
-    target = version / relative
-    if target.is_file():
-        if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
-            raise ValueError('Immutable shard already exists with different bytes')
-    else:
-        if shutil.disk_usage(root).free < len(data) + 1024**3:
-            raise ValueError('Less than 1 GiB asset-volume headroom remains')
-        target.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, name = tempfile.mkstemp(prefix='.upload-', dir=target.parent)
-        temporary = Path(name)
-        try:
-            with os.fdopen(descriptor, 'wb') as out:
-                out.write(data)
-                out.flush()
-                os.fchmod(out.fileno(), 0o644)
-                os.fsync(out.fileno())
-            os.replace(temporary, target)
-            descriptor = os.open(target.parent, os.O_RDONLY)
-            try: os.fsync(descriptor)
-            finally: os.close(descriptor)
-        finally:
-            temporary.unlink(missing_ok=True)
+    target = root / 'openings' / policy / relative
+    # Serialize capacity checks with publication, including concurrent receivers.
+    with (root / '.opening-publication.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if target.is_file():
+            if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+                raise ValueError('Immutable shard already exists with different bytes')
+        else:
+            free = shutil.disk_usage(root).free
+            filesystem = os.statvfs(root)
+            allocated = ((len(data) + filesystem.f_frsize - 1) // filesystem.f_frsize) * filesystem.f_frsize
+            missing_directories = sum(not parent.exists() for parent in target.parents if parent != root and root in parent.parents)
+            needed_inodes = 1 + missing_directories
+            allocated += missing_directories * filesystem.f_frsize
+            if free < allocated + 1024**3 or filesystem.f_favail < 1024 + needed_inodes:
+                return dict(status='capacity', sha256=digest, bytes=len(data), policy=policy,
+                            freeBytes=free, reserveBytes=1024**3, freeInodes=filesystem.f_favail,
+                            reason='bytes' if free < allocated + 1024**3 else 'inodes')
+            target.parent.mkdir(parents=True, exist_ok=True)
+            descriptor, name = tempfile.mkstemp(prefix='.upload-', dir=target.parent)
+            temporary = Path(name)
+            try:
+                with os.fdopen(descriptor, 'wb') as out:
+                    out.write(data)
+                    out.flush()
+                    os.fchmod(out.fileno(), 0o644)
+                    os.fsync(out.fileno())
+                os.replace(temporary, target)
+                descriptor = os.open(target.parent, os.O_RDONLY)
+                try: os.fsync(descriptor)
+                finally: os.close(descriptor)
+            finally:
+                temporary.unlink(missing_ok=True)
     return dict(status='published', sha256=digest, bytes=len(data), path=str(target), policy=policy)
 
 
