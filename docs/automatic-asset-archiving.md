@@ -18,7 +18,7 @@ grant to the configured archive folder through the macOS folder picker.
 Build a local, ad-hoc signed helper once at a stable internal location:
 
 ```sh
-scripts/run-quiet.sh --show-warnings 'Archive access helper' python3 scripts/build_archive_access_app.py '/private/tmp/ARCHIVE-RUNTIME/Cribbage Archive.app'
+scripts/run-quiet.sh --show-warnings 'Archive access helper' python3 scripts/build_archive_access_app.py '/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ARCHIVE-RUNTIME/Cribbage Archive.app'
 ```
 
 While unlocked, run the helper's `authorize BOOKMARK DESTINATION` mode. Select
@@ -31,12 +31,12 @@ Run a **separate one-shot supervisor probe** with this stage command before
 enabling the archive worker:
 
 ```text
-/private/tmp/ARCHIVE-RUNTIME/Cribbage Archive.app/Contents/MacOS/ArchiveAccess
+/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ARCHIVE-RUNTIME/Cribbage Archive.app/Contents/MacOS/ArchiveAccess
 access
-/private/tmp/ARCHIVE-RUNTIME/archive.bookmark
+/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ARCHIVE-RUNTIME/archive.bookmark
 /Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model28/ace283-production-20261005
 /usr/bin/python3
-/private/tmp/ARCHIVE-RUNTIME/probe.py
+/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ARCHIVE-RUNTIME/probe.py
 ```
 
 The probe must verify a read/write round trip in the chosen folder and remove its
@@ -59,10 +59,10 @@ job. Its archive stage invokes the signed helper in `access` mode, followed by:
 
 ```text
 /usr/bin/python3
-/private/tmp/ARCHIVE-RUNTIME/watch_model283_archive.py
-/private/tmp/ARCHIVE-RUNTIME/config.json
+/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ARCHIVE-RUNTIME/watch_model283_archive.py
+/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ARCHIVE-RUNTIME/config.json
 /Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model28/ace283-production-20261005
-/private/tmp/ARCHIVE-RUNTIME/worker-state.json
+/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ARCHIVE-RUNTIME/worker-state.json
 --mount
 /Volumes/TerraMasterWDBlue
 ```
@@ -70,7 +70,10 @@ job. Its archive stage invokes the signed helper in `access` mode, followed by:
 Keep all executables, supervisor state, mutable output, and configuration on the
 internal disk. The stage's completion check requires `worker-state.json` status
 `complete` and its `archived` field equal to the frozen `maxChunks`. Verify that
-the installed job uses one supervisor under `/private/tmp` and `KeepAlive=false`.
+the installed job uses one supervisor with `KeepAlive=false`, and that its scripts,
+configuration, bookmark, and state all resolve to persistent internal storage.
+Do not stage these dependencies in `/tmp`, `/private/tmp`, or an OS cache: cleanup
+can remove files that a running process will need on its next restart.
 The job ends when the finite build target has been durably archived. Stop it with
 the supervisor's `stop` command, preserving the same job specification for resume.
 
