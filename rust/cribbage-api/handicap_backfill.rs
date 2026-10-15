@@ -5,6 +5,8 @@ struct Options {
     players: Vec<String>,
     through: String,
     apply: bool,
+    session_ids: Vec<String>,
+    saved_evaluator: Option<String>,
 }
 
 #[derive(Clone)]
@@ -13,6 +15,8 @@ struct SelectedSession {
     cycle_samples: Vec<(u32, String, DynamicCycleSample)>,
     game_length: Option<(String, f64)>,
     completed_analyses: usize,
+    evaluator_version: String,
+    persist_session: bool,
 }
 
 #[derive(Serialize)]
@@ -37,6 +41,8 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
     let mut players = None;
     let mut through = None;
     let mut apply = None;
+    let mut session_ids = Vec::new();
+    let mut saved_evaluator = None;
     let mut index = 1;
     while index < arguments.len() {
         match arguments[index].as_str() {
@@ -66,6 +72,31 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
                         .clone(),
                 );
             }
+            "--session-ids" if session_ids.is_empty() => {
+                index += 1;
+                session_ids = arguments
+                    .get(index)
+                    .ok_or("--session-ids requires a comma-separated list")?
+                    .split(',')
+                    .map(str::trim)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                if session_ids.iter().any(String::is_empty)
+                    || session_ids.iter().collect::<HashSet<_>>().len() != session_ids.len()
+                {
+                    return Err("--session-ids requires distinct nonempty IDs".to_string());
+                }
+            }
+            "--saved-evaluator" if saved_evaluator.is_none() => {
+                index += 1;
+                let evaluator = arguments
+                    .get(index)
+                    .ok_or("--saved-evaluator requires an Ace model")?;
+                if !ModelId::from_str(evaluator).is_ok_and(|model| model.is_ace()) {
+                    return Err("--saved-evaluator requires a recognized Ace model".to_string());
+                }
+                saved_evaluator = Some(evaluator.clone());
+            }
             "--dry-run" if apply.is_none() => apply = Some(false),
             "--apply-offline" if apply.is_none() => apply = Some(true),
             option => return Err(format!("unknown or duplicate backfill option: {option}")),
@@ -75,8 +106,17 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
     let through = through.ok_or_else(|| "--through is required".to_string())?;
     let through = canonical_utc_timestamp(&through)
         .ok_or_else(|| "--through must be a UTC timestamp".to_string())?;
+    let players = players.ok_or_else(|| "--players is required".to_string())?;
+    if session_ids.is_empty() != saved_evaluator.is_none() {
+        return Err("--session-ids and --saved-evaluator must be supplied together".to_string());
+    }
+    if !session_ids.is_empty() && players.len() != 1 {
+        return Err("Targeted saved-review repair requires exactly one player".to_string());
+    }
     Ok(Options {
-        players: players.ok_or_else(|| "--players is required".to_string())?,
+        players,
+        session_ids,
+        saved_evaluator,
         through,
         apply: apply
             .ok_or_else(|| "choose exactly one of --dry-run or --apply-offline".to_string())?,
@@ -191,7 +231,41 @@ fn load_selected_sessions(
     baseline_sessions: &HashSet<String>,
     calibration_completed_at: &str,
     through: &str,
+    session_ids: &[String],
 ) -> Result<Vec<Session>, String> {
+    if !session_ids.is_empty() {
+        // Read only the explicitly selected games; do not materialize unrelated histories.
+        return session_ids
+            .iter()
+            .map(|id| {
+                let text: String = connection
+                    .query_row(
+                        "SELECT session_json FROM cribbage_game_sessions WHERE session_id=?1",
+                        [id],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(|error| format!("read selected session: {error}"))?
+                    .ok_or_else(|| format!("Selected session not found: {id}"))?;
+                let session = serde_json::from_str::<PersistedSession>(&text)
+                    .map_err(|error| format!("parse selected session: {error}"))
+                    .and_then(restore_persisted_session)?;
+                if session.owner_user_id != Some(user_id)
+                    || !should_select_session(
+                        &session,
+                        baseline_sessions,
+                        calibration_completed_at,
+                        through,
+                    )
+                {
+                    return Err(format!(
+                        "Selected session is outside this player's eligible scope: {id}"
+                    ));
+                }
+                Ok(session)
+            })
+            .collect();
+    }
     let stored = connection
         .prepare("SELECT session_json FROM cribbage_game_sessions ORDER BY created_at, session_id")
         .map_err(|error| format!("prepare sessions for {display_name}: {error}"))?
@@ -242,14 +316,25 @@ fn cycle_completed_at(session: &Session, first_hand: u32) -> String {
         .to_string()
 }
 
-fn prepare_session(mut session: Session, model_root: &str) -> Result<SelectedSession, String> {
+fn prepare_session(
+    mut session: Session,
+    model_root: &str,
+    saved_evaluator: Option<&str>,
+) -> Result<SelectedSession, String> {
+    let evaluator = saved_evaluator.unwrap_or(DYNAMIC_EVALUATOR_VERSION);
     let missing = session
         .decision_reviews
         .iter()
-        .filter(|review| saved_decision_analysis(review, DYNAMIC_EVALUATOR_VERSION).is_none())
+        .filter(|review| saved_decision_analysis(review, evaluator).is_none())
         .count();
+    if saved_evaluator.is_some() && missing > 0 {
+        return Err(format!(
+            "Selected session {} lacks {missing} saved reviews by {evaluator}",
+            session.id
+        ));
+    }
     for review in &mut session.decision_reviews {
-        if saved_decision_analysis(review, DYNAMIC_EVALUATOR_VERSION).is_some() {
+        if saved_decision_analysis(review, evaluator).is_some() {
             continue;
         }
         let completed = evaluate_saved_decision_review(review, model_root)
@@ -261,7 +346,7 @@ fn prepare_session(mut session: Session, model_root: &str) -> Result<SelectedSes
     session = serde_json::from_str::<PersistedSession>(&stored)
         .map_err(|error| format!("parse canonical {}: {error}", session.id))
         .and_then(restore_persisted_session)?;
-    let cycle_samples = eligible_dynamic_cycle_samples(&session)
+    let cycle_samples = eligible_dynamic_cycle_samples_for_evaluator(&session, evaluator)
         .into_iter()
         .map(|cycle| {
             (
@@ -285,6 +370,8 @@ fn prepare_session(mut session: Session, model_root: &str) -> Result<SelectedSes
         cycle_samples,
         game_length,
         completed_analyses: missing,
+        evaluator_version: evaluator.to_string(),
+        persist_session: saved_evaluator.is_none(),
     })
 }
 
@@ -365,7 +452,7 @@ fn persist_player(
     for selected in sessions.iter_mut() {
         // Active and forfeited Dynamic sessions may contribute already-played
         // complete cycles, but the repair must not alter their resumable state.
-        if completed_at(&selected.session).is_some() {
+        if selected.persist_session && completed_at(&selected.session).is_some() {
             if selected.session.model == ModelId::Dynamic {
                 selected.session.use_dynamic_profile(profile.clone());
             }
@@ -389,7 +476,7 @@ fn persist_player(
                      (SELECT 1 FROM dynamic_profile_cycles WHERE user_id=?1 AND session_id=?3 AND first_hand_number=?4)",
                     params![
                         user_id,
-                        DYNAMIC_EVALUATOR_VERSION,
+                        selected.evaluator_version,
                         selected.session.id,
                         first_hand,
                         serde_json::to_string(sample)
@@ -408,7 +495,7 @@ fn persist_player(
                      (SELECT 1 FROM dynamic_profile_games WHERE user_id=?1 AND session_id=?3)",
                     params![
                         user_id,
-                        DYNAMIC_EVALUATOR_VERSION,
+                        selected.evaluator_version,
                         selected.session.id,
                         json!({"cyclesPerGame": length}).to_string(),
                         at,
@@ -473,6 +560,7 @@ pub fn run(arguments: &[String], data_dir: &Path, model_root: &str) -> Result<()
             &baseline_sessions,
             &calibration_completed_at,
             &options.through,
+            &options.session_ids,
         )?;
         if sessions.is_empty() {
             return Err(format!("no eligible sessions found for {display_name}"));
@@ -482,7 +570,7 @@ pub fn run(arguments: &[String], data_dir: &Path, model_root: &str) -> Result<()
             .any(|session| session.model == ModelId::Dynamic);
         let prepared = sessions
             .into_iter()
-            .map(|session| prepare_session(session, model_root))
+            .map(|session| prepare_session(session, model_root, options.saved_evaluator.as_deref()))
             .collect::<Result<Vec<_>, _>>()?;
         plans.push((
             user_id,
@@ -750,8 +838,36 @@ mod tests {
                 players: vec!["Shane".to_string(), "Garrett".to_string()],
                 through: "2026-09-07T05:00:00.000Z".to_string(),
                 apply: false,
+                session_ids: Vec::new(),
+                saved_evaluator: None,
             }
         );
+    }
+
+    #[test]
+    fn targeted_saved_review_scope_rejects_ambiguous_options() {
+        let basic = vec![
+            "backfill-handicaps",
+            "--players",
+            "Shane",
+            "--through",
+            "2026-10-14T00:00:00Z",
+            "--dry-run",
+        ];
+        for extra in [
+            vec!["--session-ids", "one"],
+            vec!["--saved-evaluator", MODEL_13_23],
+            vec!["--session-ids", "one,one", "--saved-evaluator", MODEL_13_23],
+            vec!["--session-ids", "one", "--saved-evaluator", "dynamic"],
+        ] {
+            let arguments = basic
+                .iter()
+                .copied()
+                .chain(extra)
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            assert!(parse_options(&arguments).is_err());
+        }
     }
 
     #[test]
@@ -800,6 +916,123 @@ mod tests {
             calibration,
             through
         ));
+    }
+
+    #[test]
+    fn handicap_targeted_saved_reviews_preserve_baseline_and_other_games() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "handicap-targeted-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        auth::initialize(&data_dir).unwrap();
+        let connection = open_game_database(&data_dir).unwrap();
+        let user_id = connection
+            .query_row(
+                "SELECT id FROM auth_users WHERE username='Travis'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        let start = new_session_from_seed(ModelId::Dynamic, Some("Travis".to_string()), 19, 1);
+        sync_dynamic_player_profile(&data_dir, user_id, &start).unwrap();
+        for day in 1..=6 {
+            let mut session = reviewed_session(ACE_MODEL_ID, &format!("baseline-{day}"), day);
+            session.owner_user_id = Some(user_id);
+            persist_session_event(&data_dir, &session, "new", "{}").unwrap();
+            sync_dynamic_player_profile(&data_dir, user_id, &session).unwrap();
+        }
+        let mut baseline = load_dynamic_profile(&data_dir, user_id).unwrap().unwrap();
+        baseline.started_dynamic = false;
+        player_profile::save(&connection, user_id, &baseline).unwrap();
+        player_profile::save(&connection, 999, &baseline).unwrap();
+        for day in 7..=9 {
+            let mut session = reviewed_session(ACE_MODEL_ID, &format!("recent-{day}"), day);
+            session.owner_user_id = Some(user_id);
+            session.handicap_weighting = HandicapWeighting::Legacy;
+            for review in &mut session.decision_reviews {
+                review.completed.as_mut().unwrap().evaluator_model = MODEL_13_23.to_string();
+            }
+            persist_session_event(&data_dir, &session, "new", "{}").unwrap();
+        }
+        drop(connection);
+        let mut arguments = vec![
+            "backfill-handicaps",
+            "--players",
+            "Travis",
+            "--through",
+            "2026-01-10T00:00:00Z",
+            "--session-ids",
+            "recent-7,recent-8",
+            "--saved-evaluator",
+            MODEL_13_23,
+            "--dry-run",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+        let before = database_state(&data_dir, user_id);
+        run(&arguments, &data_dir, "/no-model-assets-needed").unwrap();
+        assert_eq!(database_state(&data_dir, user_id), before);
+        *arguments.last_mut().unwrap() = "--apply-offline".to_string();
+        run(&arguments, &data_dir, "/no-model-assets-needed").unwrap();
+        let after = load_dynamic_profile(&data_dir, user_id).unwrap().unwrap();
+        let mut expected = baseline.clone();
+        for _ in 0..2 {
+            expected.observe_cycle(DynamicCycleSample {
+                handicap_weighting: HandicapWeighting::Legacy,
+                dealer_discard_regret: 0.05,
+                dealer_pegging_regret: 0.05,
+                pone_discard_regret: 0.05,
+                pone_pegging_regret: 0.05,
+                total_regret: 0.20,
+            });
+            expected.observe_game_length(1.5);
+        }
+        assert_eq!(after.handicap_cycles, 8);
+        assert!((after.ewma_cycle_handicap - expected.ewma_cycle_handicap).abs() < 1e-12);
+        assert_eq!(after.length_games, expected.length_games);
+        assert_eq!(
+            load_dynamic_profile(&data_dir, 999).unwrap().unwrap(),
+            baseline
+        );
+        assert_eq!(
+            database_state(&data_dir, user_id).3,
+            before.3,
+            "Saved games must not be rewritten"
+        );
+        let connection = open_game_database(&data_dir).unwrap();
+        let credited: Vec<(String, String)> = connection
+            .prepare(
+                "SELECT session_id,evaluator_version FROM dynamic_profile_cycles
+                 WHERE user_id=? AND session_id LIKE 'recent-%' ORDER BY session_id",
+            )
+            .unwrap()
+            .query_map([user_id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            credited,
+            vec![
+                ("recent-7".into(), MODEL_13_23.into()),
+                ("recent-8".into(), MODEL_13_23.into())
+            ]
+        );
+        drop(connection);
+        run(&arguments, &data_dir, "/no-model-assets-needed").unwrap();
+        assert_eq!(
+            load_dynamic_profile(&data_dir, user_id).unwrap().unwrap(),
+            after
+        );
+        arguments[6] = "recent-9,missing-session".to_string();
+        assert!(run(&arguments, &data_dir, "/no-model-assets-needed").is_err());
+        assert_eq!(
+            load_dynamic_profile(&data_dir, user_id).unwrap().unwrap(),
+            after
+        );
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[test]
