@@ -13,7 +13,7 @@ from pathlib import Path
 import sqlite3
 import time
 
-from build_model283_opening_assets import archive_file, sha, sync_directory
+from build_model283_opening_assets import archive_file, sha, sync_directory, valid_publication
 from cribbage_job_queue import atomic_json
 
 
@@ -99,9 +99,9 @@ def archive(config, destination, release=False, incremental=False, mount=None):
                 relative = Path(v['relative'])
                 if relative.is_absolute() or '..' in relative.parts or v['index'] != index:
                     raise ValueError('Invalid committed chunk path/index')
-                if config.get('remote') and (v.get('publication', {}).get('status') != 'published'
-                        or v['publication'].get('sha256') != v['production']['sha256']):
-                    raise ValueError('Missing verified publication receipt')
+                if config.get('remote') and not valid_publication(
+                        v, allow_local=config['remote'].get('onCapacity') == 'retain_local'):
+                    raise ValueError('Missing verified publication or local-retention receipt')
                 for kind in ('full', 'production'):
                     row = v[kind]; src = source / kind / relative; dst = target / kind / relative
                     if row['policy'] != config['policy']: raise ValueError('Shard policy mismatch')

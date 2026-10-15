@@ -281,6 +281,75 @@ class AssetPipelineTests(unittest.TestCase):
                 target.write_bytes(b'bad')
                 with self.assertRaises(ValueError): receive.receive(root, POLICY, REL, digest, data)
 
+    def test_receiver_capacity_does_not_publish_and_existing_shard_is_still_acknowledged(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); data = shard(); digest = hashlib.sha256(data).hexdigest()
+            filesystem = SimpleNamespace(f_frsize=4096, f_favail=10000)
+            with patch.object(receive.os.path, 'ismount', return_value=True), patch.object(receive.os, 'statvfs', return_value=filesystem), patch.object(receive.shutil, 'disk_usage', return_value=SimpleNamespace(free=1024**3)):
+                result = receive.receive(root, POLICY, REL, digest, data)
+                self.assertEqual((result['status'], result['reason'], result['sha256']), ('capacity', 'bytes', digest))
+                self.assertFalse((root/'openings'/POLICY/REL).exists())
+            with patch.object(receive.os.path, 'ismount', return_value=True), patch.object(receive.os, 'statvfs', return_value=SimpleNamespace(f_frsize=4096, f_favail=100)), patch.object(receive.shutil, 'disk_usage', return_value=SimpleNamespace(free=10*1024**3)):
+                self.assertEqual(receive.receive(root, POLICY, REL, digest, data)['reason'], 'inodes')
+            with patch.object(receive.os.path, 'ismount', return_value=True):
+                receive.receive(root, POLICY, REL, digest, data)
+                with patch.object(receive.shutil, 'disk_usage', return_value=SimpleNamespace(free=0)):
+                    self.assertEqual(receive.receive(root, POLICY, REL, digest, data)['status'], 'published')
+
+    def test_capacity_continues_local_build_and_archive_without_more_uploads_on_resume(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); config = self.config(root); config['maxWorkers'] = 1
+            config['remote'] = dict(host='test-host', key='test-key', receiver='receiver.py', onCapacity='retain_local')
+            calls = []
+            def publish(command, **kwargs):
+                digest = command[-1]; calls.append(digest)
+                result = dict(status='published' if len(calls) == 1 else 'capacity', sha256=digest,
+                              policy=POLICY, reason='bytes', freeBytes=1024**3, reserveBytes=1024**3)
+                return SimpleNamespace(stdout=json.dumps(result).encode())
+            with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=1), patch.object(build.subprocess, 'run', side_effect=publish):
+                build.run(config)
+            self.assertEqual(len(calls), 2)
+            complete = json.loads((root/'run/complete.json').read_text())
+            self.assertEqual((complete['completed'], complete['published'], complete['localOnly']), (3, 1, 2))
+            with sqlite3.connect(root/'run/queue.db') as db:
+                original = dict(db.execute('SELECT id,receipt FROM completed'))
+            first = archiver.archive(config, root/'external', release=True)
+            self.assertEqual(first['completed'], 3)
+            config['maxChunks'] = 5
+            with patch.object(build, 'build', side_effect=self.fake_build), patch.object(build, 'memory_slots', return_value=1), patch.object(build.subprocess, 'run') as remote:
+                build.run(config)
+                remote.assert_not_called()
+            with sqlite3.connect(root/'run/queue.db') as db:
+                rows = dict(db.execute('SELECT id,receipt FROM completed'))
+            self.assertTrue(all(rows[i] == raw for i, raw in original.items()))
+            result = archiver.archive(config, root/'external', release=True, incremental=True)
+            self.assertEqual((result['completed'], result['reusedChunks']), (5, 3))
+            for raw in rows.values():
+                value = json.loads(raw)
+                self.assertTrue(build.valid_publication(value, allow_local=True))
+                for kind in ('full', 'production'):
+                    self.assertEqual(build.sha(root/'external'/POLICY/kind/value['relative']), value[kind]['sha256'])
+            final = json.loads((root/'run/complete.json').read_text())
+            self.assertEqual((final['completed'], final['published'], final['localOnly']), (5, 1, 4))
+
+    def test_capacity_acknowledgment_requires_opt_in_correct_digest_and_identity(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); config = self.config(root)
+            config['remote'] = dict(host='test-host', key='test-key', receiver='receiver.py')
+            value = self.fake_build(config, 0, (0, 0, 0, 0))
+            good = dict(status='capacity', sha256=value['production']['sha256'], policy=POLICY, reason='bytes')
+            for result, opt_in in [(good, False), ({**good, 'sha256': 'bad'}, True), ({**good, 'policy': 'b'*64}, True)]:
+                if opt_in: config['remote']['onCapacity'] = 'retain_local'
+                with patch.object(build.subprocess, 'run', return_value=SimpleNamespace(stdout=json.dumps(result).encode())):
+                    with self.assertRaises(ValueError): build.sync_chunk(config, value)
+                self.assertFalse((root/'run/production-capacity.json').exists())
+            with patch.object(build.subprocess, 'run', side_effect=OSError('network failure')):
+                with self.assertRaises(OSError): build.sync_chunk(config, value)
+            self.assertFalse((root/'run/production-capacity.json').exists())
+
     def test_archive_is_verified_and_idempotent(self):
         with tempfile.TemporaryDirectory() as d:
             src = Path(d)/'source'; dest = Path(d)/'archive'/'chunk'

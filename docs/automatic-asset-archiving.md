@@ -111,3 +111,29 @@ snapshots is a separate user-approved operation.
 Apple references: [security-scoped folder bookmarks](https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox),
 [removable-volume consent](https://developer.apple.com/documentation/bundleresources/information-property-list/nsremovablevolumesusagedescription),
 and [sleep settings](https://support.apple.com/guide/mac-help/set-sleep-and-wake-settings-mchle41a6ccd/mac).
+
+## Full coverage and production capacity
+
+The complete opening-asset domain contains 190,091 supported cut/score combinations
+and all 13 lead ranks: **2,471,183 chunks**. This covers all 14,641 score positions,
+excluding impossible post-cut Jack positions where the dealer has fewer than two
+points. Preserve the frozen ranking and native inputs when extending a smaller
+job; resume from the actual completed IDs, including holes.
+
+Keep both the full four-reply asset and the smaller two-reply projection in the
+local durable archive. Only the two-reply projection is eligible for production.
+Setting `remote.onCapacity` to `retain_local` lets the build finish when the
+production volume reaches its capacity. The receiver checks the dedicated mount,
+keeps 1 GiB and 1,024 inodes free, and serializes capacity checks with publication.
+It validates existing shards even after the volume is full.
+
+A verified capacity response creates `production-capacity.json` in the run
+folder. Subsequent chunks are retained locally without further uploads, including
+after a restart. Network, integrity, and permission errors still fail the stage.
+Queue receipts and progress distinguish `published` from `localOnly` chunks;
+local completion and archival require the full target, not full production coverage.
+The archive verifies both local projections even for chunks omitted from production.
+
+An expanded volume does not silently republish previously omitted chunks. Such a
+publication backfill requires a separate explicit operation; do not delete the
+capacity marker while treating all completed chunks as already published.
