@@ -301,9 +301,10 @@ class AssetPipelineTests(unittest.TestCase):
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as d:
             root = Path(d); config = self.config(root); config['maxWorkers'] = 1
-            config['remote'] = dict(host='test-host', key='test-key', receiver='receiver.py', onCapacity='retain_local')
+            config['remote'] = dict(host='test-host', key='test-key', receiver='receiver.py', onCapacity='retain_local', controlPath='/persistent/asset-ssh')
             calls = []
             def publish(command, **kwargs):
+                self.assertIn('ControlPath=/persistent/asset-ssh', command)
                 digest = command[-1]; calls.append(digest)
                 result = dict(status='published' if len(calls) == 1 else 'capacity', sha256=digest,
                               policy=POLICY, reason='bytes', freeBytes=1024**3, reserveBytes=1024**3)

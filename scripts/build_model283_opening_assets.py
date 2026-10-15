@@ -169,7 +169,7 @@ def sync_chunk(config, value):
         command = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15',
                    '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3',
                    '-o', 'ControlMaster=auto', '-o', 'ControlPersist=60',
-                   '-o', 'ControlPath=' + str(Path(config['run']) / 'ssh-control'),
+                   '-o', 'ControlPath=' + remote.get('controlPath', str(Path(config['run']) / 'ssh-control')),
                    '-i', remote['key'], remote['host'], 'python3', remote['receiver'],
                    config['policy'], value['relative'], row['sha256']]
         with Path(row['path']).open('rb') as data:
