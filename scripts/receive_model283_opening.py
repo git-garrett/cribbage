@@ -58,7 +58,10 @@ def receive(root, policy, relative, expected_sha, data):
             free = shutil.disk_usage(root).free
             filesystem = os.statvfs(root)
             allocated = ((len(data) + filesystem.f_frsize - 1) // filesystem.f_frsize) * filesystem.f_frsize
-            if free < allocated + 1024**3 or filesystem.f_favail < 1024:
+            missing_directories = sum(not parent.exists() for parent in target.parents if parent != root and root in parent.parents)
+            needed_inodes = 1 + missing_directories
+            allocated += missing_directories * filesystem.f_frsize
+            if free < allocated + 1024**3 or filesystem.f_favail < 1024 + needed_inodes:
                 return dict(status='capacity', sha256=digest, bytes=len(data), policy=policy,
                             freeBytes=free, reserveBytes=1024**3, freeInodes=filesystem.f_favail,
                             reason='bytes' if free < allocated + 1024**3 else 'inodes')

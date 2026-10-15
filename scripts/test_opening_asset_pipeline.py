@@ -290,7 +290,7 @@ class AssetPipelineTests(unittest.TestCase):
                 result = receive.receive(root, POLICY, REL, digest, data)
                 self.assertEqual((result['status'], result['reason'], result['sha256']), ('capacity', 'bytes', digest))
                 self.assertFalse((root/'openings'/POLICY/REL).exists())
-            with patch.object(receive.os.path, 'ismount', return_value=True), patch.object(receive.os, 'statvfs', return_value=SimpleNamespace(f_frsize=4096, f_favail=100)), patch.object(receive.shutil, 'disk_usage', return_value=SimpleNamespace(free=10*1024**3)):
+            with patch.object(receive.os.path, 'ismount', return_value=True), patch.object(receive.os, 'statvfs', return_value=SimpleNamespace(f_frsize=4096, f_favail=1024)), patch.object(receive.shutil, 'disk_usage', return_value=SimpleNamespace(free=10*1024**3)):
                 self.assertEqual(receive.receive(root, POLICY, REL, digest, data)['reason'], 'inodes')
             with patch.object(receive.os.path, 'ismount', return_value=True):
                 receive.receive(root, POLICY, REL, digest, data)
