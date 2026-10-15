@@ -1547,7 +1547,15 @@ impl CycleRegretAccumulators {
     }
 }
 
+#[cfg(test)]
 fn reviewed_decision_regret(review: &SavedDecisionReview) -> Option<f64> {
+    reviewed_decision_regret_for_evaluator(review, DYNAMIC_EVALUATOR_VERSION)
+}
+
+fn reviewed_decision_regret_for_evaluator(
+    review: &SavedDecisionReview,
+    evaluator: &str,
+) -> Option<f64> {
     if review.kind == ReviewKind::Peg {
         if review.game.legal_cards(HUMAN).len() <= 1 {
             return None;
@@ -1560,7 +1568,7 @@ fn reviewed_decision_regret(review: &SavedDecisionReview) -> Option<f64> {
         }
     }
 
-    let completed = saved_decision_analysis(review, DYNAMIC_EVALUATOR_VERSION)?;
+    let completed = saved_decision_analysis(review, evaluator)?;
     let selected = completed.selected_win_probability?;
     let recommended = completed.recommended_win_probability?;
     if !selected.is_finite()
@@ -1583,6 +1591,13 @@ struct EligibleDynamicCycle {
 /// Collect only fully scored, fully reviewed two-hand cycles. Model evaluation
 /// happens when each choice is saved; this aggregation is deliberately cheap.
 fn eligible_dynamic_cycle_samples(session: &Session) -> Vec<EligibleDynamicCycle> {
+    eligible_dynamic_cycle_samples_for_evaluator(session, DYNAMIC_EVALUATOR_VERSION)
+}
+
+fn eligible_dynamic_cycle_samples_for_evaluator(
+    session: &Session,
+    evaluator: &str,
+) -> Vec<EligibleDynamicCycle> {
     let completed_hands = session
         .score_events
         .iter()
@@ -1613,7 +1628,7 @@ fn eligible_dynamic_cycle_samples(session: &Session) -> Vec<EligibleDynamicCycle
         if reviews.is_empty()
             || reviews
                 .iter()
-                .any(|review| saved_decision_analysis(review, DYNAMIC_EVALUATOR_VERSION).is_none())
+                .any(|review| saved_decision_analysis(review, evaluator).is_none())
         {
             continue;
         }
@@ -1621,7 +1636,7 @@ fn eligible_dynamic_cycle_samples(session: &Session) -> Vec<EligibleDynamicCycle
         let mut buckets = CycleRegretAccumulators::default();
         let mut total_regret = 0.0;
         for review in reviews {
-            if let Some(regret) = reviewed_decision_regret(review) {
+            if let Some(regret) = reviewed_decision_regret_for_evaluator(review, evaluator) {
                 buckets.add(review.kind, review.game.dealer == HUMAN, regret);
                 total_regret += regret;
             }
@@ -1689,7 +1704,9 @@ fn sync_dynamic_profile_evidence(
         profile.started_dynamic = true;
         changed = true;
     }
-    if !profile.started_dynamic {
+    // Older reviewed/backfilled histories can be calibrated without ever
+    // starting Dynamic. Calibration itself permits subsequent evidence.
+    if !profile.started_dynamic && profile.complete_cycles < MIN_COMPLETE_CYCLES {
         return Ok(None);
     }
 
@@ -6499,6 +6516,50 @@ mod tests {
         legacy.as_object_mut().unwrap().remove("handicap_weighting");
         let restored = restore_persisted_session(serde_json::from_value(legacy).unwrap()).unwrap();
         assert_eq!(restored.handicap_weighting, HandicapWeighting::Legacy);
+    }
+
+    #[test]
+    fn handicap_calibrated_profiles_accept_new_evidence_without_dynamic_start() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "handicap-calibrated-{}-{}",
+            std::process::id(),
+            unix_millis()
+        ));
+        initialize_game_database(&data_dir).unwrap();
+        let connection = open_game_database(&data_dir).unwrap();
+        for (user_id, cycles, started, expected) in [
+            (991, 5, false, 5),
+            (992, 6, false, 7),
+            (993, 12, false, 13),
+            (994, 12, true, 13),
+        ] {
+            let baseline = DynamicProfile {
+                started_dynamic: started,
+                complete_cycles: cycles,
+                handicap_cycles: cycles,
+                ewma_cycle_handicap: -0.02,
+                ..DynamicProfile::default()
+            };
+            player_profile::save(&connection, user_id, &baseline).unwrap();
+            let session =
+                reviewed_cycle_session(ModelId::Myrmidon5, &format!("calibrated-{user_id}"));
+            assert_eq!(eligible_dynamic_cycle_samples(&session).len(), 1);
+            sync_dynamic_player_profile(&data_dir, user_id, &session).unwrap();
+            let after = load_dynamic_profile(&data_dir, user_id).unwrap().unwrap();
+            assert_eq!(
+                after.handicap_cycles, expected,
+                "cycles={cycles}, started={started}"
+            );
+            assert!(sync_dynamic_player_profile(&data_dir, user_id, &session)
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                load_dynamic_profile(&data_dir, user_id).unwrap().unwrap(),
+                after
+            );
+        }
+        drop(connection);
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[test]
