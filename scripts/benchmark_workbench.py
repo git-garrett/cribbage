@@ -25,6 +25,7 @@ from benchmark_workbench_analysis import build_analysis_report
 from benchmark_workbench_gpu import build_gpu_report
 from benchmark_workbench_training import build_training_report
 from benchmark_workbench_comparisons import comparison_report
+from benchmark_workbench_evolution import evolution_report
 
 
 RUNTIME = Path('/private/tmp/strong-cribbage-local-runtime/workbench')
@@ -583,11 +584,11 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == '/health':
             return self.respond({'service': 'cribbage-benchmark-workbench', 'version': 1})
         jobs = None
-        if url.path in ('/api/jobs', '/api/report', '/api/comparison'):
+        if url.path in ('/api/jobs', '/api/report', '/api/comparison', '/api/evolution'):
             jobs = list_jobs(self.server.runtime)
         if url.path == '/api/jobs':
             return self.respond({'jobs': jobs, 'refreshSeconds': CACHE_SECONDS, 'uiVersion': UI_VERSION})
-        if url.path == '/api/comparison':
+        if url.path in ('/api/comparison', '/api/evolution'):
             query = parse_qs(url.query)
             entry = next((job for job in jobs if job['id'] == query.get('job',[''])[0]),None)
             if not entry or entry.get('kind') != 'training':
@@ -596,7 +597,8 @@ class Handler(BaseHTTPRequestHandler):
             if settings.get('mode') != 'cyclic':
                 return self.respond({'error':'This study has no cyclic comparisons'},404)
             try:
-                value = comparison_report(entry['root'],int(query.get('checkpoint',[''])[0]))
+                value = (evolution_report(entry['root']) if url.path == '/api/evolution' else
+                         comparison_report(entry['root'],int(query.get('checkpoint',[''])[0])))
             except FileNotFoundError:
                 return self.respond({'error':'This comparison has not completed yet'},404)
             except (OSError,ValueError,KeyError,TypeError,sqlite3.Error) as error:

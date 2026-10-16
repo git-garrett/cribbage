@@ -50,6 +50,25 @@ remain explicitly unrecorded; their predictions and timings are not reconstructe
 Each checkpoint has its own confidence intervals because the learned state
 changes. The checkpoint-adjusted assessment also accounts for repeated testing.
 
+The workbench separately accumulates evidence for the **evolving branch** across
+every completed comparison, beginning with the first. Each fresh reciprocal seed
+pair contributes its win fraction (0, 1/2, or 1). The two-sided 95% confidence
+sequence targets the average conditional win rate across evaluated states,
+including the declared rolling-cache policy. It allows changing performance and
+repeated inspection; superiority requires its lower bound to exceed 50%.
+It cannot establish latest-state strength, future strength, or monotonic learning.
+
+The fixed method is Howard et al., [Theorem 4 and equation (24)](https://arxiv.org/pdf/1810.08240),
+using the predictable constant forecast 1/2. With `n` pairs and `V` equal to one
+quarter of the number of sweeps, put `v=max(1,V)` and `l=log(log(2*v))`.
+The radius is `(1.7*sqrt(v*(l+3.8)) + 3.4*l + 13)/n`, clipped to [0,1].
+This differs from the fixed-mean betting interval used by ordinary benchmarks.
+Never intersect bounds from different checkpoints or force confidence to improve:
+their cumulative targets change. All checkpoints count, including ones older than
+the UI's rolling history. Missing panels, reused seeds, changed originals, or
+incomplete orientations make cumulative inference unavailable rather than silently
+dropping evidence. This is read-only reporting and schedules no additional games.
+
 For an already frozen run, `evaluation_runner.py CONFIG EXTENSION` attaches a
 separately pinned recorder at the controller's worker boundary. Training still
 uses the original binary, controller, config, assets and cache identity. The

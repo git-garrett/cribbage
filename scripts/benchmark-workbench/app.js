@@ -21,6 +21,7 @@ const previews = new Map();
 const comparisonChoices = new Map();
 const comparisonReports = new Map();
 let comparisonKey = '';
+let evolutionKey = '';
 const visibleJobs = () => jobs.filter((job) => !job.archived);
 const jobTitle = (job) => job.title || (job.candidate && job.opponent ? `${modelName(job.candidate)} vs ${modelName(job.opponent)}` : job.id);
 
@@ -194,6 +195,7 @@ function renderPreviews() {
 function selectJob(id) {
   selected = id; followLatest = true; report = null;
   comparisonKey = '';
+  evolutionKey = '';
   $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('gpu-report').hidden = true; $('training-report').hidden = true; $('selfplay-report').hidden = true; $('cyclic-report').hidden = true; $('study-overview').hidden = true; $('notice').hidden = true;
   $('visibility-error').hidden = true;
   renderJobs(); refresh();
@@ -719,6 +721,7 @@ function renderCyclic(value) {
     for(const text of [value.completedUpdates-value.history.length+i+1,r.phase,`${number.format(u.games)} ${r.phase==='forecast'?'opponent worlds':'games'}`,coverage,r.advanced?'Advanced experimentally':'Retained previous',Object.entries(r.evaluations).map(([k,v])=>`${k}: ${v.status}`).join('; ') || 'Scheduled every 5,000 games'])row.append(element('td',String(text)));body.append(row);});
   const evaluations=$('cyclic-evaluations');evaluations.replaceChildren();
   const checkpoints=value.evaluations || [];
+  loadEvolution(value.id,checkpoints.at(-1)?.trainingGames || 0);
   const chosen=comparisonChoices.get(value.id) || checkpoints.at(-1)?.trainingGames;
   for(const r of checkpoints){
     const row=element('tr');
@@ -731,6 +734,51 @@ function renderCyclic(value) {
   }
   if(chosen) loadComparison(value.id,chosen);
   else {comparisonKey='';$('cyclic-comparison-detail').replaceChildren(element('p','The first full report appears after the 5,000-game comparison completes.','muted'));}
+}
+
+async function loadEvolution(job,checkpoint) {
+  const key=`${job}:${checkpoint}`;
+  if(evolutionKey===key)return;
+  evolutionKey=key;
+  const target=$('cyclic-evolution');
+  const url=`/api/evolution?job=${encodeURIComponent(job)}`;
+  target.replaceChildren(element('p','Loading cumulative evidence…','muted'));
+  try {
+    const response=await fetch(url,{signal:AbortSignal.timeout(10000)});
+    const value=await response.json();
+    if(!response.ok || value.error)throw new Error(value.error || `Report returned ${response.status}`);
+    if(selected!==job || evolutionKey!==key)return;
+    target.replaceChildren();
+    const latest=value.latest;
+    if(!latest){target.append(element('p','Cumulative evidence begins when the first 1,000-game comparison completes.','muted'));return;}
+    const verdict={superior:'Evidence of superiority',inferior:'Evidence of underperformance',inconclusive:'Inconclusive'};
+    const facts=element('dl');
+    for(const [label,stat] of [
+      ['Evaluated checkpoints',number.format(latest.checkpoints)],
+      ['Evaluation games / fresh seed pairs',`${number.format(latest.games)} / ${number.format(latest.pairs)}`],
+      ['Cumulative win rate',percent(latest.winRate)],
+      ['Anytime-valid 95% bounds',latest.confidence95.map(percent).join(' – ')],
+      ['Evolving-branch assessment',verdict[latest.status]],
+      ['Through training games',number.format(latest.trainingGames)]])facts.append(element('dt',label),element('dd',stat));
+    target.append(facts,element('p','Superiority requires the lower bound to exceed 50%. These bounds describe average performance across the evolving branch; use the checkpoint reports below to assess its latest state.','caption'));
+    const details=element('details');details.append(element('summary','Cumulative history and method'));
+    const scroll=element('div',null,'table-scroll'),table=element('table'),head=element('tr'),body=element('tbody');
+    for(const label of ['After training games','Total evaluation games','Cumulative win rate','Anytime-valid 95% bounds','Assessment'])head.append(element('th',label));
+    const thead=element('thead');thead.append(head);table.append(thead,body);scroll.append(table);details.append(scroll);
+    for(const row of value.history.slice(-60)){
+      const tr=element('tr');
+      for(const stat of [number.format(row.trainingGames),number.format(row.games),percent(row.winRate),row.confidence95.map(percent).join(' – '),verdict[row.status]])tr.append(element('td',stat));
+      body.append(tr);
+    }
+    if(value.history.length>60)details.append(element('p','Showing the latest 60 checkpoints; cumulative totals include every checkpoint.','caption'));
+    details.append(element('p','Empirical-Bernstein confidence sequence for changing means. Each reciprocal seed pair is one observation; all completed checkpoints are included from the first. No extra evaluation games.','caption'));
+    const source=element('a','Statistical method · Theorem 4');source.href=value.source;details.append(source);
+    const download=element('a','Download cumulative report data');download.href=url;download.download='model29-evolving-branch.json';
+    target.append(details,download);
+  } catch(error) {
+    if(selected!==job || evolutionKey!==key)return;
+    evolutionKey='';target.replaceChildren(element('p',`Cumulative evidence unavailable: ${error.message}`,'notice'));
+  }
 }
 
 async function loadComparison(job,checkpoint) {

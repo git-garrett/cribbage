@@ -113,9 +113,8 @@ def comparison_report(root, checkpoint):
     return _completed_report(str(root.resolve()), checkpoint, receipt)
 
 
-@lru_cache(maxsize=8)
-def _completed_report(root_text, checkpoint, receipt_text):
-    root = Path(root_text); receipt = json.loads(receipt_text)
+def comparison_games(root, checkpoint, receipt, include_hands=True):
+    """Validate a complete paired panel; optionally project out large event arrays."""
     if receipt['status'] != 'complete' or receipt['trainingGames'] != checkpoint:
         raise ValueError('Comparison is not complete')
     pairs = receipt['assessment']['pairs']
@@ -126,7 +125,8 @@ def _completed_report(root_text, checkpoint, receipt_text):
     # One bounded WAL read transaction; never open a writer or replay games.
     with closing(sqlite3.connect((root/'evidence.db').as_uri()+'?mode=ro',uri=True,timeout=.15)) as db:
         db.execute('pragma query_only=ON'); db.execute('begin')
-        rows = db.execute('select id,request,root,result from results where id>=? and id<? order by id limit ?',
+        projection = "result" if include_hands else "json_remove(result,'$.hands','$.benchmark.discards','$.benchmark.plays')"
+        rows = db.execute(f'select id,request,root,{projection} from results where id>=? and id<? order by id limit ?',
                           (prefix,prefix+'\uffff',2*pairs+1))
         for identity, raw_request, saved_root, raw in rows:
             index, side = map(int,identity[len(prefix):].split(':'))
@@ -144,13 +144,36 @@ def _completed_report(root_text, checkpoint, receipt_text):
                 raise ValueError('Invalid first-winner outcome')
             if not math.isfinite(game['seconds']) or game['seconds'] < 0: raise ValueError('Invalid game duration')
             digest.update(json.dumps([identity,raw_request,saved_root,raw],separators=(',',':')).encode())
-            game['_samples'] = samples(game); games[side][index] = game
+            if include_hands: game['_samples'] = samples(game)
+            games[side][index] = game
     if any(set(rows) != set(range(pairs)) for rows in games): raise ValueError('Missing comparison game indexes')
     games = [[rows[i] for i in range(pairs)] for rows in games]
     if len({g['seed'] for g in games[0]}) != pairs: raise ValueError('Repeated comparison seed')
     for a,b in zip(*games):
         if a['seed'] != b['seed'] or a['firstDealer'] != b['firstDealer']:
             raise ValueError('Reciprocal seed or first-dealer mismatch')
+    return games, digest.hexdigest()
+
+
+def comparison_snapshots(receipt, games):
+    manifest = json.loads((Path(receipt['root'])/ASSETS/'model29-generation.json').read_text())
+    original = Path(receipt['baseline'])/ASSETS/'model29-generation.json'
+    snapshot = Path(receipt['root'])/ASSETS/'model29-generation.json'
+    snapshots = [hashlib.sha256(p.read_bytes()).hexdigest() for p in (snapshot,original)]
+    for game in games:
+        telemetry = game.get('benchmark',{})
+        if telemetry.get('recorderSha256'):
+            if (telemetry.get('snapshots') != snapshots or
+                    telemetry.get('policyBinarySha256') != manifest['policy']['binarySha256']):
+                raise ValueError('Recorded evaluation policy or snapshots changed')
+    return manifest, snapshots
+
+
+@lru_cache(maxsize=8)
+def _completed_report(root_text, checkpoint, receipt_text):
+    root = Path(root_text); receipt = json.loads(receipt_text)
+    games, digest = comparison_games(root, checkpoint, receipt)
+    pairs = receipt['assessment']['pairs']
     candidate, opponent = '29.0 current state','29.0 original state'
     def compact(g,index):
         side = g['candidateSide']
@@ -170,16 +193,7 @@ def _completed_report(root_text, checkpoint, receipt_text):
     all_games = games[0]+games[1]
     margins = [g['scores'][g['candidateSide']]-g['scores'][1-g['candidateSide']] for g in all_games]
     result['candidateMarginNormal95'] = normal_interval(sum(margins),sum(v*v for v in margins),len(margins))
-    manifest = json.loads((Path(receipt['root'])/ASSETS/'model29-generation.json').read_text())
-    original = Path(receipt['baseline'])/ASSETS/'model29-generation.json'
-    snapshot = Path(receipt['root'])/ASSETS/'model29-generation.json'
-    snapshots = [hashlib.sha256(p.read_bytes()).hexdigest() for p in (snapshot,original)]
-    for game in all_games:
-        telemetry = game.get('benchmark',{})
-        if telemetry.get('recorderSha256'):
-            if (telemetry.get('snapshots') != snapshots or
-                    telemetry.get('policyBinarySha256') != manifest['policy']['binarySha256']):
-                raise ValueError('Recorded evaluation policy or snapshots changed')
+    manifest, snapshots = comparison_snapshots(receipt, all_games)
     result.update(trainingGames=checkpoint,assessment=receipt['assessment'],phaseScoring=scores['realized'],
         availableEventScoring=scores['available'],history=history,
         performance=dict(wallSeconds=receipt['seconds'],workerGameSeconds=sum(g['seconds'] for g in all_games),
@@ -188,13 +202,13 @@ def _completed_report(root_text, checkpoint, receipt_text):
         integrity=dict(status='passed',completePairs=pairs,seedMismatches=0,snapshotMismatches=0,
             firstWinnerGames=len(all_games),generation=manifest['generation'],
             candidateSnapshot=snapshots[0],originalSnapshot=snapshots[1],
-            sourceRevision=manifest['policy']['sourceRevision'],evidenceSha256=digest.hexdigest(),
+            sourceRevision=manifest['policy']['sourceRevision'],evidenceSha256=digest,
             firstSeed=games[0][0]['seed'],lastSeed=games[0][-1]['seed']),
         notes=['Realized scoring is capped at 121; available-event scoring includes the complete winning event, excluding later unplayed events.',
                'Pegging includes heels and go/last-card awards, matching the standard benchmark report.',
                'Phase differences use reciprocal-seed clustered 95% intervals. Per-orientation tables use game clusters.',
                'Raw Wilson and paired normal intervals describe this checkpoint only; the assessment interval adjusts across checkpoints.',
-               'Checkpoints test different learned states and are not pooled. More games narrow the interval for a state only when that state and the opponent remain fixed.',
+               'These intervals describe this checkpoint only. The separate cumulative confidence sequence estimates average performance across the evolving branch, not the latest state.',
                'Full-game durations include both players and scheduling. They are not per-model decision timings.',receipt['policy']])
     result.update(telemetry_report(all_games,hand_scores))
     return result

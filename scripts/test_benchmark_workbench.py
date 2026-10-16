@@ -332,6 +332,19 @@ class WorkbenchTests(unittest.TestCase):
 
 
 class WorkbenchAccessTests(unittest.TestCase):
+    def test_evolution_route_uses_only_the_selected_cyclic_study(self):
+        entry = dict(id='cyclic-run',kind='training',root='/saved-output',spec='/saved-spec')
+        handler = object.__new__(workbench.Handler)
+        handler.server = SimpleNamespace(allowed_hosts={'localhost:8766'},runtime=Path('/unused'))
+        handler.path = '/api/evolution?job=cyclic-run'
+        handler.headers = {'Host':'localhost:8766'}; handler.respond = mock.Mock()
+        with mock.patch.object(workbench,'list_jobs',return_value=[entry]), \
+             mock.patch.object(workbench,'read_json',return_value=dict(trainingStudy=dict(mode='cyclic'))), \
+             mock.patch.object(workbench,'evolution_report',return_value={'status':'pending'}) as cumulative:
+            handler.do_GET()
+        cumulative.assert_called_once_with('/saved-output')
+        handler.respond.assert_called_once_with({'status':'pending'})
+
     def test_report_accepts_a_previous_supervisor_link(self):
         entry = {'id': 'current-run', 'aliases': ['previous-run']}
         handler = object.__new__(workbench.Handler)
