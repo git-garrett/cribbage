@@ -116,6 +116,15 @@ function renderPreviews() {
     const tab = document.getElementById(`tab-${job.id}`);
     if (!tab) continue;
     const snapshot = previews.get(job.id);
+    if (job.kind === 'training' && snapshot?.mode === 'cyclic' && !snapshot.error) {
+      tab.querySelector('.tab-purpose').textContent = 'Learn one prior at a time from full games';
+      tab.querySelector('.tab-state').textContent = snapshot.state;
+      tab.querySelector('.tab-rate').textContent = snapshot.activity?.label || snapshot.stage;
+      tab.querySelector('.tab-progress').textContent = `${number.format(snapshot.completed)} training games · ${snapshot.completedUpdates} asset updates`;
+      tab.querySelector('.tab-meaning').textContent = 'Original-state comparison every 5,000 training games';
+      chart(`preview-${job.id}`, snapshot.evaluations, { compact: true, x: (r) => r.trainingGames, y: (r) => r.assessment.winRate, percent: true, domain: [0, 1], empty: 'Waiting for the first 1,000-game comparison' });
+      continue;
+    }
     if (job.kind === 'training' && snapshot?.mode === 'wins' && !snapshot.error) {
       tab.querySelector('.tab-meaning').textContent = 'Chart: training win rate · not overall completion';
       tab.querySelector('.tab-purpose').textContent = snapshot.discardModels?.length ? 'Play full games · learn and evaluate both policies' : 'Play full games · learn pegging with fixed Ace discard';
