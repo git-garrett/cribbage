@@ -18,6 +18,9 @@ let jobs = [];
 let jobsSignature = '';
 let savingVisibility = false;
 const previews = new Map();
+const comparisonChoices = new Map();
+const comparisonReports = new Map();
+let comparisonKey = '';
 const visibleJobs = () => jobs.filter((job) => !job.archived);
 const jobTitle = (job) => job.title || (job.candidate && job.opponent ? `${modelName(job.candidate)} vs ${modelName(job.opponent)}` : job.id);
 
@@ -714,7 +717,103 @@ function renderCyclic(value) {
   value.history.forEach((r,i)=>{const row=element('tr');const u=r.update;const coverage=u.cells!=null ? `${number.format(u.cells)} WP cells` : u.contextKeepRows!=null ? `${number.format(u.contextKeepRows)} hand/keep/board contexts` : u.rows!=null ? `${number.format(u.rows)} rows` : 'Saved in snapshot';
     for(const text of [value.completedUpdates-value.history.length+i+1,r.phase,`${number.format(u.games)} ${r.phase==='forecast'?'opponent worlds':'games'}`,coverage,r.advanced?'Advanced experimentally':'Retained previous',Object.entries(r.evaluations).map(([k,v])=>`${k}: ${v.status}`).join('; ') || 'Scheduled every 5,000 games'])row.append(element('td',String(text)));body.append(row);});
   const evaluations=$('cyclic-evaluations');evaluations.replaceChildren();
-  for(const r of value.evaluations || []){const row=element('tr');for(const v of [number.format(r.trainingGames),number.format(r.games),percent(r.assessment.winRate),r.assessment.confidence95.map(percent).join(' – '),r.assessment.status])row.append(element('td',v));evaluations.append(row);}
+  const checkpoints=value.evaluations || [];
+  const chosen=comparisonChoices.get(value.id) || checkpoints.at(-1)?.trainingGames;
+  for(const r of checkpoints){
+    const row=element('tr');
+    for(const v of [number.format(r.trainingGames),number.format(r.games),percent(r.assessment.winRate),r.assessment.confidence95.map(percent).join(' – '),r.assessment.status])row.append(element('td',v));
+    const cell=element('td'),button=element('button','View report');button.type='button';
+    button.setAttribute('aria-label',`View benchmark report after ${number.format(r.trainingGames)} training games`);
+    button.setAttribute('aria-pressed',String(chosen===r.trainingGames));
+    button.addEventListener('click',()=>{comparisonChoices.set(value.id,r.trainingGames);renderCyclic(value);});
+    cell.append(button);row.append(cell);evaluations.append(row);
+  }
+  if(chosen) loadComparison(value.id,chosen);
+  else {comparisonKey='';$('cyclic-comparison-detail').replaceChildren(element('p','The first full report appears after the 5,000-game comparison completes.','muted'));}
+}
+
+async function loadComparison(job,checkpoint) {
+  const key=`${job}:${checkpoint}`;
+  if(comparisonKey===key)return;
+  comparisonKey=key;
+  const target=$('cyclic-comparison-detail');
+  const url=`/api/comparison?job=${encodeURIComponent(job)}&checkpoint=${checkpoint}`;
+  target.replaceChildren(element('p','Loading the saved benchmark report…','muted'));
+  try {
+    let value=comparisonReports.get(key);
+    if(!value){
+      const response=await fetch(url,{signal:AbortSignal.timeout(10000)});
+      value=await response.json();
+      if(!response.ok || value.error)throw new Error(value.error || `Report returned ${response.status}`);
+      comparisonReports.set(key,value);
+      if(comparisonReports.size>8)comparisonReports.delete(comparisonReports.keys().next().value);
+    }
+    if(selected!==job || comparisonKey!==key)return;
+    renderComparison(target,value,url);
+  } catch(error) {
+    if(selected!==job || comparisonKey!==key)return;
+    comparisonKey='';target.replaceChildren(element('p',`Comparison report unavailable: ${error.message}`,'notice'));
+  }
+}
+
+function renderComparison(target,value,url) {
+  target.replaceChildren();target.className='comparison-detail';
+  const n=(v)=>v==null?'Not recorded':number.format(Math.round(v*1000)/1000);
+  const band=(v)=>v?v.map(n).join(' – '):'More pairs needed';
+  const heading=element('div',null,'section-heading');
+  heading.append(element('h3',`Benchmark after ${number.format(value.trainingGames)} training games`));
+  const download=element('a','Download report data');download.href=url;download.download=`model29-comparison-${value.trainingGames}.json`;
+  heading.append(download);target.append(heading,element('p',`Current state · generation ${value.integrity.generation} versus frozen original state`,'muted'));
+  const facts=(title,rows,parent=target)=>{
+    const section=element('section',null,'comparison-section');section.append(element('h3',title));
+    const list=element('dl');for(const [label,text] of rows)list.append(element('dt',label),element('dd',String(text)));
+    section.append(list);parent.append(section);
+  };
+  const table=(title,headers,rows,parent=target)=>{
+    const section=element('section',null,'comparison-section');section.append(element('h3',title));
+    const scroll=element('div',null,'table-scroll'),grid=element('table'),head=element('thead'),h=element('tr'),body=element('tbody');
+    for(const text of headers)h.append(element('th',text));head.append(h);
+    for(const values of rows){const row=element('tr');for(const text of values)row.append(element('td',String(text)));body.append(row);}
+    grid.append(head,body);scroll.append(grid);section.append(scroll);parent.append(section);
+  };
+  const p=value.pairedSeeds;
+  facts('Result and paired evidence',[
+    ['Games',`${n(value.games)} / ${n(value.games)} complete`],['Wins',`${n(value.candidateWins)} current · ${n(value.opponentWins)} original`],
+    ['Current-state win rate',percent(value.candidateWinRate)],['Raw Wilson 95% interval',interval(value.candidateWilson95)],
+    ['Paired 95% interval',interval(p.winRate95)],['Checkpoint-adjusted interval',interval(value.assessment.confidence95)],
+    ['Assessment',value.assessment.status],['Noninferiority margin',percent(value.assessment.noninferiorityMargin)],
+    ['Reciprocal seed pairs',n(p.pairs)],['Pair outcomes',`${n(p.candidateSweeps)} current sweeps · ${n(p.splitPairs)} splits · ${n(p.opponentSweeps)} original sweeps`],
+    ['Score advantage per game',n(value.candidateMeanMargin)],['Raw score 95% interval',band(value.candidateMarginNormal95)],
+    ['Paired score advantage',n(p.candidateMeanMargin)],['Paired score 95% interval',band(p.score95)]
+  ]);
+  const orientations=[['Current left',value.orientations.candidateLeft],['Original left',value.orientations.opponentLeft]];
+  table('Reciprocal orientations',['Orientation','Games','Current wins','Original wins','Current win rate','Score advantage'],
+    orientations.map(([label,r])=>[label,n(r.games),n(r.candidateWins),n(r.opponentWins),percent(r.candidateWinRate),n(r.candidateMeanMargin)]));
+  const phases=(title,rows,parent=target)=>table(title,['Phase','Current mean','Original mean','Difference','Difference 95%','N current / original'],
+    rows.map(r=>[r.label,n(r.candidate),n(r.opponent),n(r.delta),band(r.fixed95),`${n(r.candidateN)} / ${n(r.opponentN)}`]),parent);
+  phases('Realized scoring',value.phaseScoring);
+  phases('Available-event scoring',value.availableEventScoring);
+  target.append(element('p','Phase values are points per recorded hand in that role; final score and margin are per game. Available-event scoring includes the full winning event. Unreached phases contribute zero.','caption'));
+  const bySide=element('details',null,'methods');bySide.append(element('summary','Scoring within each reciprocal orientation'));
+  const sideBody=element('div');for(const [label,r] of orientations){phases(`${label} · realized scoring`,r.scoring.realized,sideBody);phases(`${label} · available-event scoring`,r.scoring.available,sideBody);}
+  bySide.append(sideBody);target.append(bySide);
+  for(const title of ['EV calibration','Win-probability calibration and Brier','Decision timing · opening and whole pegging hand']){
+    const section=element('section',null,'comparison-section');section.append(element('h3',title),element('p',value.evCalibration.note,'muted'));target.append(section);
+  }
+  const speed=value.performance;
+  facts('Full-game throughput',[
+    ['Comparison wall time',`${n(speed.wallSeconds)} seconds`],['Games per hour',n(speed.gamesPerHour)],
+    ['Mean full-game duration',`${n(speed.meanGameSeconds)} seconds`],['Sum of worker game durations',`${n(speed.workerGameSeconds)} seconds`]
+  ]);
+  const audit=value.integrity;
+  facts('Integrity',[
+    ['Saved snapshot / request checks',audit.status],['Complete paired indexes',n(audit.completePairs)],
+    ['Seed mismatches',n(audit.seedMismatches)],['Snapshot mismatches',n(audit.snapshotMismatches)],['First-winner games',n(audit.firstWinnerGames)],
+    ['Seed range',`${audit.firstSeed} – ${audit.lastSeed}`],['Frozen source',audit.sourceRevision],
+    ['Current snapshot SHA-256',audit.candidateSnapshot],['Original snapshot SHA-256',audit.originalSnapshot],['Evidence SHA-256',audit.evidenceSha256]
+  ]);
+  const methods=element('details',null,'methods');methods.append(element('summary','Report definitions and uncertainty'));
+  const explanation=element('div');for(const text of value.notes)explanation.append(element('p',text));methods.append(explanation);target.append(methods);
 }
 function renderSelfplay(value) {
   $('selfplay-history-panel').hidden=Boolean(value.roleStudy);

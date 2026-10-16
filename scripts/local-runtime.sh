@@ -197,6 +197,8 @@ workbench_fingerprint() {
       "${ROOT_DIR}/scripts/benchmark_workbench_analysis.py" \
       "${ROOT_DIR}/scripts/benchmark_workbench_gpu.py" \
       "${ROOT_DIR}/scripts/benchmark_workbench_training.py" \
+      "${ROOT_DIR}/scripts/benchmark_workbench_comparisons.py" \
+      "${ROOT_DIR}/scripts/report_paired_benchmark.py" \
       "${ROOT_DIR}/scripts/local-runtime.sh" \
       "${ROOT_DIR}/scripts/benchmark-workbench/"*
     workbench_hostname
@@ -250,6 +252,7 @@ workbench_start() {
   fi
   mkdir -p "${WORKBENCH_DIR}/app/benchmark-workbench"
   cp "${ROOT_DIR}/scripts/benchmark_workbench.py" "${ROOT_DIR}/scripts/benchmark_workbench_stats.py" "${ROOT_DIR}/scripts/benchmark_workbench_assets.py" "${ROOT_DIR}/scripts/benchmark_workbench_analysis.py" "${ROOT_DIR}/scripts/benchmark_workbench_gpu.py" "${ROOT_DIR}/scripts/benchmark_workbench_training.py" "${WORKBENCH_DIR}/app/"
+  cp "${ROOT_DIR}/scripts/benchmark_workbench_comparisons.py" "${ROOT_DIR}/scripts/report_paired_benchmark.py" "${WORKBENCH_DIR}/app/"
   cp "${ROOT_DIR}/scripts/benchmark-workbench/"* "${WORKBENCH_DIR}/app/benchmark-workbench/"
   python3 - "$WORKBENCH_DIR" "$WORKBENCH_LABEL" "$(workbench_hostname)" <<'PY'
 from pathlib import Path
