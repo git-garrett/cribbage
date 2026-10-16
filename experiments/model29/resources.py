@@ -29,7 +29,7 @@ def allocation(owner, workers, release=False, reclaim=False):
         else:
             if owner in shares and (not reclaim or shares[owner] != workers):
                 raise ValueError('CPU reservation ownership changed')
-            if sum(shares.values())-shares.get(owner,0)+workers > 11:
+            if sum(shares.values())-shares.get(owner,0)+workers > 12:
                 raise ValueError('CPU reservation unavailable')
             shares[owner] = workers
         value.update(workers=sum(shares.values()),updatedAt=time.time())

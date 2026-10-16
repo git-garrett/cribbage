@@ -13,7 +13,8 @@ ASSETS = Path('rust/cribbage-shadow-engine/assets')
 FILES = {'wp': 'model202-board-win-matrix.bin', 'crib': 'model203-crib.bin',
          'holds': 'model203-hold.bin', 'discards': 'model203-opponent-discards.bin',
          'declines': 'model203-decline-factors.json'}
-PHASES = tuple(FILES)
+PHASES = (*FILES, 'forecast')
+FORECAST = 'model29-forecasts.json'
 
 
 def sha(path):
@@ -73,7 +74,13 @@ def clone(source, target):
         raise ValueError('snapshot target already exists')
     # Copy-on-write clones where supported, ordinary independent copies elsewhere.
     # No writable hard links to ancestors or production assets.
-    shutil.copytree(Path(source) / ASSETS, Path(target) / ASSETS,
+    def copy(src, dst):
+        import subprocess
+        result = subprocess.run(['/bin/cp','-c',str(src),str(dst)],capture_output=True)
+        if result.returncode:
+            shutil.copy2(src,dst)
+        return dst
+    shutil.copytree(Path(source) / ASSETS, Path(target) / ASSETS, copy_function=copy,
                     ignore=shutil.ignore_patterns('model29-generation.json'))
 
 
@@ -83,6 +90,7 @@ def bootstrap(source, target, policy):
         if sha(Path(source) / ASSETS / name) != row['sha256']:
             raise ValueError('inherited asset differs from audited 28.3 baseline: ' + name)
     clone(source, target)
+    atomic(Path(target)/ASSETS/FORECAST,dict(prior_mass=32.,rows={}))
     return seal(target, 0, None, {'inheritedAudit': audit}, policy)
 
 
@@ -122,37 +130,24 @@ def series(game):
 
 
 def board_observations(game):
+    if game['trajectory']:
+        raise ValueError('transposed trajectories are not Model 29 training evidence')
     events, markers = series(game)
     prefix = [[0, 0]]
-    crossings = [[math.inf] * 122 for _ in range(2)]
     for i, (actor, points) in enumerate(events):
         total = prefix[-1].copy(); total[actor] += points
-        for need in range(prefix[-1][actor]+1, min(121,total[actor])+1):
-            crossings[actor][need] = i
         prefix.append(total)
     result = defaultdict(lambda: [0., 0])
-    if game['trajectory']:
-        if any(n < 121 for n in prefix[-1]):
-            raise ValueError('incomplete two-sided trajectory')
-        # A single initial board is translated; later tails are not independent
-        # starts. Accumulate only visits occurring before the translated winner.
-        for offset, phase, dealer in markers:
-            pone = 1-dealer
-            for d in range(prefix[offset][dealer], 121):
-                d_event = crossings[dealer][121-(d-prefix[offset][dealer])]
-                for p in range(prefix[offset][pone], 121):
-                    p_event = crossings[pone][121-(p-prefix[offset][pone])]
-                    row = result[phase, d, p]
-                    row[0] += int(d_event < p_event); row[1] += 1
-    else:
-        if game['winner'] not in (0, 1):
-            raise ValueError('missing winner')
-        for offset, phase, dealer in markers:
-            score = [game['start'][i]+prefix[offset][i] for i in range(2)]
-            if max(score) >= 121:
-                continue
-            row = result[phase, score[dealer], score[1-dealer]]
-            row[0] += int(game['winner'] == dealer); row[1] += 1
+    if game['winner'] not in (0, 1):
+        raise ValueError('missing winner')
+    for offset, phase, dealer in markers:
+        if phase != 0:
+            continue
+        score = [game['start'][i]+prefix[offset][i] for i in range(2)]
+        if max(score) >= 121:
+            continue
+        row = result[phase, score[dealer], score[1-dealer]]
+        row[0] += int(game['winner'] == dealer); row[1] += 1
     return result
 
 
@@ -227,7 +222,7 @@ def update_board(source, target, games, mass, state):
     replace(target,data)
     return dict(cells=len(values),seedClusters=len(clusters),
                 transposedGames=sum(g['trajectory'] for g in games),
-                interpretation='fixed-line replay prior plus direct on-policy visits; not unbiased score-conditioned WP')
+                interpretation='actual start-of-hand visits and first-winner outcomes; no transposition')
 
 
 def update_discards(source, target, counts, suits, mass, state):
@@ -282,9 +277,13 @@ def update(source, target, phase, records, mass, repo):
     if not selected:
         raise ValueError('no new observations for '+phase)
     games = [selected[k] for k in sorted(selected)]
-    holds,discards,suits,hands = observations(games)
+    if phase == 'forecast':
+        holds,discards,suits,hands = None,None,None,[]
+    else:
+        holds,discards,suits,hands = observations(games)
     clone(source,target); dst = Path(target)/ASSETS
-    name = FILES[phase]; counts = phase_state['counts']; details = {}
+    name = FORECAST if phase == 'forecast' else FILES[phase]
+    counts = phase_state['counts']; details = {}
     if phase == 'wp':
         details = update_board(src/name,dst/name,games,mass,counts)
     elif phase == 'holds':
@@ -293,15 +292,33 @@ def update(source, target, phase, records, mass, repo):
         update_crib(src/name,dst/name,discards,mass,counts)
     elif phase == 'discards':
         update_discards(src/name,dst/name,discards,suits,mass,counts)
-    else:
+    elif phase == 'declines':
         details['observations'] = update_declines(src/name,dst/name,hands,mass,counts,repo,old['policy'])
+    else:
+        data = json.loads((src/name).read_text()) if (src/name).exists() else dict(prior_mass=32.,rows={})
+        for game in games:
+            if game['model'] != '29.0' or len(game['outcomes']) != 15:
+                raise ValueError('invalid counterfactual cohort')
+            world_keys=set()
+            for row in game['outcomes']:
+                scores=row['scores']
+                if len(scores)!=2 or any(type(s)is not int or not 0<=s<=121 for s in scores) or scores==[121,121]:
+                    raise ValueError('invalid terminal hand outcome')
+                if row['key'] in world_keys:
+                    continue  # suit-symmetric keeps do not multiply one world's effective weight
+                world_keys.add(row['key'])
+                data['rows'].setdefault(row['key'],[]).append(scores)
+        atomic(dst/name,data)
+        details.update(contextKeepRows=len(data['rows']),sampledHands=15*len(games),
+            interpretation='suit-canonical six, discard, role and actual board; full hand endpoints preserve first-winner stopping; sparse smoothed replacement')
     phase_state['applied'] = sorted(seen|selected.keys())
     atomic(dst/'model29-state.json',state)
     evidence = dict(phase=phase,games=len(games),hands=len(hands),priorEffectiveSamples=mass,
                     identities=sorted(selected),**details)
     fingerprint = seal(target,old['generation']+1,sha(src/'model29-generation.json'),evidence,old['policy'])
     new = verify(target)
-    changed = [name for name in FILES.values() if old['assets'][name] != new['assets'][name]]
-    if any(name != FILES[phase] for name in changed):
+    changed = [name for name in (*FILES.values(),FORECAST) if old['assets'].get(name) != new['assets'].get(name)]
+    expected_name = FORECAST if phase == 'forecast' else FILES[phase]
+    if any(name != expected_name for name in changed):
         raise ValueError('non-target prior changed')
     return dict(snapshot=fingerprint,changed=changed,**evidence)

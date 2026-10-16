@@ -34,7 +34,7 @@ fn progress(value: &Value) -> Result<(), String> {
     }
     Ok(())
 }
-fn run(h: &Value, model: ModelId, root: &str) -> Result<Value, String> {
+pub fn run(h: &Value, model: ModelId, root: &str) -> Result<Value, String> {
     let own: Vec<u8> = serde_json::from_value(h["own"].clone()).map_err(|e| e.to_string())?;
     let other: Vec<u8> =
         serde_json::from_value(h["opponent"].clone()).map_err(|e| e.to_string())?;
@@ -125,7 +125,11 @@ fn run(h: &Value, model: ModelId, root: &str) -> Result<Value, String> {
     if played != 8 && game.phase != Phase::GameOver {
         return Err("incomplete pegging hand".into());
     }
-    let result = json!({"status":"complete","model":model.as_str(),"rows":rows,"cardsPlayed":played,"postCutStart":start,"scores":[game.player(Side::Left).score,game.player(Side::Right).score],"phase":game.phase,"allMovesLegal":true});
+    let peg_end = [game.player(Side::Left).score,game.player(Side::Right).score];
+    if h["finishCounting"] == true && game.phase == Phase::PeggingComplete {
+        game.score_after_pegging()?;
+    }
+    let result = json!({"status":"complete","model":model.as_str(),"rows":rows,"cardsPlayed":played,"postCutStart":start,"pegEnd":peg_end,"scores":[game.player(Side::Left).score,game.player(Side::Right).score],"phase":game.phase,"allMovesLegal":true});
     progress(&result)?;
     Ok(result)
 }

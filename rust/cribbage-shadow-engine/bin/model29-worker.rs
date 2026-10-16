@@ -7,6 +7,39 @@ use cribbage_shadow_engine::{
 };
 use serde_json::{json, Value};
 use std::{io::{self, BufRead, Write}, time::Instant};
+#[allow(dead_code)]
+#[path = "../examples/model283-hands.rs"]
+mod hand_rollout;
+
+fn counterfactual(root: &str, r: &Value) -> Result<Value, String> {
+    let started = Instant::now();
+    let own: Vec<u8> = serde_json::from_value(r["own"].clone()).map_err(|e|e.to_string())?;
+    if own.len()!=6 || own.iter().any(|c|*c>=52) || (0..6).any(|i|(i+1..6).any(|j|own[i]==own[j])) { return Err("invalid own six".into()); }
+    let scores: [i32;2] = serde_json::from_value(r["scores"].clone()).map_err(|e|e.to_string())?;
+    if scores.iter().any(|s|!(0..121).contains(s)) {return Err("invalid forecast scores".into());}
+    let dealer = r["dealer"].as_u64().filter(|d|*d<2).ok_or("invalid forecast dealer")?;
+    let mut seed = r["seed"].as_u64().filter(|n|*n<=u32::MAX as u64).ok_or("invalid forecast seed")? as u32;
+    let mut deck: Vec<u8> = (0..52).filter(|c|!own.contains(c)).collect();
+    for i in (1..deck.len()).rev() {
+        seed=seed.wrapping_mul(1664525).wrapping_add(1013904223);
+        deck.swap(i, (seed as usize)%(i+1));
+    }
+    let six=&deck[..6]; let cut=deck[6];
+    // Opponent chooses with its own six and public pre-cut board only.
+    let input=model::parse_decision_input(&format!("kind=discard;model=29.0;role={};aiHand={};aiScore={};humanScore={};turnCard=0",
+        if dealer==1 {"dealer"} else {"pone"},six.iter().map(u8::to_string).collect::<Vec<_>>().join(","),scores[1],scores[0]))?;
+    let Decision::Discard {card_ids,..}=model::evaluate_decision(&input,root)? else {return Err("expected discard".into());};
+    let opponent: Vec<_> = six.iter().copied().filter(|c|!card_ids.contains(c)).chain(card_ids.iter().copied()).collect();
+    let mut outcomes=vec![];
+    for a in 0..6 {for b in a+1..6 {
+        let discard=[own[a],own[b]];
+        let ordered: Vec<_>=own.iter().copied().filter(|c|!discard.contains(c)).chain(discard).collect();
+        let result=hand_rollout::run(&json!({"own":ordered,"opponent":opponent,"cut":cut,"scores":scores,"dealer":dealer,"finishCounting":true}),ModelId::Schell290,root)?;
+        outcomes.push(json!({"key":cribbage_shadow_engine::model29_forecast::key(&own,&discard,scores,dealer==0),"discard":discard,"scores":result["scores"],"pegEnd":result["pegEnd"],"postCutStart":result["postCutStart"]}));
+    }}
+    Ok(json!({"model":"29.0","seed":r["seed"],"own":own,"opponent":opponent,"cut":cut,"start":scores,"dealer":dealer,
+        "outcomes":outcomes,"seconds":started.elapsed().as_secs_f64(),"cache":model29_snapshot::cache_stats()}))
+}
 
 fn ids(cards: &[Card]) -> Vec<u8> { cards.iter().map(|c| c.id).collect() }
 
@@ -36,6 +69,11 @@ fn decision(value: Decision) -> Value {
 }
 
 fn run(root: &str, reference: Option<&str>, r: &Value) -> Result<Value, String> {
+    let cache = r["cache"].as_bool().unwrap_or(true)
+        && std::env::var_os("MODEL29_CACHE_CONFIG").is_some();
+    model29_snapshot::reset_cache_stats();
+    model29_snapshot::activate(root, cache)?;
+    if r["kind"] == "counterfactual" { return counterfactual(root,r); }
     if r["kind"] == "decision" {
         let input = model::parse_decision_input(r["inputText"].as_str().ok_or("missing inputText")?)?;
         return model::evaluate_decision(&input, root).map(decision);
@@ -51,24 +89,17 @@ fn run(root: &str, reference: Option<&str>, r: &Value) -> Result<Value, String> 
     if candidate.is_some_and(|s| s > 1) || candidate.is_some() != reference.is_some() {
         return Err("evaluation requires reference root and candidate side".into());
     }
-    let trajectory = r["kind"] == "trajectory";
-    if trajectory && (candidate.is_some() || start != [0,0]) {
-        return Err("transposition requires a training trajectory from 0–0".into());
-    }
+    if r["kind"] != "game" { return Err("only ordinary games are supported".into()); }
     let model = |side| if candidate.is_none_or(|c| c == side) { ModelId::Schell290 } else { ModelId::Schell283 };
     let mut game = ModelPlayout::new_at_hand(seed, first, 1, start[0], start[1], model(0), model(1))?;
     let started = Instant::now();
-    let (winner, scores, record) = if trajectory {
-        let result = game.play_until_both_reach(root, 121, 121, 10000)?;
-        (None, [result.left_score,result.right_score], result.record)
-    } else {
+    let (winner, scores, record) = {
         let caches = [Model13HandCache::new(),Model13HandCache::new()];
         let cache911 = [Model911HandCache::new(),Model911HandCache::new()];
         let result = game.play_to_end_with_override(root,10000,&mut |input| {
             let is_reference = input.model == ModelId::Schell283.as_str();
             let target = if is_reference { reference.ok_or("reference missing")? } else { root };
-            // Both sides use the same algorithm and FP64 arithmetic. The roots
-            // alone differ. 29.0 bypasses opening assets tied to old priors.
+            model29_snapshot::activate(target, cache)?;
             let mut input = input.clone(); input.model = ModelId::Schell290.as_str().into();
             let index = usize::from(is_reference);
             if input.kind == DecisionKind::Discard { caches[index].clear(); }
@@ -77,8 +108,9 @@ fn run(root: &str, reference: Option<&str>, r: &Value) -> Result<Value, String> 
         (Some(result.winner.index()),[result.left_score,result.right_score],result.record)
     };
     Ok(json!({"model":"29.0","seed":seed,"firstDealer":first.index(),"start":start,
-        "winner":winner,"scores":scores,"hands":hands(&record),"trajectory":trajectory,
-        "candidateSide":candidate,"seconds":started.elapsed().as_secs_f64()}))
+        "winner":winner,"scores":scores,"hands":hands(&record),"trajectory":false,
+        "candidateSide":candidate,"seconds":started.elapsed().as_secs_f64(),
+        "cache":model29_snapshot::cache_stats()}))
 }
 
 fn main() -> Result<(), String> {

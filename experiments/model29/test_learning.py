@@ -3,13 +3,14 @@ import math
 import shutil
 import struct
 import tempfile
+import sqlite3
 import unittest
 from collections import defaultdict
 from pathlib import Path
 from unittest.mock import Mock, patch
 import learning
 import resources
-from cycle import assessment, validate
+from cycle import assessment, validate, collect
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -30,32 +31,14 @@ def game():
 
 
 class LearningTests(unittest.TestCase):
-    def test_replay_matches_every_direct_start_with_role_changes(self):
-        events = [(0,40),(1,50),(0,40),(1,50),(0,50),(1,50)]
-        markers = [(0,0,0),(1,1,0),(2,2,0),(4,0,1),(5,2,1)]
-        expected = defaultdict(lambda:[0.,0])
-        for left in range(121):
-            for right in range(121):
-                scores = [left,right]; visits = []
-                for offset,(actor,points) in enumerate(events):
-                    for at,phase,dealer in markers:
-                        if at == offset:
-                            visits.append((phase,scores[dealer],scores[1-dealer],dealer))
-                    scores[actor] += points
-                    if scores[actor] >= 121:
-                        for phase,d,p,dealer in visits:
-                            row = expected[phase,d,p]; row[0] += int(dealer==actor); row[1] += 1
-                        break
-                else:
-                    self.fail('unresolved fixture')
+    def test_only_actual_start_of_hand_boards_learn(self):
+        events = [(0,20),(1,15),(1,40),(0,40)]
+        markers = [(0,0,0),(1,1,0),(2,0,1),(3,2,1)]
         with patch.object(learning,'series',return_value=(events,markers)):
-            actual = learning.board_observations(dict(trajectory=True))
-        self.assertEqual(dict(actual),dict(expected))
-
-    def test_replay_rejects_censored_trajectory(self):
-        with patch.object(learning,'series',return_value=([(0,121)],[(0,0,0)])):
-            with self.assertRaisesRegex(ValueError,'incomplete'):
-                learning.board_observations(dict(trajectory=True))
+            actual=learning.board_observations(dict(trajectory=False,winner=0,start=[40,50]))
+        self.assertEqual(dict(actual),{(0,40,50):[1.,1],(0,65,60):[0.,1]})
+        with self.assertRaisesRegex(ValueError,'transposed'):
+            learning.board_observations(dict(trajectory=True))
 
     def test_go_awards_are_recorded_for_the_scoring_actor(self):
         g = game(); h = g['hands'][0]
@@ -79,7 +62,7 @@ class LearningTests(unittest.TestCase):
             (assets/'model1323-corrections.bin').write_bytes(b'frozen fixture')
             learning.seal(base,0,None,{},dict(peggingPolicy='28.3-f64-test'))
             original = learning.verify(base)
-            for phase in learning.PHASES:
+            for phase in learning.FILES:
                 target = Path(tmp)/phase
                 result = learning.update(base,target,phase,[('game-1',game())],1000,REPO)
                 self.assertEqual(result['changed'],[learning.FILES[phase]])
@@ -94,7 +77,7 @@ class LearningTests(unittest.TestCase):
     def test_replay_effective_count_is_seed_cluster_not_cell_visit(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = REPO/learning.ASSETS/learning.FILES['wp']; target = Path(tmp)/'board.bin'; state = {}
-            g = dict(seed=12,trajectory=True)
+            g = dict(seed=12,trajectory=False)
             with patch.object(learning,'board_observations',return_value={(0,10,20):(900,1000)}):
                 result = learning.update_board(source,target,[g,g],1000,state)
             self.assertEqual(state,{'0,10,20':1})
@@ -102,6 +85,7 @@ class LearningTests(unittest.TestCase):
             old = struct.unpack_from('<d',source.read_bytes(),16+8*(10*121+20))[0]
             new = struct.unpack_from('<d',target.read_bytes(),16+8*(10*121+20))[0]
             self.assertAlmostEqual(new,(old*1000+.9)/1001)
+            self.assertEqual(source.read_bytes()[16+121*121*8:],target.read_bytes()[16+121*121*8:])
 
     def test_small_pilot_cannot_claim_strength(self):
         games = [dict(seed=10,candidateSide=s,winner=s) for s in (0,1)]
@@ -110,6 +94,36 @@ class LearningTests(unittest.TestCase):
             assessment([games[0],games[0]],.01)
         with self.assertRaisesRegex(ValueError,'incomplete'):
             assessment(games[:1],.01)
+
+    def test_forecast_update_preserves_terminal_outcomes_and_deduplicates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp)/'base';assets=base/learning.ASSETS;assets.mkdir(parents=True)
+            for name in learning.FILES.values():shutil.copyfile(REPO/learning.ASSETS/name,assets/name)
+            (assets/'model1323-corrections.bin').write_bytes(b'frozen fixture')
+            learning.seal(base,0,None,{},dict(peggingPolicy='28.3-f64-test'))
+            row=dict(model='29.0',outcomes=[dict(key=f'keep-{i}',scores=[121,120]) for i in range(15)])
+            target=Path(tmp)/'candidate'
+            result=learning.update(base,target,'forecast',[('forecast:1',row)],1000,REPO)
+            self.assertEqual(result['changed'],[learning.FORECAST])
+            table=json.loads((target/learning.ASSETS/learning.FORECAST).read_text())
+            self.assertEqual(table['rows']['keep-0'],[[121,120]])
+            with self.assertRaisesRegex(ValueError,'no new'):
+                learning.update(target,Path(tmp)/'repeat','forecast',[('forecast:1',row)],1000,REPO)
+
+    def test_resume_counts_only_completed_full_games_for_cache_age(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out=Path(tmp);db=sqlite3.connect(':memory:')
+            db.execute('create table results(id text primary key, request text, root text, result text)')
+            request=dict(kind='game',seed=1);result=dict(seconds=1,cache=dict(hits=3))
+            db.execute('insert into results values(?,?,?,?)',('train:0:0',json.dumps(request),'root',json.dumps(result)))
+            db.execute('insert into results values(?,?,?,?)',('forecast:1:0','{}','root',json.dumps(result)))
+            config=dict(output=str(out),workers=2,binary='not called')
+            with patch('cycle.Worker',side_effect=AssertionError('completed work must not replay')):
+                collect(db,config,'root',[('train:0:0',request)],out)
+            self.assertEqual(json.loads((out/'cache-clock.json').read_text())['completedGames'],1)
+            self.assertEqual(json.loads((out/'cache-progress.json').read_text())['hits'],6)
+            with self.assertRaisesRegex(ValueError,'resumed request'):
+                collect(db,config,'root',[('train:0:0',dict(kind='game',seed=2))],out)
 
     def test_training_and_evaluation_seeds_must_be_disjoint(self):
         config = dict(rounds=1,trainingGames=2,evaluationPairs=1,workers=1,

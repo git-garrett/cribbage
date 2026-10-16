@@ -9,7 +9,7 @@ import sqlite3
 import subprocess
 import time
 from pathlib import Path
-from learning import ASSETS, PHASES, atomic, sha, update, verify, verify_source
+from learning import ASSETS, PHASES, atomic, sha, update, verify, verify_source, natural_hands
 
 
 class Worker:
@@ -65,11 +65,19 @@ def validate(config):
     phases = config.get('phases',list(PHASES))
     if not phases or any(p not in PHASES for p in phases):
         raise ValueError('invalid phases')
+    if 'forecast' in phases and (phases.index('forecast')==0 or phases[phases.index('forecast')-1]=='forecast'):
+        raise ValueError('forecast requires a preceding ordinary-game phase')
+    for field,default in [('forecastContexts',12),('forecastWorlds',16)]:
+        if type(config.get(field,default))is not int or not 1<=config.get(field,default)<=1000:
+            raise ValueError('invalid '+field)
+    if config.get('forecastContexts',12)*config.get('forecastWorlds',16)>100000:
+        raise ValueError('forecast exceeds seed stride')
     for name in ('seed','evaluationSeed'):
         if type(config.get(name)) is not int or not 0 <= config[name] <= 0xffffffff:
             raise ValueError('invalid '+name)
     n = config['rounds']*len(phases); stride = 100000
-    a = (config['seed'], config['seed']+(n-1)*stride+config['trainingGames']-1)
+    span=max(config['trainingGames'],config.get('forecastContexts',12)*config.get('forecastWorlds',16) if 'forecast' in phases else 0)
+    a = (config['seed'], config['seed']+(n-1)*stride+span-1)
     b = (config['evaluationSeed'], config['evaluationSeed']+(n-1)*stride+2*config['evaluationPairs']-1)
     if max(a[1],b[1]) > 0xffffffff or max(a[0],b[0]) <= min(a[1],b[1]):
         raise ValueError('overlapping or wrapping seed reservations')
@@ -79,6 +87,8 @@ def validate(config):
         points = config.get(field,[[0,0]])
         if not points or any(len(p)!=2 or any(type(v) is not int or not 0<=v<121 for v in p) for p in points):
             raise ValueError('invalid '+field)
+        if points != [[0,0]]:
+            raise ValueError('Model 29 uses ordinary 0–0 games only')
     mass = config.get('priorEffectiveSamples',1000)
     if not isinstance(mass,(int,float)) or not math.isfinite(mass) or mass <= 0:
         raise ValueError('invalid prior mass')
@@ -87,10 +97,31 @@ def validate(config):
         raise ValueError('invalid noninferiority margin')
 
 
+def checkpoint(db, config, **activity):
+    out=Path(config['output'])
+    full=db.execute("select count(*) from results where id like 'train:%' or id like 'eval:%'").fetchone()[0]
+    atomic(out/'cache-clock.json',dict(completedGames=full))
+    progress=json.loads((out/'progress.json').read_text()) if (out/'progress.json').exists() else {}
+    progress.update(activity,updatedAt=time.time(),workers=config['workers'],completedGames=full,
+        trainingGames=db.execute("select count(*) from results where id like 'train:%'").fetchone()[0],
+        forecastWorlds=db.execute("select count(*) from results where id like 'forecast:%'").fetchone()[0],
+        evaluationGames=db.execute("select count(*) from results where id like 'eval:%'").fetchone()[0])
+    atomic(out/'progress.json',progress)
+
+
 def collect(db, config, root, requests, output, reference=None):
     """One writer and exact request identities; out-of-order completion is resumable."""
     pending = [(identity,req) for identity,req in requests
                if not db.execute('select 1 from results where id=?',(identity,)).fetchone()]
+    started=time.monotonic(); completed=len(requests)-len(pending)
+    stats=dict(hits=0,misses=0,expired=0,writes=0,maxAgeGames=0)
+    for (raw,) in db.execute('select result from results'):
+        prior=json.loads(raw).get('cache',{})
+        for k in ('hits','misses','expired','writes'):stats[k]+=prior.get(k,0)
+        stats['maxAgeGames']=max(stats['maxAgeGames'],prior.get('maxAgeGames',0))
+    atomic(Path(config['output'])/'cache-progress.json',stats)
+    checkpoint(db,config,phase='evaluation' if reference else 'forecast' if requests[0][1]['kind']=='counterfactual' else 'collection',
+        phaseCompleted=completed,phaseTarget=len(requests),phaseStartedAt=time.time(),activeRoot=str(root))
     groups = [pending[i::config['workers']] for i in range(config['workers'])]
     # Each task is one game so each completion commits promptly. Reuse a worker
     # per thread; loss of a process cannot manufacture completed game indices.
@@ -128,8 +159,14 @@ def collect(db, config, root, requests, output, reference=None):
                 db.execute('insert into results values(?,?,?,?)',
                            (identity,json.dumps(req),str(root),json.dumps(game)))
                 db.commit()
-                atomic(output/'progress.json',dict(phase='evaluation' if reference else 'collection',
-                       lastCompleted=identity,seconds=game['seconds'],updatedAt=time.time()))
+                completed+=1
+                checkpoint(db,config,lastCompleted=identity,phaseCompleted=completed,
+                    phaseSeconds=time.monotonic()-started,lastGameSeconds=game['seconds'])
+                stats_path=Path(config['output'])/'cache-progress.json'
+                for k in ('hits','misses','expired','writes'):
+                    stats[k]+=game.get('cache',{}).get(k,0)
+                stats['maxAgeGames']=max(stats['maxAgeGames'],game.get('cache',{}).get('maxAgeGames',0))
+                stats['updatedAt']=time.time();atomic(stats_path,stats)
         for f in futures:
             f.result()
     if failure:
@@ -141,6 +178,20 @@ def collect(db, config, root, requests, output, reference=None):
             raise ValueError('resumed request or root changed')
         result.append((identity,json.loads(row[2])))
     return result
+
+
+def forecast_requests(db, config, index):
+    # Select actual legal contexts from the most recent ordinary training batch.
+    games=[json.loads(r[0]) for r in db.execute("select result from results where id like ? order by id",(f'train:{index-1}:%',))]
+    if not games: raise ValueError('forecast phase requires preceding natural games')
+    contexts=[]
+    for i in range(config.get('forecastContexts',12)):
+        game=games[(i*len(games))//config.get('forecastContexts',12)]
+        hands=list(natural_hands(game)); h=hands[(i//2)%len(hands)]; actor=i%2
+        contexts.append(dict(own=h['dealt'][actor],scores=[h['start'][actor],h['start'][1-actor]],dealer=int(h['dealer']!=actor)))
+    worlds=config.get('forecastWorlds',16)
+    return [(f'forecast:{index}:{i}:{world}',dict(kind='counterfactual',seed=config['seed']+index*100000+i*worlds+world,**context))
+        for i,context in enumerate(contexts) for world in range(worlds)]
 
 
 def run(config):
@@ -159,9 +210,11 @@ def run(config):
         raise ValueError('resume differs from frozen run identity')
     atomic(path,identity)
     db = sqlite3.connect(out/'evidence.db')
+    db.execute('pragma journal_mode=WAL')
     db.execute('create table if not exists results(id text primary key,request text,root text,result text)')
     current = Path(config['initialRoot']); baseline = current
     reports = []; phases = config.get('phases',list(PHASES)); planned = phases*config['rounds']
+    checkpoint(db,config,phase='preparing')
     try:
         for index,phase in enumerate(planned):
             directory = out/f'{index:04d}-{phase}'; directory.mkdir(exist_ok=True)
@@ -170,12 +223,12 @@ def run(config):
                 report = json.loads(receipt.read_text()); current = Path(report['nextRoot'])
                 verify(current); reports.append(report); continue
             started = time.monotonic(); seed = config['seed']+index*100000
-            points = config.get('trainingScores',[[90,90],[110,115]])
-            requests = [(f'train:{index}:{i}',dict(kind='trajectory' if i == 0 else 'game',
-                         seed=seed+i,firstDealer=i%2,scores=[0,0] if i == 0 else points[(i-1)%len(points)]))
-                        for i in range(config['trainingGames'])]
+            checkpoint(db,config,asset=phase,stageIndex=index,cycle=index//len(phases)+1,generation=verify(current)['generation'])
+            requests = forecast_requests(db,config,index) if phase=='forecast' else [
+                (f'train:{index}:{i}',dict(kind='game',seed=seed+i,firstDealer=i%2,scores=[0,0])) for i in range(config['trainingGames'])]
             collect(db,config,current,requests,directory)
-            records = [(r[0],json.loads(r[1])) for r in db.execute("select id,result from results where id like 'train:%' order by id")]
+            pattern='forecast:%' if phase=='forecast' else 'train:%'
+            records = [(r[0],json.loads(r[1])) for r in db.execute('select id,result from results where id like ? order by id',(pattern,))]
             candidate = directory/'candidate'; update_path = directory/'update.json'
             if update_path.exists():
                 details = json.loads(update_path.read_text()); verify(candidate)
@@ -184,7 +237,7 @@ def run(config):
             else:
                 if candidate.exists():
                     candidate.rename(directory/f'interrupted-candidate-{time.time_ns()}')
-                atomic(directory/'progress.json',dict(phase='updating',asset=phase,updatedAt=time.time()))
+                checkpoint(db,config,phase='updating',asset=phase)
                 verify_source(config)
                 details = update(current,candidate,phase,records,config.get('priorEffectiveSamples',1000),config['repo'])
                 atomic(update_path,details)
@@ -198,23 +251,28 @@ def run(config):
                 eval_requests = [(f'eval:{index}:{name}:{i}:{side}',dict(kind='game',
                                   seed=config['evaluationSeed']+index*100000+panel*config['evaluationPairs']+i,
                                   firstDealer=i%2,candidateSide=side,
+                                  cache=False,
                                   scores=scores[i%len(scores)] if side==0 else scores[i%len(scores)][::-1]))
                                  for i in range(config['evaluationPairs']) for side in range(2)]
                 games = collect(db,config,candidate,eval_requests,directory,reference)
                 evaluations[name] = assessment([g for _,g in games],config.get('noninferiorityMargin',.01),2*len(planned))
             full_games = scores == [[0,0]]
             promoted = full_games and all(v['status']=='passed' for v in evaluations.values())
-            if promoted:
+            advanced = all(v['status']!='regressed' for v in evaluations.values())
+            if advanced:
                 current = candidate
+            if promoted:
                 atomic(out/'promoted.json',dict(root=str(current),snapshot=details['snapshot'],evaluations=evaluations))
             report = dict(status='complete',phase=phase,update=details,evaluations=evaluations,
-                          fullGameStrengthMeasured=full_games,promoted=promoted,nextRoot=str(current),
+                          fullGameStrengthMeasured=full_games,promoted=promoted,advanced=advanced,nextRoot=str(current),
                           seconds=time.monotonic()-started)
             atomic(receipt,report); reports.append(report)
+            atomic(out/'history.json',dict(stages=reports,experimentalRoot=str(current)))
         result = dict(status='complete',model='29.0',stages=reports,acceptedRoot=str(current),
                       evidenceGames=db.execute("select count(*) from results where id like 'train:%'").fetchone()[0],
                       promoted=(out/'promoted.json').exists())
         atomic(out/'result.json',result)
+        checkpoint(db,config,phase='complete')
         return result
     finally:
         db.close()

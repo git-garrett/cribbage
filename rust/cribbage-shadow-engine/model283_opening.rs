@@ -6,6 +6,9 @@ use sha2::{Digest, Sha256};
 use std::io::Write;
 #[path = "model283_opening_codec.rs"]
 mod codec;
+#[cfg(feature = "model29-training")]
+#[path = "model283_opening_training.rs"]
+mod training;
 
 pub(super) struct Book {
     pub rows: Vec<(u128, u64, u8)>,
@@ -121,6 +124,10 @@ impl Book {
         lead: u8,
         policy: &str,
     ) -> Result<usize, String> {
+        self.write_metadata(path, cut, scores, lead, policy, None)
+    }
+    fn write_metadata(&self, path: &Path, cut: u8, scores: Endpoint, lead: u8,
+        policy: &str, training: Option<serde_json::Value>) -> Result<usize, String> {
         let mut body = Vec::new();
         let mut at = 0;
         let mut previous = 0;
@@ -141,8 +148,8 @@ impl Book {
             }
         }
         let body = codec::encode(&body)?;
-        let header=serde_json::to_vec(&serde_json::json!({"format":4,"dealerPlays":self.dealer_plays,"policy":policy,"cut":cut,"scores":scores,"lead":lead,"rows":self.rows.len(),"sha256":format!("{:x}",Sha256::digest(&body))})).map_err(|e|e.to_string())?;
-        let tmp = path.with_extension("tmp");
+        let header=serde_json::to_vec(&serde_json::json!({"format":4,"dealerPlays":self.dealer_plays,"policy":policy,"cut":cut,"scores":scores,"lead":lead,"rows":self.rows.len(),"sha256":format!("{:x}",Sha256::digest(&body)),"training":training})).map_err(|e|e.to_string())?;
+        let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
         let mut out = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
         out.write_all(&(header.len() as u32).to_le_bytes())
             .and_then(|_| out.write_all(&header))
@@ -388,6 +395,10 @@ pub(super) fn asset_forecast(
     lead: u8,
     public_own: &[Hand],
 ) -> Result<Option<Solved>, String> {
+    #[cfg(feature = "model29-training")]
+    if crate::model29_snapshot::cache_enabled() {
+        return training::forecast(s, p, next, own, other, lead, public_own);
+    }
     let Ok(dir) = std::env::var("CRIBBAGE_283_FAST_ASSET") else {
         return Ok(None);
     };
@@ -413,6 +424,12 @@ pub(super) fn asset_forecast(
         table: Table::Constant(BAD),
         live,
     }))
+}
+
+#[cfg(feature = "model29-training")]
+pub(super) fn capture(s: &mut Solver, p: &Position, next: &Position,
+    own: &[Hand], other: &[Hand], i: usize, lead: u8) -> Result<Solved, String> {
+    training::capture(s, p, next, own, other, i, lead)
 }
 
 fn shard_path(root: &Path, cut: u8, scores: Endpoint, lead: u8) -> std::path::PathBuf {

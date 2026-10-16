@@ -56,6 +56,8 @@ def game_pace(rounds, progress, cfg, status, settings, now):
 def _training_report(entry, status, now=None):
     now = time.time() if now is None else now
     settings = read_json(Path(entry['spec']), {})['trainingStudy']
+    if settings.get('mode') == 'cyclic':
+        return build_cyclic_report(entry,status,settings,now)
     if settings.get('mode') == 'roles':
         return build_role_report(entry, status, settings, now)
     if settings.get('mode') == 'discard':
@@ -120,6 +122,19 @@ def _training_report(entry, status, now=None):
                 verification=read_json(root / 'verification.json', {}).get('status', 'pending'),
                 archive=read_json(root / 'sync-receipt.json', {}).get('status', 'pending'),
                 playingStrengthMeasured=False, fullGameThroughputMeasured=False, warnings=warnings)
+
+
+def build_cyclic_report(entry,status,settings,now):
+    root=Path(entry['root']); progress=read_json(root/'progress.json',{})
+    history=read_json(root/'history.json',{}).get('stages',[])
+    stage=next((s['name'] for s in status.get('stages',[]) if s.get('state') in ('running','failed')),'')
+    reservation=read_json(Path('/Users/garrett/Library/Application Support/StrongCribbage/runtimes/coordination/model30-reserved-cpus.json'),{})
+    return dict(id=entry['id'],kind='training',mode='cyclic',title=entry['title'],state=status.get('state','prepared'),asOf=now,
+        stage=stage,progress=progress,target=settings['target'],completed=progress.get('trainingGames',0),
+        workers=reservation.get('allocations',{}).get(entry['id'],0),workerLimit=settings['workers'],
+        rounds=settings['rounds'],history=history,cache=read_json(root/'cache-progress.json',{}),
+        cacheLimit=settings['maxAgeGames'],inheritedCache=read_json(root.parent/'cache-stage.json',{}) or read_json(Path(settings.get('cacheBank',str(root)))/'progress.json',{}),
+        stages=[dict(name=s['name'],state=s.get('state','pending')) for s in status.get('stages',[])],warnings=[])
 
 
 def build_win_report(entry, status, settings, now):
@@ -244,6 +259,14 @@ def activity(report, status):
     stage=report.get('stageKinds',{}).get(raw_stage,raw_stage)
     state=status.get('state','prepared');root=Path(report['_root'])
     progress=read_json(root/'progress.json',{})
+    if mode=='cyclic':
+        phase=progress.get('phase','preparing'); asset=progress.get('asset','WP')
+        labels={'collection':'Playing full games','forecast':'Sampling all 15 keeps','updating':'Updating one asset','evaluation':'Screening fresh policy','complete':'Pilot cycles complete'}
+        label=labels.get(phase,raw_stage.replace('-',' ').capitalize() or 'Preparing')
+        if state!='running': label=state.capitalize()
+        return dict(label=f"{label} · {asset}",kind=state,detail='Normal 0–0 games, first winner at 121. One asset changes between batches. Cache refresh happens only on a miss or expiry.',
+            completed=progress.get('phaseCompleted'),target=progress.get('phaseTarget'),unit='opponent worlds' if phase=='forecast' else 'games',
+            context=f"Cycle {progress.get('cycle',1)} · generation {progress.get('generation',0)}",stageLabels={},state=state)
     if report.get('roleStudy'):
         phase=progress.get('phase','preparing');r=progress.get('round');size=progress.get('size','')
         table=report.get('learningMode')=='alternating' and isinstance(r,int) and r%2==0 and phase!='evaluation'

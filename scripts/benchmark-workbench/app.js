@@ -181,7 +181,7 @@ function renderPreviews() {
 
 function selectJob(id) {
   selected = id; followLatest = true; report = null;
-  $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('gpu-report').hidden = true; $('training-report').hidden = true; $('selfplay-report').hidden = true; $('study-overview').hidden = true; $('notice').hidden = true;
+  $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('gpu-report').hidden = true; $('training-report').hidden = true; $('selfplay-report').hidden = true; $('cyclic-report').hidden = true; $('study-overview').hidden = true; $('notice').hidden = true;
   $('visibility-error').hidden = true;
   renderJobs(); refresh();
 }
@@ -259,7 +259,7 @@ function renderCharts() {
   if (report.kind === 'asset') return renderAssetCharts(report);
   if (report.kind === 'analysis') return renderAnalysisChart(report);
   if (report.kind === 'gpu') return renderGpuCharts(report);
-  if (report.kind === 'training') return report.mode === 'wins' ? renderSelfplayChart(report) : renderTrainingCharts(report);
+  if (report.kind === 'training') return report.mode === 'cyclic' ? undefined : report.mode === 'wins' ? renderSelfplayChart(report) : renderTrainingCharts(report);
   const index = Number($('inspect').value);
   const bands = [];
   if ($('show-anytime').checked) bands.push({ key: 'anytime95', className: 'anytime-band' });
@@ -321,7 +321,8 @@ function render(value) {
   $('analysis-report').hidden = Boolean(error) || value.kind !== 'analysis';
   $('asset-report').hidden = Boolean(error) || value.kind !== 'asset';
   $('gpu-report').hidden = Boolean(error) || value.kind !== 'gpu';
-  $('training-report').hidden = Boolean(error) || value.kind !== 'training' || value.mode === 'wins';
+  $('cyclic-report').hidden = Boolean(error) || value.kind !== 'training' || value.mode !== 'cyclic';
+  $('training-report').hidden = Boolean(error) || value.kind !== 'training' || ['wins','cyclic'].includes(value.mode);
   $('selfplay-report').hidden = Boolean(error) || value.kind !== 'training' || value.mode !== 'wins';
   $('notice').hidden = !error && !value.warnings?.length;
   $('notice').textContent = error || (value.warnings || []).join(' ');
@@ -331,7 +332,7 @@ function render(value) {
   if (value.kind === 'asset') return renderAsset(value);
   if (value.kind === 'analysis') return renderAnalysis(value);
   if (value.kind === 'gpu') return renderGpu(value);
-  if (value.kind === 'training') return value.mode === 'wins' ? renderSelfplay(value) : renderTraining(value);
+  if (value.kind === 'training') return value.mode === 'cyclic' ? renderCyclic(value) : value.mode === 'wins' ? renderSelfplay(value) : renderTraining(value);
   const candidate = modelName(value.candidate), opponent = modelName(value.opponent);
   $('matchup').textContent = `${candidate} vs ${opponent}`;
   $('experiment').textContent = value.experiment;
@@ -524,7 +525,7 @@ async function refresh() {
       $('run-tabs').dataset.jobs = '';
       $('benchmark-view').removeAttribute('aria-labelledby');
       $('jobs').replaceChildren(element('option', 'No paired benchmarks registered'));
-      $('empty').hidden = false; $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('gpu-report').hidden = true; $('training-report').hidden = true; $('selfplay-report').hidden = true; $('study-overview').hidden = true; $('notice').hidden = true;
+      $('empty').hidden = false; $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('gpu-report').hidden = true; $('training-report').hidden = true; $('selfplay-report').hidden = true; $('cyclic-report').hidden = true; $('study-overview').hidden = true; $('notice').hidden = true;
       $('connection').textContent = 'Connected';
       return;
     }
@@ -678,6 +679,31 @@ function modelSize(value,name) {
 
 function renderSelfplayChart(value) {
   chart('selfplay-chart', value.history, { x: (r) => r.round, xLabel: 'Training round →', y: (r) => r.winRate, percent: true, domain: [0, 1], empty: 'Waiting for a completed training round' });
+}
+function renderCyclic(value) {
+  const p=value.progress, c=value.cache;
+  $('cyclic-title').textContent=value.title;
+  $('cyclic-state').textContent=value.state;
+  $('cyclic-stage').textContent=value.activity.context;
+  $('cyclic-activity').textContent=value.activity.label;
+  $('cyclic-progress').textContent=activityProgress(value.activity);
+  $('cyclic-detail').textContent=value.activity.detail;
+  renderStageList('cyclic-stages',value);
+  const fill=(id,rows)=>{const list=$(id);list.replaceChildren();for(const [label,stat] of rows)list.append(element('dt',label),element('dd',String(stat)));};
+  const speed=p.phaseSeconds>0 && p.phase==='collection' ? `${number.format(Math.round(p.phaseCompleted*3600/p.phaseSeconds))} games/hour this batch` : 'Measured during game collection';
+  fill('cyclic-totals',[
+    ['CPU allocation',`${value.workers} / ${value.workerLimit} workers`],['Training games',`${number.format(value.completed)} / ${number.format(value.target)} in this pilot`],
+    ['Cycles',`${p.cycle || 0} / ${value.rounds}`],['Asset updates completed',value.history.length],['Current generation',p.generation || 0],
+    ['Forecast hand rollouts',number.format((p.forecastWorlds || 0)*15)],['Evaluation games',number.format(p.evaluationGames || 0)],
+    ['Game pace',speed],['Last checkpoint',p.updatedAt ? new Date(p.updatedAt*1000).toLocaleTimeString() : 'Waiting']]);
+  fill('cyclic-cache',[
+    ['Hits',number.format(c.hits || 0)],['Missing chunks',number.format(c.misses || 0)],['Expired lookups',number.format(c.expired || 0)],
+    ['Fresh chunks written',number.format(c.writes || 0)],['Oldest observed age',`${number.format(c.maxAgeGames || 0)} games`],
+    ['Completed-game clock',number.format(p.completedGames || 0)],['Inherited chunks staged',number.format(value.inheritedCache.chunks || 0)]]);
+  $('cyclic-cache-note').textContent='Cached dealer choices may lag current priors within the age limit. Fresh solves update the cache on demand; cached choices do not train themselves.';
+  const body=$('cyclic-history');body.replaceChildren();
+  value.history.forEach((r,i)=>{const row=element('tr');const u=r.update;const coverage=u.cells!=null ? `${number.format(u.cells)} WP cells` : u.contextKeepRows!=null ? `${number.format(u.contextKeepRows)} hand/keep/board contexts` : u.rows!=null ? `${number.format(u.rows)} rows` : 'Saved in snapshot';
+    for(const text of [i+1,r.phase,`${number.format(u.games)} ${r.phase==='forecast'?'opponent worlds':'games'}`,coverage,r.advanced?'Advanced experimentally':'Retained previous',Object.entries(r.evaluations).map(([k,v])=>`${k}: ${v.status}`).join('; ')])row.append(element('td',String(text)));body.append(row);});
 }
 function renderSelfplay(value) {
   $('selfplay-history-panel').hidden=Boolean(value.roleStudy);
