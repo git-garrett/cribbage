@@ -193,6 +193,7 @@ function renderPreviews() {
 
 function selectJob(id) {
   selected = id; followLatest = true; report = null;
+  comparisonKey = '';
   $('report').hidden = true; $('asset-report').hidden = true; $('analysis-report').hidden = true; $('gpu-report').hidden = true; $('training-report').hidden = true; $('selfplay-report').hidden = true; $('cyclic-report').hidden = true; $('study-overview').hidden = true; $('notice').hidden = true;
   $('visibility-error').hidden = true;
   renderJobs(); refresh();
