@@ -34,6 +34,7 @@ def prepare(source, runtime, archive):
     atomic(runtime/'source-manifest.json',dict(revision=revision,
            files={str(p.relative_to(frozen)):sha(p) for p in sorted(frozen.rglob('*')) if p.is_file()}))
     config = dict(model='29.0',sourceRevision=revision,repo=str(frozen),
+                  sourceManifestSha256=sha(runtime/'source-manifest.json'),
                   binary=str(runtime/'target/release/model29-worker'),
                   initialRoot=str(runtime/'initial'),output=str(runtime/'output'),archive=str(archive),
                   rounds=1,phases=['wp','crib'],trainingGames=2,evaluationPairs=2,workers=2,

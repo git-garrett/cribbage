@@ -7,11 +7,12 @@ import sqlite3
 import time
 from pathlib import Path
 from cycle import Worker
-from learning import ASSETS, atomic, bootstrap, manifest, sha, verify
+from learning import ASSETS, atomic, bootstrap, sha, verify, verify_source
 
 
 def run(stage, config):
     root = Path(config['repo']); out = Path(config['output']); runtime = out.parent
+    verify_source(config)
     if stage == 'bootstrap':
         policy = dict(peggingPolicy='28.3-f64',sourceRevision=config['sourceRevision'],
                       sourceSha256=sha(runtime/'source-manifest.json'),

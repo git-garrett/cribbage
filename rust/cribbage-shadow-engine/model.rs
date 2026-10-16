@@ -659,6 +659,14 @@ fn model29_input(input: &DecisionInput) -> Option<DecisionInput> {
     }
     let mut baseline = input.clone();
     baseline.model = MODEL_28_3.into();
+    // Offline two-sided trajectories continue after the standard game's first
+    // winner. Preserve raw record scores, but define those synthetic choices
+    // on the last legal board square. Ordinary 0..120 games are unchanged.
+    #[cfg(feature = "model29-training")]
+    {
+        baseline.ai_score = baseline.ai_score.min(120);
+        baseline.human_score = baseline.human_score.min(120);
+    }
     Some(baseline)
 }
 
@@ -8188,6 +8196,22 @@ mod tests {
         let expected = evaluate_decision(&normalized, root.to_str().unwrap()).unwrap();
         assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
         assert!(model29_input(&normalized).is_none());
+    }
+
+    #[cfg(feature = "model29-training")]
+    #[test]
+    fn model290_synthetic_continuation_preserves_raw_overshoot() {
+        let mut input = parse_decision_input("kind=peg;model=schell_table-peg_table-29.0;turnCard=10;role=pone;ownDiscards=1,6;aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore=128;humanScore=116;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5").unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+        let projected = model29_input(&input).unwrap();
+        assert_eq!(input.ai_score, 128);
+        assert_eq!(projected.ai_score, 120);
+        assert_eq!(projected.human_score, 116);
+        let actual = evaluate_decision(&input, root.to_str().unwrap()).unwrap();
+        let expected = evaluate_decision(&projected, root.to_str().unwrap()).unwrap();
+        assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+        input.human_score = 142;
+        assert_eq!(model29_input(&input).unwrap().human_score, 120);
     }
 
     fn model16_peg_input() -> DecisionInput {

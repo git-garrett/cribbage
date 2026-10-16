@@ -6,8 +6,9 @@ import tempfile
 import unittest
 from collections import defaultdict
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import learning
+import resources
 from cycle import assessment, validate
 
 REPO = Path(__file__).resolve().parents[2]
@@ -117,6 +118,37 @@ class LearningTests(unittest.TestCase):
             validate(config)
         config['evaluationSeed'] = 500
         validate(config)
+
+    def test_resumed_training_rejects_changed_external_extractor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)/'frozen'; helper = root/'scripts/extractor.py'
+            helper.parent.mkdir(parents=True); helper.write_text('original')
+            source = Path(tmp)/'source-manifest.json'
+            learning.atomic(source,dict(files={'scripts/extractor.py':learning.sha(helper)}))
+            config = dict(repo=str(root),sourceManifestSha256=learning.sha(source))
+            learning.verify_source(config)
+            helper.write_text('changed')
+            with self.assertRaisesRegex(ValueError,'frozen source changed'):
+                learning.verify_source(config)
+
+    def test_only_locked_same_owner_can_reclaim_crashed_cpu_allocation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'reservation.json'
+            with patch.object(resources,'RESERVATION',path):
+                resources.allocation('run',2)
+                with self.assertRaisesRegex(ValueError,'ownership'):
+                    resources.allocation('run',2)
+                resources.allocation('run',2,reclaim=True)
+                self.assertEqual(json.loads(path.read_text())['workers'],2)
+                resources.allocation('run',2,release=True)
+                self.assertEqual(json.loads(path.read_text())['workers'],0)
+
+    def test_crashed_parent_does_not_leave_native_workers_running(self):
+        child = Mock(pid=123); child.poll.return_value = 1
+        with patch.object(resources.os,'killpg',side_effect=[None,ProcessLookupError]) as kill:
+            resources.terminate_group(child)
+        self.assertEqual(kill.call_args_list[0].args,(123,resources.signal.SIGTERM))
+        child.wait.assert_called_once_with(timeout=10)
 
 
 if __name__ == '__main__':

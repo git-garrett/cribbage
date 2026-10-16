@@ -51,7 +51,9 @@ pone count, dealer count, then crib. Later suffixes are not separately rebased.
 
 28.3 changes actions with board position. A fixed line played from 0–0 is
 therefore **not** an unbiased estimate of what 29.0 would play from 115–118.
-Post-terminal continuation is synthetic too. This replay estimates a broad
+Post-terminal continuation is synthetic too: its decisions cap each policy
+score at 120 while the game record retains true cumulative scores above 121.
+This keeps the unchanged solver inside its valid score domain. This replay estimates a broad
 fixed-line prior; direct games from specified board strata also contribute
 on-policy observations. That combination remains an approximation, with no
 claim that a few games identify all board squares. The pilot exercises both

@@ -34,6 +34,17 @@ def manifest(root):
     return json.loads((Path(root) / ASSETS / 'model29-generation.json').read_text())
 
 
+def verify_source(config):
+    path = Path(config['repo']).parent/'source-manifest.json'
+    if sha(path) != config['sourceManifestSha256']:
+        raise ValueError('frozen source manifest changed')
+    value = json.loads(path.read_text())
+    for name,expected in value['files'].items():
+        relative = Path(name)
+        if relative.is_absolute() or '..' in relative.parts or sha(Path(config['repo'])/relative) != expected:
+            raise ValueError('frozen source changed: '+name)
+
+
 def verify(root):
     m = manifest(root)
     if m['model'] != '29.0' or m['schemaVersion'] != 1:

@@ -4,17 +4,20 @@ import argparse
 import concurrent.futures
 import json
 import math
+import os
 import sqlite3
 import subprocess
 import time
 from pathlib import Path
-from learning import ASSETS, PHASES, atomic, canonical, manifest, sha, update, verify
+from learning import ASSETS, PHASES, atomic, sha, update, verify, verify_source
 
 
 class Worker:
     def __init__(self, binary, root, reference=None):
         args = [binary, str(root)] + ([str(reference)] if reference else [])
-        self.process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        lease = os.environ.get('MODEL29_LEASE_FD')
+        self.process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                        text=True,pass_fds=(int(lease),) if lease else ())
 
     def call(self, request):
         self.process.stdin.write(json.dumps(request)+'\n'); self.process.stdin.flush()
@@ -143,7 +146,10 @@ def collect(db, config, root, requests, output, reference=None):
 def run(config):
     validate(config)
     out = Path(config['output']); out.mkdir(parents=True,exist_ok=True)
-    verify(config['initialRoot'])
+    verify_source(config)
+    initial = verify(config['initialRoot'])
+    if initial['policy']['binarySha256'] != sha(config['binary']):
+        raise ValueError('native binary differs from audited policy')
     # Freeze all executable Python policy-update inputs as well as the native binary.
     identity = dict(config=config,binary=sha(config['binary']),
                     source={p.name:sha(p) for p in sorted(Path(__file__).parent.glob('*.py'))},
@@ -179,6 +185,7 @@ def run(config):
                 if candidate.exists():
                     candidate.rename(directory/f'interrupted-candidate-{time.time_ns()}')
                 atomic(directory/'progress.json',dict(phase='updating',asset=phase,updatedAt=time.time()))
+                verify_source(config)
                 details = update(current,candidate,phase,records,config.get('priorEffectiveSamples',1000),config['repo'])
                 atomic(update_path,details)
             evaluations = {}
