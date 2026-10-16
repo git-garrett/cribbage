@@ -1,5 +1,6 @@
 //! One immutable generation per process; JSON lines in and out.
 use cribbage_shadow_engine::{
+    board::Role,
     cards::Card, game::Side,
     model::{self, Decision, DecisionKind, Model13HandCache, Model911HandCache},
     model_id::ModelId, model29_snapshot,
@@ -68,6 +69,25 @@ fn decision(value: Decision) -> Value {
     }
 }
 
+// Serialize observations already collected by ModelPlayout. No extra decisions
+// or model calls: recording must not change policy, cache use or learning data.
+fn benchmark(record: &CompactPlayoutRecord) -> Value {
+    let role = |r: Role| if r == Role::Dealer { "dealer" } else { "pone" };
+    let discards: Vec<_> = record.discards.iter().map(|d| json!({
+        "hand":d.hand_number,"actor":d.player.index(),"role":role(d.role),"model":d.model.as_str(),
+        "ev":d.selected_ev,"wp":d.selected_win_probability,"micros":d.decision_elapsed_us
+    })).collect();
+    let plays: Vec<_> = record.peg_plays.iter().map(|p| json!({
+        "hand":p.hand_number,"sequence":p.sequence,"actor":p.player.map(Side::index),
+        "role":p.role.map(role),"model":p.model.map(|m|m.as_str()),
+        "ev":p.selected_ev,"evKind":"future_net","wp":p.selected_win_probability,
+        "micros":p.decision_elapsed_us,"legalCount":p.legal_count,
+        "action":p.action,"card":p.card.map(|c|c.id),"before":p.count_before,
+        "after":p.count_after,"points":p.points,"scores":[p.left_score,p.right_score]
+    })).collect();
+    json!({"schemaVersion":1,"discards":discards,"plays":plays})
+}
+
 fn run(root: &str, reference: Option<&str>, r: &Value) -> Result<Value, String> {
     let cache = r["cache"].as_bool().unwrap_or(true)
         && std::env::var_os("MODEL29_CACHE_CONFIG").is_some();
@@ -107,10 +127,12 @@ fn run(root: &str, reference: Option<&str>, r: &Value) -> Result<Value, String> 
         })?;
         (Some(result.winner.index()),[result.left_score,result.right_score],result.record)
     };
-    Ok(json!({"model":"29.0","seed":seed,"firstDealer":first.index(),"start":start,
+    let mut output = json!({"model":"29.0","seed":seed,"firstDealer":first.index(),"start":start,
         "winner":winner,"scores":scores,"hands":hands(&record),"trajectory":false,
         "candidateSide":candidate,"seconds":started.elapsed().as_secs_f64(),
-        "cache":model29_snapshot::cache_stats()}))
+        "cache":model29_snapshot::cache_stats()});
+    if reference.is_some() { output["benchmark"] = benchmark(&record); }
+    Ok(output)
 }
 
 fn main() -> Result<(), String> {

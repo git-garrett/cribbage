@@ -795,12 +795,28 @@ function renderComparison(target,value,url) {
   phases('Realized scoring',value.phaseScoring);
   phases('Available-event scoring',value.availableEventScoring);
   target.append(element('p','Phase values are points per recorded hand in that role; final score and margin are per game. Available-event scoring includes the full winning event. Unreached phases contribute zero.','caption'));
-  const bySide=element('details',null,'methods');bySide.append(element('summary','Scoring within each reciprocal orientation'));
-  const sideBody=element('div');for(const [label,r] of orientations){phases(`${label} · realized scoring`,r.scoring.realized,sideBody);phases(`${label} · available-event scoring`,r.scoring.available,sideBody);}
+  const calibration=(r,parent=target)=>{
+    const labels={discard_total:'Discard total',peg_future:'Remaining net pegging',discard:'Discard',pegging:'Pegging',peg_opening:'Opening play / hand',peg_hand:'Total / pegging hand'};
+    for(const [field,title,headers,values] of [
+      ['evCalibration','EV calibration',['Kind','Role','State','N','Predicted','Realized','Realized − predicted','Mean absolute error'],x=>[n(x.avgEv),n(x.avgRealized),n(x.avgError),n(x.meanAbsError)]],
+      ['winProbabilityCalibration','Win-probability calibration and Brier',['Kind','Role','State','N','Predicted WP','Actual wins','Actual − predicted','Brier','Mean absolute error'],x=>[percent(x.avgPredicted),percent(x.actualWinRate),percent(x.miss),n(x.brier),n(x.meanAbsError)]],
+      ['timing','Decision timing · opening and whole pegging hand',['Kind','Role','State','N','Mean ms','Median ms','90th percentile ms','Maximum ms','Total seconds'],x=>[n(x.avgMs),n(x.p50Ms),n(x.p90Ms),n(x.maxMs),n(x.totalSeconds)]]
+    ]){
+      const data=r[field];
+      table(title,headers,(data.rows || []).map(x=>[labels[x.kind] || x.kind,x.role,x.model,n(x.rows),...values(x)]),parent);
+      parent.append(element('p',`${data.note}${data.recordedGames == null ? '' : ` Telemetry: ${n(data.recordedGames)} / ${n(data.totalGames)} games (${data.status}).`}`,'caption'));
+      if(field==='evCalibration' && data.recordedGames)parent.append(element('p',`EV exclusions: ${Object.entries(data.excluded).map(([key,count])=>`${key}: ${n(count)}`).join(' · ')}`,'caption'));
+    }
+    const bins=r.winProbabilityCalibration.buckets || [];
+    if(bins.length){
+      const detail=element('details',null,'methods');detail.append(element('summary','Win-probability calibration by predicted range'));
+      table('Prediction ranges',['Kind','Role','State','Range','N','Predicted WP','Actual wins','Brier'],bins.map(x=>[labels[x.kind],x.role,x.model,x.bucket,n(x.rows),percent(x.avgPredicted),percent(x.actualWinRate),n(x.brier)]),detail);parent.append(detail);
+    }
+  };
+  calibration(value);
+  const bySide=element('details',null,'methods');bySide.append(element('summary','Full analysis within each reciprocal orientation'));
+  const sideBody=element('div');for(const [label,r] of orientations){phases(`${label} · realized scoring`,r.scoring.realized,sideBody);phases(`${label} · available-event scoring`,r.scoring.available,sideBody);calibration(r,sideBody);}
   bySide.append(sideBody);target.append(bySide);
-  for(const title of ['EV calibration','Win-probability calibration and Brier','Decision timing · opening and whole pegging hand']){
-    const section=element('section',null,'comparison-section');section.append(element('h3',title),element('p',value.evCalibration.note,'muted'));target.append(section);
-  }
   const speed=value.performance;
   facts('Full-game throughput',[
     ['Comparison wall time',`${n(speed.wallSeconds)} seconds`],['Games per hour',n(speed.gamesPerHour)],
@@ -812,6 +828,7 @@ function renderComparison(target,value,url) {
     ['Seed mismatches',n(audit.seedMismatches)],['Snapshot mismatches',n(audit.snapshotMismatches)],['First-winner games',n(audit.firstWinnerGames)],
     ['Seed range',`${audit.firstSeed} – ${audit.lastSeed}`],['Frozen source',audit.sourceRevision],
     ['Current snapshot SHA-256',audit.candidateSnapshot],['Original snapshot SHA-256',audit.originalSnapshot],['Evidence SHA-256',audit.evidenceSha256]
+    ,['Evaluation recorder SHA-256',(value.telemetry?.recorderSha256 || []).join(', ') || 'Not recorded']
   ]);
   const methods=element('details',null,'methods');methods.append(element('summary','Report definitions and uncertainty'));
   const explanation=element('div');for(const text of value.notes)explanation.append(element('p',text));methods.append(explanation);target.append(methods);

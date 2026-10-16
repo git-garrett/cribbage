@@ -10,6 +10,7 @@ import sqlite3
 
 from benchmark_workbench_stats import PairedRatio, normal_interval, paired_history
 from report_paired_benchmark import build_report
+from benchmark_comparison_telemetry import telemetry_report
 
 
 PHASES = ('Peg pone', 'Peg dealer', 'Hand pone', 'Hand dealer', 'Crib')
@@ -165,29 +166,35 @@ def _completed_report(root_text, checkpoint, receipt_text):
     for key,rows in zip(('candidateLeft','opponentLeft'),games):
         result['orientations'][key]['scoring'] = scoring_rows(rows,paired=False)
         result['orientations'][key]['games'] = len(rows)
+        result['orientations'][key].update(telemetry_report(rows,hand_scores))
     all_games = games[0]+games[1]
     margins = [g['scores'][g['candidateSide']]-g['scores'][1-g['candidateSide']] for g in all_games]
     result['candidateMarginNormal95'] = normal_interval(sum(margins),sum(v*v for v in margins),len(margins))
     manifest = json.loads((Path(receipt['root'])/ASSETS/'model29-generation.json').read_text())
     original = Path(receipt['baseline'])/ASSETS/'model29-generation.json'
     snapshot = Path(receipt['root'])/ASSETS/'model29-generation.json'
+    snapshots = [hashlib.sha256(p.read_bytes()).hexdigest() for p in (snapshot,original)]
+    for game in all_games:
+        telemetry = game.get('benchmark',{})
+        if telemetry.get('recorderSha256'):
+            if (telemetry.get('snapshots') != snapshots or
+                    telemetry.get('policyBinarySha256') != manifest['policy']['binarySha256']):
+                raise ValueError('Recorded evaluation policy or snapshots changed')
     result.update(trainingGames=checkpoint,assessment=receipt['assessment'],phaseScoring=scores['realized'],
         availableEventScoring=scores['available'],history=history,
-        evCalibration=dict(status='not recorded',note=MISSING,rows=[]),
-        winProbabilityCalibration=dict(status='not recorded',note=MISSING,rows=[]),
-        timing=dict(status='not recorded',note=MISSING,rows=[]),
         performance=dict(wallSeconds=receipt['seconds'],workerGameSeconds=sum(g['seconds'] for g in all_games),
             gamesPerHour=len(all_games)*3600/receipt['seconds'] if receipt['seconds'] > 0 else None,
             meanGameSeconds=sum(g['seconds'] for g in all_games)/len(all_games)),
         integrity=dict(status='passed',completePairs=pairs,seedMismatches=0,snapshotMismatches=0,
             firstWinnerGames=len(all_games),generation=manifest['generation'],
-            candidateSnapshot=hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-            originalSnapshot=hashlib.sha256(original.read_bytes()).hexdigest(),
+            candidateSnapshot=snapshots[0],originalSnapshot=snapshots[1],
             sourceRevision=manifest['policy']['sourceRevision'],evidenceSha256=digest.hexdigest(),
             firstSeed=games[0][0]['seed'],lastSeed=games[0][-1]['seed']),
         notes=['Realized scoring is capped at 121; available-event scoring includes the complete winning event, excluding later unplayed events.',
                'Pegging includes heels and go/last-card awards, matching the standard benchmark report.',
                'Phase differences use reciprocal-seed clustered 95% intervals. Per-orientation tables use game clusters.',
                'Raw Wilson and paired normal intervals describe this checkpoint only; the assessment interval adjusts across checkpoints.',
+               'Checkpoints test different learned states and are not pooled. More games narrow the interval for a state only when that state and the opponent remain fixed.',
                'Full-game durations include both players and scheduling. They are not per-model decision timings.',receipt['policy']])
+    result.update(telemetry_report(all_games,hand_scores))
     return result

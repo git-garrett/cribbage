@@ -42,6 +42,23 @@ breaking remains inherited; the modern forecast updates win-probability value.
 
 ## Opening cache
 
+Completed original-state comparisons retain per-decision EV, win probability,
+actor/role/model, legal-choice count and computation time. The workbench reports
+EV error (excluding terminal hands), WP calibration/Brier, and discard, opening
+and whole-hand pegging timings for both states and orientations. Legacy games
+remain explicitly unrecorded; their predictions and timings are not reconstructed.
+Each checkpoint has its own confidence intervals because the learned state
+changes. The checkpoint-adjusted assessment also accounts for repeated testing.
+
+For an already frozen run, `evaluation_runner.py CONFIG EXTENSION` attaches a
+separately pinned recorder at the controller's worker boundary. Training still
+uses the original binary, controller, config, assets and cache identity. The
+recorder changes only result serialization. A supervised build and
+`verify_evaluation_recorder.py UPGRADE_DIRECTORY` require unchanged policy
+sources and four matched games against the original binary before sealing the
+extension. Resume via a versioned supervisor spec pointing to the same evidence
+ledger; never rewrite the original run identity or completed records.
+
 The dedicated training binary permits explicit policy lag. A chunk's computation
 records the global completed-full-game count, generation hash and binary identity.
 Training and evaluation full games advance the clock; counterfactual hand rollouts
