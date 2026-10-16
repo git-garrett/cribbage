@@ -3,7 +3,7 @@
 //! The live player's own-discard-aware policy and joint counting run at runtime.
 use super::*;
 use sha2::{Digest, Sha256};
-use std::io::Write;
+use std::io::{Read, Write};
 #[path = "model283_opening_codec.rs"]
 mod codec;
 #[cfg(feature = "model29-training")]
@@ -166,11 +166,19 @@ impl Book {
         lead: u8,
         policy: &str,
     ) -> Result<Self, String> {
-        // Shards from this format are small. Bound untrusted allocations.
-        if std::fs::metadata(path).map_err(|e| e.to_string())?.len() > 128 * 1024 * 1024 {
+        Self::decode(&Self::read_bytes(path)?, cut, scores, lead, policy)
+    }
+    fn read_bytes(path: &Path) -> Result<Vec<u8>, String> {
+        // One file handle pins one atomic generation; bound the read itself.
+        let mut bytes = Vec::new();
+        std::fs::File::open(path).map_err(|e| e.to_string())?
+            .take(128 * 1024 * 1024 + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+        if bytes.len() > 128 * 1024 * 1024 {
             return Err("opening asset too large".into());
         }
-        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        Ok(bytes)
+    }
+    fn decode(bytes: &[u8], cut: u8, scores: Endpoint, lead: u8, policy: &str) -> Result<Self, String> {
         let n =
             u32::from_le_bytes(bytes.get(..4).ok_or("short asset")?.try_into().unwrap()) as usize;
         if n > 8192 {
@@ -611,6 +619,11 @@ mod tests {
             Book::read(&path, 4, [15, 11], 0, "test").unwrap().rows,
             b.rows
         );
+        let snapshot = Book::read_bytes(&path).unwrap();
+        b.write(&path, 4, [15, 11], 0, "replacement").unwrap();
+        assert_eq!(Book::decode(&snapshot, 4, [15, 11], 0, "test").unwrap().rows, b.rows);
+        assert!(Book::read(&path, 4, [15, 11], 0, "test").is_err());
+        b.write(&path, 4, [15, 11], 0, "test").unwrap();
         for (cut, scores, lead, policy) in [
             (5, [15, 11], 0, "test"),
             (4, [15, 12], 0, "test"),

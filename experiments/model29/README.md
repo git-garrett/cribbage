@@ -95,10 +95,13 @@ they need. The one-shot supervisor runs until explicitly stopped or a failure;
 there is no 2,000-game limit and no automatic retry after failure. Each game and
 each generation is checkpointed on persistent storage. Final report/archive
 stages remain pending while the continuous process runs.
+Only unconsumed evidence is decoded for each asset update. Cache counters are
+transactional and incremental. A phase-boundary storage guard checkpoints and
+stops if fewer than 10 GiB remain, preserving all evidence for an explicit resume.
 
 Use `scripts/cribbage_job_queue.py validate JOB.json` and `install JOB.json`.
-The ordered stages are build, bootstrap, decision parity, cache parity, wait for
-staged bank, continuous cycles, report, archive, and archive verification. The
+The ordered stages are build, bootstrap, decision parity, wait for staged bank,
+cache parity, continuous cycles, report, archive, and archive verification. The
 release build uses FP64 and no PGO; timing is diagnostic. Register with
 `scripts/local-runtime.sh workbench-start JOB.json`. The workbench reads small
 receipts showing active asset, cycle, generation, games, sampled hands, workers,

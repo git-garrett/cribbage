@@ -42,9 +42,9 @@ pub(super) fn forecast(s: &mut Solver, p: &Position, next: &Position, own: &Hand
     if !baseline.exists() {
         if let Some(tail)=c["baselineTail"].as_str() {baseline=shard_path(Path::new(tail),s.cut,p.scores,lead);}
     }
-    let (path, policy, born, generation) = if path.exists() {
+    let (book, born, generation) = if path.exists() {
         // Header metadata and body are committed in the same atomic file.
-        let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+        let bytes = Book::read_bytes(&path)?;
         let n = u32::from_le_bytes(bytes.get(..4).ok_or("short training cache")?.try_into().unwrap()) as usize;
         if n > 8192 { return Err("invalid training header size".into()); }
         let h: Value = serde_json::from_slice(bytes.get(4..4+n).ok_or("short training header")?).map_err(|e| e.to_string())?;
@@ -53,7 +53,7 @@ pub(super) fn forecast(s: &mut Solver, p: &Position, next: &Position, own: &Hand
             session::cache_event("expired", now.saturating_sub(age), "");
             return Ok(None);
         }
-        (path, h["policy"].as_str().ok_or("missing cache policy")?.to_owned(), age,
+        (Book::decode(&bytes, s.cut, p.scores, lead, h["policy"].as_str().ok_or("missing cache policy")?)?, age,
             h["training"]["generation"].as_str().ok_or("missing cache generation")?.to_owned())
     } else if baseline.exists() && fresh(0, now, limit) {
         // This separately staged, immutable bank is accepted only by a run
@@ -61,12 +61,11 @@ pub(super) fn forecast(s: &mut Solver, p: &Position, next: &Position, own: &Hand
         if c["baselinePolicy"] != BASELINE_POLICY || c["code"] != contract(s) {
             return Err("inherited opening cache contract changed".into());
         }
-        (baseline, BASELINE_POLICY.to_owned(), 0, "inherited-28.3".to_owned())
+        (Book::read(&baseline, s.cut, p.scores, lead, BASELINE_POLICY)?, 0, "inherited-28.3".to_owned())
     } else {
         session::cache_event("misses", 0, "");
         return Ok(None);
     };
-    let book = Book::read(&path, s.cut, p.scores, lead, &policy)?;
     let known = s.live.unwrap().known;
     let public = (book.dealer_plays < 3).then_some(public_own);
     let live = private_solve(s, &book, next, *own, other, &known, public)?;

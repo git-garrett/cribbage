@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 import learning
 import resources
-from cycle import assessment, validate, collect, maybe_assess
+from cycle import assessment, validate, collect, maybe_assess, cache_stats, unconsumed_records
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -142,6 +142,23 @@ class LearningTests(unittest.TestCase):
                 self.assertEqual(collector.call_count,1)
             receipt=json.loads((Path(tmp)/'assessments/000005000.json').read_text())
             self.assertEqual(receipt['games'],1000);self.assertEqual(receipt['assessment']['pairs'],500)
+
+    def test_continuous_updates_skip_consumed_payloads_and_cache_stats_resume_transactionally(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);assets=root/learning.ASSETS;assets.mkdir(parents=True)
+            learning.atomic(assets/'model29-state.json',dict(wp=dict(applied=['train:0:0'])))
+            db=sqlite3.connect(':memory:')
+            db.execute('create table results(id text primary key,request text,root text,result text)')
+            db.execute('insert into results values(?,?,?,?)',('train:0:0','{}','root',json.dumps(dict(cache=dict(hits=3)))))
+            self.assertEqual(cache_stats(db)['hits'],3);db.commit()
+            # Already aggregated/consumed historical payload must not be decoded again.
+            db.execute("update results set result='intentionally undecodable' where id='train:0:0'")
+            db.execute('insert into results values(?,?,?,?)',('train:1:0','{}','root',json.dumps(dict(cache=dict(hits=2)))))
+            self.assertEqual(cache_stats(db)['hits'],5)
+            self.assertEqual([i for i,_ in unconsumed_records(db,root,'wp')],['train:1:0'])
+            db.rollback()
+            self.assertEqual(cache_stats(db)['hits'],3)
+            db.close()
 
     def test_training_and_evaluation_seeds_must_be_disjoint(self):
         config = dict(rounds=1,trainingGames=2,evaluationPairs=1,workers=1,

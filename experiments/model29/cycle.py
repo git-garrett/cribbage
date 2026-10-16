@@ -6,6 +6,7 @@ import json
 import itertools
 import math
 import os
+import shutil
 import sqlite3
 import subprocess
 import time
@@ -112,16 +113,38 @@ def checkpoint(db, config, **activity):
     atomic(out/'progress.json',progress)
 
 
+def cache_stats(db):
+    """Aggregate each committed result once, in the evidence transaction."""
+    db.execute('create table if not exists metrics(name text primary key,value text)')
+    row=db.execute("select value from metrics where name='cache'").fetchone()
+    stats=json.loads(row[0]) if row else dict(hits=0,misses=0,expired=0,writes=0,maxAgeGames=0,lastRowid=0)
+    for rowid,raw in db.execute('select rowid,result from results where rowid>? order by rowid',(stats['lastRowid'],)):
+        prior=json.loads(raw).get('cache',{})
+        for k in ('hits','misses','expired','writes'):stats[k]+=prior.get(k,0)
+        stats['maxAgeGames']=max(stats['maxAgeGames'],prior.get('maxAgeGames',0))
+        stats['lastRowid']=rowid
+    db.execute("insert or replace into metrics values('cache',?)",(json.dumps(stats),))
+    return stats
+
+
+def unconsumed_records(db, root, phase):
+    """Filter on the sealed ledger before decoding historical game payloads."""
+    path=Path(root)/ASSETS/'model29-state.json'
+    state=json.loads(path.read_text()) if path.exists() else {}
+    db.execute('create temp table if not exists consumed(id text primary key)')
+    db.execute('delete from consumed')
+    db.executemany('insert into consumed values(?)',((identity,) for identity in state.get(phase,{}).get('applied',[])))
+    pattern='forecast:%' if phase=='forecast' else 'train:%'
+    return [(identity,json.loads(raw)) for identity,raw in db.execute(
+        'select id,result from results where id like ? and not exists (select 1 from consumed where consumed.id=results.id) order by id',(pattern,))]
+
+
 def collect(db, config, root, requests, output, reference=None):
     """One writer and exact request identities; out-of-order completion is resumable."""
     pending = [(identity,req) for identity,req in requests
                if not db.execute('select 1 from results where id=?',(identity,)).fetchone()]
     started=time.monotonic(); completed=len(requests)-len(pending)
-    stats=dict(hits=0,misses=0,expired=0,writes=0,maxAgeGames=0)
-    for (raw,) in db.execute('select result from results'):
-        prior=json.loads(raw).get('cache',{})
-        for k in ('hits','misses','expired','writes'):stats[k]+=prior.get(k,0)
-        stats['maxAgeGames']=max(stats['maxAgeGames'],prior.get('maxAgeGames',0))
+    stats=cache_stats(db);db.commit()
     atomic(Path(config['output'])/'cache-progress.json',stats)
     checkpoint(db,config,phase='evaluation' if reference else 'forecast' if requests[0][1]['kind']=='counterfactual' else 'collection',
         phaseCompleted=completed,phaseTarget=len(requests),phaseStartedAt=time.time(),activeRoot=str(root))
@@ -161,14 +184,12 @@ def collect(db, config, root, requests, output, reference=None):
                 identity,req,game = value
                 db.execute('insert into results values(?,?,?,?)',
                            (identity,json.dumps(req),str(root),json.dumps(game)))
+                stats=cache_stats(db)
                 db.commit()
                 completed+=1
                 checkpoint(db,config,lastCompleted=identity,phaseCompleted=completed,
                     phaseSeconds=time.monotonic()-started,lastGameSeconds=game['seconds'])
                 stats_path=Path(config['output'])/'cache-progress.json'
-                for k in ('hits','misses','expired','writes'):
-                    stats[k]+=game.get('cache',{}).get(k,0)
-                stats['maxAgeGames']=max(stats['maxAgeGames'],game.get('cache',{}).get('maxAgeGames',0))
                 stats['updatedAt']=time.time();atomic(stats_path,stats)
         for f in futures:
             f.result()
@@ -276,12 +297,14 @@ def run(config):
                 maybe_assess(db,active_config,current,baseline,index,phases)
                 continue
             started = time.monotonic(); seed = active_config['seed']+(index%len(planned))*100000
+            free=shutil.disk_usage(out).free
+            if free < 10*1024**3:
+                checkpoint(db,config,phase='storage limit',freeBytes=free)
+                raise RuntimeError('less than 10 GiB free; evidence is checkpointed; free storage before resuming')
             checkpoint(db,config,asset=phase,stageIndex=index,cycle=index//len(phases)+1,generation=verify(current)['generation'])
             requests = forecast_requests(db,active_config,index) if phase=='forecast' else [
                 (f'train:{index}:{i}',dict(kind='game',seed=seed+i,firstDealer=i%2,scores=[0,0])) for i in range(config['trainingGames'])]
             collect(db,config,current,requests,directory)
-            pattern='forecast:%' if phase=='forecast' else 'train:%'
-            records = [(r[0],json.loads(r[1])) for r in db.execute('select id,result from results where id like ? order by id',(pattern,))]
             candidate = directory/'candidate'; update_path = directory/'update.json'
             if update_path.exists():
                 details = json.loads(update_path.read_text()); verify(candidate)
@@ -292,6 +315,7 @@ def run(config):
                     candidate.rename(directory/f'interrupted-candidate-{time.time_ns()}')
                 checkpoint(db,config,phase='updating',asset=phase)
                 verify_source(config)
+                records=unconsumed_records(db,current,phase)
                 details = update(current,candidate,phase,records,config.get('priorEffectiveSamples',1000),config['repo'])
                 atomic(update_path,details)
             # Per-phase checks validate data and assets. The user-requested

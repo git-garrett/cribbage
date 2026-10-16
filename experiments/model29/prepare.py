@@ -67,7 +67,7 @@ def prepare(source, runtime, archive):
                    command=['/bin/bash',str(frozen/'scripts/run-quiet.sh'),'--show-warnings','Model 29 pilot build',
                             cargo,'build','--offline','--locked','--release','--manifest-path',str(frozen/'rust/Cargo.toml'),
                             '-p','cribbage-shadow-engine','--features','model29-training','--bin','model29-worker','--bin','build-model283-opening'],
-                   completionChecks=[dict(type='file_exists',path=config['binary'])]),stage('bootstrap'),stage('parity'),stage('cache-parity'),stage('await-cache'),
+                   completionChecks=[dict(type='file_exists',path=config['binary'])]),stage('bootstrap'),stage('parity'),stage('await-cache'),stage('cache-parity'),
               dict(name='cycles',cwd=str(frozen),env=env,
                    command=[python,str(frozen/'experiments/model29/cycle.py'),str(runtime/'config.json')],
                    completionChecks=[checked(runtime/'output/result.json')]),stage('report'),stage('sync'),stage('verify-sync')]
