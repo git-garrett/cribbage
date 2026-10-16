@@ -389,12 +389,20 @@ impl PolicyAssets {
         let path = directory.join("model203-hold.bin");
         let bytes = fs::read(&path).map_err(|e| format!("read Model 20.3 hold: {e}"))?;
         // A model version identifies an immutable learning snapshot.
-        if format!("{:x}", Sha256::digest(&bytes)) != MODEL203_HOLD_SHA256 {
+        #[cfg(not(feature = "model29-training"))]
+        let invalid = format!("{:x}", Sha256::digest(&bytes)) != MODEL203_HOLD_SHA256;
+        #[cfg(feature = "model29-training")]
+        let invalid = !crate::model29_snapshot::matches(&path, &bytes, MODEL203_HOLD_SHA256);
+        if invalid {
             return Err("Model 20.3 hold asset differs from its verified snapshot".into());
         }
         let factor_path = directory.join("model203-decline-factors.json");
         let factor_bytes = fs::read(&factor_path).map_err(|e| format!("read decline factors: {e}"))?;
-        if format!("{:x}", Sha256::digest(&factor_bytes)) != MODEL203_DECLINE_SHA256 {
+        #[cfg(not(feature = "model29-training"))]
+        let invalid = format!("{:x}", Sha256::digest(&factor_bytes)) != MODEL203_DECLINE_SHA256;
+        #[cfg(feature = "model29-training")]
+        let invalid = !crate::model29_snapshot::matches(&factor_path, &factor_bytes, MODEL203_DECLINE_SHA256);
+        if invalid {
             return Err("Model 20.3 decline factors differ from the verified snapshot".into());
         }
         let packed = crate::model203_discards::Model203DiscardAsset::load(

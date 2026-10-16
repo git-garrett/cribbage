@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "model": "29.0",
+  "base": "28.3",
+  "assets": {
+    "model1323-corrections.bin": {
+      "disposition": "Synthetic9.11 pegging forecasts, not raw15.x/16.x actor observations. Generator used model1322-decline-factors.json (4dfb1b8c20f612153a6b0d57496fd77c5219a8a2ba7e01acb8909b862d5418dc), which has excluded-family evidence as an indirect inference dependency. Retained immutable for28.3 compatibility; not certified free of historical indirect influence. Neither its broad decline counts nor factors enter new behavioral decline learning. 9.x exclusion in ADR0003 applies to behavioral decline data, not this forecast asset.",
+      "sha256": "ff0894471867cd80c636a46bb4c8c148b7300090a9b536dd61d991fea6fe293a"
+    },
+    "model202-board-win-matrix.bin": {
+      "disposition": "Audited all40000 completed trajectories /10000seed clusters. Actors only9.0,9.0-crib13,9.0-crib148,9.1,9.11; no15/16 actor rows. TrajectorySHA43adc3b2bb8a0481a5d6f089fc4ab7e2911219d092910e4e4b7fc84fb98396e5 in benchmarks/model20/board-rebuild-20260926. Existing recorded-policy replay limitations retained.",
+      "sha256": "9e658a77bd98d59ada0c363a0c27e68b01c1f5865a850896d790fe68367c696c"
+    },
+    "model203-crib.bin": {
+      "disposition": "Audited Model203 crib evidence: no15.x or16.x actors.",
+      "sha256": "864497acca78bd9d79a7a9784799c3aaf4777fbbd4191c1761b3ebaf39120cb7"
+    },
+    "model203-decline-factors.json": {
+      "disposition": "Qualified strategic-pegging-v1 ledger: all33 source hashes, actor eligibility and aggregate counts verified; broad legacy and unclassified human priors excluded.",
+      "sha256": "36fc42ab1dd5696236b534fccdda6d21be0deda5193da2ceafa3f1ead3e0a92a"
+    },
+    "model203-hold.bin": {
+      "disposition": "Audited Model203 hold evidence: no 15.x or 16.x actors; prior retains approved historical observations.",
+      "sha256": "192d43b7712e1f16bf0ba0991df14aaf646c2a44cd43f7e917d6ac8689cc375e"
+    },
+    "model203-opponent-discards.bin": {
+      "disposition": "Audited conditional discard and suited sections: no 15.x or16.x actors.",
+      "sha256": "efd7a4594a8c42fc0e332726d44e8ababf541b3eb80c4cbf8140b9629389dbad"
+    }
+  }
+}

@@ -32,3 +32,6 @@ mod tests {
         crate::cards::self_test().expect("card self-test should pass");
     }
 }
+
+#[cfg(feature = "model29-training")]
+pub mod model29_snapshot;
