@@ -20,3 +20,23 @@ card replies to production. Assets must bind to the exact policy and learning
 inputs, preserve legal uncertainty and ties, and pass exact parity checks. This
 does not authorize a general exhaustive pegging-path graph or an approximate
 observation lookup policy. See `docs/research/ace283-production-rollout.md`.
+
+## Model 29 training exception, 2026-10-16
+
+The user authorized a rolling, approximate opening cache for Model 29 self-play.
+Each chunk records its computation's completed-game count, generation and code
+identity. It is eligible for fewer than 50,000 subsequent completed full games;
+hits do not change its birth count. On a miss or expiry the current executable
+solver supplies the decision and captures its public dealer choices for reuse.
+No early fresh-solve audits and no proactive refresh are scheduled. Incompatible
+code invalidates immediately. The inherited 28.3 bank starts at game zero after
+an explicit generation-zero parity check; its original fingerprint and checksums
+remain enforced. The production exact-cache contract above is unchanged.
+
+This exception knowingly permits policy lag between asset updates. Record cache
+generations with learning evidence. It does not authorize a general pegging-path
+graph. Original-state evaluation uses a separate cache populated only with the frozen
+starting priors; the candidate retains its declared rolling-cache policy. The sparse modern
+discard forecast stores sampled full-hand score outcomes for suit-canonical six,
+discard, role and actual pre-cut board; it stores no actions and never translates
+these outcomes to other boards.

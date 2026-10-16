@@ -1284,7 +1284,11 @@ pub(super) fn forecast_with_opening(assets:&PolicyAssets,o:&Model132Observation,
         let fast_result: Option<Solved> = None;
         let asset_result=if use_opening {opening::asset_forecast(&mut solver,&p,&next,&children[i],other,rank,&children)?}else{None};
         let table = if let Some(result) = asset_result.or(fast_result) { result } else if actor == 0 {
-            solver.solve_live(&next, &children, other, Some(i))?
+            #[cfg(feature = "model29-training")]
+            let result = opening::capture(&mut solver, &p, &next, &children, other, i, rank)?;
+            #[cfg(not(feature = "model29-training"))]
+            let result = solver.solve_live(&next, &children, other, Some(i))?;
+            result
         } else {
             solver.solve_live(&next, other, &children, Some(i))?
         };
