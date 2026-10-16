@@ -66,7 +66,7 @@ def recorded(repo):
     return ranges, files
 
 
-def reserve(repo, output, generations=2):
+def reserve(repo, output, generations=2, exclusions=None):
     span = generations * 100000
     if not 0 < span < LIMIT // 3: raise ValueError('seed reservation too large; use fewer generations')
     shared = Path('/Users/garrett/Library/Application Support/StrongCribbage/runtimes/coordination/model29-seed-reservations.json')
@@ -74,7 +74,7 @@ def reserve(repo, output, generations=2):
     with shared.with_suffix('.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         old = json.loads(shared.read_text()) if shared.exists() else []
-        blocked, files = recorded(repo)
+        blocked, files = recorded(repo) if exclusions is None else (list(map(tuple,exclusions)),0)
         for row in old:
             blocked.extend(tuple(v) for v in row['ranges'].values())
         ranges = {}

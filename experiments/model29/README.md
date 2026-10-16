@@ -2,8 +2,9 @@
 
 29.0 starts from the audited FP64 28.3 policy and its immutable assets. This is
 an experimental training model; production Ace remains unchanged. PR #78 owns
-this work. The October 16 user request supersedes the original transposition
-pilot: build now, run ten workers, show progress on the workbench, and refresh
+this work. The October 16 user requests supersede the original transposition
+pilot: build now, run ten workers continuously, evaluate 1,000 games against the original
+state after every 5,000 training games, show progress on the workbench, and refresh
 opening chunks only on misses or at age 50,000 games.
 
 ## Cycle and evidence
@@ -52,21 +53,25 @@ Code changes invalidate immediately. No early fresh checks and no proactive
 refresh run during training. Implementation parity tests before launch are separate.
 
 The staged inherited bank retains its original fingerprint and checksums and is
-born at game zero. The local pilot stages 675,987 existing full chunks covering
-about 86.6% of historical openings; other contexts build on demand. This avoids
-filling the internal disk with the complete bank. Source, binaries, cache, assets,
+born at game zero. The local run stages 675,987 existing full chunks plus the remaining 574,013
+existing two-reply chunks. Together they retain about 99.5% historical opening
+coverage while using about 92 GiB rather than 152 GiB for an all-full bank. Full
+chunks cover about 86.6% of historical openings; partial chunks compute later
+replies at runtime. Missing contexts build full chunks on demand. Source, binaries, cache, assets,
 seeds, databases and supervisor are on persistent internal storage. Production's
 exact cache checks are unchanged. See ADR 0001 for the authorized exception.
 
 ## Experimental advancement and verification
 
-Both sides use immutable priors during a game. Between phases, validate assets,
-then play fresh paired full games with opening acceleration disabled against the
-previous generation and the frozen baseline. Evaluation never feeds learning.
-An inconclusive screen may advance the experimental lineage; a detected regression
-retains the previous generation. The verified baseline stays separate. Only a
-passing predeclared noninferiority gate can mark a snapshot promoted. The small
-pilot cannot establish stronger play, and its sparse forecast coverage is reported.
+Both sides use immutable priors during a game. Between phases, validate and seal
+one changed asset, then advance the experimental lineage. Every 5,000 training
+games, play 1,000 ordinary games on 500 fresh paired seeds against the original
+starting state. Evaluation never feeds learning. The original opponent has a
+separate opening cache populated only with its frozen starting priors; it never
+reads chunks captured under the candidate's learned priors. The candidate keeps
+its declared rolling-cache policy. Intervals use a conservative paired-seed bound
+with an error budget spread across successive checkpoints. Results are reported;
+these comparisons do not silently deploy or promote a model.
 
 Before training: native decision parity, whole-game uncached/captured/replayed/
 expired/inherited-cache parity, and captured-chunk equality against the independent
@@ -80,19 +85,32 @@ loop that hides failures.
 
 Commit the source and install the audited `model1323-corrections.bin`. The existing
 opening bank is staged with `stage_cache.py` under its own one-shot supervisor.
-`prepare.py RUNTIME ARCHIVE` freezes the pilot: two cycles, 200 normal games per
-ordinary asset phase (2,000 total), 12 contexts × 16 worlds × 15 keeps per forecast
-phase, and four evaluation seed pairs per reference and phase. Ten workers play
-or sample; cache refresh runs inside the same workers. Brief serial asset updates
-use only the CPU they need. This is a bounded pilot, not an indefinite automation.
+`prepare.py RUNTIME ARCHIVE` freezes a continuous run: 200 normal games per
+ordinary asset phase, 12 contexts × 16 worlds × 15 keeps per forecast phase,
+and 1,000 original-state evaluation games after each 5,000 training games. Fresh
+disjoint seed ranges are reserved for each 5,000-game block, using frozen historical
+exclusions and the shared reservation ledger. Ten workers play or sample; cache
+refresh runs inside those workers. Brief serial asset updates use only the CPU
+they need. The one-shot supervisor runs until explicitly stopped or a failure;
+there is no 2,000-game limit and no automatic retry after failure. Each game and
+each generation is checkpointed on persistent storage. Final report/archive
+stages remain pending while the continuous process runs.
 
 Use `scripts/cribbage_job_queue.py validate JOB.json` and `install JOB.json`.
 The ordered stages are build, bootstrap, decision parity, cache parity, wait for
-staged bank, cycles, report, archive, and archive verification. The release build
-uses FP64 and no PGO; timing is diagnostic. Register with
+staged bank, continuous cycles, report, archive, and archive verification. The
+release build uses FP64 and no PGO; timing is diagnostic. Register with
 `scripts/local-runtime.sh workbench-start JOB.json`. The workbench reads small
-receipts, showing active asset, cycle, generation, games, sampled hands, workers,
-cache age/hits/misses/writes, coverage and evaluation outcomes.
+receipts showing active asset, cycle, generation, games, sampled hands, workers,
+cache age/hits/misses/writes, coverage and original-state evaluation results.
+
+A broad one-time rebuild of the old 330,590-row forecast would cost approximately
+8–11 days at only 16 worlds per row, 34–42 days at 64 worlds, or 134–168 days at
+256 worlds, using the measured 21,003 cached hand rollouts/hour at eight workers
+and optimistic linear scaling to ten. These already assume opening-cache hits,
+exclude build/validation overhead and new board/suit dimensions, and do not imply
+statistical adequacy. The run therefore begins cyclic learning and incremental
+modern forecasts rather than delaying it for that rebuild.
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 scripts/run-quiet.sh 'Model 29 learning tests' \

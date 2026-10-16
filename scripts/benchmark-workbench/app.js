@@ -692,8 +692,8 @@ function renderCyclic(value) {
   const fill=(id,rows)=>{const list=$(id);list.replaceChildren();for(const [label,stat] of rows)list.append(element('dt',label),element('dd',String(stat)));};
   const speed=p.phaseSeconds>0 && p.phase==='collection' ? `${number.format(Math.round(p.phaseCompleted*3600/p.phaseSeconds))} games/hour this batch` : 'Measured during game collection';
   fill('cyclic-totals',[
-    ['CPU allocation',`${value.workers} / ${value.workerLimit} workers`],['Training games',`${number.format(value.completed)} / ${number.format(value.target)} in this pilot`],
-    ['Cycles',`${p.cycle || 0} / ${value.rounds}`],['Asset updates completed',value.history.length],['Current generation',p.generation || 0],
+    ['CPU allocation',`${value.workers} / ${value.workerLimit} workers`],['Training games',value.continuous ? `${number.format(value.completed)} · continuous` : `${number.format(value.completed)} / ${number.format(value.target)}`],
+    ['Cycles',value.continuous ? `${p.cycle || 0} · continuous` : `${p.cycle || 0} / ${value.rounds}`],['Asset updates completed',value.completedUpdates],['Current generation',p.generation || 0],
     ['Forecast hand rollouts',number.format((p.forecastWorlds || 0)*15)],['Evaluation games',number.format(p.evaluationGames || 0)],
     ['Game pace',speed],['Last checkpoint',p.updatedAt ? new Date(p.updatedAt*1000).toLocaleTimeString() : 'Waiting']]);
   fill('cyclic-cache',[
@@ -703,7 +703,9 @@ function renderCyclic(value) {
   $('cyclic-cache-note').textContent='Cached dealer choices may lag current priors within the age limit. Fresh solves update the cache on demand; cached choices do not train themselves.';
   const body=$('cyclic-history');body.replaceChildren();
   value.history.forEach((r,i)=>{const row=element('tr');const u=r.update;const coverage=u.cells!=null ? `${number.format(u.cells)} WP cells` : u.contextKeepRows!=null ? `${number.format(u.contextKeepRows)} hand/keep/board contexts` : u.rows!=null ? `${number.format(u.rows)} rows` : 'Saved in snapshot';
-    for(const text of [i+1,r.phase,`${number.format(u.games)} ${r.phase==='forecast'?'opponent worlds':'games'}`,coverage,r.advanced?'Advanced experimentally':'Retained previous',Object.entries(r.evaluations).map(([k,v])=>`${k}: ${v.status}`).join('; ')])row.append(element('td',String(text)));body.append(row);});
+    for(const text of [value.completedUpdates-value.history.length+i+1,r.phase,`${number.format(u.games)} ${r.phase==='forecast'?'opponent worlds':'games'}`,coverage,r.advanced?'Advanced experimentally':'Retained previous',Object.entries(r.evaluations).map(([k,v])=>`${k}: ${v.status}`).join('; ') || 'Scheduled every 5,000 games'])row.append(element('td',String(text)));body.append(row);});
+  const evaluations=$('cyclic-evaluations');evaluations.replaceChildren();
+  for(const r of value.evaluations || []){const row=element('tr');for(const v of [number.format(r.trainingGames),number.format(r.games),percent(r.assessment.winRate),r.assessment.confidence95.map(percent).join(' – '),r.assessment.status])row.append(element('td',v));evaluations.append(row);}
 }
 function renderSelfplay(value) {
   $('selfplay-history-panel').hidden=Boolean(value.roleStudy);

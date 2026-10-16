@@ -24,7 +24,8 @@ fn contract(s: &Solver) -> String {
     session::code_identity()
 }
 fn location(c: &Value, s: &Solver, p: &Position, lead: u8) -> Result<PathBuf, String> {
-    Ok(shard_path(Path::new(c["root"].as_str().ok_or("missing cache root")?), s.cut, p.scores, lead))
+    let field=if c["baselineGeneration"].as_str()==Some(&session::generation()) {"referenceRoot"} else {"root"};
+    Ok(shard_path(Path::new(c[field].as_str().ok_or("missing cache root")?), s.cut, p.scores, lead))
 }
 fn fresh(born: u64, now: u64, limit: u64) -> bool {
     now >= born && now - born < limit
@@ -37,7 +38,10 @@ pub(super) fn forecast(s: &mut Solver, p: &Position, next: &Position, own: &Hand
     let now = clock(&c)?;
     let limit = c["maxAgeGames"].as_u64().filter(|n| *n > 0).ok_or("invalid cache age")?;
     let path = location(&c, s, p, lead)?;
-    let baseline = shard_path(Path::new(c["baseline"].as_str().ok_or("missing inherited cache")?), s.cut, p.scores, lead);
+    let mut baseline = shard_path(Path::new(c["baseline"].as_str().ok_or("missing inherited cache")?), s.cut, p.scores, lead);
+    if !baseline.exists() {
+        if let Some(tail)=c["baselineTail"].as_str() {baseline=shard_path(Path::new(tail),s.cut,p.scores,lead);}
+    }
     let (path, policy, born, generation) = if path.exists() {
         // Header metadata and body are committed in the same atomic file.
         let bytes = fs::read(&path).map_err(|e| e.to_string())?;

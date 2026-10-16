@@ -3,6 +3,7 @@
 import argparse
 import concurrent.futures
 import json
+import itertools
 import math
 import os
 import sqlite3
@@ -72,6 +73,8 @@ def validate(config):
             raise ValueError('invalid '+field)
     if config.get('forecastContexts',12)*config.get('forecastWorlds',16)>100000:
         raise ValueError('forecast exceeds seed stride')
+    if config.get('continuous') and config.get('evaluationEveryGames') != config['rounds']*sum(p!='forecast' for p in phases)*config['trainingGames']:
+        raise ValueError('one seed block must cover exactly one evaluation interval')
     for name in ('seed','evaluationSeed'):
         if type(config.get(name)) is not int or not 0 <= config[name] <= 0xffffffff:
             raise ValueError('invalid '+name)
@@ -190,8 +193,41 @@ def forecast_requests(db, config, index):
         hands=list(natural_hands(game)); h=hands[(i//2)%len(hands)]; actor=i%2
         contexts.append(dict(own=h['dealt'][actor],scores=[h['start'][actor],h['start'][1-actor]],dealer=int(h['dealer']!=actor)))
     worlds=config.get('forecastWorlds',16)
-    return [(f'forecast:{index}:{i}:{world}',dict(kind='counterfactual',seed=config['seed']+index*100000+i*worlds+world,**context))
+    return [(f'forecast:{index}:{i}:{world}',dict(kind='counterfactual',seed=config['seed']+(index%(config['rounds']*len(config['phases'])))*100000+i*worlds+world,**context))
         for i,context in enumerate(contexts) for world in range(worlds)]
+
+
+def compact_report(report):
+    result={k:v for k,v in report.items() if k!='update'}
+    result['update']={k:v for k,v in report['update'].items() if k not in ('identities',)}
+    return result
+
+
+def maybe_assess(db,config,current,baseline,index,phases):
+    """A frozen 500-seed paired panel after exactly 5,000 new training games."""
+    phase=index%len(phases)
+    if phases[phase]=='forecast':return
+    trained=(index//len(phases)*sum(p!='forecast' for p in phases)+sum(p!='forecast' for p in phases[:phase+1]))*config['trainingGames']
+    interval=config.get('evaluationEveryGames',5000)
+    if trained%interval:return
+    out=Path(config['output']);directory=out/'assessments';directory.mkdir(exist_ok=True)
+    path=directory/f'{trained:09d}.json'
+    if path.exists():
+        if json.loads(path.read_text())['root']!=str(current):raise ValueError('checkpoint root changed')
+        return
+    requests=[(f'eval:checkpoint:{trained}:{i}:{side}',dict(kind='game',seed=config['evaluationSeed']+i,
+        firstDealer=i%2,candidateSide=side,scores=[0,0],cache=True)) for i in range(config['evaluationPairs']) for side in (0,1)]
+    checkpoint(db,config,asset='original-state comparison',checkpointTrainingGames=trained,
+        generation=verify(current)['generation'])
+    started=time.monotonic();games=collect(db,config,current,requests,directory,baseline)
+    epoch=trained//interval
+    assessment_result=assessment([g for _,g in games],config.get('noninferiorityMargin',.01),epoch*(epoch+1))
+    result=dict(status='complete',trainingGames=trained,root=str(current),baseline=str(baseline),
+        games=len(games),assessment=assessment_result,seconds=time.monotonic()-started,
+        policy='candidate rolling cache; original-state opponent has its own frozen-prior cache; evaluations never learn')
+    atomic(path,result)
+    history=[json.loads(p.read_text()) for p in sorted(directory.glob('*.json'))]
+    atomic(out/'evaluation-history.json',dict(checkpoints=history[-60:],completed=len(history)))
 
 
 def run(config):
@@ -214,17 +250,34 @@ def run(config):
     db.execute('create table if not exists results(id text primary key,request text,root text,result text)')
     current = Path(config['initialRoot']); baseline = current
     reports = []; phases = config.get('phases',list(PHASES)); planned = phases*config['rounds']
+    source_seeds=dict(training=[config['seed']],evaluation=[config['evaluationSeed']])
     checkpoint(db,config,phase='preparing')
     try:
-        for index,phase in enumerate(planned):
+        indices=itertools.count() if config.get('continuous') else range(len(planned))
+        for index in indices:
+            phase=phases[index%len(phases)]
+            block=index//len(planned)
+            if block:
+                from seeds import reserve
+                seed_dir=out/'seed-blocks'/str(block)
+                path=seed_dir/'seed-reservation.json'
+                if not path.exists():
+                    excluded=out.parent/'seed-exclusions.json'
+                    if sha(excluded)!=config['seedExclusionsSha256']:raise ValueError('seed exclusions changed')
+                    seed_dir.mkdir(parents=True,exist_ok=True)
+                    reserve(config['repo'],seed_dir,len(planned),json.loads(excluded.read_text()))
+                source_seeds=json.loads(path.read_text())['ranges']
+            active_config=dict(config,seed=source_seeds['training'][0],evaluationSeed=source_seeds['evaluation'][0])
             directory = out/f'{index:04d}-{phase}'; directory.mkdir(exist_ok=True)
             receipt = directory/'complete.json'
             if receipt.exists():
                 report = json.loads(receipt.read_text()); current = Path(report['nextRoot'])
-                verify(current); reports.append(report); continue
-            started = time.monotonic(); seed = config['seed']+index*100000
+                verify(current); reports.append(compact_report(report))
+                maybe_assess(db,active_config,current,baseline,index,phases)
+                continue
+            started = time.monotonic(); seed = active_config['seed']+(index%len(planned))*100000
             checkpoint(db,config,asset=phase,stageIndex=index,cycle=index//len(phases)+1,generation=verify(current)['generation'])
-            requests = forecast_requests(db,config,index) if phase=='forecast' else [
+            requests = forecast_requests(db,active_config,index) if phase=='forecast' else [
                 (f'train:{index}:{i}',dict(kind='game',seed=seed+i,firstDealer=i%2,scores=[0,0])) for i in range(config['trainingGames'])]
             collect(db,config,current,requests,directory)
             pattern='forecast:%' if phase=='forecast' else 'train:%'
@@ -241,33 +294,16 @@ def run(config):
                 verify_source(config)
                 details = update(current,candidate,phase,records,config.get('priorEffectiveSamples',1000),config['repo'])
                 atomic(update_path,details)
-            evaluations = {}
-            # Test both the previous accepted generation and the frozen 28.3 baseline.
-            references = [('previous',current)]
-            if current != baseline:
-                references.append(('baseline',baseline))
-            scores = config.get('evaluationScores',[[0,0]])
-            for panel,(name,reference) in enumerate(references):
-                eval_requests = [(f'eval:{index}:{name}:{i}:{side}',dict(kind='game',
-                                  seed=config['evaluationSeed']+index*100000+panel*config['evaluationPairs']+i,
-                                  firstDealer=i%2,candidateSide=side,
-                                  cache=False,
-                                  scores=scores[i%len(scores)] if side==0 else scores[i%len(scores)][::-1]))
-                                 for i in range(config['evaluationPairs']) for side in range(2)]
-                games = collect(db,config,candidate,eval_requests,directory,reference)
-                evaluations[name] = assessment([g for _,g in games],config.get('noninferiorityMargin',.01),2*len(planned))
-            full_games = scores == [[0,0]]
-            promoted = full_games and all(v['status']=='passed' for v in evaluations.values())
-            advanced = all(v['status']!='regressed' for v in evaluations.values())
-            if advanced:
-                current = candidate
-            if promoted:
-                atomic(out/'promoted.json',dict(root=str(current),snapshot=details['snapshot'],evaluations=evaluations))
+            # Per-phase checks validate data and assets. The user-requested
+            # strength panel runs once per 5,000 training games, separately.
+            evaluations = {}; full_games = False; promoted = False; advanced = True
+            current = candidate
             report = dict(status='complete',phase=phase,update=details,evaluations=evaluations,
                           fullGameStrengthMeasured=full_games,promoted=promoted,advanced=advanced,nextRoot=str(current),
                           seconds=time.monotonic()-started)
-            atomic(receipt,report); reports.append(report)
-            atomic(out/'history.json',dict(stages=reports,experimentalRoot=str(current)))
+            atomic(receipt,report); reports.append(compact_report(report))
+            atomic(out/'history.json',dict(stages=[compact_report(r) for r in reports[-60:]],completedUpdates=len(reports),experimentalRoot=str(current)))
+            maybe_assess(db,active_config,current,baseline,index,phases)
         result = dict(status='complete',model='29.0',stages=reports,acceptedRoot=str(current),
                       evidenceGames=db.execute("select count(*) from results where id like 'train:%'").fetchone()[0],
                       promoted=(out/'promoted.json').exists())

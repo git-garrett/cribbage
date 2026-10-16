@@ -18,6 +18,8 @@ def cache_configuration(config):
     out=Path(config['output']); out.mkdir(exist_ok=True)
     if not (out/'cache-clock.json').exists(): atomic(out/'cache-clock.json',dict(completedGames=0))
     atomic(config['cacheConfig'],dict(root=str(out/'opening'),baseline=str(Path(config['cacheBank'])/'chunks'),
+        baselineTail=str(Path(config['cacheTail'])/'chunks'),referenceRoot=str(out/'baseline-opening'),
+        baselineGeneration=sha(Path(config['initialRoot'])/ASSETS/'model29-generation.json'),
         clock=str(out/'cache-clock.json'),maxAgeGames=config['maxAgeGames'],code=sha(config['binary']),
         baselinePolicy='7c4c58c9100ef3f5388b0d5e3838b6542fb810e230451035d5dee2f5b6cfd2a8'))
 
@@ -26,7 +28,7 @@ def cache_parity(config):
     """Independent full solver, captured chunks, replay and age-expiry checks."""
     runtime=Path(config['output']).parent; directory=runtime/'cache-validation';directory.mkdir(exist_ok=True)
     base=json.loads(Path(config['cacheConfig']).read_text())
-    validation=dict(base,root=str(directory/'chunks'),baseline=str(directory/'empty'),clock=str(directory/'clock.json'))
+    validation=dict(base,root=str(directory/'chunks'),referenceRoot=str(directory/'chunks'),baseline=str(directory/'empty'),baselineTail=str(directory/'empty'),clock=str(directory/'clock.json'))
     atomic(directory/'clock.json',dict(completedGames=0));atomic(directory/'config.json',validation)
     old=os.environ.get('MODEL29_CACHE_CONFIG');os.environ['MODEL29_CACHE_CONFIG']=str(directory/'config.json')
     worker=Worker(config['binary'],config['initialRoot'])
@@ -75,7 +77,6 @@ def run(stage, config):
     root = Path(config['repo']); out = Path(config['output']); runtime = out.parent
     verify_source(config)
     if stage == 'bootstrap':
-        cache_configuration(config)
         policy = dict(peggingPolicy='28.3-f64',sourceRevision=config['sourceRevision'],
                       sourceSha256=sha(runtime/'source-manifest.json'),
                       binarySha256=sha(config['binary']),
@@ -86,21 +87,26 @@ def run(stage, config):
                 existing = verify(initial)
                 if existing['policy'] != policy:
                     raise ValueError('initial policy changed')
+                cache_configuration(config)
                 atomic(runtime/'bootstrap.json',dict(status='complete',policy=policy)); return
             except (OSError,ValueError,KeyError):
                 initial.rename(runtime/f'interrupted-bootstrap-{time.time_ns()}')
         bootstrap(root,initial,policy)
+        cache_configuration(config)
         atomic(runtime/'bootstrap.json',dict(status='complete',policy=policy))
     elif stage == 'cache-parity':
         cache_parity(config)
     elif stage == 'await-cache':
-        bank=Path(config['cacheBank'])
-        while True:
-            status=json.loads((bank/'supervisor/status.json').read_text())
-            if status['state']=='complete':break
-            if status['state'] in ('failed','stopped','interrupted'):raise ValueError('opening bank staging needs attention')
-            time.sleep(10)
-        shutil.copy2(bank/'receipt.json',runtime/'cache-stage.json')
+        receipts=[]
+        for name in ('cacheBank','cacheTail'):
+            bank=Path(config[name])
+            while True:
+                status=json.loads((bank/'supervisor/status.json').read_text())
+                if status['state']=='complete':break
+                if status['state'] in ('failed','stopped','interrupted'):raise ValueError('opening bank staging needs attention')
+                time.sleep(10)
+            receipts.append(json.loads((bank/'receipt.json').read_text()))
+        atomic(runtime/'cache-stage.json',dict(status='complete',chunks=sum(r['chunks'] for r in receipts),parts=receipts))
         atomic(runtime/'await-cache.json',dict(status='complete'))
     elif stage == 'parity':
         worker = Worker(config['binary'],config['initialRoot'])

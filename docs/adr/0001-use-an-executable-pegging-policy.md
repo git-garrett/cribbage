@@ -35,7 +35,8 @@ remain enforced. The production exact-cache contract above is unchanged.
 
 This exception knowingly permits policy lag between asset updates. Record cache
 generations with learning evidence. It does not authorize a general pegging-path
-graph. Fresh-policy evaluation disables this approximation. The sparse modern
+graph. Original-state evaluation uses a separate cache populated only with the frozen
+starting priors; the candidate retains its declared rolling-cache policy. The sparse modern
 discard forecast stores sampled full-hand score outcomes for suit-canonical six,
 discard, role and actual pre-cut board; it stores no actions and never translates
 these outcomes to other boards.

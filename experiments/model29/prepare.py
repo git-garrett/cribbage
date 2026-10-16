@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 from learning import ASSETS, PHASES, atomic, sha
-from seeds import reserve
+from seeds import reserve, recorded
 
 
 def prepare(source, runtime, archive):
@@ -21,7 +21,9 @@ def prepare(source, runtime, archive):
     if dirty:
         raise ValueError('commit the reviewed source before freezing')
     runtime.mkdir(parents=True)
-    reservation = reserve(source,runtime,2*len(PHASES))
+    exclusions,_=recorded(source)
+    atomic(runtime/'seed-exclusions.json',exclusions)
+    reservation = reserve(source,runtime,5*len(PHASES),exclusions)
     frozen = runtime/'frozen'; frozen.mkdir()
     names = subprocess.check_output(['git','ls-files','-z'],cwd=source).decode().split('\0')
     for name in filter(None,names):
@@ -37,9 +39,11 @@ def prepare(source, runtime, archive):
                   sourceManifestSha256=sha(runtime/'source-manifest.json'),
                   binary=str(runtime/'target/release/model29-worker'),
                   initialRoot=str(runtime/'initial'),output=str(runtime/'output'),archive=str(archive),
-                  rounds=2,phases=list(PHASES),trainingGames=200,evaluationPairs=4,workers=10,
+                  rounds=5,continuous=True,phases=list(PHASES),trainingGames=200,evaluationPairs=500,workers=10,
+                  evaluationEveryGames=5000,seedExclusionsSha256=sha(runtime/'seed-exclusions.json'),
                   forecastContexts=12,forecastWorlds=16,maxAgeGames=50000,
                   cacheBank=str(parent/'model29-opening-bank-20261016-v1'),
+                  cacheTail=str(parent/'model29-opening-tail-20261016-v1'),
                   cacheConfig=str(runtime/'cache-config.json'),
                   seed=reservation['ranges']['training'][0],evaluationSeed=reservation['ranges']['evaluation'][0],
                   paritySeed=reservation['ranges']['parity'][0],
@@ -74,7 +78,7 @@ def prepare(source, runtime, archive):
     stages[-1]['completionChecks'] = [checked(runtime/'sync-verification.json'),checked(archive/'sync-verification.json')]
     spec = dict(schemaVersion=1,jobId=runtime.name,jobRoot=str(runtime/'supervisor'),stages=stages,
                 trainingStudy=dict(root=config['output'],title='Model 29.0 · cyclic prior learning',mode='cyclic',
-                    target=config['rounds']*len([p for p in PHASES if p!='forecast'])*config['trainingGames'],workers=10,rounds=2,maxAgeGames=50000,cacheBank=config['cacheBank']),
+                    target=5000,workers=10,rounds=None,continuous=True,maxAgeGames=50000,cacheBank=config['cacheBank'],cacheTail=config['cacheTail']),
                 reportCommand=[python,str(frozen/'scripts/cribbage_job_queue.py'),'summary',str(runtime/'job.json')])
     atomic(runtime/'job.json',spec)
     print(json.dumps(dict(status='prepared',job=str(runtime/'job.json'),seed= config['seed'],evaluationSeed=config['evaluationSeed'])))

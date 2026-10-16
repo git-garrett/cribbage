@@ -127,13 +127,19 @@ def _training_report(entry, status, now=None):
 def build_cyclic_report(entry,status,settings,now):
     root=Path(entry['root']); progress=read_json(root/'progress.json',{})
     history=read_json(root/'history.json',{}).get('stages',[])
+    inherited=read_json(root.parent/'cache-stage.json',{})
+    if not inherited:
+        parts=[read_json(Path(settings.get(k,str(root)))/'progress.json',{}) for k in ('cacheBank','cacheTail')]
+        inherited=dict(chunks=sum(p.get('chunks',0) for p in parts))
     stage=next((s['name'] for s in status.get('stages',[]) if s.get('state') in ('running','failed')),'')
     reservation=read_json(Path('/Users/garrett/Library/Application Support/StrongCribbage/runtimes/coordination/model30-reserved-cpus.json'),{})
     return dict(id=entry['id'],kind='training',mode='cyclic',title=entry['title'],state=status.get('state','prepared'),asOf=now,
         stage=stage,progress=progress,target=settings['target'],completed=progress.get('trainingGames',0),
         workers=reservation.get('allocations',{}).get(entry['id'],0),workerLimit=settings['workers'],
         rounds=settings['rounds'],history=history,cache=read_json(root/'cache-progress.json',{}),
-        cacheLimit=settings['maxAgeGames'],inheritedCache=read_json(root.parent/'cache-stage.json',{}) or read_json(Path(settings.get('cacheBank',str(root)))/'progress.json',{}),
+        cacheLimit=settings['maxAgeGames'],inheritedCache=inherited,continuous=settings.get('continuous',False),
+        evaluations=read_json(root/'evaluation-history.json',{}).get('checkpoints',[]),
+        completedUpdates=read_json(root/'history.json',{}).get('completedUpdates',len(history)),
         stages=[dict(name=s['name'],state=s.get('state','pending')) for s in status.get('stages',[])],warnings=[])
 
 

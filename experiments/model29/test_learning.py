@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 import learning
 import resources
-from cycle import assessment, validate, collect
+from cycle import assessment, validate, collect, maybe_assess
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -124,6 +124,24 @@ class LearningTests(unittest.TestCase):
             self.assertEqual(json.loads((out/'cache-progress.json').read_text())['hits'],6)
             with self.assertRaisesRegex(ValueError,'resumed request'):
                 collect(db,config,'root',[('train:0:0',dict(kind='game',seed=2))],out)
+
+    def test_original_state_panel_runs_once_after_exactly_five_thousand_training_games(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config=dict(output=tmp,trainingGames=200,evaluationEveryGames=5000,evaluationPairs=500,evaluationSeed=900000)
+            def collected(db,cfg,current,requests,directory,baseline):
+                self.assertEqual(current,Path('candidate'));self.assertEqual(baseline,Path('original'))
+                self.assertEqual(len(requests),1000)
+                self.assertEqual(len({r['seed'] for _,r in requests}),500)
+                self.assertTrue(all(r['cache'] and r['scores']==[0,0] for _,r in requests))
+                return [(i,dict(seed=r['seed'],candidateSide=r['candidateSide'],winner=0)) for i,r in requests]
+            with patch('cycle.checkpoint'),patch('cycle.verify',return_value=dict(generation=29)),patch('cycle.collect',side_effect=collected) as collector:
+                maybe_assess(None,config,Path('candidate'),Path('original'),27,learning.PHASES)
+                collector.assert_not_called()
+                maybe_assess(None,config,Path('candidate'),Path('original'),28,learning.PHASES)
+                maybe_assess(None,config,Path('candidate'),Path('original'),28,learning.PHASES)
+                self.assertEqual(collector.call_count,1)
+            receipt=json.loads((Path(tmp)/'assessments/000005000.json').read_text())
+            self.assertEqual(receipt['games'],1000);self.assertEqual(receipt['assessment']['pairs'],500)
 
     def test_training_and_evaluation_seeds_must_be_disjoint(self):
         config = dict(rounds=1,trainingGames=2,evaluationPairs=1,workers=1,
