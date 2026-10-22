@@ -69,6 +69,8 @@ pub const MODEL_20_6: &str = "schell_table-peg_table-20.6";
 pub const MODEL_20_7: &str = "schell_table-peg_table-20.7";
 /// Experimental score-block backward policy; 20.7 discard and root valuation.
 pub const MODEL_29_0: &str = "schell_table-peg_table-29.0";
+/// Exact-hand opponent-tempo forecast learning; optional rejected-discard training.
+pub const MODEL_29_1: &str = "schell_table-peg_table-29.1";
 /// The unchanged 28.3 baseline policy.
 pub const MODEL_28_3: &str = "schell_table-peg_table-28.3";
 /// Exact optional opening assets; uncovered decisions use ordinary 28.3.
@@ -115,6 +117,7 @@ pub enum ModelId {
     Schell207,
     Schell283,
     Schell290,
+    Schell291,
     Schell283Fast,
     Schell205Pegging,
     Schell205Pegging2,
@@ -156,6 +159,7 @@ impl ModelId {
             ModelId::Schell207 => MODEL_20_7,
             ModelId::Schell283 => MODEL_28_3,
             ModelId::Schell290 => MODEL_29_0,
+            ModelId::Schell291 => MODEL_29_1,
             ModelId::Schell283Fast => MODEL_28_3_FAST,
             ModelId::Schell205Pegging => MODEL_20_5_PEGGING,
             ModelId::Schell205Pegging2 => MODEL_20_5_PEGGING2,
@@ -195,6 +199,7 @@ impl ModelId {
             ModelId::Schell207 => "Schell Table + Peg Table 20.7",
             ModelId::Schell283 => "28.3 Score-block pegging (experimental)",
             ModelId::Schell290 => "29.0 Cyclic prior learning (experimental)",
+            ModelId::Schell291 => "29.1 Opponent-tempo forecast learning (experimental)",
             ModelId::Schell283Fast => "28.3.fast Exact opening assets (experimental)",
             ModelId::Schell205Pegging => "20.5.pegging (experimental)",
             ModelId::Schell205Pegging2 => "20.5.pegging2 (experimental)",
@@ -235,6 +240,7 @@ impl ModelId {
                 | ModelId::Schell207
                 | ModelId::Schell283
                 | ModelId::Schell290
+                | ModelId::Schell291
                 | ModelId::Schell283Fast
                 | ModelId::Schell205Pegging
                 | ModelId::Schell205Pegging2
@@ -299,6 +305,7 @@ impl FromStr for ModelId {
             MODEL_20_7 => Ok(ModelId::Schell207),
             MODEL_28_3 | "28.3" => Ok(ModelId::Schell283),
             MODEL_29_0 | "29.0" => Ok(ModelId::Schell290),
+            MODEL_29_1 | "29.1" => Ok(ModelId::Schell291),
             MODEL_28_3_FAST | "28.3.fast" => Ok(ModelId::Schell283Fast),
             MODEL_20_5_PEGGING | "20.5.pegging" => Ok(ModelId::Schell205Pegging),
             MODEL_20_5_PEGGING2 | "20.5.pegging2" => Ok(ModelId::Schell205Pegging2),

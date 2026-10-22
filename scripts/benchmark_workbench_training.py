@@ -267,11 +267,11 @@ def activity(report, status):
     progress=read_json(root/'progress.json',{})
     if mode=='cyclic':
         phase=progress.get('phase','preparing'); asset=progress.get('asset','WP')
-        labels={'collection':'Playing full games','forecast':'Sampling all 15 keeps','updating':'Updating one asset','evaluation':'Screening fresh policy','complete':'Pilot cycles complete'}
+        labels={'collection':'Playing full games','forecast':'Checking rejected discards' if progress.get('trainingMode') is not None else 'Sampling all 15 keeps','updating':'Updating one asset','evaluation':'Screening fresh policy','complete':'Pilot cycles complete'}
         label=labels.get(phase,raw_stage.replace('-',' ').capitalize() or 'Preparing')
         if state!='running': label=state.capitalize()
         return dict(label=f"{label} · {asset}",kind=state,detail='Normal 0–0 games, first winner at 121. One asset changes between batches. Cache refresh happens only on a miss or expiry.',
-            completed=progress.get('phaseCompleted'),target=progress.get('phaseTarget'),unit='opponent worlds' if phase=='forecast' else 'games',
+            completed=progress.get('phaseCompleted'),target=progress.get('phaseTarget'),unit=('hand decisions × 14 alternatives' if progress.get('trainingMode') is not None else 'opponent worlds') if phase=='forecast' else 'games',
             context=f"Cycle {progress.get('cycle',1)} · generation {progress.get('generation',0)}",stageLabels={},state=state)
     if report.get('roleStudy'):
         phase=progress.get('phase','preparing');r=progress.get('round');size=progress.get('size','')

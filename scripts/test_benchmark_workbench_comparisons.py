@@ -92,6 +92,20 @@ class ComparisonTests(unittest.TestCase):
             with patch('benchmark_workbench_comparisons.samples',return_value=samples(sample_game)):
                 with self.assertRaisesRegex(ValueError,'Missing'):comparison_report(root,5000)
 
+    def test_291_panels_are_labelled_and_mixed_versions_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);self.fixture(root)
+            with sqlite3.connect(root/'evidence.db') as db:
+                db.execute("update results set result=json_set(result,'$.model','29.1') where id like 'eval:%'")
+            sample_game=dict(start=[100,100],scores=[101,121],hands=[self.hand()])
+            with patch('benchmark_workbench_comparisons.samples',return_value=samples(sample_game)):
+                report=comparison_report(root,5000)
+                self.assertIn('29.1 current state',json.dumps(report))
+                with sqlite3.connect(root/'evidence.db') as db:
+                    db.execute("update results set result=json_set(result,'$.model','29.0') where id='eval:checkpoint:5000:0:0'")
+                _completed_report.cache_clear()
+                with self.assertRaisesRegex(ValueError,'Mixed'):comparison_report(root,5000)
+
     def test_snapshot_mismatch_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);self.fixture(root)

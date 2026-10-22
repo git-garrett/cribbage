@@ -1,4 +1,53 @@
-# Model 29.0: cyclic prior learning
+# Model 29.1: exact-hand forecast learning
+
+29.1 forks the latest completed 29.0 snapshot and keeps its live WP-maximizing
+policy and other learning phases. It adds a forecast correction for each exact,
+suit-canonical six-card/discard/role context. It does **not** pool different or
+similar hands, rank-only hands, or different discards. Global suit renaming is
+an exact game symmetry and is the only card equivalence used.
+
+Each context has three regularized linear corrections: opponent standard, on,
+and off. Features are an intercept, both actual scores (centered/scaled), and
+the inherited forecast WP. The learning target is the hand's realized next-state
+WP minus its inherited forecast, both evaluated at the actual source board with
+the source generation's WP matrix. Terminal wins/losses are exactly 1/0. Each
+four-parameter regression starts with zero coefficients and ridge strength 32.
+This is a compact **WP correction**, not a newly generated joint-scoring table;
+full joint endpoints and source predictions remain in evidence.db. Legacy
+forecasts still supply the initial prediction and unvisited contexts.
+
+The initial opponent-tempo heuristic asks whether faster scoring by both players
+helps the opponent in the current WP table. A two-point forward slope (backward
+at the board edge) blends standard with on/off over a 0.02-WP band. This is an
+explicit experimental heuristic, not an implementation of Colvert's rules and
+not an assertion that the opponent always adopts the opposite style. Its zones
+change as the WP table learns; the band itself is fixed. Actual board features
+also condition corrections for changes in our own future choices. Neither
+actor's executable WP chooser is constrained to a style. Accuracy and strength
+remain to be measured; a nonzero correction is not proof of improvement.
+
+Prepare with `transition291.py prepare RUNTIME ARCHIVE`; training mode defaults
+to on. Add `--ordinary-hands-only` to start with exploration disabled. During a
+run, set `output/training-control.json` to `{"trainingMode": false}` for speed,
+or `true` for all rejected discards. Changes take effect at the next 20-game
+batch. The selected mode is persisted per batch; an interrupted batch resumes
+its original mode even if the control file subsequently changes.
+
+The supervised transition builds and verifies 29.1 before stopping 29.0. It
+forks the latest completed snapshot after the stop, retains all old evidence,
+and uses two workers. The rolling opening cache reads compatible older chunks
+without resetting their age and writes new chunks into the 29.1 runtime. Cache
+compatibility is supported by a source audit and initial-policy parity. The
+clock carries forward all previous completed training/evaluation games. A disk
+check before every worker request preserves at least 10 GiB of headroom.
+
+The pilot uses 20 ordinary games per phase, with 50 rounds per 5,000-game block.
+After every 5,000 training games it runs 1,000 paired games against the original
+29.0 starting state, recording full benchmark telemetry. These are a new run's
+confidence sequence; older 29.0 panels are not silently pooled into it.
+
+## Inherited 29.0 experiment
+
 
 29.0 starts from the audited FP64 28.3 policy and its immutable assets. This is
 an experimental training model; production Ace remains unchanged. PR #78 owns
@@ -27,18 +76,33 @@ of board cells, determine effective WP observations. Raw observations and prior
 smoothing mass remain distinct. Cumulative evidence describes a policy mixture,
 not an unbiased estimate of only the latest policy.
 
-The old 9.x-derived correction asset remains the fallback while the sixth phase
-adds modern forecasts. Each sampled context is an actual hand and board from
-training. For each of 16 fresh legal opponent deals/cuts, the opponent chooses its
-own discard using its own legal information, and all 15 candidate keeps play the
-hand with the current executable policy. Suit-canonical six, discard, role and
-actual board identify a row. Full-hand endpoints retain heels, pegging, counting
-order and first-winner stopping. Runtime values these endpoints with the current
-WP table, blended with 32 effective observations of the inherited forecast.
-Unvisited contexts retain their inherited forecast. This is sparse incremental
-coverage, not a claim to have rebuilt the old asset broadly. Shared worlds across
-keeps are correlated; raw rollout count is not independent sample count. EV tie
-breaking remains inherited; the modern forecast updates win-probability value.
+## Training-mode toggle
+
+New runs default to `trainingMode: true`. After each ordinary training batch,
+its same workers check all **14 rejected discards for both players in every
+played hand**, using that hand's actual deal, cut, board position, and frozen
+policy. The chosen discard's outcome comes from the ordinary game and is not
+replayed. Both actors still receive only their legal observations. Alternatives
+stop at the first winner; there is no score transposition or post-win play.
+
+Set `trainingMode: false`, or prepare with `--ordinary-hands-only`, when speed
+matters more than exploring alternatives. In that mode the forecast still
+learns from the chosen discards in ordinary games. No counterfactual worker
+requests are made. The toggle governs evidence collection only; learned assets
+remain in use in both modes. The mode control is separate from the frozen policy configuration and is recorded at each batch boundary.
+
+The forecast phase consumes the new ordinary-game evidence and, when enabled,
+the rejected-discard continuations from all preceding ordinary phases. Evidence
+is committed by exact game/hand/actor identity, so interrupted or out-of-order
+continuations resume without repeating completed work. A game/hand/actor is one
+shared world; its 15 candidate outcomes are correlated and are never counted as
+15 independent games. Suit-equivalent choices contribute at most once per
+forecast row per world, preferring the actually played outcome. Only ordinary
+full games advance the cache clock. Evaluation never supplies training evidence.
+
+29.0's sparse exact-board forecast remains an inherited component. In 29.1 the
+new source-board residuals update the separate exact-hand tempo correction;
+absolute terminal endpoints are never transplanted onto a different board.
 
 ## Opening cache
 
@@ -122,7 +186,7 @@ loop that hides failures.
 Commit the source and install the audited `model1323-corrections.bin`. The existing
 opening bank is staged with `stage_cache.py` under its own one-shot supervisor.
 `prepare.py RUNTIME ARCHIVE` freezes a continuous run: 200 normal games per
-ordinary asset phase, 12 contexts × 16 worlds × 15 keeps per forecast phase,
+ordinary asset phase, optional all-rejected-discard continuations for every hand,
 and 1,000 original-state evaluation games after each 5,000 training games. Fresh
 disjoint seed ranges are reserved for each 5,000-game block, using frozen historical
 exclusions and the shared reservation ledger. Ten workers play or sample; cache

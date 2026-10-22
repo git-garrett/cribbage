@@ -11,13 +11,17 @@ import sqlite3
 import subprocess
 import time
 from pathlib import Path
-from learning import ASSETS, PHASES, atomic, sha, update, verify, verify_source, natural_hands
+from learning import ASSETS, PHASES, atomic, sha, update, verify, verify_source
+from forecast import training_mode, rejected_requests
 
 
 class Worker:
     def __init__(self, binary, root, reference=None):
         args = [binary, str(root)] + ([str(reference)] if reference else [])
         lease = os.environ.get('MODEL29_LEASE_FD')
+        self.reference = reference
+        self.policy_binary = sha(binary) if reference else None
+        self.snapshots = [sha(Path(p)/ASSETS/'model29-generation.json') for p in (root,reference)] if reference else []
         self.process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         text=True,pass_fds=(int(lease),) if lease else ())
 
@@ -29,7 +33,11 @@ class Worker:
         response = json.loads(line)
         if not response.get('ok'):
             raise RuntimeError(response.get('error','native worker failed'))
-        return response['result']
+        result=response['result']
+        if self.reference:
+            if result.get('benchmark',{}).get('schemaVersion')!=1:raise ValueError('evaluation telemetry missing')
+            result['benchmark'].update(recorderSha256=self.policy_binary,policyBinarySha256=self.policy_binary,snapshots=self.snapshots)
+        return result
 
     def close(self):
         self.process.stdin.close()
@@ -69,18 +77,14 @@ def validate(config):
         raise ValueError('invalid phases')
     if 'forecast' in phases and (phases.index('forecast')==0 or phases[phases.index('forecast')-1]=='forecast'):
         raise ValueError('forecast requires a preceding ordinary-game phase')
-    for field,default in [('forecastContexts',12),('forecastWorlds',16)]:
-        if type(config.get(field,default))is not int or not 1<=config.get(field,default)<=1000:
-            raise ValueError('invalid '+field)
-    if config.get('forecastContexts',12)*config.get('forecastWorlds',16)>100000:
-        raise ValueError('forecast exceeds seed stride')
+    training_mode(config)
     if config.get('continuous') and config.get('evaluationEveryGames') != config['rounds']*sum(p!='forecast' for p in phases)*config['trainingGames']:
         raise ValueError('one seed block must cover exactly one evaluation interval')
     for name in ('seed','evaluationSeed'):
         if type(config.get(name)) is not int or not 0 <= config[name] <= 0xffffffff:
             raise ValueError('invalid '+name)
     n = config['rounds']*len(phases); stride = 100000
-    span=max(config['trainingGames'],config.get('forecastContexts',12)*config.get('forecastWorlds',16) if 'forecast' in phases else 0)
+    span=config['trainingGames']
     a = (config['seed'], config['seed']+(n-1)*stride+span-1)
     b = (config['evaluationSeed'], config['evaluationSeed']+(n-1)*stride+2*config['evaluationPairs']-1)
     if max(a[1],b[1]) > 0xffffffff or max(a[0],b[0]) <= min(a[1],b[1]):
@@ -104,9 +108,10 @@ def validate(config):
 def checkpoint(db, config, **activity):
     out=Path(config['output'])
     full=db.execute("select count(*) from results where id like 'train:%' or id like 'eval:%'").fetchone()[0]
-    atomic(out/'cache-clock.json',dict(completedGames=full))
+    atomic(out/'cache-clock.json',dict(completedGames=config.get('cacheClockBase',0)+full))
     progress=json.loads((out/'progress.json').read_text()) if (out/'progress.json').exists() else {}
-    progress.update(activity,updatedAt=time.time(),workers=config['workers'],completedGames=full,
+    progress.update(activity,updatedAt=time.time(),workers=config['workers'],completedGames=full,cacheClockGames=config.get('cacheClockBase',0)+full,
+        trainingMode=activity.get('trainingMode',progress.get('trainingMode',training_mode(config))),forecastRollouts=cache_stats(db).get('forecastRollouts',0),
         trainingGames=db.execute("select count(*) from results where id like 'train:%'").fetchone()[0],
         forecastWorlds=db.execute("select count(*) from results where id like 'forecast:%'").fetchone()[0],
         evaluationGames=db.execute("select count(*) from results where id like 'eval:%'").fetchone()[0])
@@ -122,6 +127,7 @@ def cache_stats(db):
         prior=json.loads(raw).get('cache',{})
         for k in ('hits','misses','expired','writes'):stats[k]+=prior.get(k,0)
         stats['maxAgeGames']=max(stats['maxAgeGames'],prior.get('maxAgeGames',0))
+        stats['forecastRollouts']=stats.get('forecastRollouts',0)+len(json.loads(raw).get('outcomes',[]))
         stats['lastRowid']=rowid
     db.execute("insert or replace into metrics values('cache',?)",(json.dumps(stats),))
     return stats
@@ -134,19 +140,21 @@ def unconsumed_records(db, root, phase):
     db.execute('create temp table if not exists consumed(id text primary key)')
     db.execute('delete from consumed')
     db.executemany('insert into consumed values(?)',((identity,) for identity in state.get(phase,{}).get('applied',[])))
-    pattern='forecast:%' if phase=='forecast' else 'train:%'
+    pattern="(id like 'train:%' or id like 'forecast:%')" if phase=='forecast' else "id like 'train:%'"
     return [(identity,json.loads(raw)) for identity,raw in db.execute(
-        'select id,result from results where id like ? and not exists (select 1 from consumed where consumed.id=results.id) order by id',(pattern,))]
+        'select id,result from results where '+pattern+' and not exists (select 1 from consumed where consumed.id=results.id) order by id')]
 
 
 def collect(db, config, root, requests, output, reference=None):
     """One writer and exact request identities; out-of-order completion is resumable."""
+    if not requests:
+        return []
     pending = [(identity,req) for identity,req in requests
                if not db.execute('select 1 from results where id=?',(identity,)).fetchone()]
     started=time.monotonic(); completed=len(requests)-len(pending)
     stats=cache_stats(db);db.commit()
     atomic(Path(config['output'])/'cache-progress.json',stats)
-    checkpoint(db,config,phase='evaluation' if reference else 'forecast' if requests[0][1]['kind']=='counterfactual' else 'collection',
+    checkpoint(db,config,phase='evaluation' if reference else 'forecast' if requests[0][1]['kind'] in ('counterfactual','rejected-discards') else 'collection',
         phaseCompleted=completed,phaseTarget=len(requests),phaseStartedAt=time.time(),activeRoot=str(root))
     groups = [pending[i::config['workers']] for i in range(config['workers'])]
     # Each task is one game so each completion commits promptly. Reuse a worker
@@ -157,6 +165,8 @@ def collect(db, config, root, requests, output, reference=None):
         worker = Worker(config['binary'],root,reference)
         try:
             for identity,req in group:
+                if shutil.disk_usage(config['output']).free < config.get('minimumFreeBytes',10*1024**3):
+                    raise RuntimeError('less than reserved free storage; completed evidence is checkpointed')
                 yield identity,req,worker.call(req)
         finally:
             worker.close()
@@ -204,18 +214,29 @@ def collect(db, config, root, requests, output, reference=None):
     return result
 
 
-def forecast_requests(db, config, index):
-    # Select actual legal contexts from the most recent ordinary training batch.
-    games=[json.loads(r[0]) for r in db.execute("select result from results where id like ? order by id",(f'train:{index-1}:%',))]
-    if not games: raise ValueError('forecast phase requires preceding natural games')
-    contexts=[]
-    for i in range(config.get('forecastContexts',12)):
-        game=games[(i*len(games))//config.get('forecastContexts',12)]
-        hands=list(natural_hands(game)); h=hands[(i//2)%len(hands)]; actor=i%2
-        contexts.append(dict(own=h['dealt'][actor],scores=[h['start'][actor],h['start'][1-actor]],dealer=int(h['dealer']!=actor)))
-    worlds=config.get('forecastWorlds',16)
-    return [(f'forecast:{index}:{i}:{world}',dict(kind='counterfactual',seed=config['seed']+(index%(config['rounds']*len(config['phases'])))*100000+i*worlds+world,**context))
-        for i,context in enumerate(contexts) for world in range(worlds)]
+def batch_training_mode(db, config, index):
+    # Operational speed control is read only at a new batch boundary. The
+    # persisted choice, rather than today's control file, governs every resume.
+    db.execute('create table if not exists controls(id text primary key,value text)')
+    identity='batchMode:'+str(index)
+    row=db.execute('select value from controls where id=?',(identity,)).fetchone()
+    if row:return json.loads(row[0])['trainingMode']
+    control=Path(config['trainingControl']) if config.get('trainingControl') else None
+    mode=training_mode(json.loads(control.read_text())) if control else training_mode(config)
+    db.execute('insert into controls values(?,?)',(identity,json.dumps(dict(trainingMode=mode))))
+    db.commit()
+    return mode
+
+
+def collect_training_batch(db, config, root, requests, directory):
+    mode=batch_training_mode(db,config,requests[0][0].split(':')[1])
+    checkpoint(db,config,trainingMode=mode)
+    games = collect(db, config, root, requests, directory)
+    if 'forecast' in config.get('phases', PHASES):
+        # Reuse the SAME immutable policy and actual deal as the ordinary game.
+        # Rejected keeps are evidence only for the forecast, never other priors.
+        collect(db, config, root, rejected_requests(games, dict(config,trainingMode=mode)), directory)
+    return games
 
 
 def compact_report(report):
@@ -269,7 +290,8 @@ def run(config):
     db = sqlite3.connect(out/'evidence.db')
     db.execute('pragma journal_mode=WAL')
     db.execute('create table if not exists results(id text primary key,request text,root text,result text)')
-    current = Path(config['initialRoot']); baseline = current
+    current = Path(config['initialRoot']); baseline = Path(config.get('referenceRoot',current))
+    verify(baseline)
     reports = []; phases = config.get('phases',list(PHASES)); planned = phases*config['rounds']
     source_seeds=dict(training=[config['seed']],evaluation=[config['evaluationSeed']])
     checkpoint(db,config,phase='preparing')
@@ -302,9 +324,10 @@ def run(config):
                 checkpoint(db,config,phase='storage limit',freeBytes=free)
                 raise RuntimeError('less than 10 GiB free; evidence is checkpointed; free storage before resuming')
             checkpoint(db,config,asset=phase,stageIndex=index,cycle=index//len(phases)+1,generation=verify(current)['generation'])
-            requests = forecast_requests(db,active_config,index) if phase=='forecast' else [
-                (f'train:{index}:{i}',dict(kind='game',seed=seed+i,firstDealer=i%2,scores=[0,0])) for i in range(config['trainingGames'])]
-            collect(db,config,current,requests,directory)
+            if phase != 'forecast':
+                requests = [(f'train:{index}:{i}',dict(kind='game',seed=seed+i,firstDealer=i%2,scores=[0,0]))
+                            for i in range(config['trainingGames'])]
+                collect_training_batch(db,config,current,requests,directory)
             candidate = directory/'candidate'; update_path = directory/'update.json'
             if update_path.exists():
                 details = json.loads(update_path.read_text()); verify(candidate)
@@ -328,7 +351,7 @@ def run(config):
             atomic(receipt,report); reports.append(compact_report(report))
             atomic(out/'history.json',dict(stages=[compact_report(r) for r in reports[-60:]],completedUpdates=len(reports),experimentalRoot=str(current)))
             maybe_assess(db,active_config,current,baseline,index,phases)
-        result = dict(status='complete',model='29.0',stages=reports,acceptedRoot=str(current),
+        result = dict(status='complete',model=initial['model'],stages=reports,acceptedRoot=str(current),
                       evidenceGames=db.execute("select count(*) from results where id like 'train:%'").fetchone()[0],
                       promoted=(out/'promoted.json').exists())
         atomic(out/'result.json',result)

@@ -37,7 +37,14 @@ pub(super) fn forecast(s: &mut Solver, p: &Position, next: &Position, own: &Hand
     let c = config()?;
     let now = clock(&c)?;
     let limit = c["maxAgeGames"].as_u64().filter(|n| *n > 0).ok_or("invalid cache age")?;
-    let path = location(&c, s, p, lead)?;
+    let mut path = location(&c, s, p, lead)?;
+    if !path.exists() {
+        let field=if c["baselineGeneration"].as_str()==Some(&session::generation()) {"referenceFallbackRoot"} else {"fallbackRoot"};
+        if let Some(root)=c[field].as_str() {
+            let previous=shard_path(Path::new(root),s.cut,p.scores,lead);
+            if previous.exists() {path=previous;}
+        }
+    }
     let mut baseline = shard_path(Path::new(c["baseline"].as_str().ok_or("missing inherited cache")?), s.cut, p.scores, lead);
     if !baseline.exists() {
         if let Some(tail)=c["baselineTail"].as_str() {baseline=shard_path(Path::new(tail),s.cut,p.scores,lead);}

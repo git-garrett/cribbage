@@ -11,6 +11,7 @@ import subprocess
 import time
 from pathlib import Path
 from cycle import Worker
+from forecast import rejected_requests, training_mode
 from learning import ASSETS, atomic, bootstrap, sha, verify, verify_source
 
 
@@ -71,6 +72,18 @@ def cache_parity(config):
     if semantic(inherited)!=semantic(exact) or not inherited['cache']['hits']:raise ValueError('inherited bank parity failed')
     atomic(runtime/'cache-parity.json',dict(status='complete',wholeGameComparisons=4,independentChunkParity=True,counterfactualKeeps=15,
         captured=captured['cache'],replayed=replayed['cache'],expired=expired['cache'],inherited=inherited['cache']))
+
+
+def archive_inputs(config):
+    files=['config.json','source-manifest.json','seed-reservation.json','seed-exclusions.json',
+           'job.json','bootstrap.json','cache-config.json','report.json']
+    directories=['output','initial','frozen']
+    if config.get('model')=='29.1':
+        files+=['verify.json','opening-compatibility.json','handoff-source.json','handoff.json','verification-games.json']
+        directories+=['reference']
+    else:
+        files+=['parity.json','cache-parity.json','cache-stage.json']
+    return files,directories
 
 
 def run(stage, config):
@@ -143,50 +156,56 @@ def run(stage, config):
         expected_training = config['rounds']*len([p for p in config['phases'] if p!='forecast'])*config['trainingGames']
         with sqlite3.connect(out/'evidence.db') as db:
             rows = db.execute('select id,root,result from results order by id').fetchall()
+            modes={k:json.loads(v)['trainingMode'] for k,v in db.execute('select id,value from controls')}
         training = [json.loads(r[2]) for r in rows if r[0].startswith('train:')]
         if len(training) != expected_training:
             raise ValueError('incomplete training games')
         for i in range(config['rounds']*len(config['phases'])):
             if config['phases'][i%len(config['phases'])]=='forecast':
-                expected={f'forecast:{i}:{c}:{w}' for c in range(config['forecastContexts']) for w in range(config['forecastWorlds'])}
-                actual={r[0] for r in rows if r[0].startswith(f'forecast:{i}:')}
-                if actual!=expected:raise ValueError('missing forecast indices')
                 continue
             expected = {f'train:{i}:{j}' for j in range(config['trainingGames'])}
             actual = {r[0] for r in rows if r[0].startswith(f'train:{i}:')}
             if actual != expected:
                 raise ValueError('missing or overlapping game indices')
+        records = [(r[0],json.loads(r[2])) for r in rows if r[0].startswith('train:')]
+        expected = {identity for source,game in records for identity,_ in rejected_requests([(source,game)],dict(config,trainingMode=modes['batchMode:'+source.split(':')[1]]))} if 'forecast' in config['phases'] else set()
+        actual = {r[0] for r in rows if r[0].startswith('forecast:')}
+        if actual != expected:
+            raise ValueError('missing or unexpected rejected-discard cohorts')
         for path in out.glob('*/candidate'):
             verify(path)
         full = [g for g in training if not g['trajectory'] and max(g['scores'])>=121 and min(g['scores'])<121 and g['start']==[0,0]]
         if len(full)!=len(training):raise ValueError('nonstandard training game')
         seconds = sum(g['seconds'] for g in full)
-        report = dict(status='complete',model='29.0',trainingGames=len(training),
+        report = dict(status='complete',model=config['model'],trainingGames=len(training),
                       normalGames=len(full),evaluationGames=sum(r[0].startswith('eval:') for r in rows),
                       forecastWorlds=sum(r[0].startswith('forecast:') for r in rows),
+                      trainingMode=training_mode(config),
+                      forecastRollouts=sum(len(json.loads(r[2])['outcomes']) for r in rows if r[0].startswith('forecast:')),
                       workerGamesPerHour=3600*len(full)/seconds if seconds else None,
                       stages=[dict(phase=s['phase'],changed=s['update']['changed'],
                                    evaluations=s['evaluations'],promoted=s['promoted']) for s in result['stages']],
-                      parity=json.loads((runtime/'parity.json').read_text()),
+                      parity=json.loads((runtime/('verify.json' if config.get('model')=='29.1' else 'parity.json')).read_text()),
                       promoted=result['promoted'],interpretation='Engineering pilot; insufficient evidence of playing-strength improvement')
         atomic(runtime/'report.json',report)
         print(json.dumps({k:report[k] for k in ('status','model','trainingGames','forecastWorlds','promoted')}))
     elif stage == 'sync':
         archive = Path(config['archive']); archive.mkdir(parents=True,exist_ok=True)
         # Completed snapshots and evidence are archived, not large compiler caches.
-        shutil.copytree(out,archive/'output',dirs_exist_ok=True)
-        for name in ('config.json','source-manifest.json','seed-reservation.json','job.json',
-                     'bootstrap.json','parity.json','cache-parity.json','cache-stage.json','cache-config.json','report.json'):
-            shutil.copy2(runtime/name,archive/name)
-        shutil.copytree(runtime/'frozen',archive/'frozen',dirs_exist_ok=True)
-        shutil.copytree(runtime/'initial',archive/'initial',dirs_exist_ok=True)
+        files,directories=archive_inputs(config)
+        for name in files:shutil.copy2(runtime/name,archive/name)
+        for name in directories:shutil.copytree(runtime/name,archive/name,dirs_exist_ok=True)
         (archive/'bin').mkdir(exist_ok=True)
         shutil.copy2(config['binary'],archive/'bin/model29-worker')
         atomic(runtime/'sync.json',dict(status='copied'))
     elif stage == 'verify-sync':
         archive = Path(config['archive'])
         checked = 0
-        for directory in ('output','initial','frozen'):
+        files,directories=archive_inputs(config)
+        for name in files:
+            if sha(runtime/name)!=sha(archive/name):raise ValueError('archive differs: '+name)
+            checked+=1
+        for directory in directories:
             for source in (runtime/directory).rglob('*'):
                 if source.is_file():
                     dest = archive/source.relative_to(runtime)

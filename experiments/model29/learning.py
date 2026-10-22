@@ -6,6 +6,8 @@ import shutil
 import struct
 from collections import Counter, defaultdict
 from pathlib import Path
+from forecast import ordinary_cohorts
+import forecast291
 from formats import (DI, KI, PAIRS, canonical, key, replace, update_crib,
                      update_declines, update_hold)
 
@@ -48,9 +50,10 @@ def verify_source(config):
 
 def verify(root):
     m = manifest(root)
-    if m['model'] != '29.0' or m['schemaVersion'] != 1:
+    if m['model'] not in ('29.0','29.1') or m['schemaVersion'] != 1:
         raise ValueError('invalid generation')
     required = set(FILES.values()) | {'model1323-corrections.bin'}
+    if m['model']=='29.1': required.add(forecast291.FILE)
     if not required <= m['assets'].keys():
         raise ValueError('missing required assets')
     for name, expected in m['assets'].items():
@@ -59,9 +62,9 @@ def verify(root):
     return m
 
 
-def seal(root, generation, parent, evidence, policy):
+def seal(root, generation, parent, evidence, policy, model='29.0'):
     directory = Path(root) / ASSETS
-    value = dict(schemaVersion=1, model='29.0', base='28.3', arithmetic='f64',
+    value = dict(schemaVersion=1, model=model, base='29.0' if model=='29.1' else '28.3', arithmetic='f64',
                  generation=generation, parent=parent, evidence=evidence, policy=policy,
                  assets={p.name: sha(p) for p in sorted(directory.iterdir())
                          if p.is_file() and p.name != 'model29-generation.json'})
@@ -92,6 +95,22 @@ def bootstrap(source, target, policy):
     clone(source, target)
     atomic(Path(target)/ASSETS/FORECAST,dict(prior_mass=32.,rows={}))
     return seal(target, 0, None, {'inheritedAudit': audit}, policy)
+
+
+def inherit(source, target, policy, model='29.1'):
+    old=verify(source)
+    clone(source,target)
+    assets=Path(target)/ASSETS
+    state_path=assets/'model29-state.json'
+    if state_path.exists():
+        state=json.loads(state_path.read_text())
+        for phase in state.values():phase['applied']=[]
+        state.pop('forecast',None)
+        atomic(state_path,state)
+    if model=='29.1':atomic(assets/forecast291.FILE,forecast291.empty())
+    return seal(target,0,sha(Path(source)/ASSETS/'model29-generation.json'),
+        dict(inheritedModel=old['model'],inheritedGeneration=old['generation'],
+             sourceSnapshot=str(source)),policy,model)
 
 
 def series(game):
@@ -174,7 +193,7 @@ def natural_hands(game):
 def observations(games):
     holds, discards, suits, hands = Counter(), Counter(), Counter(), []
     for game in games:
-        if game.get('candidateSide') is not None or game['model'] != '29.0':
+        if game.get('candidateSide') is not None or game['model'] not in ('29.0','29.1'):
             raise ValueError('only attributable training games may enter learning')
         for h in natural_hands(game):
             if len(set(h['dealt'][0]+h['dealt'][1]+[h['cut']])) != 13:
@@ -282,7 +301,7 @@ def update(source, target, phase, records, mass, repo):
     else:
         holds,discards,suits,hands = observations(games)
     clone(source,target); dst = Path(target)/ASSETS
-    name = FORECAST if phase == 'forecast' else FILES[phase]
+    name = (forecast291.FILE if old['model']=='29.1' else FORECAST) if phase == 'forecast' else FILES[phase]
     counts = phase_state['counts']; details = {}
     if phase == 'wp':
         details = update_board(src/name,dst/name,games,mass,counts)
@@ -296,29 +315,47 @@ def update(source, target, phase, records, mass, repo):
         details['observations'] = update_declines(src/name,dst/name,hands,mass,counts,repo,old['policy'])
     else:
         data = json.loads((src/name).read_text()) if (src/name).exists() else dict(prior_mass=32.,rows={})
-        for game in games:
-            if game['model'] != '29.0' or len(game['outcomes']) != 15:
-                raise ValueError('invalid counterfactual cohort')
-            world_keys=set()
-            for row in game['outcomes']:
-                scores=row['scores']
-                if len(scores)!=2 or any(type(s)is not int or not 0<=s<=121 for s in scores) or scores==[121,121]:
-                    raise ValueError('invalid terminal hand outcome')
-                if row['key'] in world_keys:
-                    continue  # suit-symmetric keeps do not multiply one world's effective weight
-                world_keys.add(row['key'])
-                data['rows'].setdefault(row['key'],[]).append(scores)
+        shared = old['model']=='29.1'; board_cache={}; changed_rows=set()
+        worlds = {}; ordinary = 0; rejected = 0
+        # Admit the observed choice first; suit-equivalent alternatives in the
+        # same physical world must not multiply that row's effective evidence.
+        for identity in sorted(selected, key=lambda k: (not k.startswith('train:'), k)):
+            game = selected[identity]
+            cohorts = ordinary_cohorts(identity,game) if identity.startswith('train:') else [game]
+            for cohort in cohorts:
+                kind = cohort.get('evidenceKind', 'legacy-counterfactual')
+                expected = {'ordinary': 1, 'rejected': 14, 'legacy-counterfactual': 15}.get(kind)
+                if cohort['model'] not in ('29.0','29.1') or len(cohort['outcomes']) != expected:
+                    raise ValueError('invalid counterfactual cohort')
+                world = (cohort['sourceGame'],cohort['hand'],cohort['actor']) if kind != 'legacy-counterfactual' else (identity,)
+                world_keys = worlds.setdefault(world,set())
+                for row in cohort['outcomes']:
+                    scores=row['scores']
+                    if len(scores)!=2 or any(type(s)is not int or not 0<=s<=121 for s in scores) or scores==[121,121]:
+                        raise ValueError('invalid terminal hand outcome')
+                    if row['key'] in world_keys:
+                        continue
+                    world_keys.add(row['key'])
+                    if shared:
+                        changed_rows.add(forecast291.add(data,cohort,row,board_cache))
+                    else:
+                        data['rows'].setdefault(row['key'],[]).append(scores)
+                ordinary += int(kind == 'ordinary')
+                rejected += len(cohort['outcomes']) if kind != 'ordinary' else 0
+        if shared: forecast291.finish(data,changed_rows)
         atomic(dst/name,data)
-        details.update(contextKeepRows=len(data['rows']),sampledHands=15*len(games),
-            interpretation='suit-canonical six, discard, role and actual board; full hand endpoints preserve first-winner stopping; sparse smoothed replacement')
+        details.update(contextKeepRows=len(data['rows']),sampledHands=ordinary+rejected,
+            ordinaryHands=ordinary,rejectedDiscardRollouts=rejected,sourceWorlds=len(worlds),
+            forecastRepresentation='exact-hand tempo correction' if shared else 'exact-board outcomes',
+            interpretation='exact-hand opponent-tempo WP corrections; source-board targets; no similar-hand pooling' if shared else 'exact-context terminal hand outcomes')
     phase_state['applied'] = sorted(seen|selected.keys())
     atomic(dst/'model29-state.json',state)
     evidence = dict(phase=phase,games=len(games),hands=len(hands),priorEffectiveSamples=mass,
                     identities=sorted(selected),**details)
-    fingerprint = seal(target,old['generation']+1,sha(src/'model29-generation.json'),evidence,old['policy'])
+    fingerprint = seal(target,old['generation']+1,sha(src/'model29-generation.json'),evidence,old['policy'],old['model'])
     new = verify(target)
-    changed = [name for name in (*FILES.values(),FORECAST) if old['assets'].get(name) != new['assets'].get(name)]
-    expected_name = FORECAST if phase == 'forecast' else FILES[phase]
+    changed = [name for name in (*FILES.values(),FORECAST,forecast291.FILE) if old['assets'].get(name) != new['assets'].get(name)]
+    expected_name = (forecast291.FILE if old['model']=='29.1' else FORECAST) if phase == 'forecast' else FILES[phase]
     if any(name != expected_name for name in changed):
         raise ValueError('non-target prior changed')
     return dict(snapshot=fingerprint,changed=changed,**evidence)
