@@ -654,7 +654,7 @@ pub fn parse_decision_input(input_text: &str) -> Result<DecisionInput, String> {
 }
 
 fn model29_input(input: &DecisionInput) -> Option<DecisionInput> {
-    if input.model != crate::model_id::MODEL_29_0 && input.model != "29.0" {
+    if !matches!(input.model.as_str(), crate::model_id::MODEL_29_0 | "29.0" | crate::model_id::MODEL_29_1 | "29.1") {
         return None;
     }
     let mut baseline = input.clone();
@@ -2195,6 +2195,8 @@ fn recommend_discard_model1323_with_assets(
         };
         #[cfg(feature = "model29-training")]
         crate::model29_forecast::adjust(input, &discard, board, &mut evaluation.win_probability)?;
+        #[cfg(feature = "model29-training")]
+        crate::model291_forecast::adjust(input, &discard, board, &mut evaluation.win_probability)?;
         if best.as_ref().is_none_or(|(_, current)| {
             evaluation.win_probability > current.win_probability
                 || (evaluation.win_probability == current.win_probability

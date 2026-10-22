@@ -9,8 +9,10 @@ from collections import defaultdict
 from pathlib import Path
 from unittest.mock import Mock, patch
 import learning
+import forecast291
 import resources
-from cycle import assessment, validate, collect, maybe_assess, cache_stats, unconsumed_records
+from cycle import assessment, validate, collect, collect_training_batch, batch_training_mode, maybe_assess, cache_stats, unconsumed_records
+from forecast import ordinary_cohorts, rejected_requests, training_mode, terminal_hand_scores, key
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -31,6 +33,27 @@ def game():
 
 
 class LearningTests(unittest.TestCase):
+    def test_handover_publication_resumes_after_old_initial_is_renamed(self):
+        from transition291 import install_initial
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'parent';assets=source/learning.ASSETS;assets.mkdir(parents=True)
+            for name in (*learning.FILES.values(),'model1323-corrections.bin'):
+                (assets/name).write_bytes(b'fixture')
+            learning.seal(source,8,None,{},dict(binarySha256='old'))
+            policy=dict(binarySha256='new');target=root/'initial'
+            learning.inherit(source,target,dict(binarySha256='preflight'))
+            # Simulate interruption after the complete replacement was staged
+            # and the preflight target preserved, but before final publication.
+            learning.inherit(source,root/'handoff-initial',policy)
+            target.rename(root/'preflight-initial')
+            install_initial(source,target,policy)
+            before=learning.sha(target/learning.ASSETS/'model29-generation.json')
+            install_initial(source,target,policy)
+            self.assertEqual(before,learning.sha(target/learning.ASSETS/'model29-generation.json'))
+            self.assertTrue((root/'preflight-initial').exists())
+            self.assertFalse((root/'handoff-initial').exists())
+            self.assertEqual(learning.verify(target)['parent'],learning.sha(assets/'model29-generation.json'))
+
     def test_only_actual_start_of_hand_boards_learn(self):
         events = [(0,20),(1,15),(1,40),(0,40)]
         markers = [(0,0,0),(1,1,0),(2,0,1),(3,2,1)]
@@ -109,6 +132,120 @@ class LearningTests(unittest.TestCase):
             self.assertEqual(table['rows']['keep-0'],[[121,120]])
             with self.assertRaisesRegex(ValueError,'no new'):
                 learning.update(target,Path(tmp)/'repeat','forecast',[('forecast:1',row)],1000,REPO)
+
+    def test_training_toggle_defaults_on_and_false_has_no_rollouts(self):
+        self.assertTrue(training_mode({}))
+        self.assertFalse(training_mode({'trainingMode':False}))
+        for value in ('false',0,1,None):
+            with self.assertRaisesRegex(ValueError,'boolean'):
+                training_mode({'trainingMode':value})
+        records=[('train:0:0',game())]
+        for enabled in (True,False):
+            config=dict(trainingMode=enabled,phases=['wp','forecast'])
+            with patch('cycle.collect',return_value=records) as collector, patch('cycle.batch_training_mode',return_value=enabled),patch('cycle.checkpoint'):
+                collect_training_batch(None,config,'immutable-root',[('train:0:0',{})],'out')
+                self.assertEqual(collector.call_count,2)
+                extra=collector.call_args_list[1].args[3]
+                self.assertEqual(len(extra),2 if enabled else 0)
+                self.assertEqual(collector.call_args_list[1].args[2],'immutable-root')
+        self.assertEqual(rejected_requests(records,{'trainingMode':False}),[])
+
+    def test_speed_toggle_changes_next_batch_but_not_resumed_work(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            control=Path(tmp)/'mode.json';db=sqlite3.connect(':memory:')
+            config=dict(trainingControl=str(control))
+            learning.atomic(control,dict(trainingMode=True))
+            self.assertTrue(batch_training_mode(db,config,0))
+            learning.atomic(control,dict(trainingMode=False))
+            self.assertTrue(batch_training_mode(db,config,0))
+            self.assertFalse(batch_training_mode(db,config,1))
+            db.close()
+
+    def test_forecast_uses_actual_deal_both_roles_and_stable_identities(self):
+        requests=rejected_requests([('train:3:7',game())],{})
+        self.assertEqual([i for i,_ in requests],['forecast:3:7:1:0','forecast:3:7:1:1'])
+        left,right=[r for _,r in requests]
+        self.assertEqual(left['own'],list(range(6)))
+        self.assertEqual(left['opponent'],list(range(13,19)))
+        self.assertEqual(left['selectedDiscard'],[4,5]);self.assertEqual(left['cut'],50)
+        self.assertEqual((left['dealer'],right['dealer']),(0,1))
+        self.assertEqual(right['opponent'],list(range(6)))
+        self.assertEqual([c['outcomes'][0]['scores'] for c in ordinary_cohorts('train:3:7',game())],[[121,100],[100,121]])
+        for identity,g in [('eval:0:0',game()),('train:0:0',dict(game(),candidateSide=0)),('train:0:0',dict(game(),trajectory=True))]:
+            with self.assertRaisesRegex(ValueError,'ordinary training'):
+                list(ordinary_cohorts(identity,g))
+
+    def test_observed_forecast_keeps_first_winner_and_counting_order(self):
+        h=game()['hands'][0];h['end']=[None,None]
+        self.assertEqual(terminal_hand_scores(h),[121,100])
+        h['handPoints']=[29,29]
+        self.assertEqual(terminal_hand_scores(h),[90,121])
+        h['plays']=[];h['start']=[120,100];h['cut']=10
+        self.assertEqual(terminal_hand_scores(h),[121,100])
+        h['cut']=11;h['plays']=[dict(action=0,scores=[120,121])]
+        self.assertEqual(terminal_hand_scores(h),[120,121])
+        h['plays']=[]
+        with self.assertRaisesRegex(ValueError,'incomplete'):
+            terminal_hand_scores(h)
+
+    def test_canonical_forecast_key_matches_native_format(self):
+        self.assertEqual(key([0,2,4,16,18,30],[0,18],[20,30],True),
+                         '1:20:30:[0, 2, 4, 16, 18, 30]:[0, 18]')
+        self.assertEqual(key([0,2,4,16,18,30],[0,18],[20,30],True),
+                         key([13,15,17,3,5,43],[13,5],[20,30],True))
+
+    def test_ordinary_only_forecasts_learn_and_same_world_cannot_double_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp)/'base';assets=base/learning.ASSETS;assets.mkdir(parents=True)
+            for name in learning.FILES.values():shutil.copyfile(REPO/learning.ASSETS/name,assets/name)
+            (assets/'model1323-corrections.bin').write_bytes(b'frozen fixture')
+            learning.seal(base,0,None,{},dict(peggingPolicy='28.3-f64-test'))
+            cohort=list(ordinary_cohorts('train:0:0',game()))[0]
+            duplicate=cohort['outcomes'][0]['key']
+            alternatives=dict(cohort,evidenceKind='rejected',outcomes=[dict(key=duplicate,scores=[100,121])]+
+                [dict(key=f'alternative-{i}',scores=[121,100]) for i in range(13)])
+            target=Path(tmp)/'candidate'
+            result=learning.update(base,target,'forecast',[('forecast:0:0:1:0',alternatives),('train:0:0',game())],1000,REPO)
+            self.assertEqual(result['ordinaryHands'],2);self.assertEqual(result['rejectedDiscardRollouts'],14)
+            table=json.loads((target/learning.ASSETS/learning.FORECAST).read_text())
+            self.assertEqual(table['rows'][duplicate],[[121,100]])
+            ordinary=Path(tmp)/'ordinary'
+            result=learning.update(base,ordinary,'forecast',[('train:0:0',game())],1000,REPO)
+            self.assertEqual(result['ordinaryHands'],2);self.assertEqual(result['rejectedDiscardRollouts'],0)
+            with self.assertRaisesRegex(ValueError,'no new'):
+                learning.update(ordinary,Path(tmp)/'repeat','forecast',[('train:0:0',game())],1000,REPO)
+
+    def test_291_fits_actual_board_residuals_without_sharing_cards(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source=Path(tmp)/'source';assets=source/learning.ASSETS;assets.mkdir(parents=True)
+            for name in learning.FILES.values():shutil.copyfile(REPO/learning.ASSETS/name,assets/name)
+            (assets/'model1323-corrections.bin').write_bytes(b'fixture')
+            learning.seal(source,12,None,{},dict(binarySha256='old'))
+            target=Path(tmp)/'initial'
+            learning.inherit(source,target,dict(binarySha256='new'))
+            self.assertEqual(learning.verify(target)['model'],'29.1')
+            g=game();g['model']='29.1';g['sourceRoot']=str(target);g['forecastInputs']={}
+            for actor in (0,1):
+                six=g['hands'][0]['dealt'][actor];discard=[4+13*actor,5+13*actor]
+                exact=key(six,discard,[90,90],actor==0)
+                g['forecastInputs'][exact]=dict(context=key(six,discard,[0,0],actor==0),
+                    baseline=.5,features=[1.,.5,.5,0.],styles=[0.,1.,0.])
+            child=Path(tmp)/'updated'
+            result=learning.update(target,child,'forecast',[('train:0:0',g)],1000,REPO)
+            self.assertEqual(result['changed'],[forecast291.FILE])
+            data=json.loads((child/learning.ASSETS/forecast291.FILE).read_text())
+            mine=data['rows'][key(list(range(6)),[4,5],[0,0],True)]
+            self.assertEqual(mine['n'],[0.,1.,0.])
+            self.assertGreater(mine['coefficients'][1][0],0.)
+            self.assertEqual(mine['coefficients'][0],[0.]*4)
+            self.assertNotIn(key([0,1,2,3,4,6],[4,6],[0,0],True),data['rows'])
+            boards={}
+            self.assertEqual(forecast291.next_wp(target,[121,120],0,boards),1.)
+            self.assertEqual(forecast291.next_wp(target,[120,121],0,boards),0.)
+            # Counting roles reverse at the next hand, independent of perspective.
+            a=forecast291.next_wp(target,[55,65],0,boards)
+            b=forecast291.next_wp(target,[65,55],1,boards)
+            self.assertAlmostEqual(a,1.-b)
 
     def test_resume_counts_only_completed_full_games_for_cache_age(self):
         with tempfile.TemporaryDirectory() as tmp:

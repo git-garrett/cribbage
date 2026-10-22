@@ -11,6 +11,7 @@ import subprocess
 import time
 from pathlib import Path
 from cycle import Worker
+from forecast import rejected_requests, training_mode
 from learning import ASSETS, atomic, bootstrap, sha, verify, verify_source
 
 
@@ -143,27 +144,32 @@ def run(stage, config):
         expected_training = config['rounds']*len([p for p in config['phases'] if p!='forecast'])*config['trainingGames']
         with sqlite3.connect(out/'evidence.db') as db:
             rows = db.execute('select id,root,result from results order by id').fetchall()
+            modes={k:json.loads(v)['trainingMode'] for k,v in db.execute('select id,value from controls')}
         training = [json.loads(r[2]) for r in rows if r[0].startswith('train:')]
         if len(training) != expected_training:
             raise ValueError('incomplete training games')
         for i in range(config['rounds']*len(config['phases'])):
             if config['phases'][i%len(config['phases'])]=='forecast':
-                expected={f'forecast:{i}:{c}:{w}' for c in range(config['forecastContexts']) for w in range(config['forecastWorlds'])}
-                actual={r[0] for r in rows if r[0].startswith(f'forecast:{i}:')}
-                if actual!=expected:raise ValueError('missing forecast indices')
                 continue
             expected = {f'train:{i}:{j}' for j in range(config['trainingGames'])}
             actual = {r[0] for r in rows if r[0].startswith(f'train:{i}:')}
             if actual != expected:
                 raise ValueError('missing or overlapping game indices')
+        records = [(r[0],json.loads(r[2])) for r in rows if r[0].startswith('train:')]
+        expected = {identity for source,game in records for identity,_ in rejected_requests([(source,game)],dict(config,trainingMode=modes['batchMode:'+source.split(':')[1]]))} if 'forecast' in config['phases'] else set()
+        actual = {r[0] for r in rows if r[0].startswith('forecast:')}
+        if actual != expected:
+            raise ValueError('missing or unexpected rejected-discard cohorts')
         for path in out.glob('*/candidate'):
             verify(path)
         full = [g for g in training if not g['trajectory'] and max(g['scores'])>=121 and min(g['scores'])<121 and g['start']==[0,0]]
         if len(full)!=len(training):raise ValueError('nonstandard training game')
         seconds = sum(g['seconds'] for g in full)
-        report = dict(status='complete',model='29.0',trainingGames=len(training),
+        report = dict(status='complete',model=config['model'],trainingGames=len(training),
                       normalGames=len(full),evaluationGames=sum(r[0].startswith('eval:') for r in rows),
                       forecastWorlds=sum(r[0].startswith('forecast:') for r in rows),
+                      trainingMode=training_mode(config),
+                      forecastRollouts=sum(len(json.loads(r[2])['outcomes']) for r in rows if r[0].startswith('forecast:')),
                       workerGamesPerHour=3600*len(full)/seconds if seconds else None,
                       stages=[dict(phase=s['phase'],changed=s['update']['changed'],
                                    evaluations=s['evaluations'],promoted=s['promoted']) for s in result['stages']],

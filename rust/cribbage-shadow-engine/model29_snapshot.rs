@@ -5,6 +5,7 @@ use std::{fs, path::Path};
 #[derive(Default)]
 struct Session {
     enabled: bool,
+    model: String,
     generation: String,
     code: String,
     stats: serde_json::Value,
@@ -19,12 +20,15 @@ pub fn activate(root: &str, enabled: bool) -> Result<(), String> {
     SESSION.with(|cell| {
         let mut s = cell.borrow_mut();
         s.enabled = enabled;
+        s.model = manifest["model"].as_str().unwrap_or("29.0").into();
         s.root = root.into();
         s.generation = format!("{:x}", Sha256::digest(raw));
-        s.code = manifest["policy"]["binarySha256"].as_str().unwrap_or("").into();
+        s.code = manifest["policy"]["openingCodeSha256"].as_str()
+            .or_else(||manifest["policy"]["binarySha256"].as_str()).unwrap_or("").into();
     });
     Ok(())
 }
+pub fn model_version() -> String { SESSION.with(|s| { let v=s.borrow().model.clone(); if v.is_empty() {"29.0".into()} else {v} }) }
 pub fn cache_enabled() -> bool { SESSION.with(|s|s.borrow().enabled) }
 pub fn generation() -> String { SESSION.with(|s|s.borrow().generation.clone()) }
 pub fn active_root() -> String { SESSION.with(|s|s.borrow().root.clone()) }
@@ -59,7 +63,7 @@ pub fn matches(path: &Path, bytes: &[u8], frozen: &str) -> bool {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
         return false;
     };
-    value["model"] == "29.0"
+    (value["model"] == "29.0" || value["model"] == "29.1")
         && value["schemaVersion"] == 1
         && value["assets"][path.file_name().unwrap().to_str().unwrap()].as_str() == Some(&actual)
 }
@@ -68,7 +72,7 @@ pub fn verify(root: &str) -> Result<String, String> {
     let directory = Path::new(root).join("rust/cribbage-shadow-engine/assets");
     let raw = fs::read(directory.join("model29-generation.json")).map_err(|e| e.to_string())?;
     let manifest: serde_json::Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
-    if manifest["model"] != "29.0" || manifest["schemaVersion"] != 1 {
+    if (manifest["model"] != "29.0" && manifest["model"] != "29.1") || manifest["schemaVersion"] != 1 {
         return Err("invalid Model 29 generation manifest".into());
     }
     let files = manifest["assets"]
@@ -85,6 +89,9 @@ pub fn verify(root: &str) -> Result<String, String> {
         if !files.contains_key(name) {
             return Err(format!("missing required asset {name}"));
         }
+    }
+    if manifest["model"] == "29.1" && !files.contains_key("model291-forecast.json") {
+        return Err("missing 29.1 forecast asset".into());
     }
     for (name, expected) in files {
         if Path::new(name).components().count() != 1 || name.starts_with('.') {

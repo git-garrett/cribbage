@@ -11,7 +11,7 @@ from learning import ASSETS, PHASES, atomic, sha
 from seeds import reserve, recorded
 
 
-def prepare(source, runtime, archive):
+def prepare(source, runtime, archive, training_mode=True):
     source,runtime,archive = map(lambda p:Path(p).resolve(),(source,runtime,archive))
     parent = Path('/Users/garrett/Library/Application Support/StrongCribbage/runtimes').resolve()
     if runtime.parent != parent or runtime.exists():
@@ -41,7 +41,7 @@ def prepare(source, runtime, archive):
                   initialRoot=str(runtime/'initial'),output=str(runtime/'output'),archive=str(archive),
                   rounds=5,continuous=True,phases=list(PHASES),trainingGames=200,evaluationPairs=500,workers=10,
                   evaluationEveryGames=5000,seedExclusionsSha256=sha(runtime/'seed-exclusions.json'),
-                  forecastContexts=12,forecastWorlds=16,maxAgeGames=50000,
+                  trainingMode=training_mode,maxAgeGames=50000,
                   cacheBank=str(parent/'model29-opening-bank-20261016-v1'),
                   cacheTail=str(parent/'model29-opening-tail-20261016-v1'),
                   cacheConfig=str(runtime/'cache-config.json'),
@@ -78,7 +78,7 @@ def prepare(source, runtime, archive):
     stages[-1]['completionChecks'] = [checked(runtime/'sync-verification.json'),checked(archive/'sync-verification.json')]
     spec = dict(schemaVersion=1,jobId=runtime.name,jobRoot=str(runtime/'supervisor'),stages=stages,
                 trainingStudy=dict(root=config['output'],title='Model 29.0 · cyclic prior learning',mode='cyclic',
-                    target=5000,workers=10,rounds=None,continuous=True,maxAgeGames=50000,cacheBank=config['cacheBank'],cacheTail=config['cacheTail']),
+                    target=5000,workers=10,rounds=None,continuous=True,trainingMode=training_mode,maxAgeGames=50000,cacheBank=config['cacheBank'],cacheTail=config['cacheTail']),
                 reportCommand=[python,str(frozen/'scripts/cribbage_job_queue.py'),'summary',str(runtime/'job.json')])
     atomic(runtime/'job.json',spec)
     print(json.dumps(dict(status='prepared',job=str(runtime/'job.json'),seed= config['seed'],evaluationSeed=config['evaluationSeed'])))
@@ -87,4 +87,6 @@ def prepare(source, runtime, archive):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(); parser.add_argument('runtime',type=Path); parser.add_argument('archive',type=Path)
     parser.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[2])
-    args = parser.parse_args(); prepare(args.source,args.runtime,args.archive)
+    parser.add_argument('--ordinary-hands-only', action='store_true',
+                        help='disable rejected-discard continuations; learn only from played hands')
+    args = parser.parse_args(); prepare(args.source,args.runtime,args.archive,not args.ordinary_hands_only)

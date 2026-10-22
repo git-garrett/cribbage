@@ -12,6 +12,10 @@ use std::{io::{self, BufRead, Write}, time::Instant};
 #[path = "../examples/model283-hands.rs"]
 mod hand_rollout;
 
+fn policy_model() -> ModelId {
+    if model29_snapshot::model_version()=="29.1" {ModelId::Schell291} else {ModelId::Schell290}
+}
+
 fn counterfactual(root: &str, r: &Value) -> Result<Value, String> {
     let started = Instant::now();
     let own: Vec<u8> = serde_json::from_value(r["own"].clone()).map_err(|e|e.to_string())?;
@@ -35,11 +39,54 @@ fn counterfactual(root: &str, r: &Value) -> Result<Value, String> {
     for a in 0..6 {for b in a+1..6 {
         let discard=[own[a],own[b]];
         let ordered: Vec<_>=own.iter().copied().filter(|c|!discard.contains(c)).chain(discard).collect();
-        let result=hand_rollout::run(&json!({"own":ordered,"opponent":opponent,"cut":cut,"scores":scores,"dealer":dealer,"finishCounting":true}),ModelId::Schell290,root)?;
+        let result=hand_rollout::run(&json!({"own":ordered,"opponent":opponent,"cut":cut,"scores":scores,"dealer":dealer,"finishCounting":true}),policy_model(),root)?;
         outcomes.push(json!({"key":cribbage_shadow_engine::model29_forecast::key(&own,&discard,scores,dealer==0),"discard":discard,"scores":result["scores"],"pegEnd":result["pegEnd"],"postCutStart":result["postCutStart"]}));
     }}
-    Ok(json!({"model":"29.0","seed":r["seed"],"own":own,"opponent":opponent,"cut":cut,"start":scores,"dealer":dealer,
+    Ok(json!({"model":model29_snapshot::model_version(),"seed":r["seed"],"own":own,"opponent":opponent,"cut":cut,"start":scores,"dealer":dealer,
         "outcomes":outcomes,"seconds":started.elapsed().as_secs_f64(),"cache":model29_snapshot::cache_stats()}))
+}
+
+fn rejected_discards_with(
+    root: &str,
+    r: &Value,
+    mut rollout: impl FnMut(&Value, ModelId, &str) -> Result<Value, String>,
+) -> Result<Value, String> {
+    let started = Instant::now();
+    let own: Vec<u8> = serde_json::from_value(r["own"].clone()).map_err(|e|e.to_string())?;
+    let other: Vec<u8> = serde_json::from_value(r["opponent"].clone()).map_err(|e|e.to_string())?;
+    let chosen: [u8;2] = serde_json::from_value(r["selectedDiscard"].clone()).map_err(|e|e.to_string())?;
+    let scores: [i32;2] = serde_json::from_value(r["scores"].clone()).map_err(|e|e.to_string())?;
+    let cut = r["cut"].as_u64().filter(|n| *n < 52).ok_or("invalid cut")? as u8;
+    let dealer = r["dealer"].as_u64().filter(|n| *n < 2).ok_or("invalid dealer")?;
+    let source = r["sourceGame"].as_str().filter(|s| s.starts_with("train:")).ok_or("not a training source")?;
+    let hand = r["hand"].as_u64().filter(|n| *n > 0).ok_or("invalid hand number")?;
+    let actor = r["actor"].as_u64().filter(|n| *n < 2).ok_or("invalid actor")?;
+    if own.len() != 6 || other.len() != 6 || chosen[0] == chosen[1]
+        || chosen.iter().any(|c| !own.contains(c)) || scores.iter().any(|s| !(0..121).contains(s)) {
+        return Err("invalid rejected-discard context".into());
+    }
+    let mut seen = [false;52];
+    for &c in own.iter().chain(&other).chain(std::iter::once(&cut)) {
+        if c >= 52 || seen[c as usize] { return Err("invalid physical deal".into()); }
+        seen[c as usize] = true;
+    }
+    let mut outcomes = Vec::with_capacity(14);
+    for a in 0..6 { for b in a+1..6 {
+        let discard = [own[a],own[b]];
+        if discard.iter().all(|c| chosen.contains(c)) { continue; }
+        let ordered: Vec<_> = own.iter().copied().filter(|c| !discard.contains(c)).chain(discard).collect();
+        // Only the engine sees the physical deal. Its executable policy builds
+        // each actor's legal observation, exactly as in an ordinary game.
+        let result = rollout(&json!({"own":ordered,"opponent":other,"cut":cut,
+            "scores":scores,"dealer":dealer,"finishCounting":true}),policy_model(),root)?;
+        outcomes.push(json!({"key":cribbage_shadow_engine::model29_forecast::key(&own,&discard,scores,dealer==0),
+            "discard":discard,"scores":result["scores"],"pegEnd":result["pegEnd"],"postCutStart":result["postCutStart"],
+            "forecast":r["forecastInputs"][cribbage_shadow_engine::model29_forecast::key(&own,&discard,scores,dealer==0)]}));
+    }}
+    Ok(json!({"model":model29_snapshot::model_version(),"sourceRoot":root,"evidenceKind":"rejected","sourceGame":source,"hand":hand,"actor":actor,
+        "seed":r["seed"],"own":own,"opponent":other,"cut":cut,"start":scores,"dealer":dealer,
+        "selectedDiscard":chosen,"outcomes":outcomes,"seconds":started.elapsed().as_secs_f64(),
+        "cache":model29_snapshot::cache_stats()}))
 }
 
 fn ids(cards: &[Card]) -> Vec<u8> { cards.iter().map(|c| c.id).collect() }
@@ -93,7 +140,13 @@ fn run(root: &str, reference: Option<&str>, r: &Value) -> Result<Value, String> 
         && std::env::var_os("MODEL29_CACHE_CONFIG").is_some();
     model29_snapshot::reset_cache_stats();
     model29_snapshot::activate(root, cache)?;
-    if r["kind"] == "counterfactual" { return counterfactual(root,r); }
+    cribbage_shadow_engine::model291_forecast::record(reference.is_none() && r["kind"]=="game" && model29_snapshot::model_version()=="29.1");
+    if r["kind"] == "counterfactual" || r["kind"] == "rejected-discards" {
+        if reference.is_some() { return Err("evaluation cannot generate training evidence".into()); }
+        return if r["kind"] == "rejected-discards" {
+            rejected_discards_with(root,r,hand_rollout::run)
+        } else { counterfactual(root,r) };
+    }
     if r["kind"] == "decision" {
         let input = model::parse_decision_input(r["inputText"].as_str().ok_or("missing inputText")?)?;
         return model::evaluate_decision(&input, root).map(decision);
@@ -110,7 +163,8 @@ fn run(root: &str, reference: Option<&str>, r: &Value) -> Result<Value, String> 
         return Err("evaluation requires reference root and candidate side".into());
     }
     if r["kind"] != "game" { return Err("only ordinary games are supported".into()); }
-    let model = |side| if candidate.is_none_or(|c| c == side) { ModelId::Schell290 } else { ModelId::Schell283 };
+    let candidate_model=policy_model();
+    let model = |side| if candidate.is_none_or(|c| c == side) { candidate_model } else { ModelId::Schell283 };
     let mut game = ModelPlayout::new_at_hand(seed, first, 1, start[0], start[1], model(0), model(1))?;
     let started = Instant::now();
     let (winner, scores, record) = {
@@ -120,18 +174,20 @@ fn run(root: &str, reference: Option<&str>, r: &Value) -> Result<Value, String> 
             let is_reference = input.model == ModelId::Schell283.as_str();
             let target = if is_reference { reference.ok_or("reference missing")? } else { root };
             model29_snapshot::activate(target, cache)?;
-            let mut input = input.clone(); input.model = ModelId::Schell290.as_str().into();
+            let mut input = input.clone(); input.model = policy_model().as_str().into();
             let index = usize::from(is_reference);
             if input.kind == DecisionKind::Discard { caches[index].clear(); }
             model::evaluate_decision_with_caches(&input,target,Some(&cache911[index]),Some(&caches[index])).map(Some)
         })?;
         (Some(result.winner.index()),[result.left_score,result.right_score],result.record)
     };
-    let mut output = json!({"model":"29.0","seed":seed,"firstDealer":first.index(),"start":start,
+    let forecasts=cribbage_shadow_engine::model291_forecast::take_records();
+    let mut output = json!({"model":if candidate_model==ModelId::Schell291 {"29.1"} else {"29.0"},"sourceRoot":root,"seed":seed,"firstDealer":first.index(),"start":start,
         "winner":winner,"scores":scores,"hands":hands(&record),"trajectory":false,
         "candidateSide":candidate,"seconds":started.elapsed().as_secs_f64(),
         "cache":model29_snapshot::cache_stats()});
     if reference.is_some() { output["benchmark"] = benchmark(&record); }
+    else if candidate_model==ModelId::Schell291 { output["forecastInputs"]=forecasts; }
     Ok(output)
 }
 
@@ -150,4 +206,41 @@ fn main() -> Result<(), String> {
         io::stdout().flush().map_err(|e|e.to_string())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod training_tests {
+    use super::*;
+    fn fixture() -> Value {
+        json!({"own":[0,1,2,3,4,5],"opponent":[13,14,15,16,17,18],"cut":50,
+            "scores":[90,100],"dealer":1,"selectedDiscard":[5,4],
+            "sourceGame":"train:0:2","hand":1,"actor":0,"seed":17})
+    }
+    #[test]
+    fn all_fourteen_rejected_discards_use_the_same_deal_and_root() {
+        let r = fixture();
+        let mut tested = std::collections::HashSet::new();
+        let result = rejected_discards_with("frozen",&r,|h,model,root| {
+            assert_eq!(root,"frozen"); assert_eq!(model,ModelId::Schell290);
+            assert_eq!(h["opponent"],r["opponent"]); assert_eq!(h["cut"],r["cut"]);
+            assert_eq!(h["scores"],r["scores"]); assert_eq!(h["dealer"],r["dealer"]);
+            assert_eq!(h["finishCounting"],true);
+            let own: Vec<u8> = serde_json::from_value(h["own"].clone()).unwrap();
+            let mut pair = [own[4],own[5]]; pair.sort_unstable();
+            assert_ne!(pair,[4,5]); assert!(tested.insert(pair));
+            let mut sorted = own.clone(); sorted.sort_unstable(); assert_eq!(sorted,vec![0,1,2,3,4,5]);
+            Ok(json!({"scores":[101,121]}))
+        }).unwrap();
+        assert_eq!(tested.len(),14); assert_eq!(result["outcomes"].as_array().unwrap().len(),14);
+        assert_eq!(result["sourceGame"],"train:0:2");
+        assert!(result["outcomes"].as_array().unwrap().iter().all(|v|v["scores"]==json!([101,121])));
+    }
+    #[test]
+    fn malformed_deals_are_rejected_before_any_continuation() {
+        for (field,value) in [("selectedDiscard",json!([0,0])),("cut",json!(0)),
+                              ("sourceGame",json!("eval:0")),("scores",json!([121,0]))] {
+            let mut r=fixture(); r[field]=value;
+            assert!(rejected_discards_with("unused",&r,|_,_,_| panic!("invalid context played")).is_err());
+        }
+    }
 }

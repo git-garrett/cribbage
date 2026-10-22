@@ -136,7 +136,7 @@ def comparison_games(root, checkpoint, receipt, include_hands=True):
             if saved_root != receipt['root'] or request.get('candidateSide') != side or game.get('candidateSide') != side:
                 raise ValueError('Comparison snapshot or orientation mismatch')
             if (request.get('kind') != 'game' or request.get('scores') != [0,0] or game.get('start') != [0,0]
-                    or game.get('trajectory') is not False or game.get('model') != '29.0'
+                    or game.get('trajectory') is not False or game.get('model') not in ('29.0','29.1')
                     or game['seed'] != request['seed'] or game['firstDealer'] != request['firstDealer']):
                 raise ValueError('Comparison game differs from its frozen request')
             scores = game['scores']; winner = game['winner']
@@ -174,7 +174,9 @@ def _completed_report(root_text, checkpoint, receipt_text):
     root = Path(root_text); receipt = json.loads(receipt_text)
     games, digest = comparison_games(root, checkpoint, receipt)
     pairs = receipt['assessment']['pairs']
-    candidate, opponent = '29.0 current state','29.0 original state'
+    version=games[0][0]['model']
+    if any(g['model']!=version for rows in games for g in rows):raise ValueError('Mixed comparison model versions')
+    candidate, opponent = version+' current state','29.0 original state'
     def compact(g,index):
         side = g['candidateSide']
         return dict(game_index=index,random_seed=g['seed'],winner=g['winner'],
