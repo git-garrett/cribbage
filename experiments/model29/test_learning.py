@@ -33,6 +33,25 @@ def game():
 
 
 class LearningTests(unittest.TestCase):
+    def test_291_archive_preserves_reference_and_handover_receipts(self):
+        import stage
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime=Path(tmp)/'runtime';archive=Path(tmp)/'archive'
+            config=dict(model='29.1',repo=str(runtime/'frozen'),output=str(runtime/'output'),
+                        archive=str(archive),binary=str(runtime/'bin/model29-worker'))
+            files,directories=stage.archive_inputs(config)
+            for name in files:
+                path=runtime/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(name)
+            for name in directories:
+                path=runtime/name;path.mkdir(parents=True,exist_ok=True);(path/'fixture').write_text(name)
+            binary=Path(config['binary']);binary.parent.mkdir();binary.write_bytes(b'worker')
+            with patch('stage.verify_source'):
+                stage.run('sync',config);stage.run('verify-sync',config)
+                self.assertEqual((archive/'reference/fixture').read_text(),'reference')
+                self.assertTrue((archive/'handoff.json').exists())
+                (archive/'reference/fixture').write_text('changed')
+                with self.assertRaisesRegex(ValueError,'archive differs'):stage.run('verify-sync',config)
+
     def test_handover_publication_resumes_after_old_initial_is_renamed(self):
         from transition291 import install_initial
         with tempfile.TemporaryDirectory() as tmp:
@@ -254,10 +273,13 @@ class LearningTests(unittest.TestCase):
             request=dict(kind='game',seed=1);result=dict(seconds=1,cache=dict(hits=3))
             db.execute('insert into results values(?,?,?,?)',('train:0:0',json.dumps(request),'root',json.dumps(result)))
             db.execute('insert into results values(?,?,?,?)',('forecast:1:0','{}','root',json.dumps(result)))
-            config=dict(output=str(out),workers=2,binary='not called')
+            config=dict(output=str(out),workers=2,binary='not called',cacheClockBase=90000)
             with patch('cycle.Worker',side_effect=AssertionError('completed work must not replay')):
                 collect(db,config,'root',[('train:0:0',request)],out)
-            self.assertEqual(json.loads((out/'cache-clock.json').read_text())['completedGames'],1)
+            self.assertEqual(json.loads((out/'cache-clock.json').read_text())['completedGames'],90001)
+            progress=json.loads((out/'progress.json').read_text())
+            self.assertEqual(progress['completedGames'],1)
+            self.assertEqual(progress['cacheClockGames'],90001)
             self.assertEqual(json.loads((out/'cache-progress.json').read_text())['hits'],6)
             with self.assertRaisesRegex(ValueError,'resumed request'):
                 collect(db,config,'root',[('train:0:0',dict(kind='game',seed=2))],out)

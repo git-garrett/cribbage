@@ -110,7 +110,7 @@ def checkpoint(db, config, **activity):
     full=db.execute("select count(*) from results where id like 'train:%' or id like 'eval:%'").fetchone()[0]
     atomic(out/'cache-clock.json',dict(completedGames=config.get('cacheClockBase',0)+full))
     progress=json.loads((out/'progress.json').read_text()) if (out/'progress.json').exists() else {}
-    progress.update(activity,updatedAt=time.time(),workers=config['workers'],completedGames=full,
+    progress.update(activity,updatedAt=time.time(),workers=config['workers'],completedGames=full,cacheClockGames=config.get('cacheClockBase',0)+full,
         trainingMode=activity.get('trainingMode',progress.get('trainingMode',training_mode(config))),forecastRollouts=cache_stats(db).get('forecastRollouts',0),
         trainingGames=db.execute("select count(*) from results where id like 'train:%'").fetchone()[0],
         forecastWorlds=db.execute("select count(*) from results where id like 'forecast:%'").fetchone()[0],

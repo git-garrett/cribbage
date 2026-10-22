@@ -715,7 +715,7 @@ function renderCyclic(value) {
   fill('cyclic-cache',[
     ['Hits',number.format(c.hits || 0)],['Missing chunks',number.format(c.misses || 0)],['Expired lookups',number.format(c.expired || 0)],
     ['Fresh chunks written',number.format(c.writes || 0)],['Oldest observed age',`${number.format(c.maxAgeGames || 0)} games`],
-    ['Completed-game clock',number.format(p.completedGames || 0)],['Inherited chunks staged',number.format(value.inheritedCache.chunks || 0)]]);
+    ['Completed-game clock',number.format(p.cacheClockGames ?? p.completedGames ?? 0)],['Inherited chunks staged',number.format(value.inheritedCache.chunks || 0)]]);
   $('cyclic-cache-note').textContent='Cached dealer choices may lag current priors within the age limit. Fresh solves update the cache on demand; cached choices do not train themselves.';
   const body=$('cyclic-history');body.replaceChildren();
   value.history.forEach((r,i)=>{const row=element('tr');const u=r.update;const coverage=u.cells!=null ? `${number.format(u.cells)} WP cells` : u.contextKeepRows!=null ? `${number.format(u.contextKeepRows)} ${u.forecastRepresentation==='exact-hand tempo correction'?'exact hand/discard contexts':'hand/keep/board contexts'}` : u.rows!=null ? `${number.format(u.rows)} rows` : 'Saved in snapshot';
