@@ -1,4 +1,9 @@
 import copy
+import json
+import stage
+import sqlite3
+from unittest.mock import Mock, patch
+from cycle import collect
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,6 +64,39 @@ class ScoringForecast(unittest.TestCase):
         self.assertEqual(data['stats']['acceptedBoundaryUpdates'],1)
         previous=copy.deepcopy(data['regions']);f.finish(data,{})
         self.assertEqual(previous,data['regions'])
+
+    def test_compressed_requests_collect_and_resume_without_replaying(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db=sqlite3.connect(':memory:')
+            db.execute('create table results(id text primary key,request text,root text,result text)')
+            req=dict(kind='rejected-discards',scoringInputs={'b':{'prior':[[2,3,1.]]},'a':{'prior':[[4,5,1.]]}})
+            config=dict(binary='mock',output=tmp,workers=1,minimumFreeBytes=0)
+            worker=Mock();worker.call.return_value=dict(seconds=1.,outcomes=[{}]*14,cache={})
+            with patch('cycle.Worker',return_value=worker):
+                actual=collect(db,config,'frozen',[('forecast:0',req)],Path(tmp))
+                self.assertEqual(len(actual),1);worker.call.assert_called_once()
+            req['scoringInputs']=dict(reversed(list(req['scoringInputs'].items())))
+            with patch('cycle.Worker',side_effect=AssertionError('must not replay')):
+                self.assertEqual(collect(db,config,'frozen',[('forecast:0',req)],Path(tmp)),actual)
+            req['scoringInputs']['a']['prior']=[[9,9,1.]]
+            with self.assertRaisesRegex(ValueError,'resumed request'):
+                collect(db,config,'frozen',[('forecast:0',req)],Path(tmp))
+            db.close()
+
+    def test_292_report_uses_its_verification_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);out=root/'output';out.mkdir()
+            (root/'verify.json').write_text(json.dumps(dict(status='complete')))
+            (out/'result.json').write_text(json.dumps(dict(status='complete',stages=[],promoted=False)))
+            with sqlite3.connect(out/'evidence.db') as db:
+                db.execute('create table results(id text primary key,request text,root text,result text)')
+                db.execute('create table controls(id text primary key,value text)')
+            config=dict(model='29.2',repo=tmp,output=str(out),initialRoot=str(root/'initial'),rounds=0,phases=['forecast'],trainingGames=20)
+            with patch('stage.verify_source'),patch('stage.verify'),patch('builtins.print'):
+                stage.run('report',config)
+            report=json.loads((root/'report.json').read_text())
+            self.assertEqual(report['parity']['status'],'complete')
+            self.assertEqual(report['model'],'29.2')
 
     def test_invalid_markers_rejected_and_storage_round_trips(self):
         data=f.empty();c,r=self.fixture();r['pegComplete']=False

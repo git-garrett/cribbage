@@ -18,7 +18,7 @@ def packed_scoring(value):
         for row in value["outcomes"]:
             data=row.pop("scoring",None)
             if data is not None:inputs[row["key"]]=data
-    if inputs:value["scoringPacked"]=base64.b64encode(zlib.compress(json.dumps(inputs,separators=(",",":")).encode(),1)).decode()
+    if inputs:value["scoringPacked"]=base64.b64encode(zlib.compress(json.dumps(inputs,sort_keys=True,separators=(",",":")).encode(),1)).decode()
     return value
 
 def scoring_inputs(value):

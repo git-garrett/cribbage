@@ -208,7 +208,7 @@ def collect(db, config, root, requests, output, reference=None):
     result = []
     for identity,req in requests:
         row = db.execute('select request,root,result from results where id=?',(identity,)).fetchone()
-        if json.loads(row[0]) != req or row[1] != str(root):
+        if json.loads(row[0]) != packed_scoring(req) or row[1] != str(root):
             raise ValueError('resumed request or root changed')
         result.append((identity,json.loads(row[2])))
     return result
