@@ -363,7 +363,7 @@ def update(source, target, phase, records, mass, repo):
             interpretation='scoring distributions before WP; 32 legacy prior samples; exact cards; censored lower-bound likelihood' if old['model']=='29.2' else 'exact-hand opponent-tempo WP corrections; source-board targets; no similar-hand pooling' if shared else 'exact-context terminal hand outcomes')
     phase_state['applied'] = sorted(seen|selected.keys())
     atomic(dst/'model29-state.json',state)
-    evidence = dict(phase=phase,games=len(games),hands=len(hands),priorEffectiveSamples=mass,
+    evidence = dict(phase=phase,games=len(games),hands=len(hands),priorEffectiveSamples=forecast292.PRIOR if phase=='forecast' and old['model']=='29.2' else mass,
                     identities=sorted(selected),**details)
     fingerprint = seal(target,old['generation']+1,sha(src/'model29-generation.json'),evidence,old['policy'],old['model'])
     new = verify(target)
