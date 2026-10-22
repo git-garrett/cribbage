@@ -78,7 +78,7 @@ def archive_inputs(config):
     files=['config.json','source-manifest.json','seed-reservation.json','seed-exclusions.json',
            'job.json','bootstrap.json','cache-config.json','report.json']
     directories=['output','initial','frozen']
-    if config.get('model')=='29.1':
+    if config.get('model') in ('29.1','29.2'):
         files+=['verify.json','opening-compatibility.json','handoff-source.json','handoff.json','verification-games.json']
         directories+=['reference']
     else:
@@ -185,7 +185,7 @@ def run(stage, config):
                       workerGamesPerHour=3600*len(full)/seconds if seconds else None,
                       stages=[dict(phase=s['phase'],changed=s['update']['changed'],
                                    evaluations=s['evaluations'],promoted=s['promoted']) for s in result['stages']],
-                      parity=json.loads((runtime/('verify.json' if config.get('model')=='29.1' else 'parity.json')).read_text()),
+                      parity=json.loads((runtime/('verify.json' if config.get('model') in ('29.1','29.2') else 'parity.json')).read_text()),
                       promoted=result['promoted'],interpretation='Engineering pilot; insufficient evidence of playing-strength improvement')
         atomic(runtime/'report.json',report)
         print(json.dumps({k:report[k] for k in ('status','model','trainingGames','forecastWorlds','promoted')}))

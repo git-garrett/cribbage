@@ -63,7 +63,7 @@ pub fn matches(path: &Path, bytes: &[u8], frozen: &str) -> bool {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
         return false;
     };
-    (value["model"] == "29.0" || value["model"] == "29.1")
+    (value["model"] == "29.0" || value["model"] == "29.1" || value["model"] == "29.2")
         && value["schemaVersion"] == 1
         && value["assets"][path.file_name().unwrap().to_str().unwrap()].as_str() == Some(&actual)
 }
@@ -72,7 +72,7 @@ pub fn verify(root: &str) -> Result<String, String> {
     let directory = Path::new(root).join("rust/cribbage-shadow-engine/assets");
     let raw = fs::read(directory.join("model29-generation.json")).map_err(|e| e.to_string())?;
     let manifest: serde_json::Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
-    if (manifest["model"] != "29.0" && manifest["model"] != "29.1") || manifest["schemaVersion"] != 1 {
+    if (manifest["model"] != "29.0" && manifest["model"] != "29.1" && manifest["model"] != "29.2") || manifest["schemaVersion"] != 1 {
         return Err("invalid Model 29 generation manifest".into());
     }
     let files = manifest["assets"]
@@ -92,6 +92,9 @@ pub fn verify(root: &str) -> Result<String, String> {
     }
     if manifest["model"] == "29.1" && !files.contains_key("model291-forecast.json") {
         return Err("missing 29.1 forecast asset".into());
+    }
+    if manifest["model"] == "29.2" && !files.contains_key("model292-pegging.json.xz") {
+        return Err("missing 29.2 scoring asset".into());
     }
     for (name, expected) in files {
         if Path::new(name).components().count() != 1 || name.starts_with('.') {

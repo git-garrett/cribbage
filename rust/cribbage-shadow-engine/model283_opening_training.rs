@@ -40,9 +40,12 @@ pub(super) fn forecast(s: &mut Solver, p: &Position, next: &Position, own: &Hand
     let mut path = location(&c, s, p, lead)?;
     if !path.exists() {
         let field=if c["baselineGeneration"].as_str()==Some(&session::generation()) {"referenceFallbackRoot"} else {"fallbackRoot"};
-        if let Some(root)=c[field].as_str() {
+        let roots: Vec<&str> = if let Some(values)=c[field].as_array() {
+            values.iter().filter_map(Value::as_str).collect()
+        } else { c[field].as_str().into_iter().collect() };
+        for root in roots {
             let previous=shard_path(Path::new(root),s.cut,p.scores,lead);
-            if previous.exists() {path=previous;}
+            if previous.exists() {path=previous;break;}
         }
     }
     let mut baseline = shard_path(Path::new(c["baseline"].as_str().ok_or("missing inherited cache")?), s.cut, p.scores, lead);

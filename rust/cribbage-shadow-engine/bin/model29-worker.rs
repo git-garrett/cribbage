@@ -13,7 +13,7 @@ use std::{io::{self, BufRead, Write}, time::Instant};
 mod hand_rollout;
 
 fn policy_model() -> ModelId {
-    if model29_snapshot::model_version()=="29.1" {ModelId::Schell291} else {ModelId::Schell290}
+    match model29_snapshot::model_version().as_str() {"29.2"=>ModelId::Schell292,"29.1"=>ModelId::Schell291,_=>ModelId::Schell290}
 }
 
 fn counterfactual(root: &str, r: &Value) -> Result<Value, String> {
@@ -80,7 +80,8 @@ fn rejected_discards_with(
         let result = rollout(&json!({"own":ordered,"opponent":other,"cut":cut,
             "scores":scores,"dealer":dealer,"finishCounting":true}),policy_model(),root)?;
         outcomes.push(json!({"key":cribbage_shadow_engine::model29_forecast::key(&own,&discard,scores,dealer==0),
-            "discard":discard,"scores":result["scores"],"pegEnd":result["pegEnd"],"postCutStart":result["postCutStart"],
+            "discard":discard,"scores":result["scores"],"pegEnd":result["pegEnd"],"postCutStart":result["postCutStart"],"pegComplete":result["pegComplete"],
+            "scoring":r["scoringInputs"][cribbage_shadow_engine::model29_forecast::key(&own,&discard,scores,dealer==0)],
             "forecast":r["forecastInputs"][cribbage_shadow_engine::model29_forecast::key(&own,&discard,scores,dealer==0)]}));
     }}
     Ok(json!({"model":model29_snapshot::model_version(),"sourceRoot":root,"evidenceKind":"rejected","sourceGame":source,"hand":hand,"actor":actor,
@@ -140,6 +141,7 @@ fn run(root: &str, reference: Option<&str>, r: &Value) -> Result<Value, String> 
         && std::env::var_os("MODEL29_CACHE_CONFIG").is_some();
     model29_snapshot::reset_cache_stats();
     model29_snapshot::activate(root, cache)?;
+    cribbage_shadow_engine::model292_forecast::record(reference.is_none() && r["kind"]=="game" && model29_snapshot::model_version()=="29.2");
     cribbage_shadow_engine::model291_forecast::record(reference.is_none() && r["kind"]=="game" && model29_snapshot::model_version()=="29.1");
     if r["kind"] == "counterfactual" || r["kind"] == "rejected-discards" {
         if reference.is_some() { return Err("evaluation cannot generate training evidence".into()); }
@@ -182,10 +184,12 @@ fn run(root: &str, reference: Option<&str>, r: &Value) -> Result<Value, String> 
         (Some(result.winner.index()),[result.left_score,result.right_score],result.record)
     };
     let forecasts=cribbage_shadow_engine::model291_forecast::take_records();
-    let mut output = json!({"model":if candidate_model==ModelId::Schell291 {"29.1"} else {"29.0"},"sourceRoot":root,"seed":seed,"firstDealer":first.index(),"start":start,
+    let mut output = json!({"model":match candidate_model {ModelId::Schell292=>"29.2",ModelId::Schell291=>"29.1",_=>"29.0"},"sourceRoot":root,"seed":seed,"firstDealer":first.index(),"start":start,
         "winner":winner,"scores":scores,"hands":hands(&record),"trajectory":false,
         "candidateSide":candidate,"seconds":started.elapsed().as_secs_f64(),
         "cache":model29_snapshot::cache_stats()});
+    let scoring=cribbage_shadow_engine::model292_forecast::take_records();
+    if reference.is_none() && candidate_model==ModelId::Schell292 {output["scoringInputs"]=scoring;}
     if reference.is_some() { output["benchmark"] = benchmark(&record); }
     else if candidate_model==ModelId::Schell291 { output["forecastInputs"]=forecasts; }
     Ok(output)

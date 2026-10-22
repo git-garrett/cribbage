@@ -12,7 +12,7 @@ import subprocess
 import time
 from pathlib import Path
 from learning import ASSETS, PHASES, atomic, sha, update, verify, verify_source
-from forecast import training_mode, rejected_requests
+from forecast import training_mode, rejected_requests, packed_scoring
 
 
 class Worker:
@@ -37,7 +37,7 @@ class Worker:
         if self.reference:
             if result.get('benchmark',{}).get('schemaVersion')!=1:raise ValueError('evaluation telemetry missing')
             result['benchmark'].update(recorderSha256=self.policy_binary,policyBinarySha256=self.policy_binary,snapshots=self.snapshots)
-        return result
+        return packed_scoring(result)
 
     def close(self):
         self.process.stdin.close()
@@ -193,7 +193,7 @@ def collect(db, config, root, requests, output, reference=None):
             else:
                 identity,req,game = value
                 db.execute('insert into results values(?,?,?,?)',
-                           (identity,json.dumps(req),str(root),json.dumps(game)))
+                           (identity,json.dumps(packed_scoring(req)),str(root),json.dumps(game)))
                 stats=cache_stats(db)
                 db.commit()
                 completed+=1
@@ -208,7 +208,7 @@ def collect(db, config, root, requests, output, reference=None):
     result = []
     for identity,req in requests:
         row = db.execute('select request,root,result from results where id=?',(identity,)).fetchone()
-        if json.loads(row[0]) != req or row[1] != str(root):
+        if json.loads(row[0]) != packed_scoring(req) or row[1] != str(root):
             raise ValueError('resumed request or root changed')
         result.append((identity,json.loads(row[2])))
     return result
@@ -356,7 +356,7 @@ def run(config):
                       promoted=(out/'promoted.json').exists())
         atomic(out/'result.json',result)
         checkpoint(db,config,phase='complete')
-        return result
+        return packed_scoring(result)
     finally:
         db.close()
 
