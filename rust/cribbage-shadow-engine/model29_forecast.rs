@@ -30,6 +30,7 @@ pub fn key(six: &[u8], discard: &[u8], scores: [i32;2], dealer: bool) -> String 
 
 pub(crate) fn adjust(input: &DecisionInput, discard: &[Card], board: &mut BoardModel,
     probability: &mut f64) -> Result<(), String> {
+    if crate::model29_snapshot::model_version() == "29.2" { return Ok(()); }
     let root = crate::model29_snapshot::active_root();
     if root.is_empty() { return Ok(()); }
     TABLES.with(|cell| {

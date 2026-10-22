@@ -78,7 +78,7 @@ def archive_inputs(config):
     files=['config.json','source-manifest.json','seed-reservation.json','seed-exclusions.json',
            'job.json','bootstrap.json','cache-config.json','report.json']
     directories=['output','initial','frozen']
-    if config.get('model')=='29.1':
+    if config.get('model') in ('29.1','29.2'):
         files+=['verify.json','opening-compatibility.json','handoff-source.json','handoff.json','verification-games.json']
         directories+=['reference']
     else:

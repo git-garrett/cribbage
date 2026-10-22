@@ -654,7 +654,7 @@ pub fn parse_decision_input(input_text: &str) -> Result<DecisionInput, String> {
 }
 
 fn model29_input(input: &DecisionInput) -> Option<DecisionInput> {
-    if !matches!(input.model.as_str(), crate::model_id::MODEL_29_0 | "29.0" | crate::model_id::MODEL_29_1 | "29.1") {
+    if !matches!(input.model.as_str(), crate::model_id::MODEL_29_0 | "29.0" | crate::model_id::MODEL_29_1 | "29.1" | crate::model_id::MODEL_29_2 | "29.2") {
         return None;
     }
     let mut baseline = input.clone();
@@ -2120,9 +2120,23 @@ fn recommend_discard_model1323_with_assets(
                 weight as f64 / total_weight,
             );
         }
+        #[cfg(feature = "model29-training")]
+        let modern = crate::model292_forecast::distribution(input, &discard,
+            &hist.entries.iter().map(|((a,b),p)|(*a,*b,*p)).collect::<Vec<_>>())?;
+        #[cfg(not(feature = "model29-training"))]
+        let modern: Option<Vec<(i32,i32,f64)>> = None;
+        let mut my_ev = row.moments.my_weighted_points as f64 / total_weight;
+        let mut opponent_ev = row.moments.opponent_weighted_points as f64 / total_weight;
+        if let Some(bins) = modern {
+            hist = WeightedPairI32::default(); my_ev=0.; opponent_ev=0.;
+            for (a,b,p) in bins {
+                add_weight_pair_i32(&mut hist,(a,b),p);
+                my_ev += f64::from(a)*p; opponent_ev += f64::from(b)*p;
+            }
+        }
         let pegging = Model13PeggingOption {
-            my_ev: row.moments.my_weighted_points as f64 / total_weight,
-            opponent_ev: row.moments.opponent_weighted_points as f64 / total_weight,
+            my_ev,
+            opponent_ev,
             best_lead: -1,
             hist,
             total_weight: 1.0,

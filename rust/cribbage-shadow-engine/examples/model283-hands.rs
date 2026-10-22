@@ -125,11 +125,12 @@ pub fn run(h: &Value, model: ModelId, root: &str) -> Result<Value, String> {
     if played != 8 && game.phase != Phase::GameOver {
         return Err("incomplete pegging hand".into());
     }
+    let peg_complete = game.phase == Phase::PeggingComplete;
     let peg_end = [game.player(Side::Left).score,game.player(Side::Right).score];
     if h["finishCounting"] == true && game.phase == Phase::PeggingComplete {
         game.score_after_pegging()?;
     }
-    let result = json!({"status":"complete","model":model.as_str(),"rows":rows,"cardsPlayed":played,"postCutStart":start,"pegEnd":peg_end,"scores":[game.player(Side::Left).score,game.player(Side::Right).score],"phase":game.phase,"allMovesLegal":true});
+    let result = json!({"status":"complete","model":model.as_str(),"rows":rows,"cardsPlayed":played,"pegComplete":peg_complete,"postCutStart":start,"pegEnd":peg_end,"scores":[game.player(Side::Left).score,game.player(Side::Right).score],"phase":game.phase,"allMovesLegal":true});
     progress(&result)?;
     Ok(result)
 }

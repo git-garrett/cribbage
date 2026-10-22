@@ -136,7 +136,7 @@ def comparison_games(root, checkpoint, receipt, include_hands=True):
             if saved_root != receipt['root'] or request.get('candidateSide') != side or game.get('candidateSide') != side:
                 raise ValueError('Comparison snapshot or orientation mismatch')
             if (request.get('kind') != 'game' or request.get('scores') != [0,0] or game.get('start') != [0,0]
-                    or game.get('trajectory') is not False or game.get('model') not in ('29.0','29.1')
+                    or game.get('trajectory') is not False or game.get('model') not in ('29.0','29.1','29.2')
                     or game['seed'] != request['seed'] or game['firstDealer'] != request['firstDealer']):
                 raise ValueError('Comparison game differs from its frozen request')
             scores = game['scores']; winner = game['winner']

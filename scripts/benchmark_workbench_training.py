@@ -132,11 +132,12 @@ def build_cyclic_report(entry,status,settings,now):
         parts=[read_json(Path(settings.get(k,str(root)))/'progress.json',{}) for k in ('cacheBank','cacheTail')]
         inherited=dict(chunks=sum(p.get('chunks',0) for p in parts))
     stage=next((s['name'] for s in status.get('stages',[]) if s.get('state') in ('running','failed')),'')
+    forecast=next((r['update'] for r in reversed(history) if r.get('phase')=='forecast'),{})
     reservation=read_json(Path('/Users/garrett/Library/Application Support/StrongCribbage/runtimes/coordination/model30-reserved-cpus.json'),{})
     return dict(id=entry['id'],kind='training',mode='cyclic',title=entry['title'],state=status.get('state','prepared'),asOf=now,
         stage=stage,progress=progress,target=settings['target'],completed=progress.get('trainingGames',0),
         workers=reservation.get('allocations',{}).get(entry['id'],0),workerLimit=settings['workers'],
-        rounds=settings['rounds'],history=history,cache=read_json(root/'cache-progress.json',{}),
+        rounds=settings['rounds'],history=history,scoringForecast=forecast,cache=read_json(root/'cache-progress.json',{}),
         cacheLimit=settings['maxAgeGames'],inheritedCache=inherited,continuous=settings.get('continuous',False),
         evaluations=read_json(root/'evaluation-history.json',{}).get('checkpoints',[]),
         completedUpdates=read_json(root/'history.json',{}).get('completedUpdates',len(history)),

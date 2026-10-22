@@ -39,3 +39,5 @@ pub mod model29_snapshot;
 pub mod model29_forecast;
 #[cfg(feature = "model29-training")]
 pub mod model291_forecast;
+#[cfg(feature = "model29-training")]
+pub mod model292_forecast;
