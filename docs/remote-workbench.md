@@ -24,6 +24,11 @@ Keep tokens, cookies and private backups outside Git and tool output. Use the
 existing account; do not purchase plans, servers, backups or add-ons without
 separate spending approval. Cloudflare Tunnel and Access Free cover this one
 user. Check account subscriptions before and after configuration.
+The API can create an Access organization before a plan has been selected.
+Check Zero Trust Settings in the dashboard and complete Free-plan activation
+before cutover. If checkout requires authorization for charges beyond free
+limits, obtain the owner's explicit approval even when the displayed total is
+$0. Do not accept that authorization merely because the plan is named Free.
 
 1. Create the Access organization if absent using
    `POST /accounts/ACCOUNT/access/organizations`. Set name `Strong Cribbage`,
