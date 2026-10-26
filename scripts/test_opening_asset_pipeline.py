@@ -5,6 +5,7 @@ import struct
 import sqlite3
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -27,6 +28,14 @@ def shard(depth=2):
 
 
 class AssetPipelineTests(unittest.TestCase):
+    def setUp(self):
+        # Tiny fake shards must not wait for the production 20 GiB reserve on
+        # the host. Storage-pressure cases override this snapshot explicitly.
+        disk = patch.object(build.shutil, 'disk_usage',
+                            return_value=SimpleNamespace(free=50 * 1024**3))
+        disk.start()
+        self.addCleanup(disk.stop)
+
     def config(self, root):
         assets = root / 'assets'; assets.mkdir()
         binary = root / 'binary'; binary.write_bytes(b'unchanged builder')
