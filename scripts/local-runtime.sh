@@ -197,6 +197,7 @@ workbench_fingerprint() {
       "${ROOT_DIR}/scripts/benchmark_workbench_analysis.py" \
       "${ROOT_DIR}/scripts/benchmark_workbench_gpu.py" \
       "${ROOT_DIR}/scripts/benchmark_workbench_training.py" \
+      "${ROOT_DIR}/scripts/benchmark_workbench_native_search.py" \
       "${ROOT_DIR}/scripts/local-runtime.sh" \
       "${ROOT_DIR}/scripts/benchmark-workbench/"*
   } | shasum | awk '{print $1}'
@@ -243,6 +244,7 @@ workbench_start() {
   fi
   mkdir -p "${WORKBENCH_DIR}/app/benchmark-workbench"
   cp "${ROOT_DIR}/scripts/benchmark_workbench.py" "${ROOT_DIR}/scripts/benchmark_workbench_stats.py" "${ROOT_DIR}/scripts/benchmark_workbench_assets.py" "${ROOT_DIR}/scripts/benchmark_workbench_analysis.py" "${ROOT_DIR}/scripts/benchmark_workbench_gpu.py" "${ROOT_DIR}/scripts/benchmark_workbench_training.py" "${WORKBENCH_DIR}/app/"
+  cp "${ROOT_DIR}/scripts/benchmark_workbench_native_search.py" "${WORKBENCH_DIR}/app/"
   cp "${ROOT_DIR}/scripts/benchmark-workbench/"* "${WORKBENCH_DIR}/app/benchmark-workbench/"
   python3 - "$WORKBENCH_DIR" "$WORKBENCH_LABEL" <<'PY'
 from pathlib import Path
