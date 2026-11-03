@@ -116,6 +116,7 @@ function renderPreviews() {
     const tab = document.getElementById(`tab-${job.id}`);
     if (!tab) continue;
     const snapshot = previews.get(job.id);
+    if (snapshot?.mode === 'native-search' && !snapshot.error) { NativeSearchWorkbench.preview(tab, snapshot); continue; }
     if (job.kind === 'training' && snapshot?.mode === 'wins' && !snapshot.error) {
       tab.querySelector('.tab-meaning').textContent = 'Chart: training win rate · not overall completion';
       tab.querySelector('.tab-purpose').textContent = snapshot.discardModels?.length ? 'Play full games · learn and evaluate both policies' : 'Play full games · learn pegging with fixed Ace discard';
@@ -256,6 +257,7 @@ function chart(id, rows, options) {
 
 function renderCharts() {
   if (!report || report.error || report.waiting) return;
+  if (report.mode === 'native-search') return;
   if (report.kind === 'asset') return renderAssetCharts(report);
   if (report.kind === 'analysis') return renderAnalysisChart(report);
   if (report.kind === 'gpu') return renderGpuCharts(report);
@@ -316,6 +318,7 @@ function renderMetric(prefix, key, pairs) {
 
 function render(value) {
   report = value;
+  if ($('native-search-report')) $('native-search-report').hidden = true;
   const error = value.error || value.waiting;
   $('report').hidden = Boolean(error) || ['asset', 'analysis', 'gpu', 'training'].includes(value.kind);
   $('analysis-report').hidden = Boolean(error) || value.kind !== 'analysis';
@@ -328,6 +331,7 @@ function render(value) {
   renderStudyOverview(error ? null : value.workflow);
   renderVisibilityControls();
   if (error) return;
+  if (value.mode === 'native-search') return NativeSearchWorkbench.render(value);
   if (value.kind === 'asset') return renderAsset(value);
   if (value.kind === 'analysis') return renderAnalysis(value);
   if (value.kind === 'gpu') return renderGpu(value);

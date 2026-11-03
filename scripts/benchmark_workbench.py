@@ -24,13 +24,16 @@ from benchmark_workbench_assets import build_asset_report
 from benchmark_workbench_analysis import build_analysis_report
 from benchmark_workbench_gpu import build_gpu_report
 from benchmark_workbench_training import build_training_report
+from benchmark_workbench_native_search import route_training_report
+
+build_training_report = route_training_report(build_training_report)
 
 
 RUNTIME = Path('/private/tmp/strong-cribbage-local-runtime/workbench')
 JOBS_RUNTIME = Path('/private/tmp/cribbage-jobs')
 STATIC = Path(__file__).resolve().parent / 'benchmark-workbench'
 UI_VERSION = hashlib.sha256(b''.join((STATIC / name).read_bytes()
-                            for name in ('index.html', 'app.js', 'style.css'))).hexdigest()[:16]
+                            for name in ('index.html', 'app.js', 'native-search.js', 'style.css'))).hexdigest()[:16]
 PORT = 8766
 CACHE_SECONDS = 15
 
@@ -596,7 +599,7 @@ class Handler(BaseHTTPRequestHandler):
             if entry.get('kind') in ('asset', 'analysis', 'gpu', 'training') and client_version != UI_VERSION:
                 return self.respond({'id': entry['id'], 'error': 'Workbench updated. Reload this browser page once to load the new views. Background jobs are still running.'})
             return self.respond(self.server.report(entry))
-        files = {'/favicon.svg': ('favicon.svg', 'image/svg+xml'), '/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
+        files = {'/native-search.js': ('native-search.js', 'text/javascript'), '/favicon.svg': ('favicon.svg', 'image/svg+xml'), '/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
         if url.path in files:
             filename, content_type = files[url.path]
             body = (STATIC / filename).read_bytes()
