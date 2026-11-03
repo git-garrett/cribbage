@@ -41,7 +41,11 @@ fn keep_index(keep: &[u8; 13]) -> Result<usize, String> {
 impl Model203DiscardAsset {
     pub(crate) fn load(path: &Path) -> Result<Self, String> {
         let bytes = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-        if format!("{:x}", Sha256::digest(&bytes)) != SHA256 {
+        #[cfg(not(feature = "model29-training"))]
+        let invalid = format!("{:x}", Sha256::digest(&bytes)) != SHA256;
+        #[cfg(feature = "model29-training")]
+        let invalid = !crate::model29_snapshot::matches(path, &bytes, SHA256);
+        if invalid {
             return Err("Model 20.3 discard asset differs from its verified snapshot".into());
         }
         Self::decode(&bytes)

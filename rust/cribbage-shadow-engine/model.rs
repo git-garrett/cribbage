@@ -258,6 +258,7 @@ struct RuntimeTables {
     scorer163: OnceLock<Option<Model162ActionScorer>>,
 }
 
+#[cfg(not(feature = "model29-training"))]
 static RUNTIME_TABLES: OnceLock<RuntimeTables> = OnceLock::new();
 thread_local! {
     static MODEL91_WORKER_POLICIES: RefCell<HashMap<String, Model91Policy>> =
@@ -652,6 +653,19 @@ pub fn parse_decision_input(input_text: &str) -> Result<DecisionInput, String> {
     })
 }
 
+fn model29_input(input: &DecisionInput) -> Option<DecisionInput> {
+    if input.model != crate::model_id::MODEL_29_0 && input.model != "29.0" {
+        return None;
+    }
+    let mut baseline = input.clone();
+    baseline.model = MODEL_28_3.into();
+    #[cfg(feature = "model29-training")]
+    if input.kind == DecisionKind::Peg && crate::model29_snapshot::cache_enabled() {
+        baseline.model = MODEL_28_3_FAST.into();
+    }
+    Some(baseline)
+}
+
 // The versioned 28.3 policy can use the same optional, fingerprint-checked
 // accelerator as Ace. An absent directory/shard still uses the exact solver.
 // Normalize only execution; the game retains its recorded model identity.
@@ -683,7 +697,9 @@ pub fn evaluate_decision_with_caches(
     model911_cache: Option<&Model911HandCache>,
     model13_cache: Option<&Model13HandCache>,
 ) -> Result<Decision, String> {
-    let accelerated = with_progressive_opening(input);
+    let learned = model29_input(input);
+    let accelerated = if learned.is_none() { with_progressive_opening(input) } else { None };
+    let input = learned.as_ref().unwrap_or(input);
     let input = accelerated.as_ref().unwrap_or(input);
     match input.kind {
         DecisionKind::Discard => recommend_discard(input, root),
@@ -697,7 +713,9 @@ pub fn review_decision(
     selected_card_ids: &[u8],
     root: &str,
 ) -> Result<DecisionReview, String> {
-    let accelerated = with_progressive_opening(input);
+    let learned = model29_input(input);
+    let accelerated = if learned.is_none() { with_progressive_opening(input) } else { None };
+    let input = learned.as_ref().unwrap_or(input);
     let input = accelerated.as_ref().unwrap_or(input);
     if input.kind == DecisionKind::Peg
         && input.player == PlayerKey::Ai
@@ -736,7 +754,9 @@ pub fn evaluate_selected_decision(
     selected_card_ids: &[u8],
     root: &str,
 ) -> Result<Decision, String> {
-    let accelerated = with_progressive_opening(input);
+    let learned = model29_input(input);
+    let accelerated = if learned.is_none() { with_progressive_opening(input) } else { None };
+    let input = learned.as_ref().unwrap_or(input);
     let input = accelerated.as_ref().unwrap_or(input);
     if !matches!(input.model.as_str(), MODEL_13_0 | MODEL_13_215 | MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3 | MODEL_20_4 | MODEL_20_5 | MODEL_20_6 | MODEL_20_7 | MODEL_28_3 | MODEL_28_3_FAST | MODEL_20_5_PEGGING | MODEL_20_5_PEGGING2) {
         return Err("saved decision review currently supports Ace models only".to_string());
@@ -2147,7 +2167,8 @@ fn recommend_discard_model1323_with_assets(
                 crib_rank,
             )
         };
-        let evaluation = CandidateEvaluation {
+        #[allow(unused_mut)]
+        let mut evaluation = CandidateEvaluation {
             win_probability: model13_discard_candidate_win_probability(
                 &input.ai_hand,
                 &keep,
@@ -2172,6 +2193,8 @@ fn recommend_discard_model1323_with_assets(
                 - pegging.opponent_ev,
             best_lead: -1,
         };
+        #[cfg(feature = "model29-training")]
+        crate::model29_forecast::adjust(input, &discard, board, &mut evaluation.win_probability)?;
         if best.as_ref().is_none_or(|(_, current)| {
             evaluation.win_probability > current.win_probability
                 || (evaluation.win_probability == current.win_probability
@@ -6638,6 +6661,7 @@ fn compare_tuple(a: &[f64], b: &[f64]) -> i32 {
     0
 }
 
+#[cfg(not(feature = "model29-training"))]
 fn runtime_tables(root: &str) -> Result<&'static RuntimeTables, String> {
     if let Some(tables) = RUNTIME_TABLES.get() {
         return Ok(tables);
@@ -6647,6 +6671,16 @@ fn runtime_tables(root: &str) -> Result<&'static RuntimeTables, String> {
     RUNTIME_TABLES
         .get()
         .ok_or_else(|| "RuntimeTables cache was not initialized".to_string())
+}
+
+#[cfg(feature = "model29-training")]
+fn runtime_tables(root: &str) -> Result<&'static RuntimeTables, String> {
+    // A worker lives for one generation, loading at most candidate and references.
+    static TABLES: OnceLock<Mutex<HashMap<String, &'static RuntimeTables>>> = OnceLock::new();
+    let canonical = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
+    let key = canonical.to_str().ok_or("non-UTF8 model root")?.to_owned();
+    let mut tables = TABLES.get_or_init(|| Mutex::new(HashMap::new())).lock().map_err(|e| e.to_string())?;
+    Ok(*tables.entry(key.clone()).or_insert_with(|| Box::leak(Box::new(RuntimeTables::new(&key)))))
 }
 
 impl RuntimeTables {
@@ -8147,6 +8181,32 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn model290_uses_the_same_legal_decision_as_283() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+        let input = parse_decision_input("kind=peg;model=schell_table-peg_table-29.0;turnCard=10;role=pone;ownDiscards=1,6;aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore=119;humanScore=120;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5").unwrap();
+        let normalized = model29_input(&input).unwrap();
+        assert_eq!(normalized.model, MODEL_28_3);
+        assert_eq!(normalized.ai_score, input.ai_score);
+        assert_eq!(normalized.own_discards, input.own_discards);
+        let actual = evaluate_decision(&input, root.to_str().unwrap()).unwrap();
+        let expected = evaluate_decision(&normalized, root.to_str().unwrap()).unwrap();
+        assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+        assert!(model29_input(&normalized).is_none());
+    }
+
+    #[cfg(feature = "model29-training")]
+    #[test]
+    fn model290_does_not_project_terminal_scores() {
+        let mut input = parse_decision_input("kind=peg;model=schell_table-peg_table-29.0;turnCard=10;role=pone;ownDiscards=1,6;aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;aiScore=128;humanScore=116;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5").unwrap();
+        let projected = model29_input(&input).unwrap();
+        assert_eq!(input.ai_score, 128);
+        assert_eq!(projected.ai_score, 128);
+        assert_eq!(projected.human_score, 116);
+        input.human_score = 142;
+        assert_eq!(model29_input(&input).unwrap().human_score, 142);
     }
 
     fn model16_peg_input() -> DecisionInput {

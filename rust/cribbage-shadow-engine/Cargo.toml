@@ -36,3 +36,11 @@ path = "bin/build-model283-opening.rs"
 [[bin]]
 name = "model283-hands"
 path = "bin/model283-hands.rs"
+
+[features]
+model29-training = []
+
+[[bin]]
+name = "model29-worker"
+path = "bin/model29-worker.rs"
+required-features = ["model29-training"]

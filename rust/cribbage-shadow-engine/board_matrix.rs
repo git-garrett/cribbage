@@ -47,7 +47,11 @@ impl BoardWinMatrix {
     pub fn load_verified_model202(path: impl AsRef<Path>) -> Result<Self, String> {
         let bytes = fs::read(path.as_ref())
             .map_err(|error| format!("read {} failed: {error}", path.as_ref().display()))?;
-        if format!("{:x}", Sha256::digest(&bytes)) != MODEL202_BOARD_SHA256 {
+        #[cfg(not(feature = "model29-training"))]
+        let invalid = format!("{:x}", Sha256::digest(&bytes)) != MODEL202_BOARD_SHA256;
+        #[cfg(feature = "model29-training")]
+        let invalid = !crate::model29_snapshot::matches(path.as_ref(), &bytes, MODEL202_BOARD_SHA256);
+        if invalid {
             return Err("Model 20.2 requires its verified rebuilt BWM2 asset".into());
         }
         Self::decode(&bytes)

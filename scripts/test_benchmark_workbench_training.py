@@ -38,6 +38,19 @@ class TrainingWorkbenchTests(unittest.TestCase):
         self.assertEqual(job_status(entry), self.status)
         self.assertEqual(self.spec.read_bytes(), before)
 
+    def test_cyclic_learning_exposes_asset_and_cache_receipts_without_database_reads(self):
+        self.save('workbench.json',dict(jobId='training-test',jobRoot=str(self.root/'job'),trainingStudy=dict(
+            root=str(self.root),target=2000,mode='cyclic',workers=10,rounds=2,maxAgeGames=50000)))
+        self.save('progress.json',dict(phase='forecast',asset='forecast',cycle=1,generation=5,
+            trainingGames=1000,forecastWorlds=20,phaseCompleted=20,phaseTarget=192,completedGames=1040))
+        self.save('cache-progress.json',dict(hits=120,misses=10,writes=10,expired=0,maxAgeGames=1039))
+        with patch('sqlite3.connect',side_effect=AssertionError('No worker database reads')):
+            result=build_training_report(self.entry,dict(state='running',stages=[dict(name='cycles',state='running')]))
+        self.assertEqual(result['mode'],'cyclic');self.assertEqual(result['completed'],1000)
+        self.assertEqual(result['cache']['hits'],120);self.assertEqual(result['workerLimit'],10)
+        self.assertEqual(result['activity']['unit'],'opponent worlds')
+        self.assertEqual(result['activity']['target'],192)
+
     def test_current_epoch_curves_without_datasets_or_databases(self):
         self.save('training-progress.json', dict(trial=self.trial, epoch=1, bestEpoch=1, updatedAt=1000, natural283=dict(agreement=.7)))
         self.save(f'students/{self.trial}/checkpoint.json', dict(epoch=1, bestEpoch=1, history=self.history + [dict(self.history[0], epoch=2)]))
