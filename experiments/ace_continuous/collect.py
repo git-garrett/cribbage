@@ -1,6 +1,6 @@
 """Continue the verified Ace replay corpus with a single SQLite writer."""
 from collections import deque
-from hybrid import worker_limit, reserve_workers, native_worker_limit
+from hybrid import worker_limit, reserve_workers, native_worker_limit, gpu_cpu_key
 import gzip
 import json
 import os
@@ -109,7 +109,8 @@ def collect_block(db, native, capacity, source, offset, games):
         # Capacity may wait for pressure to clear. Recheck and claim the whole
         # currently available CPU budget under the shared lock afterward.
         budget = min(capacity.workers(), len(games) - index)
-        with reserve_workers(LEDGER, f'{root.name}-ace', budget, os.cpu_count() or 12) as workers:
+        with reserve_workers(LEDGER, f'{root.name}-ace', budget, os.cpu_count() or 12,
+                             keep_available_for=gpu_cpu_key(root)) as workers:
             if workers < 1:
                 time.sleep(5)
                 continue

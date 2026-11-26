@@ -88,12 +88,12 @@ def worker_limit(samples, cpu_count):
 
 
 @contextmanager
-def reserve_workers(ledger, prefix, maximum, cpu_count):
+def reserve_workers(ledger, prefix, maximum, cpu_count, *, keep_available_for=None):
     """Claim the current batch atomically after any memory/thermal wait."""
     ledger = Path(ledger)
     keys = []
     def interrupted(*_):
-        raise InterruptedError('Collector interrupted; CPU claims released')
+        raise InterruptedError('CPU reservation interrupted; claims released')
     previous = signal.signal(signal.SIGTERM, interrupted)
     try:
         with ledger.with_suffix('.lock').open('a') as lock:
@@ -101,7 +101,8 @@ def reserve_workers(ledger, prefix, maximum, cpu_count):
             data = read(ledger)
             assert data['workers'] == sum(data['allocations'].values())
             headroom = 0 if data['allocations'].get('user-workday-headroom', 0) else int(cpu_count > 1)
-            count = max(0, min(maximum, cpu_count - headroom - data['workers']))
+            gpu_holdback = int(bool(keep_available_for) and keep_available_for not in data['allocations'])
+            count = max(0, min(maximum, cpu_count - headroom - gpu_holdback - data['workers']))
             proposed = [f'{prefix}-{i}' for i in range(count)]
             assert not any(key in data['allocations'] for key in proposed), 'Collector reservations already owned'
             for key in proposed:
@@ -141,3 +142,25 @@ def native_worker_limit(call, maximum):
             low = probe
     assert low > 0, 'Native teacher accepts no CPU workers'
     return low
+
+
+def gpu_cpu_key(root):
+    return Path(root).name + '-gpu-0'
+
+
+@contextmanager
+def gpu_cpu(root, ledger):
+    """Wait for CPU capacity without turning temporary contention into failure."""
+    root = Path(root)
+    while True:
+        if (root / 'STOP-TRAIN').exists():
+            raise SystemExit(76)
+        with reserve_workers(ledger, root.name+'-gpu', 1, os.cpu_count() or 12) as count:
+            if count:
+                save(root / 'gpu-live.json', dict(status='self-play while Ace labels accumulate',
+                     updatedAt=time.time(), **(pending(root) or {})))
+                yield
+                return
+        save(root / 'gpu-live.json', dict(status='waiting for CPU capacity',
+             updatedAt=time.time(), **(pending(root) or {})))
+        time.sleep(3)

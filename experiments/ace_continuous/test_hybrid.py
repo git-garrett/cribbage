@@ -60,6 +60,49 @@ class HybridTests(unittest.TestCase):
         self.assertEqual(h.worker_limit([sample(thermal=2)], 12), 0)
         self.assertEqual(h.worker_limit([sample(pressure=2), sample(10)], 12), 4)
 
+    def test_collector_leaves_gpu_slot_between_every_chunk(self):
+        ledger = self.root / 'cpus.json'
+        h.save(ledger, dict(workers=1, allocations={'user-workday-headroom': 1}))
+        gpu_key = self.root.name + '-gpu-0'
+        for _ in range(20):
+            with h.reserve_workers(ledger, 'ace', 11, 12, keep_available_for=gpu_key) as workers:
+                self.assertEqual(workers, 10, 'Ace must leave the next GPU chunk one CPU slot')
+                with h.reserve_workers(ledger, self.root.name+'-gpu', 1, 12) as gpu:
+                    self.assertEqual(gpu, 1, 'The GPU trainer must be able to start after Ace claims its workers')
+            with h.reserve_workers(ledger, self.root.name+'-gpu', 1, 12) as gpu:
+                with h.reserve_workers(ledger, 'ace', 11, 12, keep_available_for=gpu_key) as workers:
+                    self.assertEqual(workers, 10, 'The active GPU slot must not be reserved twice')
+        self.assertEqual(h.read(ledger)['allocations'], {'user-workday-headroom': 1})
+
+    def test_gpu_waits_for_temporary_full_capacity_and_releases_its_claim(self):
+        ledger = self.root / 'cpus.json'
+        full = dict(workers=12, allocations={'user-workday-headroom': 1, 'other': 11})
+        h.save(ledger, full)
+        waits = []
+        def make_room(seconds):
+            waits.append(seconds)
+            h.save(ledger, dict(workers=11, allocations={'user-workday-headroom': 1, 'other': 10}))
+        with patch.object(h.os, 'cpu_count', return_value=12), patch.object(h.time, 'sleep', side_effect=make_room):
+            with h.gpu_cpu(self.root, ledger):
+                data = h.read(ledger)
+                self.assertEqual(data['workers'], 12)
+                self.assertEqual(data['allocations'][h.gpu_cpu_key(self.root)], 1)
+        self.assertEqual(waits, [3])
+        self.assertNotIn(h.gpu_cpu_key(self.root), h.read(ledger)['allocations'])
+        self.assertEqual(h.read(ledger)['workers'], 11)
+
+    def test_cpu_wait_honors_cooperative_training_stop(self):
+        ledger = self.root / 'cpus.json'
+        h.save(ledger, dict(workers=12, allocations={'other': 12}))
+        def stop(_):
+            (self.root / 'STOP-TRAIN').touch()
+        with patch.object(h.time, 'sleep', side_effect=stop), patch.object(h.os, 'cpu_count', return_value=12):
+            with self.assertRaises(SystemExit) as error:
+                with h.gpu_cpu(self.root, ledger):
+                    self.fail('Must not train without capacity')
+        self.assertEqual(error.exception.code, 76)
+        self.assertEqual(h.read(ledger)['allocations'], {'other': 12})
+
     def test_native_cpu_limit_negotiation_handles_old_and_new_binaries(self):
         def backend(limit):
             def call(value):

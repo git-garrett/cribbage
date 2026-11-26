@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 
-from hybrid import latest32, pending, publish32, read, save
+from hybrid import latest32, pending, publish32, read, save, gpu_cpu
 
 
 def sha(path):
@@ -246,10 +246,10 @@ def run(root):
         return existing
     model_root = root / f'model{identity["model"]}'
     sys.path.insert(0, str(root / 'model31/source'))
-    from resources import one_cpu
+    from resources import LEDGER
     with (model_root / 'writer.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        with one_cpu(root.name + '-selfplay'):
+        with gpu_cpu(root, LEDGER):
             import ctypes as ct
             objc = ct.CDLL('/usr/lib/libobjc.A.dylib')
             ct.CDLL('/System/Library/Frameworks/Foundation.framework/Foundation')
