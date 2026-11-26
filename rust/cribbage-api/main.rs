@@ -27,7 +27,7 @@ use cribbage_shadow_engine::dynamic::{
 use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
 use cribbage_shadow_engine::model::{Model13HandCache, Model911HandCache};
 use cribbage_shadow_engine::model_id::{
-    ModelId, ACE_MODEL, ACE_MODEL_ID, DYNAMIC, MODEL_13_0, MODEL_13_215, MODEL_13_23, MODEL_28_3, MODEL_28_4, MODEL_9_1, MODEL_9_11,
+    ModelId, ACE_MODEL, ACE_MODEL_ID, DYNAMIC, MODEL_13_0, MODEL_13_215, MODEL_13_23, MODEL_28_3, MODEL_9_1, MODEL_9_11,
     MYRMIDON_5,
 };
 use rusqlite::{params, Connection, OptionalExtension};
@@ -4673,7 +4673,7 @@ mod tests {
         assert!(model_json().contains("schell_table-peg_table-16.1"));
         assert!(model_json().contains("schell_table-peg_table-16.3"));
         assert!(model_json().contains("schell_table-peg_table-20.0"));
-        assert!(model_json().contains(MODEL_28_4));
+        assert!(model_json().contains(cribbage_shadow_engine::model_id::MODEL_28_4));
         assert!(model_json().contains(DYNAMIC));
     }
 

@@ -236,6 +236,7 @@ struct RuntimeTables {
     discard_pairs132: OnceLock<Model132KeepPairTable>,
     corrections1322: OnceLock<Model1322CorrectionTable>,
     corrections1323: OnceLock<Result<Model1323CorrectionTable, String>>,
+    corrections284: OnceLock<Result<Model1323CorrectionTable, String>>,
     policy_assets1323: OnceLock<Model1323PolicyAssets>,
     policy_assets20: OnceLock<Model1323PolicyAssets>,
     policy_assets201: OnceLock<Model1323PolicyAssets>,
@@ -658,7 +659,8 @@ pub fn parse_decision_input(input_text: &str) -> Result<DecisionInput, String> {
 // acceleration. Future 28.4 strategy changes must branch here and bind assets
 // to the changed policy before removing this baseline delegation.
 fn with_execution_model(input: &DecisionInput) -> Option<DecisionInput> {
-    let baseline284 = input.model == MODEL_28_4;
+    let baseline284 = input.model == MODEL_28_4
+        && (input.kind == DecisionKind::Peg || crate::model284_corrections::configured_manifest().is_none());
     let accelerated283 = input.kind == DecisionKind::Peg && input.model == MODEL_28_3
         && std::env::var_os("CRIBBAGE_283_FAST_ASSET").is_some_and(|p| !p.is_empty());
     if !baseline284 && !accelerated283 {
@@ -742,6 +744,9 @@ pub fn evaluate_selected_decision(
 ) -> Result<Decision, String> {
     let accelerated = with_execution_model(input);
     let input = accelerated.as_ref().unwrap_or(input);
+    if input.model == MODEL_28_4 && input.kind == DecisionKind::Discard {
+        return review_discard_model13(input, selected_card_ids, root);
+    }
     if !matches!(input.model.as_str(), MODEL_13_0 | MODEL_13_215 | MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3 | MODEL_20_4 | MODEL_20_5 | MODEL_20_6 | MODEL_20_7 | MODEL_28_3 | MODEL_28_3_FAST | MODEL_20_5_PEGGING | MODEL_20_5_PEGGING2) {
         return Err("saved decision review currently supports Ace models only".to_string());
     }
@@ -753,6 +758,7 @@ pub fn evaluate_selected_decision(
 }
 
 fn is_supported_rust_model(model: &str) -> bool {
+    if model == MODEL_28_4 { return true; }
     model == MODEL_9_0
         || model == MODEL_9_1
         || model == MODEL_9_11
@@ -881,6 +887,9 @@ fn recommend_discard(input: &DecisionInput, root: &str) -> Result<Decision, Stri
             "discard requires six AI cards, got {}",
             input.ai_hand.len()
         ));
+    }
+    if input.model == MODEL_28_4 {
+        return recommend_discard_model284(input, runtime_tables(root)?, None);
     }
     if input.model == MODEL_13_0 {
         return recommend_discard_model13(input, root);
@@ -1981,6 +1990,24 @@ fn recommend_discard_model1323(
     )
 }
 
+fn recommend_discard_model284(
+    input: &DecisionInput,
+    tables: &RuntimeTables,
+    selected_card_ids: Option<&[u8]>,
+) -> Result<Decision, String> {
+    let histogram = tables.corrections284()?;
+    // Only the discard correction changes. Known-card show/crib, board WP,
+    // tie rules, and all pegging retain the 28.3.fast baseline.
+    let mut baseline = input.clone();
+    baseline.model = MODEL_28_3_FAST.into();
+    let mut board = BoardModel::from_board_matrix(Arc::clone(tables.board_for_model1323(&baseline)?));
+    let show = model20_discard_context(&baseline, tables)?;
+    recommend_discard_model1323_with_assets(
+        &baseline, histogram, tables.crib_for_model(&baseline)?, &mut board,
+        selected_card_ids, show.as_ref(),
+    )
+}
+
 struct Model20DiscardContext<'a> {
     opponent_hands: Vec<Vec<(i32, f64)>>,
     suit_rates: &'a crate::model20_discards::SuitedDiscardRates,
@@ -2591,6 +2618,9 @@ fn review_discard_model13(
                 .ok_or_else(|| "selected discard is not in the original hand".to_string())
         })
         .collect::<Result<Vec<_>, _>>()?;
+    if input.model == MODEL_28_4 {
+        return recommend_discard_model284(input, runtime_tables(root)?, Some(selected_card_ids));
+    }
     if matches!(input.model.as_str(), MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3 | MODEL_20_4 | MODEL_20_5 | MODEL_20_6 | MODEL_20_7 | MODEL_28_3 | MODEL_28_3_FAST | MODEL_20_5_PEGGING | MODEL_20_5_PEGGING2) {
         let tables = runtime_tables(root)?;
         let mut board = BoardModel::from_board_matrix(Arc::clone(tables.board_for_model1323(input)?));
@@ -6664,6 +6694,7 @@ impl RuntimeTables {
             discard_pairs132: OnceLock::new(),
             corrections1322: OnceLock::new(),
             corrections1323: OnceLock::new(),
+            corrections284: OnceLock::new(),
             policy_assets1323: OnceLock::new(),
             policy_assets20: OnceLock::new(),
             policy_assets201: OnceLock::new(),
@@ -6745,6 +6776,14 @@ impl RuntimeTables {
         load_cached(&self.policy_assets1323, "policy_assets1323", || {
             Model1323PolicyAssets::load(&self.asset_path(""))
         })
+    }
+
+    fn corrections284(&self) -> Result<&Model1323CorrectionTable, String> {
+        self.corrections284.get_or_init(|| {
+            let path = crate::model284_corrections::configured_manifest()
+                .ok_or("28.4 corrections require an explicit activation manifest")?;
+            crate::model284_corrections::load(&path)
+        }).as_ref().map_err(Clone::clone)
     }
 
     fn pegging_policy_assets(&self, input: &DecisionInput) -> Result<&Model1323PolicyAssets, String> {
@@ -7123,6 +7162,22 @@ fn round_ev(value: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn model284_discard_and_selected_review_use_the_separate_correction_table() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+        let tables = super::RuntimeTables::new(root.to_str().unwrap());
+        let input = super::parse_decision_input("model=28.4;kind=discard;role=dealer;aiHand=0,4,8,12,16,20;aiScore=119;humanScore=118").unwrap();
+        let six = crate::cards::rank_counts(&input.ai_hand);
+        let discard = crate::cards::rank_counts(&input.ai_hand[..2]);
+        let table = super::Model1323CorrectionTable::fixture(&[(six, discard, crate::board::Role::Dealer, vec![(2, 0, 1)])]);
+        assert!(tables.corrections284.set(Ok(table)).is_ok());
+        let chosen = super::recommend_discard_model284(&input, &tables, None).unwrap();
+        let selected = super::recommend_discard_model284(&input, &tables, Some(&[0, 4])).unwrap();
+        let super::Decision::Discard { card_ids, .. } = &chosen else { panic!("discard expected") };
+        assert_eq!(card_ids, &[0, 4]);
+        assert_eq!(format!("{chosen:?}"), format!("{selected:?}"));
+        assert!(tables.corrections1323.get().is_none());
+    }
     use super::*;
     use crate::model132::Model132PeggingPolicy;
     use crate::model162::Model162ActionAdvantageEntry;

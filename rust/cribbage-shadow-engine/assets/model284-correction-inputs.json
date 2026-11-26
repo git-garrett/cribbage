@@ -1,0 +1,34 @@
+{
+  "evidenceSha256": {
+    "decline": "7feedb1dedac7da43e52691341330ee76991e61a01b013dc1afc2c187018d84b",
+    "discards": "8cff12a78e97ada3e5e3e33042285adeeeb900f41d9634cccfa34fc8a69f55d6",
+    "hold": "0fe217bee05937762279a047d09227c7ae8655a193b87e998e9ab791a9647a1c"
+  },
+  "inputChecksums": [
+    "be1de2498ef9ebc1",
+    "74fc26363b8edec9",
+    "89f737fab3128a3b",
+    "3e8a89262a14397c",
+    "0000000000000000"
+  ],
+  "inputs": {
+    "beliefs.bin": {
+      "bytes": 945770,
+      "sha256": "192d43b7712e1f16bf0ba0991df14aaf646c2a44cd43f7e917d6ac8689cc375e"
+    },
+    "discard-histograms.json": {
+      "bytes": 8964854,
+      "sha256": "414f045fea8eb527e8754f51f7886ee9834f65d7948e11a946cd6453bf0a5f15"
+    },
+    "factors.json": {
+      "bytes": 736,
+      "sha256": "1bd12e6021ed2880afce288285a40655aa5ff035968a851a0251711749f82a99"
+    },
+    "keep-prior.json": {
+      "bytes": 104667,
+      "sha256": "7fcf619741b80a323dfe6f0fe943908b2a7ca044aade423e1fb9f21dbfe0c5c7"
+    }
+  },
+  "modelVersion": "28.4",
+  "schemaVersion": 1
+}

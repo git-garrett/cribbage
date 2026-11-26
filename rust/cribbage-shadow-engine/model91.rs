@@ -348,7 +348,7 @@ impl Model91EmpiricalBeliefs {
         Self::load_binary(path.as_ref(), false)
     }
 
-    pub(crate) fn load_model203(path: &Path) -> Result<Self, String> {
+    pub fn load_model203(path: &Path) -> Result<Self, String> {
         Self::load_binary(path, true)
     }
 
