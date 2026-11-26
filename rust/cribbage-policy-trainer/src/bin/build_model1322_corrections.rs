@@ -461,6 +461,11 @@ fn build(config: &BuildConfig) -> Result<(), String> {
     if clean_inputs && !config.normalize_discard_rows {
         return Err("complete smoothed inputs require --model20-normalized-discards".into());
     }
+    if clean_inputs {
+        let factors: serde_json::Value = serde_json::from_slice(
+            &fs::read(&config.factors).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        validate_clean_factor_snapshot(&factors)?;
+    }
     let beliefs = if clean_inputs {
         Model91EmpiricalBeliefs::load_model203(&config.beliefs)?
     } else { Model91EmpiricalBeliefs::load(&config.beliefs)? };
@@ -1092,6 +1097,19 @@ fn validate_model20_factor_provenance(factors: &serde_json::Value) -> Result<(),
                 "Model 20 correction build rejects decline source {name:?} (ADR-0002)"
             ));
         }
+    }
+    Ok(())
+}
+
+fn validate_clean_factor_snapshot(factors: &serde_json::Value) -> Result<(), String> {
+    // Preparation validates source-specific ADR-0003 eligibility, corrected
+    // 13.1 hashes, and source-count reconciliation. Freeze that exact qualified
+    // snapshot here; a broad model-version allowlist cannot establish this.
+    let pinned: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../cribbage-shadow-engine/assets/model284-correction-inputs.json"
+    )).map_err(|e| e.to_string())?;
+    if pinned["qualifiedDeclineFactors"].is_null() || *factors != pinned["qualifiedDeclineFactors"] {
+        return Err("clean correction build requires the pinned ADR-0003-qualified decline snapshot".into());
     }
     Ok(())
 }
@@ -1957,9 +1975,13 @@ mod tests {
         config.baseline_pairs = None;
         config.output = root.join("clean-inputs");
         config.beliefs = assets.join("model203-hold.bin");
-        let mut factors: serde_json::Value = serde_json::from_slice(
-            &fs::read(assets.join("model203-decline-factors.json")).unwrap()).unwrap();
-        factors["modelCohort"] = json!({"includedModels": ["schell_table-peg_table-13.23"]});
+        let pinned: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../cribbage-shadow-engine/assets/model284-correction-inputs.json")).unwrap();
+        let factors = pinned["qualifiedDeclineFactors"].clone();
+        validate_clean_factor_snapshot(&factors).unwrap();
+        let mut forbidden = factors.clone();
+        forbidden["modelCohort"]["includedModels"] = json!(["schell_table-peg_table-13.22"]);
+        assert!(validate_clean_factor_snapshot(&forbidden).is_err());
         config.factors = root.join("clean-factors.json");
         atomic_json(&config.factors, &factors).unwrap();
         build(&config).unwrap();

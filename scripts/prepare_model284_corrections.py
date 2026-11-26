@@ -10,6 +10,7 @@ from pathlib import Path
 import struct
 
 from build_model203_hold import STRONG_VERSIONS, validate_evidence
+from build_model203_decline_factors import validate as validate_decline_evidence
 
 ROOT = Path(__file__).resolve().parents[1]
 SCALE = 10**12
@@ -149,6 +150,7 @@ def prepare(root, output):
     factors = (assets / 'model203-decline-factors.json').read_bytes()
     factor_meta = json.loads(factors)
     decline, decline_sha = evidence(root, 'model203-decline-qualified-evidence.json.gz')
+    validate_decline_evidence(decline, assets / 'model1322-decline-factors.json')
     decline_sha = sha(canonical(decline).rstrip(b'\n'))
     reject_excluded(decline['countsByModel'])
     if (factor_meta['evidenceSha256'] != decline_sha
@@ -166,6 +168,7 @@ def prepare(root, output):
     report = dict(schemaVersion=1, modelVersion='28.4',
                   inputChecksums=[fnv(exports[name]) for name in exports] + ['0000000000000000'],
                   inputs={name: {'sha256': sha(data), 'bytes': len(data)} for name, data in exports.items()},
+                  qualifiedDeclineFactors=factor_meta,
                   evidenceSha256=dict(hold=hold_evidence_sha, discards=discard_evidence_sha, decline=decline_sha),
                   holdGames=hold_meta['newCompletedGames'], holdHandsByModel=hold_meta['newActorHandsByModel'],
                   strong13PlusHoldHands=sum(n for model, n in hold_meta['newActorHandsByModel'].items()

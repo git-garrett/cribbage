@@ -19,12 +19,22 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(fnv(b''), 'cbf29ce484222325')
         self.assertEqual(fnv(b'hello'), 'a430d84680aabd0b')
 
+    def test_decline_gate_rejects_weak_policies_and_unregistered_sources(self):
+        from build_model203_decline_factors import bootstrap, empty_counts, validate, LEGACY
+        for model, source in [('13.22', 'unknown'), ('9.0', 'unknown'), ('13.1', 'unknown')]:
+            value = bootstrap(LEGACY, [])
+            actor = 'schell_table-peg_table-' + model
+            value['countsByModel'] = {actor: empty_counts()}
+            value['sources'] = [{'sha256': source, 'countsByModel': value['countsByModel']}]
+            with self.assertRaises(ValueError):
+                validate(value, LEGACY)
+
     def test_retained_input_preparation_reproduces_pinned_inputs(self):
         import json
         pinned = json.loads((ROOT / 'rust/cribbage-shadow-engine/assets/model284-correction-inputs.json').read_bytes())
         with tempfile.TemporaryDirectory() as folder:
             report = prepare(ROOT, Path(folder))
-        for field in ['inputChecksums', 'inputs', 'evidenceSha256']:
+        for field in ['inputChecksums', 'inputs', 'evidenceSha256', 'qualifiedDeclineFactors']:
             self.assertEqual(report[field], pinned[field])
         self.assertEqual(report['positiveDiscardCellsPerRole'], 165295)
         self.assertLess(report['maximumQuantizationError'], 1e-12)

@@ -27,6 +27,10 @@ Minimum exported weight is 617,701; even the worst two-card combination ratio
 cannot round it to zero. Maximum probability change is 6.01e-13. Keep weights
 retain their existing integer precision. The factor adapter adds attributable
 cohort metadata while preserving the qualified factor values.
+The dedicated decline validator checks registered source hashes, corrected 13.1
+snapshots, excluded lead sources, and reconciliation of source/model counts.
+The builder additionally requires the exact reviewed factor snapshot, so a broad
+model-version allowlist cannot admit an unqualified replacement.
 
 The builder now reads the complete hold and qualified factor formats directly,
 with empirical depletion and positive soft support in both optimized and direct
