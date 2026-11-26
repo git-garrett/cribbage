@@ -15,7 +15,7 @@ SETUP = Path(__file__).resolve().parent
 def upgrade(root):
     root = Path(root)
     assert read(SETUP / 'build.json')['status'] == 'complete'
-    assert read(SETUP / 'validation.json')['status'] == 'complete'
+    assert read(SETUP / 'validate.json')['status'] == 'complete'
     assert not (SETUP / 'upgrade.json').exists(), 'This native upgrade is already installed'
     targets = ['collect.py', 'hybrid.py', 'teacher/teacher-env', 'teacher/plan.json']
     backup = SETUP / 'backup'
@@ -52,7 +52,7 @@ def upgrade(root):
             temporary.replace(target)
         plan = read(root / 'teacher/plan.json')
         plan.update(teacherBinarySha256=sha(root / 'teacher/teacher-env'),
-                    maximumWorkers=read(SETUP / 'parallel-validation.json')['workers'],
+                    maximumWorkers=read(SETUP / 'parallel-validation.json')['workerCapacity'],
                     nativeWorkerUpgrade=str(SETUP / 'parallel-validation.json'))
         # The immutable Ace policy/assets and validated decisions retain their
         # teacher identity; executable provenance is tracked separately.
@@ -61,16 +61,23 @@ def upgrade(root):
              maximumWorkers=plan['maximumWorkers'], teacherIdentity=plan['teacherIdentity'], at=time.time()))
         success = True
     finally:
-        if not success:
-            for name in targets:
-                shutil.copy2(backup / name, root / name)
-        (root / 'STOP-COLLECT').unlink(missing_ok=True)
-        (root / 'teacher/stopped.json').unlink(missing_ok=True)
-        subprocess.run([sys.executable, str(runner), 'install', str(spec)], check=True)
-        config = read(spec)
-        label = 'com.strongcribbage.job.' + config['jobId']
-        plist = Path(config['jobRoot']) / (label + '.plist')
-        shutil.copy2(plist, Path.home() / 'Library/LaunchAgents' / plist.name)
+        try:
+            if not success:
+                for name in targets:
+                    target = root / name
+                    temporary = target.with_name(target.name + '.native-rollback')
+                    shutil.copy2(backup / name, temporary)
+                    temporary.replace(target)
+        finally:
+            # Restart remains independent of rollback-copy errors. Shared Python
+            # modules are always replaced atomically while training continues.
+            (root / 'STOP-COLLECT').unlink(missing_ok=True)
+            (root / 'teacher/stopped.json').unlink(missing_ok=True)
+            subprocess.run([sys.executable, str(runner), 'install', str(spec)], check=True)
+            config = read(spec)
+            label = 'com.strongcribbage.job.' + config['jobId']
+            plist = Path(config['jobRoot']) / (label + '.plist')
+            shutil.copy2(plist, Path.home() / 'Library/LaunchAgents' / plist.name)
     save(SETUP / 'upgrade.json', dict(status='complete', collector='resumed', training='continued', at=time.time()))
 
 

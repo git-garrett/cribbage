@@ -100,6 +100,9 @@ class HybridTests(unittest.TestCase):
             h.save(ledger, data)
         self.assertEqual(h.read(ledger)['allocations'], {'other': 9, 'gpu': 1})
         self.assertEqual(h.read(ledger)['workers'], 10)
+        h.save(ledger, dict(workers=2, allocations={'user-workday-headroom': 1, 'gpu': 1}))
+        with h.reserve_workers(ledger, 'ace', 11, 12) as workers:
+            self.assertEqual(workers, 10, 'Do not double-reserve foreground headroom')
         h.save(ledger, dict(workers=11, allocations={'other': 11}))
         with h.reserve_workers(ledger, 'ace', 11, 12) as workers:
             self.assertEqual(workers, 0)

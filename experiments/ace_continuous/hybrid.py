@@ -100,7 +100,8 @@ def reserve_workers(ledger, prefix, maximum, cpu_count):
             fcntl.flock(lock, fcntl.LOCK_EX)
             data = read(ledger)
             assert data['workers'] == sum(data['allocations'].values())
-            count = max(0, min(maximum, max(1, cpu_count - 1) - data['workers']))
+            headroom = 0 if data['allocations'].get('user-workday-headroom', 0) else int(cpu_count > 1)
+            count = max(0, min(maximum, cpu_count - headroom - data['workers']))
             proposed = [f'{prefix}-{i}' for i in range(count)]
             assert not any(key in data['allocations'] for key in proposed), 'Collector reservations already owned'
             for key in proposed:

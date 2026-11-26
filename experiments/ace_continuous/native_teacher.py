@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 
-from hybrid import native_worker_limit, read, save
+from hybrid import native_worker_limit, read, save, reserve_workers
 
 OLD = '''            let workers=v["workers"].as_u64().unwrap_or(8) as usize;
             if workers==0 || workers>8 {return Err("invalid teacher workers".into());}'''
@@ -104,18 +104,17 @@ def validate(setup, live, parallel=False):
     binary = setup / 'teacher-env'
     assert sha(binary) == read(setup / 'build.json')['sha256']
     sys.path.insert(0, str(live / 'model31/source'))
-    from resources import one_cpu
-    from contextlib import ExitStack
+    from resources import LEDGER
     # Initial preflight uses only two concurrent arenas. The deployment probe
     # exercises the full budget after the old collector reaches its stop.
-    workers = max(1, (os.cpu_count() or 12) - 1)
-    count = workers if parallel else 2
-    with ExitStack() as stack:
-        for i in range(count):
-            stack.enter_context(one_cpu(setup.name + f'-validate-{i}'))
+    capacity = max(1, (os.cpu_count() or 12) - 1)
+    requested = capacity if parallel else min(2, capacity)
+    with reserve_workers(LEDGER, setup.name + '-validate', requested, os.cpu_count() or 12) as count:
+        assert count > 0, 'No CPU capacity for native validation'
+        workers = count if parallel else capacity
         clients = [Native(live / 'teacher/teacher-env'), Native(binary)]
         try:
-            assert native_worker_limit(clients[1].call, workers) == workers
+            assert native_worker_limit(clients[1].call, capacity) == capacity
             reset = dict(kind='reset', workers=1, ace=False, nativeModel='schell_table-peg_table-28.3.fast',
                          games=[dict(seed=8110403+i, orientation=i%2) for i in range(count)])
             states = [c.call(reset) for c in clients]
@@ -132,8 +131,8 @@ def validate(setup, live, parallel=False):
         finally:
             for client in clients:
                 client.close()
-    save(setup / ('parallel-validation.json' if parallel else 'validation.json'), dict(status='complete',
-         workers=workers, simultaneousArenas=count, decisions=checked, originalActionsIdentical=True,
+    save(setup / ('parallel-validation.json' if parallel else 'validate.json'), dict(status='complete',
+         workers=workers, workerCapacity=capacity, simultaneousArenas=count, decisions=checked, originalActionsIdentical=True,
          teacherIdentity=plan['teacherIdentity'], binarySha256=sha(binary), at=time.time()))
 
 
