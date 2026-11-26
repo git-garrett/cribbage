@@ -1,5 +1,8 @@
 #[path = "model283_counting.rs"]
 mod score_block_counting;
+#[cfg(test)]
+#[path = "model284_late_decisions.rs"]
+mod late_decision_tests;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;

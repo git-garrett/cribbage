@@ -1,0 +1,2147 @@
+{
+  "passed": true,
+  "positions": [
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 0.13778866651633198,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 111,
+      "reference": {
+        "card": 4,
+        "ev": 0.06237817930380198,
+        "wp": 1.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 0.13778866651633198,
+        "wp": 0.9936472596967963
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 111,
+      "reference": {
+        "card": 4,
+        "ev": 0.06237817930380198,
+        "wp": 0.9943664741769588
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 0,
+        "ev": 1.5266038028803925,
+        "wp": 0.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 111,
+      "reference": {
+        "card": 0,
+        "ev": 1.4799114937014086,
+        "wp": 0.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 0.13778866651633198,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 112,
+      "reference": {
+        "card": 4,
+        "ev": 0.06237817930380198,
+        "wp": 1.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 0.13778866651633198,
+        "wp": 0.9936472596967963
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 112,
+      "reference": {
+        "card": 4,
+        "ev": 0.06237817930380198,
+        "wp": 0.9943664741769588
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 0,
+        "ev": 1.5266038028803925,
+        "wp": 0.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 112,
+      "reference": {
+        "card": 0,
+        "ev": 1.4799114937014086,
+        "wp": 0.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 0.13778866651633198,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 113,
+      "reference": {
+        "card": 4,
+        "ev": 0.06237817930380198,
+        "wp": 1.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 0.13778866651633198,
+        "wp": 0.9936472596967963
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 113,
+      "reference": {
+        "card": 4,
+        "ev": 0.06237817930380198,
+        "wp": 0.9943664741769588
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 0,
+        "ev": 1.5266038028803925,
+        "wp": 0.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 113,
+      "reference": {
+        "card": 0,
+        "ev": 1.4799114937014086,
+        "wp": 0.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 0.13778866651633198,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 114,
+      "reference": {
+        "card": 4,
+        "ev": 0.06237817930380198,
+        "wp": 1.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 0.13778866651633198,
+        "wp": 0.9936472596967963
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 114,
+      "reference": {
+        "card": 4,
+        "ev": 0.06237817930380198,
+        "wp": 0.9943664741769588
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 0,
+        "ev": 1.5266038028803925,
+        "wp": 0.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 114,
+      "reference": {
+        "card": 0,
+        "ev": 1.4799114937014086,
+        "wp": 0.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 0.13778866651633198,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 115,
+      "reference": {
+        "card": 4,
+        "ev": 0.06237817930380198,
+        "wp": 1.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 0.13778866651633198,
+        "wp": 0.9936472596967963
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 115,
+      "reference": {
+        "card": 4,
+        "ev": 0.06237817930380198,
+        "wp": 0.9943664741769588
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 0,
+        "ev": 1.5266038028803925,
+        "wp": 0.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 115,
+      "reference": {
+        "card": 0,
+        "ev": 1.4799114937014086,
+        "wp": 0.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 0.13778866651633198,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 116,
+      "reference": {
+        "card": 4,
+        "ev": 0.06237817930380198,
+        "wp": 1.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 0.13778866651633198,
+        "wp": 0.9936472596967963
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 116,
+      "reference": {
+        "card": 4,
+        "ev": 0.06237817930380198,
+        "wp": 0.9943664741769588
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 0,
+        "ev": 1.5266038028803925,
+        "wp": 0.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 116,
+      "reference": {
+        "card": 0,
+        "ev": 1.4799114937014086,
+        "wp": 0.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 0,
+        "ev": 1.509551484426548,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 117,
+      "reference": {
+        "card": 0,
+        "ev": 1.5415555290980703,
+        "wp": 1.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 0.13778866651633198,
+        "wp": 0.9936472596967963
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 117,
+      "reference": {
+        "card": 4,
+        "ev": 0.06237817930380198,
+        "wp": 0.9943664741769588
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 0.13778866651633198,
+        "wp": 0.03603535170488391
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 117,
+      "reference": {
+        "card": 4,
+        "ev": 0.06237817930380198,
+        "wp": 0.017002926281710812
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 0,
+        "ev": 2.000119935602057,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 118,
+      "reference": {
+        "card": 0,
+        "ev": 2.0044640965177685,
+        "wp": 1.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 0.10175331481144809,
+        "wp": 0.9936472596967963
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 118,
+      "reference": {
+        "card": 4,
+        "ev": 0.04537525302209117,
+        "wp": 0.9943664741769588
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 0,
+        "ev": 2.053207605760785,
+        "wp": 0.5266038028803927
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 118,
+      "reference": {
+        "card": 0,
+        "ev": 1.9598229874028175,
+        "wp": 0.4799114937014087
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 0,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 119,
+      "reference": {
+        "card": 0,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 0,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 119,
+      "reference": {
+        "card": 0,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 0,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 119,
+      "reference": {
+        "card": 0,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 0,
+        "ev": 1.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 120,
+      "reference": {
+        "card": 0,
+        "ev": 1.0,
+        "wp": 1.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 0,
+        "ev": 1.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 120,
+      "reference": {
+        "card": 0,
+        "ev": 1.0,
+        "wp": 1.0
+      },
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 0,
+        "ev": 1.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 120,
+      "reference": {
+        "card": 0,
+        "ev": 1.0,
+        "wp": 1.0
+      },
+      "role": "dealer"
+    },
+    {
+      "kind": "certain-31-scoreout",
+      "otherScore": 120,
+      "ownScore": 119,
+      "passed": true,
+      "role": "dealer"
+    },
+    {
+      "kind": "certain-31-scoreout",
+      "otherScore": 120,
+      "ownScore": 120,
+      "passed": true,
+      "role": "dealer"
+    },
+    {
+      "candidate": {
+        "card": 9,
+        "ev": -2.275167193201775,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 111,
+      "reference": {
+        "card": 9,
+        "ev": -2.120503283187459,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 9,
+        "ev": -2.275118239863951,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 111,
+      "reference": {
+        "card": 9,
+        "ev": -2.1204353097272013,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 3.0,
+        "wp": 0.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 111,
+      "reference": {
+        "card": 4,
+        "ev": 3.0,
+        "wp": 0.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 9,
+        "ev": -2.274116049256686,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 112,
+      "reference": {
+        "card": 9,
+        "ev": -2.120260773160364,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 9,
+        "ev": -2.2750827738195545,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 112,
+      "reference": {
+        "card": 9,
+        "ev": -2.1203860638562064,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 3.0,
+        "wp": 0.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 112,
+      "reference": {
+        "card": 4,
+        "ev": 3.0,
+        "wp": 0.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 9,
+        "ev": -2.273972507192752,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 113,
+      "reference": {
+        "card": 9,
+        "ev": -2.1197509604793914,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 9,
+        "ev": -2.2750827738195545,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 113,
+      "reference": {
+        "card": 9,
+        "ev": -2.1203860638562064,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 3.0044711481329642,
+        "wp": 0.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 113,
+      "reference": {
+        "card": 4,
+        "ev": 3.006208349081619,
+        "wp": 0.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 9,
+        "ev": -2.2745002705672137,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 114,
+      "reference": {
+        "card": 9,
+        "ev": -2.1200614598711827,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 9,
+        "ev": -2.2744158511849935,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 114,
+      "reference": {
+        "card": 9,
+        "ev": -2.120143553829111,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 3.0044711481329642,
+        "wp": 0.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 114,
+      "reference": {
+        "card": 4,
+        "ev": 3.006208349081619,
+        "wp": 0.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 9,
+        "ev": -2.209787775043696,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 115,
+      "reference": {
+        "card": 9,
+        "ev": -2.116393636156674,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 9,
+        "ev": -2.2700568684501206,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 115,
+      "reference": {
+        "card": 9,
+        "ev": -2.11983305443732,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 3.0096753274224652,
+        "wp": 0.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 115,
+      "reference": {
+        "card": 4,
+        "ev": 3.0134345381390464,
+        "wp": 0.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 9,
+        "ev": -2.211017927097115,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 116,
+      "reference": {
+        "card": 9,
+        "ev": -2.116995891446556,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 9,
+        "ev": -2.2711434784396056,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 116,
+      "reference": {
+        "card": 9,
+        "ev": -2.1204353097272013,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 3.0,
+        "wp": 0.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 116,
+      "reference": {
+        "card": 4,
+        "ev": 3.0,
+        "wp": 0.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 4.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 117,
+      "reference": {
+        "card": 4,
+        "ev": 4.0,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 4.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 117,
+      "reference": {
+        "card": 4,
+        "ev": 4.0,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 4.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 117,
+      "reference": {
+        "card": 4,
+        "ev": 4.0,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 3.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 118,
+      "reference": {
+        "card": 4,
+        "ev": 3.0,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 3.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 118,
+      "reference": {
+        "card": 4,
+        "ev": 3.0,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 3.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 118,
+      "reference": {
+        "card": 4,
+        "ev": 3.0,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 119,
+      "reference": {
+        "card": 4,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 119,
+      "reference": {
+        "card": 4,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 119,
+      "reference": {
+        "card": 4,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 1.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 111,
+      "ownScore": 120,
+      "reference": {
+        "card": 4,
+        "ev": 1.0,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 1.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 115,
+      "ownScore": 120,
+      "reference": {
+        "card": 4,
+        "ev": 1.0,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": 1.0,
+        "wp": 1.0
+      },
+      "kind": "two-card-continuation",
+      "otherScore": 120,
+      "ownScore": 120,
+      "reference": {
+        "card": 4,
+        "ev": 1.0,
+        "wp": 1.0
+      },
+      "role": "pone"
+    },
+    {
+      "kind": "certain-31-scoreout",
+      "otherScore": 120,
+      "ownScore": 119,
+      "passed": true,
+      "role": "pone"
+    },
+    {
+      "kind": "certain-31-scoreout",
+      "otherScore": 120,
+      "ownScore": 120,
+      "passed": true,
+      "role": "pone"
+    },
+    {
+      "candidate": {
+        "card": 43,
+        "ev": 0.7158412060654604,
+        "wp": 0.39562144337999866
+      },
+      "gameSeed": 4012349574,
+      "kind": "varied-legal-prefix",
+      "otherScore": 112,
+      "ownScore": 113,
+      "reference": {
+        "card": 43,
+        "ev": 0.6836357881814883,
+        "wp": 0.3450158296712982
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 113, human_score: 112, ai_hand: [Card { id: 43, rank: 4, suit: 3, value: 5 }, Card { id: 28, rank: 2, suit: 2, value: 3 }], ai_table: [Card { id: 19, rank: 6, suit: 1, value: 7 }, Card { id: 44, rank: 5, suit: 3, value: 6 }], human_table: [Card { id: 16, rank: 3, suit: 1, value: 4 }, Card { id: 5, rank: 5, suit: 0, value: 6 }, Card { id: 6, rank: 6, suit: 0, value: 7 }], human_hand_count: 1, own_discards: [Card { id: 36, rank: 10, suit: 2, value: 10 }, Card { id: 41, rank: 2, suit: 3, value: 3 }], turn_card: Card { id: 29, rank: 3, suit: 2, value: 4 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [OpponentPlay(3), SelfPlay(6), OpponentPlay(5), SelfPlay(5), OpponentPlay(6), SelfGo, OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 12753240172381601896 }"
+    },
+    {
+      "candidate": {
+        "card": 44,
+        "ev": 0.0,
+        "wp": 0.9996659788326526
+      },
+      "gameSeed": 2070336464,
+      "kind": "varied-legal-prefix",
+      "otherScore": 113,
+      "ownScore": 111,
+      "reference": {
+        "card": 44,
+        "ev": 0.0,
+        "wp": 0.9996344682992477
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 111, human_score: 113, ai_hand: [Card { id: 44, rank: 5, suit: 3, value: 6 }, Card { id: 15, rank: 2, suit: 1, value: 3 }], ai_table: [Card { id: 10, rank: 10, suit: 0, value: 10 }, Card { id: 17, rank: 4, suit: 1, value: 5 }], human_table: [Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 39, rank: 0, suit: 3, value: 1 }], human_hand_count: 2, own_discards: [Card { id: 28, rank: 2, suit: 2, value: 3 }, Card { id: 30, rank: 4, suit: 2, value: 5 }], turn_card: Card { id: 16, rank: 3, suit: 1, value: 4 }, count: 24, turn: Ai, go_player: Some(Human), last_player: Some(Ai), plays: [Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 10, rank: 10, suit: 0, value: 10 }, Card { id: 39, rank: 0, suit: 3, value: 1 }, Card { id: 17, rank: 4, suit: 1, value: 5 }], public_history: [OpponentPlay(7), SelfPlay(10), OpponentPlay(0), SelfPlay(4), OpponentGo], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 16034820101077991528 }"
+    },
+    {
+      "candidate": {
+        "card": 17,
+        "ev": 1.2546344876414348,
+        "wp": 1.0
+      },
+      "gameSeed": 2038373266,
+      "kind": "varied-legal-prefix",
+      "otherScore": 111,
+      "ownScore": 114,
+      "reference": {
+        "card": 17,
+        "ev": 1.2765174411218918,
+        "wp": 1.0
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 114, human_score: 111, ai_hand: [Card { id: 17, rank: 4, suit: 1, value: 5 }, Card { id: 6, rank: 6, suit: 0, value: 7 }], ai_table: [Card { id: 41, rank: 2, suit: 3, value: 3 }, Card { id: 31, rank: 5, suit: 2, value: 6 }], human_table: [Card { id: 9, rank: 9, suit: 0, value: 10 }, Card { id: 29, rank: 3, suit: 2, value: 4 }], human_hand_count: 2, own_discards: [Card { id: 3, rank: 3, suit: 0, value: 4 }, Card { id: 40, rank: 1, suit: 3, value: 2 }], turn_card: Card { id: 35, rank: 9, suit: 2, value: 10 }, count: 23, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 41, rank: 2, suit: 3, value: 3 }, Card { id: 9, rank: 9, suit: 0, value: 10 }, Card { id: 31, rank: 5, suit: 2, value: 6 }, Card { id: 29, rank: 3, suit: 2, value: 4 }], public_history: [SelfPlay(2), OpponentPlay(9), SelfPlay(5), OpponentPlay(3)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 2101370092146131316 }"
+    },
+    {
+      "candidate": {
+        "card": 34,
+        "ev": -1.4137209176706707,
+        "wp": 0.19978606881794972
+      },
+      "gameSeed": 4029735659,
+      "kind": "varied-legal-prefix",
+      "otherScore": 111,
+      "ownScore": 115,
+      "reference": {
+        "card": 34,
+        "ev": -1.4274193313100703,
+        "wp": 0.16956129292944297
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 115, human_score: 111, ai_hand: [Card { id: 34, rank: 8, suit: 2, value: 9 }, Card { id: 19, rank: 6, suit: 1, value: 7 }], ai_table: [Card { id: 0, rank: 0, suit: 0, value: 1 }, Card { id: 45, rank: 6, suit: 3, value: 7 }], human_table: [Card { id: 42, rank: 3, suit: 3, value: 4 }, Card { id: 40, rank: 1, suit: 3, value: 2 }], human_hand_count: 2, own_discards: [Card { id: 18, rank: 5, suit: 1, value: 6 }, Card { id: 20, rank: 7, suit: 1, value: 8 }], turn_card: Card { id: 24, rank: 11, suit: 1, value: 10 }, count: 14, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 0, rank: 0, suit: 0, value: 1 }, Card { id: 42, rank: 3, suit: 3, value: 4 }, Card { id: 45, rank: 6, suit: 3, value: 7 }, Card { id: 40, rank: 1, suit: 3, value: 2 }], public_history: [SelfPlay(0), OpponentPlay(3), SelfPlay(6), OpponentPlay(1)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 11714322038142271860 }"
+    },
+    {
+      "candidate": {
+        "card": 42,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "gameSeed": 3161358060,
+      "kind": "varied-legal-prefix",
+      "otherScore": 111,
+      "ownScore": 119,
+      "reference": {
+        "card": 42,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 119, human_score: 111, ai_hand: [Card { id: 35, rank: 9, suit: 2, value: 10 }, Card { id: 42, rank: 3, suit: 3, value: 4 }], ai_table: [Card { id: 29, rank: 3, suit: 2, value: 4 }, Card { id: 15, rank: 2, suit: 1, value: 3 }], human_table: [Card { id: 41, rank: 2, suit: 3, value: 3 }, Card { id: 40, rank: 1, suit: 3, value: 2 }], human_hand_count: 2, own_discards: [Card { id: 31, rank: 5, suit: 2, value: 6 }, Card { id: 8, rank: 8, suit: 0, value: 9 }], turn_card: Card { id: 44, rank: 5, suit: 3, value: 6 }, count: 12, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 29, rank: 3, suit: 2, value: 4 }, Card { id: 41, rank: 2, suit: 3, value: 3 }, Card { id: 15, rank: 2, suit: 1, value: 3 }, Card { id: 40, rank: 1, suit: 3, value: 2 }], public_history: [SelfPlay(3), OpponentPlay(2), SelfPlay(2), OpponentPlay(1)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 12422712250064699764 }"
+    },
+    {
+      "candidate": {
+        "card": 5,
+        "ev": -1.814524397320288,
+        "wp": 1.0
+      },
+      "gameSeed": 2625200316,
+      "kind": "varied-legal-prefix",
+      "otherScore": 111,
+      "ownScore": 118,
+      "reference": {
+        "card": 5,
+        "ev": -1.5686357093963967,
+        "wp": 1.0
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 118, human_score: 111, ai_hand: [Card { id: 5, rank: 5, suit: 0, value: 6 }, Card { id: 43, rank: 4, suit: 3, value: 5 }], ai_table: [Card { id: 27, rank: 1, suit: 2, value: 2 }, Card { id: 39, rank: 0, suit: 3, value: 1 }], human_table: [Card { id: 35, rank: 9, suit: 2, value: 10 }, Card { id: 29, rank: 3, suit: 2, value: 4 }], human_hand_count: 2, own_discards: [Card { id: 2, rank: 2, suit: 0, value: 3 }, Card { id: 26, rank: 0, suit: 2, value: 1 }], turn_card: Card { id: 3, rank: 3, suit: 0, value: 4 }, count: 17, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 27, rank: 1, suit: 2, value: 2 }, Card { id: 35, rank: 9, suit: 2, value: 10 }, Card { id: 39, rank: 0, suit: 3, value: 1 }, Card { id: 29, rank: 3, suit: 2, value: 4 }], public_history: [SelfPlay(1), OpponentPlay(9), SelfPlay(0), OpponentPlay(3)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 9291851859180388724 }"
+    },
+    {
+      "candidate": {
+        "card": 15,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "gameSeed": 1613751532,
+      "kind": "varied-legal-prefix",
+      "otherScore": 111,
+      "ownScore": 119,
+      "reference": {
+        "card": 15,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 119, human_score: 111, ai_hand: [Card { id: 15, rank: 2, suit: 1, value: 3 }, Card { id: 47, rank: 8, suit: 3, value: 9 }], ai_table: [Card { id: 3, rank: 3, suit: 0, value: 4 }, Card { id: 40, rank: 1, suit: 3, value: 2 }], human_table: [Card { id: 5, rank: 5, suit: 0, value: 6 }, Card { id: 43, rank: 4, suit: 3, value: 5 }], human_hand_count: 2, own_discards: [Card { id: 21, rank: 8, suit: 1, value: 9 }, Card { id: 9, rank: 9, suit: 0, value: 10 }], turn_card: Card { id: 11, rank: 11, suit: 0, value: 10 }, count: 17, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 3, rank: 3, suit: 0, value: 4 }, Card { id: 5, rank: 5, suit: 0, value: 6 }, Card { id: 40, rank: 1, suit: 3, value: 2 }, Card { id: 43, rank: 4, suit: 3, value: 5 }], public_history: [SelfPlay(3), OpponentPlay(5), SelfPlay(1), OpponentPlay(4)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 6246515743312052596 }"
+    },
+    {
+      "candidate": {
+        "card": 17,
+        "ev": 2.6416688527970744,
+        "wp": 0.06919160275743438
+      },
+      "gameSeed": 1059578406,
+      "kind": "varied-legal-prefix",
+      "otherScore": 113,
+      "ownScore": 111,
+      "reference": {
+        "card": 17,
+        "ev": 1.9917969975105214,
+        "wp": 0.046031531386719615
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 111, human_score: 113, ai_hand: [Card { id: 31, rank: 5, suit: 2, value: 6 }, Card { id: 17, rank: 4, suit: 1, value: 5 }], ai_table: [Card { id: 46, rank: 7, suit: 3, value: 8 }, Card { id: 28, rank: 2, suit: 2, value: 3 }], human_table: [Card { id: 22, rank: 9, suit: 1, value: 10 }, Card { id: 20, rank: 7, suit: 1, value: 8 }, Card { id: 0, rank: 0, suit: 0, value: 1 }], human_hand_count: 1, own_discards: [Card { id: 50, rank: 11, suit: 3, value: 10 }, Card { id: 13, rank: 0, suit: 1, value: 1 }], turn_card: Card { id: 35, rank: 9, suit: 2, value: 10 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [SelfPlay(7), OpponentPlay(9), SelfPlay(2), OpponentPlay(7), SelfGo, OpponentPlay(0), OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 5059180645742281076 }"
+    },
+    {
+      "candidate": {
+        "card": 50,
+        "ev": -2.5494894608671417,
+        "wp": 0.0000455441401319288
+      },
+      "gameSeed": 2388973112,
+      "kind": "varied-legal-prefix",
+      "otherScore": 114,
+      "ownScore": 112,
+      "reference": {
+        "card": 50,
+        "ev": -2.6933790001917055,
+        "wp": 0.00005895368188708014
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 112, human_score: 114, ai_hand: [Card { id: 50, rank: 11, suit: 3, value: 10 }, Card { id: 32, rank: 6, suit: 2, value: 7 }], ai_table: [Card { id: 40, rank: 1, suit: 3, value: 2 }, Card { id: 16, rank: 3, suit: 1, value: 4 }], human_table: [Card { id: 27, rank: 1, suit: 2, value: 2 }, Card { id: 5, rank: 5, suit: 0, value: 6 }], human_hand_count: 2, own_discards: [Card { id: 17, rank: 4, suit: 1, value: 5 }, Card { id: 22, rank: 9, suit: 1, value: 10 }], turn_card: Card { id: 25, rank: 12, suit: 1, value: 10 }, count: 14, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 40, rank: 1, suit: 3, value: 2 }, Card { id: 27, rank: 1, suit: 2, value: 2 }, Card { id: 16, rank: 3, suit: 1, value: 4 }, Card { id: 5, rank: 5, suit: 0, value: 6 }], public_history: [SelfPlay(1), OpponentPlay(1), SelfPlay(3), OpponentPlay(5)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 11495474285972029812 }"
+    },
+    {
+      "candidate": {
+        "card": 50,
+        "ev": -0.6088997828933574,
+        "wp": 0.23023560995220615
+      },
+      "gameSeed": 57528318,
+      "kind": "varied-legal-prefix",
+      "otherScore": 114,
+      "ownScore": 113,
+      "reference": {
+        "card": 50,
+        "ev": -0.5005057240355131,
+        "wp": 0.21145793608323774
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 113, human_score: 114, ai_hand: [Card { id: 40, rank: 1, suit: 3, value: 2 }, Card { id: 50, rank: 11, suit: 3, value: 10 }], ai_table: [Card { id: 41, rank: 2, suit: 3, value: 3 }, Card { id: 18, rank: 5, suit: 1, value: 6 }], human_table: [Card { id: 6, rank: 6, suit: 0, value: 7 }, Card { id: 15, rank: 2, suit: 1, value: 3 }], human_hand_count: 2, own_discards: [Card { id: 5, rank: 5, suit: 0, value: 6 }, Card { id: 1, rank: 1, suit: 0, value: 2 }], turn_card: Card { id: 49, rank: 10, suit: 3, value: 10 }, count: 19, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 41, rank: 2, suit: 3, value: 3 }, Card { id: 6, rank: 6, suit: 0, value: 7 }, Card { id: 18, rank: 5, suit: 1, value: 6 }, Card { id: 15, rank: 2, suit: 1, value: 3 }], public_history: [SelfPlay(2), OpponentPlay(6), SelfPlay(5), OpponentPlay(2)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 6429715932645425524 }"
+    },
+    {
+      "candidate": {
+        "card": 18,
+        "ev": -0.22278916106736035,
+        "wp": 0.08542062579157349
+      },
+      "gameSeed": 3704020898,
+      "kind": "varied-legal-prefix",
+      "otherScore": 112,
+      "ownScore": 114,
+      "reference": {
+        "card": 18,
+        "ev": -0.27795532773025117,
+        "wp": 0.06679344088783755
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 114, human_score: 112, ai_hand: [Card { id: 42, rank: 3, suit: 3, value: 4 }, Card { id: 18, rank: 5, suit: 1, value: 6 }], ai_table: [Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 44, rank: 5, suit: 3, value: 6 }], human_table: [Card { id: 14, rank: 1, suit: 1, value: 2 }, Card { id: 39, rank: 0, suit: 3, value: 1 }], human_hand_count: 2, own_discards: [Card { id: 26, rank: 0, suit: 2, value: 1 }, Card { id: 1, rank: 1, suit: 0, value: 2 }], turn_card: Card { id: 16, rank: 3, suit: 1, value: 4 }, count: 17, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 14, rank: 1, suit: 1, value: 2 }, Card { id: 44, rank: 5, suit: 3, value: 6 }, Card { id: 39, rank: 0, suit: 3, value: 1 }], public_history: [SelfPlay(7), OpponentPlay(1), SelfPlay(5), OpponentPlay(0)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 2882153433836552564 }"
+    },
+    {
+      "candidate": {
+        "card": 40,
+        "ev": 0.3846437505310982,
+        "wp": 0.9968290700799329
+      },
+      "gameSeed": 1422888779,
+      "kind": "varied-legal-prefix",
+      "otherScore": 112,
+      "ownScore": 115,
+      "reference": {
+        "card": 28,
+        "ev": -1.5298720994903676,
+        "wp": 0.9989051697139192
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 115, human_score: 112, ai_hand: [Card { id: 40, rank: 1, suit: 3, value: 2 }, Card { id: 28, rank: 2, suit: 2, value: 3 }], ai_table: [Card { id: 14, rank: 1, suit: 1, value: 2 }, Card { id: 22, rank: 9, suit: 1, value: 10 }], human_table: [Card { id: 45, rank: 6, suit: 3, value: 7 }, Card { id: 27, rank: 1, suit: 2, value: 2 }], human_hand_count: 2, own_discards: [Card { id: 16, rank: 3, suit: 1, value: 4 }, Card { id: 20, rank: 7, suit: 1, value: 8 }], turn_card: Card { id: 13, rank: 0, suit: 1, value: 1 }, count: 21, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 14, rank: 1, suit: 1, value: 2 }, Card { id: 45, rank: 6, suit: 3, value: 7 }, Card { id: 22, rank: 9, suit: 1, value: 10 }, Card { id: 27, rank: 1, suit: 2, value: 2 }], public_history: [SelfPlay(1), OpponentPlay(6), SelfPlay(9), OpponentPlay(1)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 11347922844886499700 }"
+    },
+    {
+      "candidate": {
+        "card": 33,
+        "ev": -1.848361482147184,
+        "wp": 0.3796333364878066
+      },
+      "gameSeed": 3546356001,
+      "kind": "varied-legal-prefix",
+      "otherScore": 112,
+      "ownScore": 116,
+      "reference": {
+        "card": 33,
+        "ev": -1.862805006435116,
+        "wp": 0.37924170564358567
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 116, human_score: 112, ai_hand: [Card { id: 33, rank: 7, suit: 2, value: 8 }, Card { id: 12, rank: 12, suit: 0, value: 10 }], ai_table: [Card { id: 0, rank: 0, suit: 0, value: 1 }, Card { id: 4, rank: 4, suit: 0, value: 5 }], human_table: [Card { id: 27, rank: 1, suit: 2, value: 2 }, Card { id: 8, rank: 8, suit: 0, value: 9 }], human_hand_count: 2, own_discards: [Card { id: 46, rank: 7, suit: 3, value: 8 }, Card { id: 37, rank: 11, suit: 2, value: 10 }], turn_card: Card { id: 48, rank: 9, suit: 3, value: 10 }, count: 17, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 0, rank: 0, suit: 0, value: 1 }, Card { id: 27, rank: 1, suit: 2, value: 2 }, Card { id: 4, rank: 4, suit: 0, value: 5 }, Card { id: 8, rank: 8, suit: 0, value: 9 }], public_history: [SelfPlay(0), OpponentPlay(1), SelfPlay(4), OpponentPlay(8)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 15424298355882197364 }"
+    },
+    {
+      "candidate": {
+        "card": 5,
+        "ev": -1.5209031553993262,
+        "wp": 1.0
+      },
+      "gameSeed": 3648320537,
+      "kind": "varied-legal-prefix",
+      "otherScore": 113,
+      "ownScore": 117,
+      "reference": {
+        "card": 5,
+        "ev": -1.6151286511721843,
+        "wp": 1.0
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 117, human_score: 113, ai_hand: [Card { id: 27, rank: 1, suit: 2, value: 2 }, Card { id: 5, rank: 5, suit: 0, value: 6 }], ai_table: [Card { id: 22, rank: 9, suit: 1, value: 10 }, Card { id: 14, rank: 1, suit: 1, value: 2 }], human_table: [Card { id: 46, rank: 7, suit: 3, value: 8 }, Card { id: 11, rank: 11, suit: 0, value: 10 }], human_hand_count: 2, own_discards: [Card { id: 49, rank: 10, suit: 3, value: 10 }, Card { id: 7, rank: 7, suit: 0, value: 8 }], turn_card: Card { id: 21, rank: 8, suit: 1, value: 9 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [SelfPlay(9), OpponentPlay(7), SelfPlay(1), OpponentPlay(11), SelfGo, OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 13291947114616586612 }"
+    },
+    {
+      "candidate": {
+        "card": 34,
+        "ev": 1.1949464766353912,
+        "wp": 1.0
+      },
+      "gameSeed": 2370030836,
+      "kind": "varied-legal-prefix",
+      "otherScore": 113,
+      "ownScore": 118,
+      "reference": {
+        "card": 34,
+        "ev": 1.012234707534697,
+        "wp": 1.0
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 118, human_score: 113, ai_hand: [Card { id: 34, rank: 8, suit: 2, value: 9 }, Card { id: 32, rank: 6, suit: 2, value: 7 }], ai_table: [Card { id: 28, rank: 2, suit: 2, value: 3 }, Card { id: 23, rank: 10, suit: 1, value: 10 }], human_table: [Card { id: 42, rank: 3, suit: 3, value: 4 }, Card { id: 11, rank: 11, suit: 0, value: 10 }, Card { id: 26, rank: 0, suit: 2, value: 1 }], human_hand_count: 1, own_discards: [Card { id: 5, rank: 5, suit: 0, value: 6 }, Card { id: 12, rank: 12, suit: 0, value: 10 }], turn_card: Card { id: 4, rank: 4, suit: 0, value: 5 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [SelfPlay(2), OpponentPlay(3), SelfPlay(10), OpponentPlay(11), SelfGo, OpponentPlay(0), OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 4373497767000015220 }"
+    },
+    {
+      "candidate": {
+        "card": 33,
+        "ev": -0.7291497922840962,
+        "wp": 1.0
+      },
+      "gameSeed": 3949052627,
+      "kind": "varied-legal-prefix",
+      "otherScore": 113,
+      "ownScore": 119,
+      "reference": {
+        "card": 33,
+        "ev": -0.7810403795733684,
+        "wp": 1.0
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 119, human_score: 113, ai_hand: [Card { id: 33, rank: 7, suit: 2, value: 8 }, Card { id: 6, rank: 6, suit: 0, value: 7 }], ai_table: [Card { id: 11, rank: 11, suit: 0, value: 10 }, Card { id: 46, rank: 7, suit: 3, value: 8 }], human_table: [Card { id: 32, rank: 6, suit: 2, value: 7 }, Card { id: 16, rank: 3, suit: 1, value: 4 }], human_hand_count: 2, own_discards: [Card { id: 23, rank: 10, suit: 1, value: 10 }, Card { id: 49, rank: 10, suit: 3, value: 10 }], turn_card: Card { id: 14, rank: 1, suit: 1, value: 2 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [SelfPlay(11), OpponentPlay(6), SelfPlay(7), OpponentPlay(3), SelfGo, OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 11377823685646745972 }"
+    },
+    {
+      "candidate": {
+        "card": 33,
+        "ev": -0.8771522545753334,
+        "wp": 1.0
+      },
+      "gameSeed": 957186126,
+      "kind": "varied-legal-prefix",
+      "otherScore": 115,
+      "ownScore": 120,
+      "reference": {
+        "card": 33,
+        "ev": -0.9354906081981791,
+        "wp": 1.0
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 120, human_score: 115, ai_hand: [Card { id: 34, rank: 8, suit: 2, value: 9 }, Card { id: 33, rank: 7, suit: 2, value: 8 }], ai_table: [Card { id: 45, rank: 6, suit: 3, value: 7 }, Card { id: 49, rank: 10, suit: 3, value: 10 }], human_table: [Card { id: 32, rank: 6, suit: 2, value: 7 }, Card { id: 5, rank: 5, suit: 0, value: 6 }], human_hand_count: 2, own_discards: [Card { id: 47, rank: 8, suit: 3, value: 9 }, Card { id: 39, rank: 0, suit: 3, value: 1 }], turn_card: Card { id: 31, rank: 5, suit: 2, value: 6 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [SelfPlay(6), OpponentPlay(6), SelfPlay(10), OpponentPlay(5), SelfGo, OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 14401451829915287924 }"
+    },
+    {
+      "candidate": {
+        "card": 34,
+        "ev": 0.058491639673354745,
+        "wp": 0.0010602497794680473
+      },
+      "gameSeed": 2129333995,
+      "kind": "varied-legal-prefix",
+      "otherScore": 114,
+      "ownScore": 111,
+      "reference": {
+        "card": 34,
+        "ev": -0.2406775472254833,
+        "wp": 0.0010150908616609752
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 111, human_score: 114, ai_hand: [Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 34, rank: 8, suit: 2, value: 9 }], ai_table: [Card { id: 23, rank: 10, suit: 1, value: 10 }, Card { id: 18, rank: 5, suit: 1, value: 6 }], human_table: [Card { id: 48, rank: 9, suit: 3, value: 10 }, Card { id: 0, rank: 0, suit: 0, value: 1 }], human_hand_count: 2, own_discards: [Card { id: 43, rank: 4, suit: 3, value: 5 }, Card { id: 30, rank: 4, suit: 2, value: 5 }], turn_card: Card { id: 39, rank: 0, suit: 3, value: 1 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [SelfPlay(10), OpponentPlay(9), SelfPlay(5), OpponentPlay(0), SelfGo, OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 9261087296201949556 }"
+    },
+    {
+      "candidate": {
+        "card": 6,
+        "ev": -1.1248362646242422,
+        "wp": 1.0
+      },
+      "gameSeed": 1729853623,
+      "kind": "varied-legal-prefix",
+      "otherScore": 113,
+      "ownScore": 115,
+      "reference": {
+        "card": 6,
+        "ev": -1.0542733311336028,
+        "wp": 1.0
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 115, human_score: 113, ai_hand: [Card { id: 42, rank: 3, suit: 3, value: 4 }, Card { id: 6, rank: 6, suit: 0, value: 7 }], ai_table: [Card { id: 40, rank: 1, suit: 3, value: 2 }, Card { id: 46, rank: 7, suit: 3, value: 8 }], human_table: [Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 1, rank: 1, suit: 0, value: 2 }], human_hand_count: 2, own_discards: [Card { id: 2, rank: 2, suit: 0, value: 3 }, Card { id: 4, rank: 4, suit: 0, value: 5 }], turn_card: Card { id: 20, rank: 7, suit: 1, value: 8 }, count: 20, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 40, rank: 1, suit: 3, value: 2 }, Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 46, rank: 7, suit: 3, value: 8 }, Card { id: 1, rank: 1, suit: 0, value: 2 }], public_history: [SelfPlay(1), OpponentPlay(7), SelfPlay(7), OpponentPlay(1)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 7026446993555718516 }"
+    },
+    {
+      "candidate": {
+        "card": 20,
+        "ev": 0.7712765562579205,
+        "wp": 0.006793508824954196
+      },
+      "gameSeed": 1087759096,
+      "kind": "varied-legal-prefix",
+      "otherScore": 113,
+      "ownScore": 116,
+      "reference": {
+        "card": 20,
+        "ev": 0.8516282454173193,
+        "wp": 0.005464257374725301
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 116, human_score: 113, ai_hand: [Card { id: 20, rank: 7, suit: 1, value: 8 }, Card { id: 3, rank: 3, suit: 0, value: 4 }], ai_table: [Card { id: 9, rank: 9, suit: 0, value: 10 }, Card { id: 5, rank: 5, suit: 0, value: 6 }], human_table: [Card { id: 31, rank: 5, suit: 2, value: 6 }, Card { id: 13, rank: 0, suit: 1, value: 1 }], human_hand_count: 2, own_discards: [Card { id: 30, rank: 4, suit: 2, value: 5 }, Card { id: 27, rank: 1, suit: 2, value: 2 }], turn_card: Card { id: 14, rank: 1, suit: 1, value: 2 }, count: 23, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 9, rank: 9, suit: 0, value: 10 }, Card { id: 31, rank: 5, suit: 2, value: 6 }, Card { id: 5, rank: 5, suit: 0, value: 6 }, Card { id: 13, rank: 0, suit: 1, value: 1 }], public_history: [SelfPlay(9), OpponentPlay(5), SelfPlay(5), OpponentPlay(0)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 408060329252094324 }"
+    },
+    {
+      "candidate": {
+        "card": 27,
+        "ev": 1.1437866399939414,
+        "wp": 0.03777297510122557
+      },
+      "gameSeed": 3776894795,
+      "kind": "varied-legal-prefix",
+      "otherScore": 117,
+      "ownScore": 113,
+      "reference": {
+        "card": 27,
+        "ev": 1.1467968317001171,
+        "wp": 0.04574821685581154
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 113, human_score: 117, ai_hand: [Card { id: 27, rank: 1, suit: 2, value: 2 }, Card { id: 44, rank: 5, suit: 3, value: 6 }], ai_table: [Card { id: 8, rank: 8, suit: 0, value: 9 }, Card { id: 40, rank: 1, suit: 3, value: 2 }], human_table: [Card { id: 20, rank: 7, suit: 1, value: 8 }, Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 29, rank: 3, suit: 2, value: 4 }], human_hand_count: 1, own_discards: [Card { id: 4, rank: 4, suit: 0, value: 5 }, Card { id: 12, rank: 12, suit: 0, value: 10 }], turn_card: Card { id: 39, rank: 0, suit: 3, value: 1 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [OpponentPlay(7), SelfPlay(8), OpponentPlay(7), SelfPlay(1), OpponentPlay(3), Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 11062507007613075560 }"
+    },
+    {
+      "candidate": {
+        "card": 44,
+        "ev": 1.0,
+        "wp": 0.0
+      },
+      "gameSeed": 407991952,
+      "kind": "varied-legal-prefix",
+      "otherScore": 116,
+      "ownScore": 113,
+      "reference": {
+        "card": 44,
+        "ev": 1.0,
+        "wp": 0.0
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 113, human_score: 116, ai_hand: [Card { id: 44, rank: 5, suit: 3, value: 6 }, Card { id: 1, rank: 1, suit: 0, value: 2 }], ai_table: [Card { id: 47, rank: 8, suit: 3, value: 9 }, Card { id: 4, rank: 4, suit: 0, value: 5 }], human_table: [Card { id: 13, rank: 0, suit: 1, value: 1 }, Card { id: 36, rank: 10, suit: 2, value: 10 }], human_hand_count: 2, own_discards: [Card { id: 37, rank: 11, suit: 2, value: 10 }, Card { id: 34, rank: 8, suit: 2, value: 9 }], turn_card: Card { id: 17, rank: 4, suit: 1, value: 5 }, count: 25, turn: Ai, go_player: Some(Human), last_player: Some(Ai), plays: [Card { id: 13, rank: 0, suit: 1, value: 1 }, Card { id: 47, rank: 8, suit: 3, value: 9 }, Card { id: 36, rank: 10, suit: 2, value: 10 }, Card { id: 4, rank: 4, suit: 0, value: 5 }], public_history: [OpponentPlay(0), SelfPlay(8), OpponentPlay(10), SelfPlay(4), OpponentGo], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 15510790385378787432 }"
+    },
+    {
+      "candidate": {
+        "card": 4,
+        "ev": -1.3364258530880253,
+        "wp": 0.9901072956978841
+      },
+      "gameSeed": 1406725221,
+      "kind": "varied-legal-prefix",
+      "otherScore": 117,
+      "ownScore": 120,
+      "reference": {
+        "card": 4,
+        "ev": -1.5105774401870233,
+        "wp": 0.9955824450833144
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 120, human_score: 117, ai_hand: [Card { id: 4, rank: 4, suit: 0, value: 5 }, Card { id: 33, rank: 7, suit: 2, value: 8 }], ai_table: [Card { id: 9, rank: 9, suit: 0, value: 10 }, Card { id: 36, rank: 10, suit: 2, value: 10 }], human_table: [Card { id: 11, rank: 11, suit: 0, value: 10 }, Card { id: 13, rank: 0, suit: 1, value: 1 }], human_hand_count: 2, own_discards: [Card { id: 35, rank: 9, suit: 2, value: 10 }, Card { id: 45, rank: 6, suit: 3, value: 7 }], turn_card: Card { id: 10, rank: 10, suit: 0, value: 10 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [SelfPlay(9), OpponentPlay(11), SelfPlay(10), OpponentPlay(0), Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 2538212104880521588 }"
+    },
+    {
+      "candidate": {
+        "card": 44,
+        "ev": 1.1421829005764572,
+        "wp": 0.0
+      },
+      "gameSeed": 2212692310,
+      "kind": "varied-legal-prefix",
+      "otherScore": 119,
+      "ownScore": 113,
+      "reference": {
+        "card": 44,
+        "ev": 1.216548401495032,
+        "wp": 0.0
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 113, human_score: 119, ai_hand: [Card { id: 44, rank: 5, suit: 3, value: 6 }, Card { id: 40, rank: 1, suit: 3, value: 2 }], ai_table: [Card { id: 4, rank: 4, suit: 0, value: 5 }, Card { id: 11, rank: 11, suit: 0, value: 10 }], human_table: [Card { id: 28, rank: 2, suit: 2, value: 3 }, Card { id: 38, rank: 12, suit: 2, value: 10 }, Card { id: 14, rank: 1, suit: 1, value: 2 }], human_hand_count: 1, own_discards: [Card { id: 10, rank: 10, suit: 0, value: 10 }, Card { id: 18, rank: 5, suit: 1, value: 6 }], turn_card: Card { id: 21, rank: 8, suit: 1, value: 9 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [OpponentPlay(2), SelfPlay(4), OpponentPlay(12), SelfPlay(11), OpponentPlay(1), SelfGo, OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 2341866506277355624 }"
+    },
+    {
+      "candidate": {
+        "card": 37,
+        "ev": 0.7070403019312594,
+        "wp": 0.0
+      },
+      "gameSeed": 4288503646,
+      "kind": "varied-legal-prefix",
+      "otherScore": 120,
+      "ownScore": 113,
+      "reference": {
+        "card": 37,
+        "ev": 0.5757917266304932,
+        "wp": 0.0
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 113, human_score: 120, ai_hand: [Card { id: 37, rank: 11, suit: 2, value: 10 }, Card { id: 31, rank: 5, suit: 2, value: 6 }], ai_table: [Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 48, rank: 9, suit: 3, value: 10 }], human_table: [Card { id: 29, rank: 3, suit: 2, value: 4 }, Card { id: 30, rank: 4, suit: 2, value: 5 }, Card { id: 13, rank: 0, suit: 1, value: 1 }], human_hand_count: 1, own_discards: [Card { id: 20, rank: 7, suit: 1, value: 8 }, Card { id: 33, rank: 7, suit: 2, value: 8 }], turn_card: Card { id: 16, rank: 3, suit: 1, value: 4 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [OpponentPlay(3), SelfPlay(7), OpponentPlay(4), SelfPlay(9), OpponentPlay(0), SelfGo, OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 18386860504376934504 }"
+    },
+    {
+      "candidate": {
+        "card": 12,
+        "ev": 1.0,
+        "wp": 1.0
+      },
+      "gameSeed": 1083720808,
+      "kind": "varied-legal-prefix",
+      "otherScore": 113,
+      "ownScore": 120,
+      "reference": {
+        "card": 12,
+        "ev": 1.0,
+        "wp": 1.0
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 120, human_score: 113, ai_hand: [Card { id: 12, rank: 12, suit: 0, value: 10 }, Card { id: 2, rank: 2, suit: 0, value: 3 }], ai_table: [Card { id: 47, rank: 8, suit: 3, value: 9 }, Card { id: 10, rank: 10, suit: 0, value: 10 }], human_table: [Card { id: 13, rank: 0, suit: 1, value: 1 }, Card { id: 26, rank: 0, suit: 2, value: 1 }], human_hand_count: 2, own_discards: [Card { id: 15, rank: 2, suit: 1, value: 3 }, Card { id: 4, rank: 4, suit: 0, value: 5 }], turn_card: Card { id: 9, rank: 9, suit: 0, value: 10 }, count: 21, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 47, rank: 8, suit: 3, value: 9 }, Card { id: 13, rank: 0, suit: 1, value: 1 }, Card { id: 10, rank: 10, suit: 0, value: 10 }, Card { id: 26, rank: 0, suit: 2, value: 1 }], public_history: [SelfPlay(8), OpponentPlay(0), SelfPlay(10), OpponentPlay(0)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 4092854953087861108 }"
+    },
+    {
+      "candidate": {
+        "card": 46,
+        "ev": 0.6450986045210294,
+        "wp": 0.05047622685821905
+      },
+      "gameSeed": 2240545414,
+      "kind": "varied-legal-prefix",
+      "otherScore": 114,
+      "ownScore": 111,
+      "reference": {
+        "card": 46,
+        "ev": 0.6853279510726429,
+        "wp": 0.034247647206366486
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 111, human_score: 114, ai_hand: [Card { id: 3, rank: 3, suit: 0, value: 4 }, Card { id: 46, rank: 7, suit: 3, value: 8 }], ai_table: [Card { id: 34, rank: 8, suit: 2, value: 9 }, Card { id: 29, rank: 3, suit: 2, value: 4 }], human_table: [Card { id: 15, rank: 2, suit: 1, value: 3 }, Card { id: 45, rank: 6, suit: 3, value: 7 }], human_hand_count: 2, own_discards: [Card { id: 47, rank: 8, suit: 3, value: 9 }, Card { id: 32, rank: 6, suit: 2, value: 7 }], turn_card: Card { id: 39, rank: 0, suit: 3, value: 1 }, count: 23, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 34, rank: 8, suit: 2, value: 9 }, Card { id: 15, rank: 2, suit: 1, value: 3 }, Card { id: 29, rank: 3, suit: 2, value: 4 }, Card { id: 45, rank: 6, suit: 3, value: 7 }], public_history: [SelfPlay(8), OpponentPlay(2), SelfPlay(3), OpponentPlay(6)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 16120641717115289972 }"
+    },
+    {
+      "candidate": {
+        "card": 25,
+        "ev": -0.9787511646379414,
+        "wp": 0.6056707642520351
+      },
+      "gameSeed": 2624755020,
+      "kind": "varied-legal-prefix",
+      "otherScore": 116,
+      "ownScore": 114,
+      "reference": {
+        "card": 25,
+        "ev": -0.6623592817748722,
+        "wp": 0.678554626964909
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 114, human_score: 116, ai_hand: [Card { id: 20, rank: 7, suit: 1, value: 8 }, Card { id: 25, rank: 12, suit: 1, value: 10 }], ai_table: [Card { id: 16, rank: 3, suit: 1, value: 4 }, Card { id: 29, rank: 3, suit: 2, value: 4 }], human_table: [Card { id: 19, rank: 6, suit: 1, value: 7 }, Card { id: 3, rank: 3, suit: 0, value: 4 }], human_hand_count: 2, own_discards: [Card { id: 38, rank: 12, suit: 2, value: 10 }, Card { id: 47, rank: 8, suit: 3, value: 9 }], turn_card: Card { id: 45, rank: 6, suit: 3, value: 7 }, count: 19, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 16, rank: 3, suit: 1, value: 4 }, Card { id: 19, rank: 6, suit: 1, value: 7 }, Card { id: 29, rank: 3, suit: 2, value: 4 }, Card { id: 3, rank: 3, suit: 0, value: 4 }], public_history: [SelfPlay(3), OpponentPlay(6), SelfPlay(3), OpponentPlay(3)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 9579986371662053748 }"
+    },
+    {
+      "candidate": {
+        "card": 44,
+        "ev": -0.8256085214119728,
+        "wp": 0.008613253863879181
+      },
+      "gameSeed": 828794698,
+      "kind": "varied-legal-prefix",
+      "otherScore": 114,
+      "ownScore": 115,
+      "reference": {
+        "card": 44,
+        "ev": -0.7577721574183083,
+        "wp": 0.006097528383869358
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 115, human_score: 114, ai_hand: [Card { id: 44, rank: 5, suit: 3, value: 6 }, Card { id: 2, rank: 2, suit: 0, value: 3 }], ai_table: [Card { id: 0, rank: 0, suit: 0, value: 1 }, Card { id: 11, rank: 11, suit: 0, value: 10 }], human_table: [Card { id: 37, rank: 11, suit: 2, value: 10 }, Card { id: 13, rank: 0, suit: 1, value: 1 }], human_hand_count: 2, own_discards: [Card { id: 14, rank: 1, suit: 1, value: 2 }, Card { id: 34, rank: 8, suit: 2, value: 9 }], turn_card: Card { id: 22, rank: 9, suit: 1, value: 10 }, count: 22, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 0, rank: 0, suit: 0, value: 1 }, Card { id: 37, rank: 11, suit: 2, value: 10 }, Card { id: 11, rank: 11, suit: 0, value: 10 }, Card { id: 13, rank: 0, suit: 1, value: 1 }], public_history: [SelfPlay(0), OpponentPlay(11), SelfPlay(11), OpponentPlay(0)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 3814542901963129204 }"
+    },
+    {
+      "candidate": {
+        "card": 29,
+        "ev": 1.3090439527227717,
+        "wp": 0.006013176717006112
+      },
+      "gameSeed": 277639042,
+      "kind": "varied-legal-prefix",
+      "otherScore": 116,
+      "ownScore": 114,
+      "reference": {
+        "card": 29,
+        "ev": 1.342411525911312,
+        "wp": 0.006463528275170531
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 114, human_score: 116, ai_hand: [Card { id: 29, rank: 3, suit: 2, value: 4 }, Card { id: 38, rank: 12, suit: 2, value: 10 }], ai_table: [Card { id: 3, rank: 3, suit: 0, value: 4 }, Card { id: 7, rank: 7, suit: 0, value: 8 }], human_table: [Card { id: 48, rank: 9, suit: 3, value: 10 }, Card { id: 18, rank: 5, suit: 1, value: 6 }, Card { id: 41, rank: 2, suit: 3, value: 3 }], human_hand_count: 1, own_discards: [Card { id: 11, rank: 11, suit: 0, value: 10 }, Card { id: 10, rank: 10, suit: 0, value: 10 }], turn_card: Card { id: 31, rank: 5, suit: 2, value: 6 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [SelfPlay(3), OpponentPlay(9), SelfPlay(7), OpponentPlay(5), SelfGo, OpponentPlay(2), Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 12080413256473117044 }"
+    },
+    {
+      "candidate": {
+        "card": 27,
+        "ev": -0.9019421267995582,
+        "wp": 0.8217685539062531
+      },
+      "gameSeed": 2089110507,
+      "kind": "varied-legal-prefix",
+      "otherScore": 118,
+      "ownScore": 115,
+      "reference": {
+        "card": 27,
+        "ev": -1.1554365808816025,
+        "wp": 0.8728562128151063
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 115, human_score: 118, ai_hand: [Card { id: 46, rank: 7, suit: 3, value: 8 }, Card { id: 27, rank: 1, suit: 2, value: 2 }], ai_table: [Card { id: 20, rank: 7, suit: 1, value: 8 }, Card { id: 45, rank: 6, suit: 3, value: 7 }], human_table: [Card { id: 25, rank: 12, suit: 1, value: 10 }, Card { id: 31, rank: 5, suit: 2, value: 6 }], human_hand_count: 2, own_discards: [Card { id: 8, rank: 8, suit: 0, value: 9 }, Card { id: 44, rank: 5, suit: 3, value: 6 }], turn_card: Card { id: 23, rank: 10, suit: 1, value: 10 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [SelfPlay(7), OpponentPlay(12), SelfPlay(6), OpponentPlay(5), Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 5230313952658850164 }"
+    },
+    {
+      "candidate": {
+        "card": 44,
+        "ev": -1.8540428092340275,
+        "wp": 0.9812939569730259
+      },
+      "gameSeed": 2270787720,
+      "kind": "varied-legal-prefix",
+      "otherScore": 116,
+      "ownScore": 116,
+      "reference": {
+        "card": 44,
+        "ev": -1.824384838086935,
+        "wp": 0.9946253324956933
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 116, human_score: 116, ai_hand: [Card { id: 35, rank: 9, suit: 2, value: 10 }, Card { id: 44, rank: 5, suit: 3, value: 6 }], ai_table: [Card { id: 43, rank: 4, suit: 3, value: 5 }, Card { id: 26, rank: 0, suit: 2, value: 1 }], human_table: [Card { id: 48, rank: 9, suit: 3, value: 10 }, Card { id: 1, rank: 1, suit: 0, value: 2 }], human_hand_count: 2, own_discards: [Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 49, rank: 10, suit: 3, value: 10 }], turn_card: Card { id: 6, rank: 6, suit: 0, value: 7 }, count: 18, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 43, rank: 4, suit: 3, value: 5 }, Card { id: 48, rank: 9, suit: 3, value: 10 }, Card { id: 26, rank: 0, suit: 2, value: 1 }, Card { id: 1, rank: 1, suit: 0, value: 2 }], public_history: [SelfPlay(4), OpponentPlay(9), SelfPlay(0), OpponentPlay(1)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 13128668585624863092 }"
+    },
+    {
+      "candidate": {
+        "card": 41,
+        "ev": 0.44099223534693993,
+        "wp": 0.8444192308686226
+      },
+      "gameSeed": 3397443893,
+      "kind": "varied-legal-prefix",
+      "otherScore": 116,
+      "ownScore": 117,
+      "reference": {
+        "card": 41,
+        "ev": 0.38988360000172917,
+        "wp": 0.826876365403112
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 117, human_score: 116, ai_hand: [Card { id: 41, rank: 2, suit: 3, value: 3 }, Card { id: 20, rank: 7, suit: 1, value: 8 }], ai_table: [Card { id: 30, rank: 4, suit: 2, value: 5 }, Card { id: 0, rank: 0, suit: 0, value: 1 }], human_table: [Card { id: 17, rank: 4, suit: 1, value: 5 }, Card { id: 2, rank: 2, suit: 0, value: 3 }], human_hand_count: 2, own_discards: [Card { id: 27, rank: 1, suit: 2, value: 2 }, Card { id: 46, rank: 7, suit: 3, value: 8 }], turn_card: Card { id: 43, rank: 4, suit: 3, value: 5 }, count: 14, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 30, rank: 4, suit: 2, value: 5 }, Card { id: 17, rank: 4, suit: 1, value: 5 }, Card { id: 0, rank: 0, suit: 0, value: 1 }, Card { id: 2, rank: 2, suit: 0, value: 3 }], public_history: [SelfPlay(4), OpponentPlay(4), SelfPlay(0), OpponentPlay(2)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 14376963932143223156 }"
+    },
+    {
+      "candidate": {
+        "card": 11,
+        "ev": 1.11846148991238,
+        "wp": 1.0
+      },
+      "gameSeed": 2545867708,
+      "kind": "varied-legal-prefix",
+      "otherScore": 117,
+      "ownScore": 118,
+      "reference": {
+        "card": 11,
+        "ev": 1.0332197502836384,
+        "wp": 1.0
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 118, human_score: 117, ai_hand: [Card { id: 11, rank: 11, suit: 0, value: 10 }, Card { id: 48, rank: 9, suit: 3, value: 10 }], ai_table: [Card { id: 17, rank: 4, suit: 1, value: 5 }, Card { id: 9, rank: 9, suit: 0, value: 10 }], human_table: [Card { id: 20, rank: 7, suit: 1, value: 8 }, Card { id: 1, rank: 1, suit: 0, value: 2 }, Card { id: 13, rank: 0, suit: 1, value: 1 }], human_hand_count: 1, own_discards: [Card { id: 47, rank: 8, suit: 3, value: 9 }, Card { id: 40, rank: 1, suit: 3, value: 2 }], turn_card: Card { id: 36, rank: 10, suit: 2, value: 10 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [SelfPlay(4), OpponentPlay(7), SelfPlay(9), OpponentPlay(1), SelfGo, OpponentPlay(0), OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 1519796460449694068 }"
+    },
+    {
+      "candidate": {
+        "card": 24,
+        "ev": 0.9898671872736268,
+        "wp": 0.9832821390385713
+      },
+      "gameSeed": 1113628113,
+      "kind": "varied-legal-prefix",
+      "otherScore": 120,
+      "ownScore": 119,
+      "reference": {
+        "card": 24,
+        "ev": 0.9857913535603797,
+        "wp": 0.9765575282952365
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 119, human_score: 120, ai_hand: [Card { id: 12, rank: 12, suit: 0, value: 10 }, Card { id: 24, rank: 11, suit: 1, value: 10 }], ai_table: [Card { id: 17, rank: 4, suit: 1, value: 5 }, Card { id: 45, rank: 6, suit: 3, value: 7 }], human_table: [Card { id: 42, rank: 3, suit: 3, value: 4 }, Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 44, rank: 5, suit: 3, value: 6 }], human_hand_count: 1, own_discards: [Card { id: 14, rank: 1, suit: 1, value: 2 }, Card { id: 51, rank: 12, suit: 3, value: 10 }], turn_card: Card { id: 29, rank: 3, suit: 2, value: 4 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [SelfPlay(4), OpponentPlay(3), SelfPlay(6), OpponentPlay(7), SelfGo, OpponentPlay(5), OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 2611066651575058804 }"
+    },
+    {
+      "candidate": {
+        "card": 22,
+        "ev": 1.0522722490243885,
+        "wp": 0.03608005750249073
+      },
+      "gameSeed": 2615738820,
+      "kind": "varied-legal-prefix",
+      "otherScore": 113,
+      "ownScore": 115,
+      "reference": {
+        "card": 22,
+        "ev": 1.0759484649124604,
+        "wp": 0.052447544266884964
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 115, human_score: 113, ai_hand: [Card { id: 20, rank: 7, suit: 1, value: 8 }, Card { id: 22, rank: 9, suit: 1, value: 10 }], ai_table: [Card { id: 36, rank: 10, suit: 2, value: 10 }, Card { id: 32, rank: 6, suit: 2, value: 7 }], human_table: [Card { id: 5, rank: 5, suit: 0, value: 6 }, Card { id: 14, rank: 1, suit: 1, value: 2 }, Card { id: 30, rank: 4, suit: 2, value: 5 }], human_hand_count: 1, own_discards: [Card { id: 39, rank: 0, suit: 3, value: 1 }, Card { id: 26, rank: 0, suit: 2, value: 1 }], turn_card: Card { id: 3, rank: 3, suit: 0, value: 4 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [OpponentPlay(5), SelfPlay(10), OpponentPlay(1), SelfPlay(6), OpponentPlay(4), SelfGo, OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 8043837798224756840 }"
+    },
+    {
+      "candidate": {
+        "card": 7,
+        "ev": 0.9943908961584156,
+        "wp": 1.0
+      },
+      "gameSeed": 2171890580,
+      "kind": "varied-legal-prefix",
+      "otherScore": 113,
+      "ownScore": 120,
+      "reference": {
+        "card": 7,
+        "ev": 0.992914180016222,
+        "wp": 1.0
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 120, human_score: 113, ai_hand: [Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 31, rank: 5, suit: 2, value: 6 }], ai_table: [Card { id: 37, rank: 11, suit: 2, value: 10 }, Card { id: 10, rank: 10, suit: 0, value: 10 }], human_table: [Card { id: 39, rank: 0, suit: 3, value: 1 }, Card { id: 35, rank: 9, suit: 2, value: 10 }, Card { id: 0, rank: 0, suit: 0, value: 1 }], human_hand_count: 1, own_discards: [Card { id: 22, rank: 9, suit: 1, value: 10 }, Card { id: 5, rank: 5, suit: 0, value: 6 }], turn_card: Card { id: 32, rank: 6, suit: 2, value: 7 }, count: 1, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 0, rank: 0, suit: 0, value: 1 }], public_history: [OpponentPlay(0), SelfPlay(11), OpponentPlay(9), SelfPlay(10), Reset, OpponentPlay(0)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 7406648613537579112 }"
+    },
+    {
+      "candidate": {
+        "card": 39,
+        "ev": 1.3114306356420684,
+        "wp": 0.4030848194023291
+      },
+      "gameSeed": 872983930,
+      "kind": "varied-legal-prefix",
+      "otherScore": 116,
+      "ownScore": 115,
+      "reference": {
+        "card": 39,
+        "ev": 1.3361149450415015,
+        "wp": 0.42275648081254913
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 115, human_score: 116, ai_hand: [Card { id: 48, rank: 9, suit: 3, value: 10 }, Card { id: 39, rank: 0, suit: 3, value: 1 }], ai_table: [Card { id: 11, rank: 11, suit: 0, value: 10 }, Card { id: 25, rank: 12, suit: 1, value: 10 }], human_table: [Card { id: 13, rank: 0, suit: 1, value: 1 }, Card { id: 19, rank: 6, suit: 1, value: 7 }, Card { id: 2, rank: 2, suit: 0, value: 3 }], human_hand_count: 1, own_discards: [Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 50, rank: 11, suit: 3, value: 10 }], turn_card: Card { id: 47, rank: 8, suit: 3, value: 9 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [OpponentPlay(0), SelfPlay(11), OpponentPlay(6), SelfPlay(12), OpponentPlay(2), Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 17377727203395764328 }"
+    },
+    {
+      "candidate": {
+        "card": 49,
+        "ev": 0.7348420015617799,
+        "wp": 0.6937613566907125
+      },
+      "gameSeed": 1153403617,
+      "kind": "varied-legal-prefix",
+      "otherScore": 117,
+      "ownScore": 117,
+      "reference": {
+        "card": 49,
+        "ev": 0.8349959486398233,
+        "wp": 0.6949180766479193
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 117, human_score: 117, ai_hand: [Card { id: 49, rank: 10, suit: 3, value: 10 }, Card { id: 14, rank: 1, suit: 1, value: 2 }], ai_table: [Card { id: 15, rank: 2, suit: 1, value: 3 }, Card { id: 17, rank: 4, suit: 1, value: 5 }], human_table: [Card { id: 5, rank: 5, suit: 0, value: 6 }, Card { id: 51, rank: 12, suit: 3, value: 10 }, Card { id: 45, rank: 6, suit: 3, value: 7 }], human_hand_count: 1, own_discards: [Card { id: 20, rank: 7, suit: 1, value: 8 }, Card { id: 0, rank: 0, suit: 0, value: 1 }], turn_card: Card { id: 10, rank: 10, suit: 0, value: 10 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [OpponentPlay(5), SelfPlay(2), OpponentPlay(12), SelfPlay(4), OpponentPlay(6), Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 12248658871757570152 }"
+    },
+    {
+      "candidate": {
+        "card": 9,
+        "ev": 0.7934391974886809,
+        "wp": 0.0
+      },
+      "gameSeed": 75383729,
+      "kind": "varied-legal-prefix",
+      "otherScore": 117,
+      "ownScore": 115,
+      "reference": {
+        "card": 9,
+        "ev": 0.9451999793104572,
+        "wp": 0.0
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 115, human_score: 117, ai_hand: [Card { id: 30, rank: 4, suit: 2, value: 5 }, Card { id: 9, rank: 9, suit: 0, value: 10 }], ai_table: [Card { id: 18, rank: 5, suit: 1, value: 6 }, Card { id: 32, rank: 6, suit: 2, value: 7 }], human_table: [Card { id: 42, rank: 3, suit: 3, value: 4 }, Card { id: 47, rank: 8, suit: 3, value: 9 }, Card { id: 1, rank: 1, suit: 0, value: 2 }], human_hand_count: 1, own_discards: [Card { id: 40, rank: 1, suit: 3, value: 2 }, Card { id: 45, rank: 6, suit: 3, value: 7 }], turn_card: Card { id: 27, rank: 1, suit: 2, value: 2 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [OpponentPlay(3), SelfPlay(5), OpponentPlay(8), SelfPlay(6), OpponentPlay(1), SelfGo, OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 11936976805938593896 }"
+    },
+    {
+      "candidate": {
+        "card": 8,
+        "ev": 4.0,
+        "wp": 1.0
+      },
+      "gameSeed": 3465126431,
+      "kind": "varied-legal-prefix",
+      "otherScore": 118,
+      "ownScore": 117,
+      "reference": {
+        "card": 8,
+        "ev": 4.0,
+        "wp": 1.0
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 117, human_score: 118, ai_hand: [Card { id: 35, rank: 9, suit: 2, value: 10 }, Card { id: 8, rank: 8, suit: 0, value: 9 }], ai_table: [Card { id: 47, rank: 8, suit: 3, value: 9 }, Card { id: 7, rank: 7, suit: 0, value: 8 }], human_table: [Card { id: 45, rank: 6, suit: 3, value: 7 }, Card { id: 48, rank: 9, suit: 3, value: 10 }, Card { id: 9, rank: 9, suit: 0, value: 10 }], human_hand_count: 1, own_discards: [Card { id: 46, rank: 7, suit: 3, value: 8 }, Card { id: 32, rank: 6, suit: 2, value: 7 }], turn_card: Card { id: 10, rank: 10, suit: 0, value: 10 }, count: 18, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 9, rank: 9, suit: 0, value: 10 }], public_history: [OpponentPlay(6), SelfPlay(8), OpponentPlay(9), SelfGo, OpponentGo, Reset, SelfPlay(7), OpponentPlay(9)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 6726618448627761256 }"
+    },
+    {
+      "candidate": {
+        "card": 25,
+        "ev": 0.9055442270206183,
+        "wp": 1.0
+      },
+      "gameSeed": 4002208553,
+      "kind": "varied-legal-prefix",
+      "otherScore": 116,
+      "ownScore": 119,
+      "reference": {
+        "card": 25,
+        "ev": 0.9533010404968482,
+        "wp": 1.0
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 119, human_score: 116, ai_hand: [Card { id: 25, rank: 12, suit: 1, value: 10 }, Card { id: 9, rank: 9, suit: 0, value: 10 }], ai_table: [Card { id: 8, rank: 8, suit: 0, value: 9 }, Card { id: 23, rank: 10, suit: 1, value: 10 }], human_table: [Card { id: 3, rank: 3, suit: 0, value: 4 }, Card { id: 30, rank: 4, suit: 2, value: 5 }, Card { id: 40, rank: 1, suit: 3, value: 2 }], human_hand_count: 1, own_discards: [Card { id: 47, rank: 8, suit: 3, value: 9 }, Card { id: 32, rank: 6, suit: 2, value: 7 }], turn_card: Card { id: 51, rank: 12, suit: 3, value: 10 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [SelfPlay(8), OpponentPlay(3), SelfPlay(10), OpponentPlay(4), SelfGo, OpponentPlay(1), OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 9793967586583511412 }"
+    },
+    {
+      "candidate": {
+        "card": 29,
+        "ev": -1.502247943231956,
+        "wp": 0.013283397166975972
+      },
+      "gameSeed": 4070999564,
+      "kind": "varied-legal-prefix",
+      "otherScore": 116,
+      "ownScore": 111,
+      "reference": {
+        "card": 29,
+        "ev": -1.8078658165600892,
+        "wp": 0.007844201881827302
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 111, human_score: 116, ai_hand: [Card { id: 29, rank: 3, suit: 2, value: 4 }, Card { id: 6, rank: 6, suit: 0, value: 7 }], ai_table: [Card { id: 30, rank: 4, suit: 2, value: 5 }, Card { id: 26, rank: 0, suit: 2, value: 1 }], human_table: [Card { id: 42, rank: 3, suit: 3, value: 4 }, Card { id: 5, rank: 5, suit: 0, value: 6 }], human_hand_count: 2, own_discards: [Card { id: 22, rank: 9, suit: 1, value: 10 }, Card { id: 27, rank: 1, suit: 2, value: 2 }], turn_card: Card { id: 12, rank: 12, suit: 0, value: 10 }, count: 16, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 30, rank: 4, suit: 2, value: 5 }, Card { id: 42, rank: 3, suit: 3, value: 4 }, Card { id: 26, rank: 0, suit: 2, value: 1 }, Card { id: 5, rank: 5, suit: 0, value: 6 }], public_history: [SelfPlay(4), OpponentPlay(3), SelfPlay(0), OpponentPlay(5)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 8125477348771365236 }"
+    },
+    {
+      "candidate": {
+        "card": 9,
+        "ev": -0.47252408273912166,
+        "wp": 0.0
+      },
+      "gameSeed": 2501521894,
+      "kind": "varied-legal-prefix",
+      "otherScore": 117,
+      "ownScore": 112,
+      "reference": {
+        "card": 9,
+        "ev": -0.3362123715911388,
+        "wp": 0.0
+      },
+      "role": "pone",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Pone, ai_score: 112, human_score: 117, ai_hand: [Card { id: 9, rank: 9, suit: 0, value: 10 }, Card { id: 19, rank: 6, suit: 1, value: 7 }], ai_table: [Card { id: 13, rank: 0, suit: 1, value: 1 }, Card { id: 37, rank: 11, suit: 2, value: 10 }], human_table: [Card { id: 44, rank: 5, suit: 3, value: 6 }, Card { id: 8, rank: 8, suit: 0, value: 9 }], human_hand_count: 2, own_discards: [Card { id: 14, rank: 1, suit: 1, value: 2 }, Card { id: 43, rank: 4, suit: 3, value: 5 }], turn_card: Card { id: 21, rank: 8, suit: 1, value: 9 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [SelfPlay(0), OpponentPlay(5), SelfPlay(11), OpponentPlay(8), SelfGo, OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 4484247239643890036 }"
+    },
+    {
+      "candidate": {
+        "card": 25,
+        "ev": -0.022415580702414117,
+        "wp": 0.24726509703478755
+      },
+      "gameSeed": 3168476263,
+      "kind": "varied-legal-prefix",
+      "otherScore": 114,
+      "ownScore": 117,
+      "reference": {
+        "card": 25,
+        "ev": -0.023902055551826604,
+        "wp": 0.23582234927899004
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 117, human_score: 114, ai_hand: [Card { id: 5, rank: 5, suit: 0, value: 6 }, Card { id: 25, rank: 12, suit: 1, value: 10 }], ai_table: [Card { id: 13, rank: 0, suit: 1, value: 1 }, Card { id: 49, rank: 10, suit: 3, value: 10 }], human_table: [Card { id: 21, rank: 8, suit: 1, value: 9 }, Card { id: 33, rank: 7, suit: 2, value: 8 }, Card { id: 37, rank: 11, suit: 2, value: 10 }], human_hand_count: 1, own_discards: [Card { id: 45, rank: 6, suit: 3, value: 7 }, Card { id: 2, rank: 2, suit: 0, value: 3 }], turn_card: Card { id: 48, rank: 9, suit: 3, value: 10 }, count: 10, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 37, rank: 11, suit: 2, value: 10 }], public_history: [OpponentPlay(8), SelfPlay(0), OpponentPlay(7), SelfPlay(10), OpponentGo, SelfGo, Reset, OpponentPlay(11)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 7366157392742711400 }"
+    },
+    {
+      "candidate": {
+        "card": 20,
+        "ev": 0.052526038576410486,
+        "wp": 0.40147566563486203
+      },
+      "gameSeed": 4274857353,
+      "kind": "varied-legal-prefix",
+      "otherScore": 115,
+      "ownScore": 117,
+      "reference": {
+        "card": 20,
+        "ev": 0.06152370793435591,
+        "wp": 0.33975272107445026
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 117, human_score: 115, ai_hand: [Card { id: 11, rank: 11, suit: 0, value: 10 }, Card { id: 20, rank: 7, suit: 1, value: 8 }], ai_table: [Card { id: 25, rank: 12, suit: 1, value: 10 }, Card { id: 46, rank: 7, suit: 3, value: 8 }], human_table: [Card { id: 47, rank: 8, suit: 3, value: 9 }, Card { id: 40, rank: 1, suit: 3, value: 2 }, Card { id: 38, rank: 12, suit: 2, value: 10 }], human_hand_count: 1, own_discards: [Card { id: 22, rank: 9, suit: 1, value: 10 }, Card { id: 39, rank: 0, suit: 3, value: 1 }], turn_card: Card { id: 28, rank: 2, suit: 2, value: 3 }, count: 10, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 38, rank: 12, suit: 2, value: 10 }], public_history: [OpponentPlay(8), SelfPlay(12), OpponentPlay(1), SelfPlay(7), OpponentGo, SelfGo, Reset, OpponentPlay(12)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 433480264556740712 }"
+    },
+    {
+      "candidate": {
+        "card": 16,
+        "ev": 3.0,
+        "wp": 1.0
+      },
+      "gameSeed": 1337214686,
+      "kind": "varied-legal-prefix",
+      "otherScore": 116,
+      "ownScore": 118,
+      "reference": {
+        "card": 16,
+        "ev": 3.0,
+        "wp": 1.0
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 118, human_score: 116, ai_hand: [Card { id: 16, rank: 3, suit: 1, value: 4 }, Card { id: 27, rank: 1, suit: 2, value: 2 }], ai_table: [Card { id: 20, rank: 7, suit: 1, value: 8 }, Card { id: 15, rank: 2, suit: 1, value: 3 }], human_table: [Card { id: 8, rank: 8, suit: 0, value: 9 }, Card { id: 2, rank: 2, suit: 0, value: 3 }], human_hand_count: 2, own_discards: [Card { id: 44, rank: 5, suit: 3, value: 6 }, Card { id: 32, rank: 6, suit: 2, value: 7 }], turn_card: Card { id: 13, rank: 0, suit: 1, value: 1 }, count: 23, turn: Ai, go_player: Some(Human), last_player: Some(Ai), plays: [Card { id: 8, rank: 8, suit: 0, value: 9 }, Card { id: 20, rank: 7, suit: 1, value: 8 }, Card { id: 2, rank: 2, suit: 0, value: 3 }, Card { id: 15, rank: 2, suit: 1, value: 3 }], public_history: [OpponentPlay(8), SelfPlay(7), OpponentPlay(2), SelfPlay(2), OpponentGo], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 5860307859803996264 }"
+    },
+    {
+      "candidate": {
+        "card": 6,
+        "ev": 1.2981287010168647,
+        "wp": 0.7286392674429961
+      },
+      "gameSeed": 269599194,
+      "kind": "varied-legal-prefix",
+      "otherScore": 118,
+      "ownScore": 118,
+      "reference": {
+        "card": 6,
+        "ev": 1.4690350079158525,
+        "wp": 0.7707551341608446
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 118, human_score: 118, ai_hand: [Card { id: 6, rank: 6, suit: 0, value: 7 }, Card { id: 15, rank: 2, suit: 1, value: 3 }], ai_table: [Card { id: 2, rank: 2, suit: 0, value: 3 }, Card { id: 36, rank: 10, suit: 2, value: 10 }], human_table: [Card { id: 21, rank: 8, suit: 1, value: 9 }, Card { id: 47, rank: 8, suit: 3, value: 9 }, Card { id: 7, rank: 7, suit: 0, value: 8 }], human_hand_count: 1, own_discards: [Card { id: 39, rank: 0, suit: 3, value: 1 }, Card { id: 20, rank: 7, suit: 1, value: 8 }], turn_card: Card { id: 24, rank: 11, suit: 1, value: 10 }, count: 8, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 7, rank: 7, suit: 0, value: 8 }], public_history: [OpponentPlay(8), SelfPlay(2), OpponentPlay(8), SelfPlay(10), Reset, OpponentPlay(7)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 5909988463776366696 }"
+    },
+    {
+      "candidate": {
+        "card": 43,
+        "ev": 0.8865076336186046,
+        "wp": 0.24509699460224832
+      },
+      "gameSeed": 831136956,
+      "kind": "varied-legal-prefix",
+      "otherScore": 120,
+      "ownScore": 117,
+      "reference": {
+        "card": 43,
+        "ev": 0.8736995776802811,
+        "wp": 0.27275714582891636
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 117, human_score: 120, ai_hand: [Card { id: 32, rank: 6, suit: 2, value: 7 }, Card { id: 43, rank: 4, suit: 3, value: 5 }], ai_table: [Card { id: 10, rank: 10, suit: 0, value: 10 }, Card { id: 29, rank: 3, suit: 2, value: 4 }], human_table: [Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 5, rank: 5, suit: 0, value: 6 }, Card { id: 44, rank: 5, suit: 3, value: 6 }], human_hand_count: 1, own_discards: [Card { id: 33, rank: 7, suit: 2, value: 8 }, Card { id: 13, rank: 0, suit: 1, value: 1 }], turn_card: Card { id: 51, rank: 12, suit: 3, value: 10 }, count: 6, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 44, rank: 5, suit: 3, value: 6 }], public_history: [OpponentPlay(7), SelfPlay(10), OpponentPlay(5), SelfPlay(3), OpponentGo, SelfGo, Reset, OpponentPlay(5)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 15651855695702917224 }"
+    },
+    {
+      "candidate": {
+        "card": 37,
+        "ev": 0.3194114368946739,
+        "wp": 1.0
+      },
+      "gameSeed": 525363197,
+      "kind": "varied-legal-prefix",
+      "otherScore": 111,
+      "ownScore": 119,
+      "reference": {
+        "card": 37,
+        "ev": 0.38742686150992856,
+        "wp": 1.0
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 119, human_score: 111, ai_hand: [Card { id: 37, rank: 11, suit: 2, value: 10 }, Card { id: 28, rank: 2, suit: 2, value: 3 }], ai_table: [Card { id: 21, rank: 8, suit: 1, value: 9 }, Card { id: 48, rank: 9, suit: 3, value: 10 }], human_table: [Card { id: 1, rank: 1, suit: 0, value: 2 }, Card { id: 50, rank: 11, suit: 3, value: 10 }, Card { id: 27, rank: 1, suit: 2, value: 2 }], human_hand_count: 1, own_discards: [Card { id: 44, rank: 5, suit: 3, value: 6 }, Card { id: 14, rank: 1, suit: 1, value: 2 }], turn_card: Card { id: 34, rank: 8, suit: 2, value: 9 }, count: 2, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 27, rank: 1, suit: 2, value: 2 }], public_history: [OpponentPlay(1), SelfPlay(8), OpponentPlay(11), SelfPlay(9), Reset, OpponentPlay(1)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 9036894817573666920 }"
+    },
+    {
+      "candidate": {
+        "card": 44,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "gameSeed": 511294593,
+      "kind": "varied-legal-prefix",
+      "otherScore": 112,
+      "ownScore": 119,
+      "reference": {
+        "card": 44,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 119, human_score: 112, ai_hand: [Card { id: 44, rank: 5, suit: 3, value: 6 }, Card { id: 6, rank: 6, suit: 0, value: 7 }], ai_table: [Card { id: 3, rank: 3, suit: 0, value: 4 }, Card { id: 22, rank: 9, suit: 1, value: 10 }], human_table: [Card { id: 45, rank: 6, suit: 3, value: 7 }, Card { id: 10, rank: 10, suit: 0, value: 10 }, Card { id: 8, rank: 8, suit: 0, value: 9 }], human_hand_count: 1, own_discards: [Card { id: 0, rank: 0, suit: 0, value: 1 }, Card { id: 29, rank: 3, suit: 2, value: 4 }], turn_card: Card { id: 27, rank: 1, suit: 2, value: 2 }, count: 9, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 8, rank: 8, suit: 0, value: 9 }], public_history: [OpponentPlay(6), SelfPlay(3), OpponentPlay(10), SelfPlay(9), Reset, OpponentPlay(8)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 4592009128306278504 }"
+    },
+    {
+      "candidate": {
+        "card": 11,
+        "ev": -0.35950186787001215,
+        "wp": 0.5280996264259975
+      },
+      "gameSeed": 796408221,
+      "kind": "varied-legal-prefix",
+      "otherScore": 116,
+      "ownScore": 118,
+      "reference": {
+        "card": 11,
+        "ev": -0.42133742814309416,
+        "wp": 0.5157325143713811
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 118, human_score: 116, ai_hand: [Card { id: 11, rank: 11, suit: 0, value: 10 }, Card { id: 48, rank: 9, suit: 3, value: 10 }], ai_table: [Card { id: 0, rank: 0, suit: 0, value: 1 }, Card { id: 8, rank: 8, suit: 0, value: 9 }], human_table: [Card { id: 19, rank: 6, suit: 1, value: 7 }, Card { id: 43, rank: 4, suit: 3, value: 5 }, Card { id: 37, rank: 11, suit: 2, value: 10 }], human_hand_count: 1, own_discards: [Card { id: 21, rank: 8, suit: 1, value: 9 }, Card { id: 28, rank: 2, suit: 2, value: 3 }], turn_card: Card { id: 20, rank: 7, suit: 1, value: 8 }, count: 10, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 37, rank: 11, suit: 2, value: 10 }], public_history: [OpponentPlay(6), SelfPlay(0), OpponentPlay(4), SelfPlay(8), OpponentGo, SelfGo, Reset, OpponentPlay(11)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 12826600923921645672 }"
+    },
+    {
+      "candidate": {
+        "card": 40,
+        "ev": 1.2684056865116555,
+        "wp": 0.028707471015486888
+      },
+      "gameSeed": 4266673645,
+      "kind": "varied-legal-prefix",
+      "otherScore": 118,
+      "ownScore": 117,
+      "reference": {
+        "card": 40,
+        "ev": 1.3208862750692894,
+        "wp": 0.010736716849706032
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 117, human_score: 118, ai_hand: [Card { id: 40, rank: 1, suit: 3, value: 2 }, Card { id: 47, rank: 8, suit: 3, value: 9 }], ai_table: [Card { id: 49, rank: 10, suit: 3, value: 10 }, Card { id: 17, rank: 4, suit: 1, value: 5 }], human_table: [Card { id: 12, rank: 12, suit: 0, value: 10 }, Card { id: 39, rank: 0, suit: 3, value: 1 }, Card { id: 16, rank: 3, suit: 1, value: 4 }], human_hand_count: 1, own_discards: [Card { id: 4, rank: 4, suit: 0, value: 5 }, Card { id: 13, rank: 0, suit: 1, value: 1 }], turn_card: Card { id: 20, rank: 7, suit: 1, value: 8 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [OpponentPlay(12), SelfPlay(10), OpponentPlay(0), SelfPlay(4), OpponentPlay(3), SelfGo, OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 5482657441370603624 }"
+    },
+    {
+      "candidate": {
+        "card": 8,
+        "ev": -0.18723603660452742,
+        "wp": 0.0015542515162050275
+      },
+      "gameSeed": 763569281,
+      "kind": "varied-legal-prefix",
+      "otherScore": 118,
+      "ownScore": 117,
+      "reference": {
+        "card": 8,
+        "ev": -0.20110782859826168,
+        "wp": 0.002264094034726074
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 117, human_score: 118, ai_hand: [Card { id: 32, rank: 6, suit: 2, value: 7 }, Card { id: 8, rank: 8, suit: 0, value: 9 }], ai_table: [Card { id: 0, rank: 0, suit: 0, value: 1 }, Card { id: 5, rank: 5, suit: 0, value: 6 }], human_table: [Card { id: 3, rank: 3, suit: 0, value: 4 }, Card { id: 40, rank: 1, suit: 3, value: 2 }, Card { id: 26, rank: 0, suit: 2, value: 1 }], human_hand_count: 1, own_discards: [Card { id: 12, rank: 12, suit: 0, value: 10 }, Card { id: 35, rank: 9, suit: 2, value: 10 }], turn_card: Card { id: 31, rank: 5, suit: 2, value: 6 }, count: 14, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 3, rank: 3, suit: 0, value: 4 }, Card { id: 0, rank: 0, suit: 0, value: 1 }, Card { id: 40, rank: 1, suit: 3, value: 2 }, Card { id: 5, rank: 5, suit: 0, value: 6 }, Card { id: 26, rank: 0, suit: 2, value: 1 }], public_history: [OpponentPlay(3), SelfPlay(0), OpponentPlay(1), SelfPlay(5), OpponentPlay(0)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 4692328569224560744 }"
+    },
+    {
+      "candidate": {
+        "card": 12,
+        "ev": -0.05076734935394023,
+        "wp": 0.19938119594555542
+      },
+      "gameSeed": 1612309071,
+      "kind": "varied-legal-prefix",
+      "otherScore": 119,
+      "ownScore": 119,
+      "reference": {
+        "card": 12,
+        "ev": 0.17265213838263116,
+        "wp": 0.2601515178239577
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 119, human_score: 119, ai_hand: [Card { id: 43, rank: 4, suit: 3, value: 5 }, Card { id: 12, rank: 12, suit: 0, value: 10 }], ai_table: [Card { id: 24, rank: 11, suit: 1, value: 10 }, Card { id: 26, rank: 0, suit: 2, value: 1 }], human_table: [Card { id: 51, rank: 12, suit: 3, value: 10 }, Card { id: 35, rank: 9, suit: 2, value: 10 }, Card { id: 2, rank: 2, suit: 0, value: 3 }], human_hand_count: 1, own_discards: [Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 33, rank: 7, suit: 2, value: 8 }], turn_card: Card { id: 25, rank: 12, suit: 1, value: 10 }, count: 3, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 2, rank: 2, suit: 0, value: 3 }], public_history: [OpponentPlay(12), SelfPlay(11), OpponentPlay(9), SelfPlay(0), Reset, OpponentPlay(2)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 9100061837898809448 }"
+    },
+    {
+      "candidate": {
+        "card": 17,
+        "ev": 0.9071773826077034,
+        "wp": 0.9535886913038517
+      },
+      "gameSeed": 1077513439,
+      "kind": "varied-legal-prefix",
+      "otherScore": 120,
+      "ownScore": 120,
+      "reference": {
+        "card": 17,
+        "ev": 0.8691124136264134,
+        "wp": 0.9345562068132068
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 120, human_score: 120, ai_hand: [Card { id: 17, rank: 4, suit: 1, value: 5 }, Card { id: 45, rank: 6, suit: 3, value: 7 }], ai_table: [Card { id: 44, rank: 5, suit: 3, value: 6 }, Card { id: 48, rank: 9, suit: 3, value: 10 }], human_table: [Card { id: 5, rank: 5, suit: 0, value: 6 }, Card { id: 33, rank: 7, suit: 2, value: 8 }, Card { id: 1, rank: 1, suit: 0, value: 2 }], human_hand_count: 1, own_discards: [Card { id: 50, rank: 11, suit: 3, value: 10 }, Card { id: 26, rank: 0, suit: 2, value: 1 }], turn_card: Card { id: 20, rank: 7, suit: 1, value: 8 }, count: 2, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 1, rank: 1, suit: 0, value: 2 }], public_history: [OpponentPlay(5), SelfPlay(5), OpponentPlay(7), SelfPlay(9), OpponentGo, SelfGo, Reset, OpponentPlay(1)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 7448411273501081704 }"
+    },
+    {
+      "candidate": {
+        "card": 28,
+        "ev": 3.0,
+        "wp": 1.0
+      },
+      "gameSeed": 875598565,
+      "kind": "varied-legal-prefix",
+      "otherScore": 113,
+      "ownScore": 118,
+      "reference": {
+        "card": 28,
+        "ev": 3.0,
+        "wp": 1.0
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 118, human_score: 113, ai_hand: [Card { id: 27, rank: 1, suit: 2, value: 2 }, Card { id: 28, rank: 2, suit: 2, value: 3 }], ai_table: [Card { id: 1, rank: 1, suit: 0, value: 2 }, Card { id: 18, rank: 5, suit: 1, value: 6 }], human_table: [Card { id: 19, rank: 6, suit: 1, value: 7 }, Card { id: 2, rank: 2, suit: 0, value: 3 }, Card { id: 38, rank: 12, suit: 2, value: 10 }], human_hand_count: 1, own_discards: [Card { id: 34, rank: 8, suit: 2, value: 9 }, Card { id: 25, rank: 12, suit: 1, value: 10 }], turn_card: Card { id: 8, rank: 8, suit: 0, value: 9 }, count: 28, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 19, rank: 6, suit: 1, value: 7 }, Card { id: 1, rank: 1, suit: 0, value: 2 }, Card { id: 2, rank: 2, suit: 0, value: 3 }, Card { id: 18, rank: 5, suit: 1, value: 6 }, Card { id: 38, rank: 12, suit: 2, value: 10 }], public_history: [OpponentPlay(6), SelfPlay(1), OpponentPlay(2), SelfPlay(5), OpponentPlay(12)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 6626859784409448552 }"
+    },
+    {
+      "candidate": {
+        "card": 8,
+        "ev": 0.6318023625231323,
+        "wp": 1.0
+      },
+      "gameSeed": 4099625210,
+      "kind": "varied-legal-prefix",
+      "otherScore": 116,
+      "ownScore": 118,
+      "reference": {
+        "card": 8,
+        "ev": 0.6210504080579409,
+        "wp": 1.0
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 118, human_score: 116, ai_hand: [Card { id: 8, rank: 8, suit: 0, value: 9 }, Card { id: 2, rank: 2, suit: 0, value: 3 }], ai_table: [Card { id: 47, rank: 8, suit: 3, value: 9 }, Card { id: 28, rank: 2, suit: 2, value: 3 }], human_table: [Card { id: 1, rank: 1, suit: 0, value: 2 }, Card { id: 19, rank: 6, suit: 1, value: 7 }, Card { id: 37, rank: 11, suit: 2, value: 10 }], human_hand_count: 1, own_discards: [Card { id: 36, rank: 10, suit: 2, value: 10 }, Card { id: 20, rank: 7, suit: 1, value: 8 }], turn_card: Card { id: 9, rank: 9, suit: 0, value: 10 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [OpponentPlay(1), SelfPlay(8), OpponentPlay(6), SelfPlay(2), OpponentPlay(11), Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 14497591129052807272 }"
+    },
+    {
+      "candidate": {
+        "card": 50,
+        "ev": 1.0,
+        "wp": 1.0
+      },
+      "gameSeed": 1739858146,
+      "kind": "varied-legal-prefix",
+      "otherScore": 116,
+      "ownScore": 120,
+      "reference": {
+        "card": 50,
+        "ev": 1.0,
+        "wp": 1.0
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 120, human_score: 116, ai_hand: [Card { id: 34, rank: 8, suit: 2, value: 9 }, Card { id: 50, rank: 11, suit: 3, value: 10 }], ai_table: [Card { id: 32, rank: 6, suit: 2, value: 7 }, Card { id: 12, rank: 12, suit: 0, value: 10 }], human_table: [Card { id: 33, rank: 7, suit: 2, value: 8 }, Card { id: 36, rank: 10, suit: 2, value: 10 }, Card { id: 7, rank: 7, suit: 0, value: 8 }], human_hand_count: 1, own_discards: [Card { id: 30, rank: 4, suit: 2, value: 5 }, Card { id: 0, rank: 0, suit: 0, value: 1 }], turn_card: Card { id: 3, rank: 3, suit: 0, value: 4 }, count: 18, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 12, rank: 12, suit: 0, value: 10 }, Card { id: 7, rank: 7, suit: 0, value: 8 }], public_history: [OpponentPlay(7), SelfPlay(6), OpponentPlay(10), SelfGo, OpponentGo, Reset, SelfPlay(12), OpponentPlay(7)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 15595021278238212200 }"
+    },
+    {
+      "candidate": {
+        "card": 11,
+        "ev": 1.2776374559416765,
+        "wp": 0.17288940758955587
+      },
+      "gameSeed": 279463661,
+      "kind": "varied-legal-prefix",
+      "otherScore": 117,
+      "ownScore": 118,
+      "reference": {
+        "card": 11,
+        "ev": 1.0354967687392451,
+        "wp": 0.058987013175312866
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 118, human_score: 117, ai_hand: [Card { id: 11, rank: 11, suit: 0, value: 10 }, Card { id: 22, rank: 9, suit: 1, value: 10 }], ai_table: [Card { id: 45, rank: 6, suit: 3, value: 7 }, Card { id: 25, rank: 12, suit: 1, value: 10 }], human_table: [Card { id: 14, rank: 1, suit: 1, value: 2 }, Card { id: 30, rank: 4, suit: 2, value: 5 }, Card { id: 17, rank: 4, suit: 1, value: 5 }], human_hand_count: 1, own_discards: [Card { id: 10, rank: 10, suit: 0, value: 10 }, Card { id: 37, rank: 11, suit: 2, value: 10 }], turn_card: Card { id: 29, rank: 3, suit: 2, value: 4 }, count: 0, turn: Ai, go_player: None, last_player: None, plays: [], public_history: [OpponentPlay(1), SelfPlay(6), OpponentPlay(4), SelfPlay(12), OpponentPlay(4), SelfGo, OpponentGo, Reset], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 10106975748889509992 }"
+    },
+    {
+      "candidate": {
+        "card": 43,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "gameSeed": 4128617985,
+      "kind": "varied-legal-prefix",
+      "otherScore": 119,
+      "ownScore": 119,
+      "reference": {
+        "card": 43,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 119, human_score: 119, ai_hand: [Card { id: 35, rank: 9, suit: 2, value: 10 }, Card { id: 43, rank: 4, suit: 3, value: 5 }], ai_table: [Card { id: 37, rank: 11, suit: 2, value: 10 }, Card { id: 16, rank: 3, suit: 1, value: 4 }], human_table: [Card { id: 29, rank: 3, suit: 2, value: 4 }, Card { id: 9, rank: 9, suit: 0, value: 10 }, Card { id: 50, rank: 11, suit: 3, value: 10 }], human_hand_count: 1, own_discards: [Card { id: 49, rank: 10, suit: 3, value: 10 }, Card { id: 42, rank: 3, suit: 3, value: 4 }], turn_card: Card { id: 47, rank: 8, suit: 3, value: 9 }, count: 10, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 50, rank: 11, suit: 3, value: 10 }], public_history: [OpponentPlay(3), SelfPlay(11), OpponentPlay(9), SelfPlay(3), OpponentGo, SelfGo, Reset, OpponentPlay(11)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 14586703415452893288 }"
+    },
+    {
+      "candidate": {
+        "card": 43,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "gameSeed": 1155186516,
+      "kind": "varied-legal-prefix",
+      "otherScore": 112,
+      "ownScore": 119,
+      "reference": {
+        "card": 43,
+        "ev": 2.0,
+        "wp": 1.0
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 119, human_score: 112, ai_hand: [Card { id: 28, rank: 2, suit: 2, value: 3 }, Card { id: 43, rank: 4, suit: 3, value: 5 }], ai_table: [Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 16, rank: 3, suit: 1, value: 4 }], human_table: [Card { id: 36, rank: 10, suit: 2, value: 10 }, Card { id: 13, rank: 0, suit: 1, value: 1 }, Card { id: 15, rank: 2, suit: 1, value: 3 }], human_hand_count: 1, own_discards: [Card { id: 18, rank: 5, suit: 1, value: 6 }, Card { id: 47, rank: 8, suit: 3, value: 9 }], turn_card: Card { id: 32, rank: 6, suit: 2, value: 7 }, count: 26, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 36, rank: 10, suit: 2, value: 10 }, Card { id: 7, rank: 7, suit: 0, value: 8 }, Card { id: 13, rank: 0, suit: 1, value: 1 }, Card { id: 16, rank: 3, suit: 1, value: 4 }, Card { id: 15, rank: 2, suit: 1, value: 3 }], public_history: [OpponentPlay(10), SelfPlay(7), OpponentPlay(0), SelfPlay(3), OpponentPlay(2)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 10454067960343167080 }"
+    },
+    {
+      "candidate": {
+        "card": 12,
+        "ev": -1.4075218882299032,
+        "wp": 1.0
+      },
+      "gameSeed": 141119790,
+      "kind": "varied-legal-prefix",
+      "otherScore": 115,
+      "ownScore": 120,
+      "reference": {
+        "card": 12,
+        "ev": -1.2332070760078009,
+        "wp": 1.0
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 120, human_score: 115, ai_hand: [Card { id: 10, rank: 10, suit: 0, value: 10 }, Card { id: 12, rank: 12, suit: 0, value: 10 }], ai_table: [Card { id: 6, rank: 6, suit: 0, value: 7 }, Card { id: 46, rank: 7, suit: 3, value: 8 }], human_table: [Card { id: 42, rank: 3, suit: 3, value: 4 }, Card { id: 51, rank: 12, suit: 3, value: 10 }, Card { id: 11, rank: 11, suit: 0, value: 10 }], human_hand_count: 1, own_discards: [Card { id: 15, rank: 2, suit: 1, value: 3 }, Card { id: 5, rank: 5, suit: 0, value: 6 }], turn_card: Card { id: 27, rank: 1, suit: 2, value: 2 }, count: 10, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 11, rank: 11, suit: 0, value: 10 }], public_history: [OpponentPlay(3), SelfPlay(6), OpponentPlay(12), SelfPlay(7), OpponentGo, SelfGo, Reset, OpponentPlay(11)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 7109785258631626856 }"
+    },
+    {
+      "candidate": {
+        "card": 5,
+        "ev": 0.3343956477239026,
+        "wp": 0.9731504114168082
+      },
+      "gameSeed": 1607470547,
+      "kind": "varied-legal-prefix",
+      "otherScore": 118,
+      "ownScore": 120,
+      "reference": {
+        "card": 5,
+        "ev": 0.3259894909952158,
+        "wp": 0.9675918484283789
+      },
+      "role": "dealer",
+      "visibleInput": "DecisionInput { kind: Peg, model: \"schell_table-peg_table-28.3\", player: Ai, role: Dealer, ai_score: 120, human_score: 118, ai_hand: [Card { id: 5, rank: 5, suit: 0, value: 6 }, Card { id: 23, rank: 10, suit: 1, value: 10 }], ai_table: [Card { id: 25, rank: 12, suit: 1, value: 10 }, Card { id: 46, rank: 7, suit: 3, value: 8 }], human_table: [Card { id: 8, rank: 8, suit: 0, value: 9 }, Card { id: 13, rank: 0, suit: 1, value: 1 }, Card { id: 9, rank: 9, suit: 0, value: 10 }], human_hand_count: 1, own_discards: [Card { id: 33, rank: 7, suit: 2, value: 8 }, Card { id: 17, rank: 4, suit: 1, value: 5 }], turn_card: Card { id: 29, rank: 3, suit: 2, value: 4 }, count: 10, turn: Ai, go_player: None, last_player: Some(Human), plays: [Card { id: 9, rank: 9, suit: 0, value: 10 }], public_history: [OpponentPlay(8), SelfPlay(12), OpponentPlay(0), SelfPlay(7), OpponentGo, SelfGo, Reset, OpponentPlay(9)], peg_lead: None, model16_policy_mode: Argmax, model16_policy_sample: 0, decision_seed: 2193104631738663016 }"
+    }
+  ],
+  "scope": "Finite probability/legality checks and certain score-outs; differing actions have no omniscient best-play labels.",
+  "wholeGamesRun": 0
+}

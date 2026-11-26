@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "artifactDirectory": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model284/late-beliefs-20261126-v3",
+  "manifestSha256": "7d4e7fef3f422fe915f7e32bedabc513237918953f79777fa80480d5ebda9f6c",
+  "nativeProbabilityPanelPassed": true,
+  "nativeDecisionPanelPassed": true,
+  "decisionScenarios": 128,
+  "changedChoices": 1,
+  "decisionReportSha256": "d0971c3645d5bcfee34b8916ebae589843fcccce9d403e693d24043dca3ec98c",
+  "pythonVersion": "3.13.2",
+  "wholeGamesRun": 0,
+  "activation": "disabled",
+  "rustValidationSources": {
+    "model284_late_tests.rs": "f9e1aac2a7e56e7eb5927556e70253689775d710904aa59dde16a4056ff1316a",
+    "model284_late_decisions.rs": "e5edae483cd50b94a23366c28a3b5bd4449a91c29557039a4484c63f1d9e39db"
+  }
+}

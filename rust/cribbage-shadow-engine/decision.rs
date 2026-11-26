@@ -319,7 +319,7 @@ fn ensure_native_model(model_id: ModelId) -> Result<(), String> {
     }
 }
 
-fn decision_input(
+pub(crate) fn decision_input(
     game: &CribbageGame,
     side: Side,
     model_id: ModelId,

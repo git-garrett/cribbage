@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model20/evaluation-20260927/20.3-vs-20.2-10k/20.2-left/games.db",
+      "engines": [
+        "schell_table-peg_table-20.2",
+        "schell_table-peg_table-20.3"
+      ],
+      "qualification": "Canonical identified 13.23/20.x/28.3 actors from the retained named head-to-head evaluation; 15.x/16.x and unknown/suffixed actors prohibited. Broad-prior seed groups excluded before fitting.",
+      "runProvenance": [
+        {
+          "runId": "model20-20.2-left",
+          "sourceCommit": "567ff4f0570faea537a2f257df2cacf4494d5b24",
+          "runnerSha256": "eb90e5edf53b31d61df4593297725509d630adc90c4205dbb9029fe9fe6ba784",
+          "frozenModel": "schell_table-peg_table-20.2",
+          "frozenSha256": "94246bd8168fa3f4f1135a9c47a3524c5f233e7ca81b5db98958397b48e54620",
+          "frozenSourceCommit": "b2737aa51a846ef110592835d1510bbd318a2d90",
+          "metadataSha256": "a2ddc745bcf638e0b8297489112e05e162aec081a30039f1f34ace4b21aa2508"
+        }
+      ]
+    },
+    {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model20/evaluation-20260927/20.3-vs-20.2-10k/20.3-left/games.db",
+      "engines": [
+        "schell_table-peg_table-20.3",
+        "schell_table-peg_table-20.2"
+      ],
+      "qualification": "Canonical identified 13.23/20.x/28.3 actors from the retained named head-to-head evaluation; 15.x/16.x and unknown/suffixed actors prohibited. Broad-prior seed groups excluded before fitting.",
+      "runProvenance": [
+        {
+          "runId": "model20-20.3-left",
+          "sourceCommit": "567ff4f0570faea537a2f257df2cacf4494d5b24",
+          "runnerSha256": "eb90e5edf53b31d61df4593297725509d630adc90c4205dbb9029fe9fe6ba784",
+          "frozenModel": "schell_table-peg_table-20.2",
+          "frozenSha256": "94246bd8168fa3f4f1135a9c47a3524c5f233e7ca81b5db98958397b48e54620",
+          "frozenSourceCommit": "b2737aa51a846ef110592835d1510bbd318a2d90",
+          "metadataSha256": "45358f99449c378ff3555dc00e4375f6336cf79c1b29680c1ea68b5dfe8e81dc"
+        }
+      ]
+    },
+    {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model20/evaluation-20260930/20.5-vs-20.4-10k/20.4-left/games.db",
+      "engines": [
+        "schell_table-peg_table-20.4",
+        "schell_table-peg_table-20.5"
+      ],
+      "qualification": "Canonical identified 13.23/20.x/28.3 actors from the retained named head-to-head evaluation; 15.x/16.x and unknown/suffixed actors prohibited. Broad-prior seed groups excluded before fitting.",
+      "runProvenance": [
+        {
+          "runId": "model20-20.4-left",
+          "sourceCommit": "6786501b7fb05f29932da92157f1d1928075180f",
+          "runnerSha256": "68e98017ac0b069d72bb3cd0e3ba53dcef90ebc08ff9d4b29010574037f4a714",
+          "frozenModel": null,
+          "frozenSha256": null,
+          "frozenSourceCommit": null,
+          "metadataSha256": "f2c9dbc3238f5557073696aadd7ba8f3c88505d9ef7ea258ff6654a4d79ba7de"
+        }
+      ]
+    },
+    {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model20/evaluation-20260930/20.5-vs-20.4-10k/20.5-left/games.db",
+      "engines": [
+        "schell_table-peg_table-20.5",
+        "schell_table-peg_table-20.4"
+      ],
+      "qualification": "Canonical identified 13.23/20.x/28.3 actors from the retained named head-to-head evaluation; 15.x/16.x and unknown/suffixed actors prohibited. Broad-prior seed groups excluded before fitting.",
+      "runProvenance": [
+        {
+          "runId": "model20-20.5-left",
+          "sourceCommit": "6786501b7fb05f29932da92157f1d1928075180f",
+          "runnerSha256": "68e98017ac0b069d72bb3cd0e3ba53dcef90ebc08ff9d4b29010574037f4a714",
+          "frozenModel": null,
+          "frozenSha256": null,
+          "frozenSourceCommit": null,
+          "metadataSha256": "c5942f4861de362be44f22475394840d3853faf098e3ffd0b7a495086474eb4d"
+        }
+      ]
+    },
+    {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model20/evaluation-20261001/20.6-final-vs-current-ace-10k/20.6-left/games.db",
+      "engines": [
+        "schell_table-peg_table-20.6",
+        "schell_table-peg_table-13.23"
+      ],
+      "qualification": "Canonical identified 13.23/20.x/28.3 actors from the retained named head-to-head evaluation; 15.x/16.x and unknown/suffixed actors prohibited. Broad-prior seed groups excluded before fitting.",
+      "runProvenance": [
+        {
+          "runId": "model20-20.6-left",
+          "sourceCommit": "6786501b7fb05f29932da92157f1d1928075180f",
+          "runnerSha256": "ba6a2f0e16d6d060c1c9e07c8d67f50ea4a51765a70e8fc7c1851921fd678428",
+          "frozenModel": "schell_table-peg_table-13.23",
+          "frozenSha256": "e91409c230f6412b6da1777157203bf286833cabd429e3e5e37d04b399653705",
+          "frozenSourceCommit": "7b0f6113fde84ea03d3a7c3f4c0d40ea9972cf4e",
+          "metadataSha256": "e5f02b9af1842717e283a10f815b71b4bc0c8f9b6ec2a993809822383db78051"
+        }
+      ]
+    },
+    {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model20/evaluation-20261001/20.6-final-vs-current-ace-10k/ace-left/games.db",
+      "engines": [
+        "schell_table-peg_table-13.23",
+        "schell_table-peg_table-20.6"
+      ],
+      "qualification": "Canonical identified 13.23/20.x/28.3 actors from the retained named head-to-head evaluation; 15.x/16.x and unknown/suffixed actors prohibited. Broad-prior seed groups excluded before fitting.",
+      "runProvenance": [
+        {
+          "runId": "model20-ace-left",
+          "sourceCommit": "6786501b7fb05f29932da92157f1d1928075180f",
+          "runnerSha256": "ba6a2f0e16d6d060c1c9e07c8d67f50ea4a51765a70e8fc7c1851921fd678428",
+          "frozenModel": "schell_table-peg_table-13.23",
+          "frozenSha256": "e91409c230f6412b6da1777157203bf286833cabd429e3e5e37d04b399653705",
+          "frozenSourceCommit": "7b0f6113fde84ea03d3a7c3f4c0d40ea9972cf4e",
+          "metadataSha256": "fc6122247f5953647b1ac55f678a37ecbb9a15ab8486562262bb70533ed97c1b"
+        }
+      ]
+    },
+    {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model20/evaluation-20261001/20.6-vs-20.5-10k/20.5-left/games.db",
+      "engines": [
+        "schell_table-peg_table-20.5",
+        "schell_table-peg_table-20.6"
+      ],
+      "qualification": "Canonical identified 13.23/20.x/28.3 actors from the retained named head-to-head evaluation; 15.x/16.x and unknown/suffixed actors prohibited. Broad-prior seed groups excluded before fitting.",
+      "runProvenance": [
+        {
+          "runId": "model20-20.5-left",
+          "sourceCommit": "6786501b7fb05f29932da92157f1d1928075180f",
+          "runnerSha256": "d85110df6e9f02d75a41f4e1cd8a59ddf31fc4c2a91007152acfc23f68289941",
+          "frozenModel": null,
+          "frozenSha256": null,
+          "frozenSourceCommit": null,
+          "metadataSha256": "50807ffe258a00724e8e3ff70f24e0e9092b56749caf823912ab88cb361bcec6"
+        }
+      ]
+    },
+    {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model20/evaluation-20261001/20.6-vs-20.5-10k/20.6-left/games.db",
+      "engines": [
+        "schell_table-peg_table-20.6",
+        "schell_table-peg_table-20.5"
+      ],
+      "qualification": "Canonical identified 13.23/20.x/28.3 actors from the retained named head-to-head evaluation; 15.x/16.x and unknown/suffixed actors prohibited. Broad-prior seed groups excluded before fitting.",
+      "runProvenance": [
+        {
+          "runId": "model20-20.6-left",
+          "sourceCommit": "6786501b7fb05f29932da92157f1d1928075180f",
+          "runnerSha256": "d85110df6e9f02d75a41f4e1cd8a59ddf31fc4c2a91007152acfc23f68289941",
+          "frozenModel": null,
+          "frozenSha256": null,
+          "frozenSourceCommit": null,
+          "metadataSha256": "00e660231f70c40dc24c8afc260ea52f53e6e1b56268753a66f6ece025a8e2da"
+        }
+      ]
+    },
+    {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model28/evaluation-20261004/28.3-vs-final-20.6-10k/benchmark/20.6-left/games.db",
+      "engines": [
+        "schell_table-peg_table-20.6",
+        "schell_table-peg_table-28.3"
+      ],
+      "qualification": "Canonical identified 13.23/20.x/28.3 actors from the retained named head-to-head evaluation; 15.x/16.x and unknown/suffixed actors prohibited. Broad-prior seed groups excluded before fitting.",
+      "runProvenance": [
+        {
+          "runId": "model28-20.6-left",
+          "sourceCommit": "4cba96da068e84e56e6ba28c96913e6274205979",
+          "runnerSha256": "8c6168497c142e40aa6b4ecfe2d17b6ef54b475f1fb1f99c5fe24d925e208690",
+          "frozenModel": "schell_table-peg_table-20.6",
+          "frozenSha256": "4e7994576317e65bf2e11bf2c15c5a827a02d18d26384a8fb9eb40889d290040",
+          "frozenSourceCommit": "6786501b7fb05f29932da92157f1d1928075180f",
+          "metadataSha256": "1225298a4123db65f73b5f789814845b2d1567268ec8cb53fa2752aea847f9df"
+        }
+      ]
+    },
+    {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model28/evaluation-20261004/28.3-vs-final-20.6-10k/benchmark/28.3-left/games.db",
+      "engines": [
+        "schell_table-peg_table-28.3",
+        "schell_table-peg_table-20.6"
+      ],
+      "qualification": "Canonical identified 13.23/20.x/28.3 actors from the retained named head-to-head evaluation; 15.x/16.x and unknown/suffixed actors prohibited. Broad-prior seed groups excluded before fitting.",
+      "runProvenance": [
+        {
+          "runId": "model28-28.3-left",
+          "sourceCommit": "4cba96da068e84e56e6ba28c96913e6274205979",
+          "runnerSha256": "8c6168497c142e40aa6b4ecfe2d17b6ef54b475f1fb1f99c5fe24d925e208690",
+          "frozenModel": "schell_table-peg_table-20.6",
+          "frozenSha256": "4e7994576317e65bf2e11bf2c15c5a827a02d18d26384a8fb9eb40889d290040",
+          "frozenSourceCommit": "6786501b7fb05f29932da92157f1d1928075180f",
+          "metadataSha256": "82101493d8a40b4f7bfa039519418ca40034d0228ac6dd3c061c76dc1366031c"
+        }
+      ]
+    }
+  ],
+  "excludedSources": [
+    {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model20/evaluation-20261004/model207-joint-counting/games-left/games.db",
+      "reason": "missing recorded source or executable identity"
+    },
+    {
+      "path": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model20/evaluation-20261004/model207-joint-counting/games-right/games.db",
+      "reason": "missing recorded source or executable identity"
+    }
+  ]
+}
