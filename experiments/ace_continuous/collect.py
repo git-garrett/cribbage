@@ -1,7 +1,6 @@
 """Continue the verified Ace replay corpus with a single SQLite writer."""
 from collections import deque
-from hybrid import worker_limit
-from contextlib import ExitStack
+from hybrid import worker_limit, reserve_workers
 import gzip
 import json
 import os
@@ -14,7 +13,7 @@ root = Path(__file__).resolve().parent
 teacher = root / "teacher"
 sys.path.insert(0, str(teacher / "source"))
 from teacher_pipeline import database, digest, read, replay, save
-from resources import LEDGER, one_cpu
+from resources import LEDGER
 
 plan = read(teacher / "plan.json")
 os.environ["CRIBBAGE_RUST_MODEL_ROOT"] = plan["assetRoot"]
@@ -105,18 +104,17 @@ def collect_block(db, native, capacity, source, offset, games):
             continue
         if shutil.disk_usage(root).free < 5 * 2**30:
             raise RuntimeError("Internal storage reserve reached")
-        slots = max(1, (os.cpu_count() or 12) - 1) - read(LEDGER)["workers"]
-        if slots < 1:
-            time.sleep(5)
-            continue
-        workers = min(slots, capacity.workers(), len(games) - index)
-        size = min(max(4, workers), len(games) - index)
-        began = time.monotonic()
-        save(teacher / "live.json", dict(status="collecting", source=source, game=offset + index,
-             workers=workers, chunkGames=size, labelHighWater=db.execute("SELECT MAX(rowid) FROM labels").fetchone()[0]))
-        with ExitStack() as reservation:
-            for worker in range(workers):
-                reservation.enter_context(one_cpu(f"{root.name}-ace-{worker}"))
+        # Capacity may wait for pressure to clear. Recheck and claim the whole
+        # currently available CPU budget under the shared lock afterward.
+        budget = min(capacity.workers(), len(games) - index)
+        with reserve_workers(LEDGER, f'{root.name}-ace', budget, os.cpu_count() or 12) as workers:
+            if workers < 1:
+                time.sleep(5)
+                continue
+            size = min(max(4, workers), len(games) - index)
+            began = time.monotonic()
+            save(teacher / "live.json", dict(status="collecting", source=source, game=offset + index,
+                 workers=workers, chunkGames=size, labelHighWater=db.execute("SELECT MAX(rowid) FROM labels").fetchone()[0]))
             try:
                 rows = replay(native, games[index:index + size], source, plan["teacherIdentity"], workers)
             except InterruptedError:

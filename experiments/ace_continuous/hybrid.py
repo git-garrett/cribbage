@@ -1,8 +1,11 @@
 """Durable handoff between Ace ingestion and bounded native self-play rounds."""
+from contextlib import contextmanager
+import fcntl
 import json
 import os
 from pathlib import Path
 import time
+import signal
 
 
 def read(path, default=None):
@@ -82,3 +85,40 @@ def worker_limit(samples, cpu_count):
     if latest['pressure'] != 1 or any(s['pressure'] != 1 for s in recent[-8:]):
         return min(4, max(1, cpu_count - 1))
     return max(1, cpu_count - 1)
+
+
+@contextmanager
+def reserve_workers(ledger, prefix, maximum, cpu_count):
+    """Claim the current batch atomically after any memory/thermal wait."""
+    ledger = Path(ledger)
+    keys = []
+    def interrupted(*_):
+        raise InterruptedError('Collector interrupted; CPU claims released')
+    previous = signal.signal(signal.SIGTERM, interrupted)
+    try:
+        with ledger.with_suffix('.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            data = read(ledger)
+            assert data['workers'] == sum(data['allocations'].values())
+            count = max(0, min(maximum, max(1, cpu_count - 1) - data['workers']))
+            proposed = [f'{prefix}-{i}' for i in range(count)]
+            assert not any(key in data['allocations'] for key in proposed), 'Collector reservations already owned'
+            for key in proposed:
+                data['allocations'][key] = 1
+            data.update(workers=sum(data['allocations'].values()), updatedAt=time.time())
+            save(ledger, data)
+            keys = proposed
+        yield count
+    finally:
+        try:
+            if keys:
+                with ledger.with_suffix('.lock').open('a') as lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX)
+                    data = read(ledger)
+                    for key in keys:
+                        assert data['allocations'].get(key) == 1, 'Collector reservation ownership changed'
+                        del data['allocations'][key]
+                    data.update(workers=sum(data['allocations'].values()), updatedAt=time.time())
+                    save(ledger, data)
+        finally:
+            signal.signal(signal.SIGTERM, previous)

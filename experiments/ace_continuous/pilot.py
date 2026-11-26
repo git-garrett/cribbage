@@ -73,6 +73,13 @@ def run(setup, live):
             old_wp, new_wp = read(before / 'wp-state.json'), read(after / 'wp-state.json')
             assert new_wp['recency']['games'] == old_wp['recency']['games'] + 2
             assert new_wp['tableSha256'] != old_wp['tableSha256']
+            evidence = np.zeros((2, 121, 121), np.uint64)
+            for path in Path(receipt['archive']).glob('native-segments/round-1-greedy-wp/*/evidence.bin'):
+                evidence += np.fromfile(path, dtype='<u8').reshape(2, 121, 121)
+            assert evidence.sum() > 0
+            with np.load(before / 'wp-state.npz') as old, np.load(after / 'wp-state.npz') as new:
+                np.testing.assert_allclose(new['weighted_visits'], old['weighted_visits'] * 2**(-2/2_000_000) + evidence[0], rtol=1e-14)
+                np.testing.assert_allclose(new['weighted_wins'], old['weighted_wins'] * 2**(-2/2_000_000) + evidence[1], rtol=1e-14)
         else:
             old_meta, new_meta = read(before / 'checkpoint.json'), read(after / 'checkpoint.json')
             assert new_meta['greedyGames'] == old_meta['greedyGames'] + 2

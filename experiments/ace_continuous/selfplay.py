@@ -95,6 +95,8 @@ def prepare(root, identity):
     else:
         binaries = {str(p): sha(p) for p in [model_root / 'build/libmodel32_33.dylib',
                                              model_root / 'cargo-target/release/libmodel3233_env.dylib']}
+    for path, digest in binaries.items():
+        assert sha(path) == digest, 'Native binary identity changed: ' + path
     manifest = dict(identity=identity, source=str(source), inputFiles=input_files, settings=settings,
                     seedReservation=reservation, binaries=binaries, createdAt=time.time(), config=cfg)
     save(folder / 'manifest.json', manifest)

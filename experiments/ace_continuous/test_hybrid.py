@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import hybrid as h
 import selfplay as sp
+import install as deployment
 
 HERE = Path(__file__).resolve().parent
 
@@ -58,6 +59,42 @@ class HybridTests(unittest.TestCase):
         self.assertEqual(h.worker_limit([sample(pressure=4)], 12), 0)
         self.assertEqual(h.worker_limit([sample(thermal=2)], 12), 0)
         self.assertEqual(h.worker_limit([sample(pressure=2), sample(10)], 12), 4)
+
+    def test_failed_training_restart_still_resumes_collector(self):
+        jobs = [dict(name='gpu', flag='STOP-TRAIN', receipt='gpu-stopped.json'),
+                dict(name='ace', flag='STOP-COLLECT', receipt='collector-stopped.json')]
+        for job in jobs:
+            h.save(self.root / (job['name'] + '.json'), dict(jobId=job['name'], jobRoot=str(self.root / job['name'])))
+            (self.root / job['flag']).touch()
+        with patch.object(deployment, 'SETUP', self.root), patch.object(deployment.shutil, 'copy2'), \
+             patch.object(deployment.subprocess, 'run', side_effect=[RuntimeError('launchd failed'), None]) as restart:
+            with self.assertRaises(RuntimeError):
+                deployment.restart_jobs(self.root, self.root / 'runner.py', jobs)
+        self.assertEqual(restart.call_count, 2)
+        self.assertFalse((self.root / 'STOP-TRAIN').exists())
+        self.assertFalse((self.root / 'STOP-COLLECT').exists())
+        self.assertEqual(h.read(self.root / 'restart-errors.json')['errors'][0]['job'], 'gpu')
+
+    def test_atomic_worker_claim_uses_latest_other_jobs_and_releases_only_ours(self):
+        ledger = self.root / 'cpus.json'
+        h.save(ledger, dict(workers=9, allocations={'other': 9}))
+        with h.reserve_workers(ledger, 'ace', 11, 12) as workers:
+            self.assertEqual(workers, 2)
+            data = h.read(ledger)
+            self.assertEqual(data['workers'], 11)
+            data['allocations']['gpu'] = 1
+            data['workers'] = 12
+            h.save(ledger, data)
+        self.assertEqual(h.read(ledger)['allocations'], {'other': 9, 'gpu': 1})
+        self.assertEqual(h.read(ledger)['workers'], 10)
+        h.save(ledger, dict(workers=11, allocations={'other': 11}))
+        with h.reserve_workers(ledger, 'ace', 11, 12) as workers:
+            self.assertEqual(workers, 0)
+        h.save(ledger, dict(workers=1, allocations={'ace-0': 1}))
+        with self.assertRaises(AssertionError):
+            with h.reserve_workers(ledger, 'ace', 11, 12):
+                self.fail('duplicate ownership must fail')
+        self.assertEqual(h.read(ledger)['allocations'], {'ace-0': 1})
 
     def test_archive_verification_and_restart_after_output_move(self):
         active = h.begin(self.root, self.state)

@@ -11,9 +11,30 @@ from hybrid import publish32, read, save
 SETUP = Path(__file__).resolve().parent
 
 
+def restart_jobs(root, runner, jobs):
+    """Attempt independent restarts even when one process cannot be restored."""
+    errors = []
+    for job in jobs:
+        (root / job['flag']).unlink(missing_ok=True)
+        (root / job['receipt']).unlink(missing_ok=True)
+    for job in jobs:
+        try:
+            subprocess.run([sys.executable, str(runner), 'install', str(root / (job['name'] + '.json'))], check=True)
+            spec = read(root / (job['name'] + '.json'))
+            label = 'com.strongcribbage.job.' + spec['jobId']
+            plist = Path(spec['jobRoot']) / (label + '.plist')
+            shutil.copy2(plist, Path.home() / 'Library/LaunchAgents' / plist.name)
+        except Exception as error:
+            errors.append(dict(job=job['name'], error=str(error)))
+    if errors:
+        save(SETUP / 'restart-errors.json', dict(status='failed', errors=errors))
+        raise RuntimeError('Independent restart attempts failed: ' + str(errors))
+
+
 def install(root):
     root = Path(root)
     assert read(SETUP / 'pilot.json')['status'] == 'complete'
+    assert read(SETUP / 'handoff-pilot.json')['status'] == 'complete'
     runner = SETUP / 'cribbage_job_queue.py'
     targets = {
         **{name: name for name in ['train.py', 'collect.py', 'hybrid.py', 'selfplay.py', 'checkpoints.py', 'evaluate.py', 'finish.py']},
@@ -90,14 +111,7 @@ def install(root):
                     shutil.copy2(backup / name, target)
                 else:
                     target.unlink(missing_ok=True)
-        for job in paused:
-            (root / job['flag']).unlink(missing_ok=True)
-            (root / job['receipt']).unlink(missing_ok=True)
-            subprocess.run([sys.executable, str(runner), 'install', str(root / (job['name'] + '.json'))], check=True)
-            spec = read(root / (job['name'] + '.json'))
-            label = 'com.strongcribbage.job.' + spec['jobId']
-            plist = Path(spec['jobRoot']) / (label + '.plist')
-            shutil.copy2(plist, Path.home() / 'Library/LaunchAgents' / plist.name)
+        restart_jobs(root, runner, paused)
     save(SETUP / 'install.json', dict(status='complete', resumed=['training', 'Ace collection'], at=time.time()))
 
 
