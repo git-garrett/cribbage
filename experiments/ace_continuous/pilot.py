@@ -74,7 +74,7 @@ def run(setup, live):
             assert new_wp['recency']['games'] == old_wp['recency']['games'] + 2
             assert new_wp['tableSha256'] != old_wp['tableSha256']
             evidence = np.zeros((2, 121, 121), np.uint64)
-            for path in Path(receipt['archive']).glob('native-segments/round-1-greedy-wp/*/evidence.bin'):
+            for path in Path(receipt['archive']).glob('data/round-1-greedy-wp-wp-evidence.bin'):
                 evidence += np.fromfile(path, dtype='<u8').reshape(2, 121, 121)
             assert evidence.sum() > 0
             with np.load(before / 'wp-state.npz') as old, np.load(after / 'wp-state.npz') as new:
