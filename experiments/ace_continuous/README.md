@@ -63,3 +63,13 @@ the new executable hash and resumes collection while GPU training continues.
 Startup also probes the backend with empty teacher requests, so an older binary
 safely retains its supported worker limit instead of crashing at its first
 larger batch. Unexpected native errors still fail and notify.
+
+Ace preserves one CPU slot for the GPU coordinator even between self-play
+chunks. The shared-ledger lock accounts for the actual GPU claim when present,
+so that slot is not reserved twice. A trainer also waits cooperatively if CPU
+capacity is temporarily full, and honors STOP while waiting. Previously the
+collector could claim every remaining slot just after a GPU chunk released its
+claim; the next chunk's legacy CPU reservation asserted and stopped the whole
+training job. The regression exercises both claim orders repeatedly, plus full
+capacity recovery and cooperative stop. Temporary contention never retries a
+scientific failure or re-applies a completed game/update.
