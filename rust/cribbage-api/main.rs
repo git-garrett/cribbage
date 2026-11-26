@@ -27,7 +27,7 @@ use cribbage_shadow_engine::dynamic::{
 use cribbage_shadow_engine::game::{CribbageGame, Phase, Side};
 use cribbage_shadow_engine::model::{Model13HandCache, Model911HandCache};
 use cribbage_shadow_engine::model_id::{
-    ModelId, ACE_MODEL, ACE_MODEL_ID, DYNAMIC, MODEL_13_0, MODEL_13_215, MODEL_13_23, MODEL_28_3, MODEL_9_1, MODEL_9_11,
+    ModelId, ACE_MODEL, ACE_MODEL_ID, DYNAMIC, MODEL_13_0, MODEL_13_215, MODEL_13_23, MODEL_28_3, MODEL_28_4, MODEL_9_1, MODEL_9_11,
     MYRMIDON_5,
 };
 use rusqlite::{params, Connection, OptionalExtension};
@@ -640,7 +640,7 @@ fn health_json() -> String {
 
 fn model_json() -> String {
     format!(
-        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\",\"schell_table-peg_table-20.0\",\"schell_table-peg_table-20.1\",\"schell_table-peg_table-20.2\",\"schell_table-peg_table-20.3\",\"schell_table-peg_table-20.4\",\"schell_table-peg_table-20.5\",\"schell_table-peg_table-20.6\",\"schell_table-peg_table-20.7\",\"schell_table-peg_table-28.3\",\"schell_table-peg_table-20.5.pegging\",\"schell_table-peg_table-20.5.pegging2\",\"{}\"]}}",
+        "{{\"appVersion\":\"{}\",\"model\":\"{}\",\"runtime\":\"rust\",\"models\":[\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"schell_table-peg_table-13.0\",\"schell_table-peg_table-13.1\",\"schell_table-peg_table-14.3\",\"schell_table-peg_table-14.8\",\"schell_table-peg_table-14.8.1\",\"schell_table-peg_table-15.0\",\"schell_table-peg_table-15.1\",\"schell_table-peg_table-15.2\",\"schell_table-peg_table-16.0\",\"schell_table-peg_table-16.1\",\"schell_table-peg_table-16.3\",\"schell_table-peg_table-20.0\",\"schell_table-peg_table-20.1\",\"schell_table-peg_table-20.2\",\"schell_table-peg_table-20.3\",\"schell_table-peg_table-20.4\",\"schell_table-peg_table-20.5\",\"schell_table-peg_table-20.6\",\"schell_table-peg_table-20.7\",\"schell_table-peg_table-28.3\",\"schell_table-peg_table-28.4\",\"schell_table-peg_table-20.5.pegging\",\"schell_table-peg_table-20.5.pegging2\",\"{}\"]}}",
         APP_VERSION, ACE_MODEL, ACE_MODEL, MYRMIDON_5, MODEL_9_1, MODEL_9_11, MODEL_13_215, DYNAMIC
     )
 }
@@ -2220,7 +2220,7 @@ fn apply_action_with_peg_decision(
                 None,
                 model_root,
                 Some(&session.model911_hand_cache),
-                matches!(decision_model, ModelId::Schell1323 | ModelId::Schell200 | ModelId::Schell201 | ModelId::Schell202 | ModelId::Schell203 | ModelId::Schell204 | ModelId::Schell205 | ModelId::Schell206 | ModelId::Schell207 | ModelId::Schell283 | ModelId::Schell283Fast | ModelId::Schell205Pegging | ModelId::Schell205Pegging2)
+                matches!(decision_model, ModelId::Schell1323 | ModelId::Schell200 | ModelId::Schell201 | ModelId::Schell202 | ModelId::Schell203 | ModelId::Schell204 | ModelId::Schell205 | ModelId::Schell206 | ModelId::Schell207 | ModelId::Schell283 | ModelId::Schell283Fast | ModelId::Schell284 | ModelId::Schell205Pegging | ModelId::Schell205Pegging2)
                     .then_some(&session.model1323_hand_cache),
             ))?;
             let (reason, cards, score_components) = match decision {
@@ -4673,6 +4673,7 @@ mod tests {
         assert!(model_json().contains("schell_table-peg_table-16.1"));
         assert!(model_json().contains("schell_table-peg_table-16.3"));
         assert!(model_json().contains("schell_table-peg_table-20.0"));
+        assert!(model_json().contains(MODEL_28_4));
         assert!(model_json().contains(DYNAMIC));
     }
 
@@ -4692,6 +4693,7 @@ mod tests {
             ModelId::Schell205,
             ModelId::Schell206,
             ModelId::Schell207,
+            ModelId::Schell284,
             ModelId::Schell205Pegging,
             ModelId::Schell205Pegging2,
             ModelId::Dynamic,
@@ -4702,6 +4704,23 @@ mod tests {
                 snapshot_json(&session).contains(&format!("\"opponent\":\"{}\"", model.as_str()))
             );
         }
+    }
+
+    #[test]
+    fn experimental_ace284_resumes_separately_from_production_ace() {
+        let data_dir = std::env::temp_dir().join(format!("ace284-session-{}-{}", std::process::id(), unix_millis()));
+        initialize_game_database(&data_dir).unwrap();
+        let production = new_session_from_seed(ACE_MODEL_ID, Some("Player".into()), 42, 1);
+        let candidate = new_session_from_seed(ModelId::Schell284, Some("Player".into()), 43, 2);
+        persist_session_snapshot(&data_dir, &production).unwrap();
+        persist_session_snapshot(&data_dir, &candidate).unwrap();
+        for session in [&production, &candidate] {
+            let restored = load_session_for_player(&data_dir, "Player", Some(session.model), None)
+                .unwrap().unwrap();
+            assert_eq!(restored.id, session.id);
+            assert_eq!(restored.model, session.model);
+        }
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[test]

@@ -39,7 +39,7 @@ use crate::model91_discard::model91_schell_crib_ev;
 use crate::model_id::{
     MODEL_13_0, MODEL_13_1, MODEL_13_2, MODEL_13_21, MODEL_13_215, MODEL_13_22, MODEL_13_23,
     MODEL_14_3, MODEL_14_8, MODEL_14_8_1, MODEL_15_0, MODEL_15_1, MODEL_15_2, MODEL_16_0,
-    MODEL_16_1, MODEL_16_3, MODEL_20_0, MODEL_20_1, MODEL_20_2, MODEL_20_3, MODEL_20_4, MODEL_20_5, MODEL_20_6, MODEL_20_7, MODEL_28_3, MODEL_28_3_FAST, MODEL_20_5_PEGGING, MODEL_20_5_PEGGING2, MODEL_9_0, MODEL_9_1, MODEL_9_11, MYRMIDON_5,
+    MODEL_16_1, MODEL_16_3, MODEL_20_0, MODEL_20_1, MODEL_20_2, MODEL_20_3, MODEL_20_4, MODEL_20_5, MODEL_20_6, MODEL_20_7, MODEL_28_3, MODEL_28_3_FAST, MODEL_28_4, MODEL_20_5_PEGGING, MODEL_20_5_PEGGING2, MODEL_9_0, MODEL_9_1, MODEL_9_11, MYRMIDON_5,
 };
 use crate::policy::PolicyArtifact;
 
@@ -618,6 +618,7 @@ pub fn parse_decision_input(input_text: &str) -> Result<DecisionInput, String> {
         model: match fields.get("model").copied().unwrap_or("") {
             "20.5.pegging" => MODEL_20_5_PEGGING,
             "20.5.pegging2" => MODEL_20_5_PEGGING2,
+            "28.4" => MODEL_28_4,
             model => model,
         }.to_string(),
         player: parse_player(fields.get("player").copied().unwrap_or("ai"))?,
@@ -652,12 +653,15 @@ pub fn parse_decision_input(input_text: &str) -> Result<DecisionInput, String> {
     })
 }
 
-// The versioned 28.3 policy can use the same optional, fingerprint-checked
-// accelerator as Ace. An absent directory/shard still uses the exact solver.
-// Normalize only execution; the game retains its recorded model identity.
-fn with_progressive_opening(input: &DecisionInput) -> Option<DecisionInput> {
-    if input.kind != DecisionKind::Peg || input.model != MODEL_28_3
-        || !std::env::var_os("CRIBBAGE_283_FAST_ASSET").is_some_and(|p| !p.is_empty()) {
+// Normalize execution only; callers retain their recorded model identity.
+// 28.4 starts as an exact copy of production Ace, including optional opening
+// acceleration. Future 28.4 strategy changes must branch here and bind assets
+// to the changed policy before removing this baseline delegation.
+fn with_execution_model(input: &DecisionInput) -> Option<DecisionInput> {
+    let baseline284 = input.model == MODEL_28_4;
+    let accelerated283 = input.kind == DecisionKind::Peg && input.model == MODEL_28_3
+        && std::env::var_os("CRIBBAGE_283_FAST_ASSET").is_some_and(|p| !p.is_empty());
+    if !baseline284 && !accelerated283 {
         return None;
     }
     let mut accelerated = input.clone();
@@ -683,7 +687,7 @@ pub fn evaluate_decision_with_caches(
     model911_cache: Option<&Model911HandCache>,
     model13_cache: Option<&Model13HandCache>,
 ) -> Result<Decision, String> {
-    let accelerated = with_progressive_opening(input);
+    let accelerated = with_execution_model(input);
     let input = accelerated.as_ref().unwrap_or(input);
     match input.kind {
         DecisionKind::Discard => recommend_discard(input, root),
@@ -697,7 +701,7 @@ pub fn review_decision(
     selected_card_ids: &[u8],
     root: &str,
 ) -> Result<DecisionReview, String> {
-    let accelerated = with_progressive_opening(input);
+    let accelerated = with_execution_model(input);
     let input = accelerated.as_ref().unwrap_or(input);
     if input.kind == DecisionKind::Peg
         && input.player == PlayerKey::Ai
@@ -736,7 +740,7 @@ pub fn evaluate_selected_decision(
     selected_card_ids: &[u8],
     root: &str,
 ) -> Result<Decision, String> {
-    let accelerated = with_progressive_opening(input);
+    let accelerated = with_execution_model(input);
     let input = accelerated.as_ref().unwrap_or(input);
     if !matches!(input.model.as_str(), MODEL_13_0 | MODEL_13_215 | MODEL_13_23 | MODEL_20_0 | MODEL_20_1 | MODEL_20_2 | MODEL_20_3 | MODEL_20_4 | MODEL_20_5 | MODEL_20_6 | MODEL_20_7 | MODEL_28_3 | MODEL_28_3_FAST | MODEL_20_5_PEGGING | MODEL_20_5_PEGGING2) {
         return Err("saved decision review currently supports Ace models only".to_string());

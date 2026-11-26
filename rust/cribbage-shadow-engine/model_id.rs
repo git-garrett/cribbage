@@ -71,6 +71,8 @@ pub const MODEL_20_7: &str = "schell_table-peg_table-20.7";
 pub const MODEL_28_3: &str = "schell_table-peg_table-28.3";
 /// Exact optional opening assets; uncovered decisions use ordinary 28.3.
 pub const MODEL_28_3_FAST: &str = "schell_table-peg_table-28.3.fast";
+/// Experimental Ace 28.4 baseline; initially identical to production 28.3.fast.
+pub const MODEL_28_4: &str = "schell_table-peg_table-28.4";
 /// Experimental posterior-weighted strategic pegging; 20.5 discard assets stay fixed.
 pub const MODEL_20_5_PEGGING: &str = "schell_table-peg_table-20.5.pegging";
 /// Symmetric backward bucket policy: both actors use their own smoothed posterior.
@@ -113,6 +115,7 @@ pub enum ModelId {
     Schell207,
     Schell283,
     Schell283Fast,
+    Schell284,
     Schell205Pegging,
     Schell205Pegging2,
     Myrmidon5,
@@ -153,6 +156,7 @@ impl ModelId {
             ModelId::Schell207 => MODEL_20_7,
             ModelId::Schell283 => MODEL_28_3,
             ModelId::Schell283Fast => MODEL_28_3_FAST,
+            ModelId::Schell284 => MODEL_28_4,
             ModelId::Schell205Pegging => MODEL_20_5_PEGGING,
             ModelId::Schell205Pegging2 => MODEL_20_5_PEGGING2,
             ModelId::Myrmidon5 => MYRMIDON_5,
@@ -191,6 +195,7 @@ impl ModelId {
             ModelId::Schell207 => "Schell Table + Peg Table 20.7",
             ModelId::Schell283 => "28.3 Score-block pegging (experimental)",
             ModelId::Schell283Fast => "28.3.fast Exact opening assets (experimental)",
+            ModelId::Schell284 => "28.4 Ace baseline (experimental)",
             ModelId::Schell205Pegging => "20.5.pegging (experimental)",
             ModelId::Schell205Pegging2 => "20.5.pegging2 (experimental)",
             ModelId::Myrmidon5 => "Myrmidon (5 simulations)",
@@ -230,6 +235,7 @@ impl ModelId {
                 | ModelId::Schell207
                 | ModelId::Schell283
                 | ModelId::Schell283Fast
+                | ModelId::Schell284
                 | ModelId::Schell205Pegging
                 | ModelId::Schell205Pegging2
                 | ModelId::Myrmidon5
@@ -293,6 +299,7 @@ impl FromStr for ModelId {
             MODEL_20_7 => Ok(ModelId::Schell207),
             MODEL_28_3 | "28.3" => Ok(ModelId::Schell283),
             MODEL_28_3_FAST | "28.3.fast" => Ok(ModelId::Schell283Fast),
+            MODEL_28_4 | "28.4" => Ok(ModelId::Schell284),
             MODEL_20_5_PEGGING | "20.5.pegging" => Ok(ModelId::Schell205Pegging),
             MODEL_20_5_PEGGING2 | "20.5.pegging2" => Ok(ModelId::Schell205Pegging2),
             MYRMIDON_5 => Ok(ModelId::Myrmidon5),
@@ -355,6 +362,13 @@ mod tests {
         assert_eq!("28.3.fast".parse::<ModelId>().unwrap().as_str(), MODEL_28_3_FAST);
         assert!(ModelId::Schell283Fast.has_native_rust_decisions());
         assert!(ModelId::Schell283Fast.is_ace());
+        assert_eq!(MODEL_28_4.parse::<ModelId>().unwrap(), ModelId::Schell284);
+        assert_eq!("28.4".parse::<ModelId>().unwrap().as_str(), MODEL_28_4);
+        assert!(ModelId::Schell284.has_native_rust_decisions());
+        // Experimental games stay separate from production Ace resume/rating.
+        assert!(!ModelId::Schell284.is_ace());
+        assert_ne!(ModelId::Schell284, ACE_MODEL_ID);
+        assert_eq!(ACE_MODEL, MODEL_28_3_FAST);
         assert_eq!(MODEL_20_7.parse::<ModelId>().unwrap(), ModelId::Schell207);
         assert_eq!(ModelId::Schell207.as_str(), MODEL_20_7);
         assert!(ModelId::Schell207.has_native_rust_decisions());
