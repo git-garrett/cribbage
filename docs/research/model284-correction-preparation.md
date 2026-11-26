@@ -84,3 +84,24 @@ Changing configuration or assets requires a process restart. Pegging remains
 Create and enable that manifest only after completed output verification and an
 acceptable held-out strength assessment. Checksums establish identity and
 integrity; they do not certify playing strength. Production Ace remains 28.3.fast.
+
+## Explicit input and probability errors
+
+Modern pegging (20.3 onward, including 28.4) validates two known, distinct own
+discards before live evaluation or saved review, including forced play/go
+shortcuts. Discards overlapping either player's played cards, the actor's hand,
+or the cut are rejected. The modern counting evaluator also validates this
+input before loading assets and no longer constructs the four-point placeholder.
+
+The shared Model 13-family discard evaluator returns errors for absent or
+non-finite total mass and invalid win probabilities. Modern cut-conditioned
+hand/crib distributions must cover every cut, with finite, nonnegative weights
+and positive mass for each cut; a missing cut cannot silently disappear during
+normalization. These errors propagate through recommendations and selected
+discard reviews. Positive smoothed support, including very small weights, is
+retained. Historical global priors for models without modern forecasts remain.
+
+Regression coverage exercises missing/partial/extra, duplicated, and conflicting
+own discards; forced and multi-choice entry points; live and saved reviews; and
+empty/non-finite/negative discard support. Valid forced actions remain asset-free.
+This cleanup changes no asset bytes and requires no correction rebuild.

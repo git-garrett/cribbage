@@ -161,3 +161,9 @@ fallbacks are bypassed by the modern forecasts.
 
 **This update leaves fallback/error behavior unchanged**, pending discussion of
 that separate change.
+
+The subsequent Ace 28.4 work implements this cleanup: modern pegging inputs
+require two distinct own discards that do not overlap known cards, including
+forced actions and saved reviews. Discard forecasts reject empty or invalid
+probability mass instead of returning 50%. See
+[the preparation record](research/model284-correction-preparation.md#explicit-input-and-probability-errors).

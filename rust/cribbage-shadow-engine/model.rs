@@ -689,6 +689,7 @@ pub fn evaluate_decision_with_caches(
     model911_cache: Option<&Model911HandCache>,
     model13_cache: Option<&Model13HandCache>,
 ) -> Result<Decision, String> {
+    validate_modern_pegging_input(input)?;
     let accelerated = with_execution_model(input);
     let input = accelerated.as_ref().unwrap_or(input);
     match input.kind {
@@ -703,6 +704,7 @@ pub fn review_decision(
     selected_card_ids: &[u8],
     root: &str,
 ) -> Result<DecisionReview, String> {
+    validate_modern_pegging_input(input)?;
     let accelerated = with_execution_model(input);
     let input = accelerated.as_ref().unwrap_or(input);
     if input.kind == DecisionKind::Peg
@@ -742,6 +744,7 @@ pub fn evaluate_selected_decision(
     selected_card_ids: &[u8],
     root: &str,
 ) -> Result<Decision, String> {
+    validate_modern_pegging_input(input)?;
     let accelerated = with_execution_model(input);
     let input = accelerated.as_ref().unwrap_or(input);
     if input.model == MODEL_28_4 && input.kind == DecisionKind::Discard {
@@ -755,6 +758,30 @@ pub fn evaluate_selected_decision(
         DecisionKind::Peg => review_peg_model13(input, selected_card_ids, root)?,
     };
     Ok(selected)
+}
+
+fn validate_modern_pegging_input(input: &DecisionInput) -> Result<(), String> {
+    if input.kind != DecisionKind::Peg
+        || !matches!(input.model.as_str(), MODEL_20_3 | MODEL_20_4 | MODEL_20_5
+            | MODEL_20_6 | MODEL_20_7 | MODEL_28_3 | MODEL_28_3_FAST | MODEL_28_4
+            | MODEL_20_5_PEGGING | MODEL_20_5_PEGGING2)
+    {
+        return Ok(());
+    }
+    if input.own_discards.len() != 2 {
+        return Err(format!("{} pegging requires two known own discards (ownDiscards); got {}",
+            input.model, input.own_discards.len()));
+    }
+    if input.own_discards[0] == input.own_discards[1] {
+        return Err("ownDiscards must contain two distinct cards".into());
+    }
+    if input.own_discards.iter().any(|card| {
+        input.ai_hand.contains(card) || input.ai_table.contains(card)
+            || input.human_table.contains(card) || *card == input.turn_card
+    }) {
+        return Err("ownDiscards overlap the known hand, played cards, or turn card".into());
+    }
+    Ok(())
 }
 
 fn is_supported_rust_model(model: &str) -> bool {
@@ -2122,6 +2149,9 @@ fn recommend_discard_model1323_with_assets(
         let row = histogram
             .row_for(&six, &rank_counts(&discard), input.role)
             .ok_or("13.23 discard joint-distribution row is missing")?;
+        if row.moments.total_weight == 0 {
+            return Err("discard pegging forecast has zero probability mass".into());
+        }
         let total_weight = row.moments.total_weight as f64;
         let mut hist = WeightedPairI32::default();
         for (own, opponent, weight) in row.bins() {
@@ -2192,7 +2222,7 @@ fn recommend_discard_model1323_with_assets(
                 board,
                 true,
                 show.as_ref(),
-            ),
+            )?,
             total_ev: hand
                 + if input.role == Role::Dealer {
                     crib
@@ -2416,7 +2446,7 @@ fn recommend_discard_model13_with_board(
             pairwise,
             &mut board,
             preserve_scoring_order,
-        ) else {
+        )? else {
             continue;
         };
         let should_replace = match &recommended {
@@ -2488,7 +2518,7 @@ fn recommend_discard_model131(input: &DecisionInput, root: &str) -> Result<Decis
             crib_rank,
             histogram,
             &mut board,
-        ) else {
+        )? else {
             continue;
         };
         let should_replace = match &recommended {
@@ -2673,7 +2703,7 @@ fn review_discard_model13(
         pairwise,
         &mut board,
         preserve_scoring_order,
-    )
+    )?
     .ok_or_else(|| "selected discard could not be evaluated".to_string())?;
     Ok(Decision::Discard {
         card_ids: selected_card_ids.to_vec(),
@@ -2701,7 +2731,7 @@ fn evaluate_discard_candidate_model13(
     pairwise: &PairwiseTable,
     board: &mut BoardModel,
     preserve_scoring_order: bool,
-) -> Option<CandidateEvaluation> {
+) -> Result<Option<CandidateEvaluation>, String> {
     let (hand_score, crib_score) = model13_rank_cut_discard_scores(
         keep,
         discard,
@@ -2712,7 +2742,7 @@ fn evaluate_discard_candidate_model13(
     );
     let pegging_options = model13_pegging_discard_options(keep, role, full_hand, pairwise);
     if pegging_options.is_empty() {
-        return None;
+        return Ok(None);
     }
     let mut best: Option<CandidateEvaluation> = None;
     for pegging in pegging_options {
@@ -2735,7 +2765,7 @@ fn evaluate_discard_candidate_model13(
             board,
             preserve_scoring_order,
             None,
-        );
+        )?;
         let candidate = CandidateEvaluation {
             win_probability,
             total_ev,
@@ -2753,7 +2783,7 @@ fn evaluate_discard_candidate_model13(
             best = Some(candidate);
         }
     }
-    best
+    Ok(best)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2769,7 +2799,7 @@ fn evaluate_discard_candidate_model131(
     crib_rank: &CribRankDiscardTables,
     histogram: &Model131DiscardHistogramTable,
     board: &mut BoardModel,
-) -> Option<CandidateEvaluation> {
+) -> Result<Option<CandidateEvaluation>, String> {
     let (hand_score, crib_score) = model13_rank_cut_discard_scores(
         keep,
         discard,
@@ -2778,7 +2808,9 @@ fn evaluate_discard_candidate_model131(
         crib_flush_bonus_by_suit,
         crib_rank,
     );
-    let pegging = model131_pegging_discard_option(full_hand, discard, role, histogram)?;
+    let Some(pegging) = model131_pegging_discard_option(full_hand, discard, role, histogram) else {
+        return Ok(None);
+    };
     let net_pegging = pegging.my_ev - pegging.opponent_ev;
     let total_ev = (if role == Role::Dealer {
         hand_score + crib_score
@@ -2798,12 +2830,12 @@ fn evaluate_discard_candidate_model131(
         board,
         false,
         None,
-    );
-    Some(CandidateEvaluation {
+    )?;
+    Ok(Some(CandidateEvaluation {
         win_probability,
         total_ev,
         best_lead: pegging.best_lead,
-    })
+    }))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2848,7 +2880,7 @@ fn evaluate_discard_candidate_model132(
         board,
         false,
         None,
-    );
+    )?;
     Ok(CandidateEvaluation {
         win_probability,
         total_ev,
@@ -3215,7 +3247,22 @@ fn model13_discard_candidate_win_probability(
     board: &mut BoardModel,
     preserve_scoring_order: bool,
     model20: Option<&Model20ShowOutcomes<'_>>,
-) -> f64 {
+) -> Result<f64, String> {
+    validate_forecast_mass(pegging.hist.entries.iter().map(|(_, weight)| *weight), "discard pegging")?;
+    if !pegging.total_weight.is_finite() || pegging.total_weight <= 0.0 {
+        return Err("discard pegging forecast has no positive finite total weight".into());
+    }
+    if let Some(show) = model20 {
+        if show.cribs.len() != deck.len() || show.opponent_hands.len() != deck.len() {
+            return Err("discard counting forecasts do not cover every cut".into());
+        }
+        for outcomes in &show.cribs {
+            validate_forecast_mass(outcomes.iter().map(|(_, weight)| *weight), "discard crib")?;
+        }
+        for outcomes in show.opponent_hands {
+            validate_forecast_mass(outcomes.iter().map(|(_, weight)| *weight), "discard opponent hand")?;
+        }
+    }
     let opponent_role = other_role(role);
     let next_role = other_role(role);
     // Card-conditioned forecasts replace the legacy normal prior entirely.
@@ -3309,11 +3356,28 @@ fn model13_discard_candidate_win_probability(
             total_weight += weight;
         }
     }
-    if total_weight > 0.0 {
-        total / total_weight
-    } else {
-        0.5
+    if !total_weight.is_finite() || total_weight <= 0.0 {
+        return Err("discard forecast has no positive finite probability mass".into());
     }
+    let probability = total / total_weight;
+    if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
+        return Err("discard forecast produced an invalid win probability".into());
+    }
+    Ok(probability)
+}
+
+fn validate_forecast_mass(weights: impl Iterator<Item = f64>, context: &str) -> Result<(), String> {
+    let mut total = 0.0;
+    for weight in weights {
+        if !weight.is_finite() || weight < 0.0 {
+            return Err(format!("{context} forecast contains an invalid probability weight"));
+        }
+        total += weight;
+    }
+    if !total.is_finite() || total <= 0.0 {
+        return Err(format!("{context} forecast has no positive finite probability mass"));
+    }
+    Ok(())
 }
 
 fn model13_crib_score_outcomes_for_cut(
@@ -6091,6 +6155,7 @@ fn model1323_pegging_win_evaluator(
     tables: &RuntimeTables,
     opponent_hands: Option<&[([u8; 13], f64)]>,
 ) -> Result<PeggingWinEvaluator, String> {
+    validate_modern_pegging_input(input)?;
     let board = BoardModel::from_board_matrix(Arc::clone(tables.board_for_model1323(input)?));
     let crib_rank = tables.crib_for_model(input)?;
     let mut context = if matches!(input.model.as_str(), MODEL_20_3 | MODEL_20_4 | MODEL_20_5 | MODEL_20_6 | MODEL_20_7 | MODEL_28_3 | MODEL_28_3_FAST | MODEL_20_5_PEGGING | MODEL_20_5_PEGGING2) {
@@ -6116,23 +6181,22 @@ fn model1323_pegging_win_evaluator(
             pone_is_perspective: input.role == Role::Pone,
             dealer_is_perspective: input.role == Role::Dealer,
             pone_hand, dealer_hand,
-            crib: if input.own_discards.len() == 2 {
+            crib: {
                 let assets = tables.pegging_policy_assets(input)?;
                 let rates = Some(assets.suited_discard_rates(other_role(input.role))?);
-                if matches!(input.model.as_str(), MODEL_20_7 | MODEL_28_3 | MODEL_28_3_FAST) {
+                let outcomes = if matches!(input.model.as_str(), MODEL_20_7 | MODEL_28_3 | MODEL_28_3_FAST) {
                     let weights = assets.opponent_discard_weights(&model1323_observation(input), hands)?;
                     let table = crib_rank.indexed.as_ref().ok_or("Model 20.7 requires indexed crib scores")?;
                     let outcomes = table.outcomes_with_weights(
                         &input.own_discards, input.turn_card, &known, &weights, rates);
-                    if outcomes.is_empty() { return Err("Model 20.7 has no legal crib support".into()); }
                     outcomes
                 } else {
                     crib_score_outcomes_for_cut(
                         &input.own_discards, input.turn_card, input.role, &known, crib_rank, rates,
                     )
-                }
-            } else {
-                upcoming_crib_score_distribution(input, None)
+                };
+                validate_forecast_mass(outcomes.iter().map(|(_, weight)| *weight), "pegging crib")?;
+                outcomes
             },
             memo: HashMap::new(), board,
         }
@@ -7390,6 +7454,92 @@ mod tests {
         assert_eq!(card_id, Some(0));
         assert_eq!(ev, Some(1.0));
         assert_eq!(win_probability, Some(1.0));
+    }
+
+    #[test]
+    fn modern_pegging_rejects_missing_private_discards_before_assets_or_shortcuts() {
+        for model in [MODEL_20_3, MODEL_20_4, MODEL_20_5, MODEL_20_6, MODEL_20_7,
+            MODEL_28_3, MODEL_28_3_FAST, MODEL_28_4, MODEL_20_5_PEGGING, MODEL_20_5_PEGGING2]
+        {
+            // Exercise a choice, a forced play, and a forced go. None may
+            // conceal malformed input, even when no asset would be needed.
+            for (hand, count) in [("4,5", 10), ("4", 10), ("4", 31)] {
+                for discards in ["", "0", "0,1,3"] {
+                    let input = parse_decision_input(&format!(
+                        "kind=peg;model={model};role=pone;aiHand={hand};ownDiscards={discards};turnCard=2;count={count}"
+                    )).unwrap();
+                    for error in [
+                        evaluate_decision(&input, "unused-assets").unwrap_err(),
+                        evaluate_selected_decision(&input, &[4], "unused-assets").unwrap_err(),
+                        review_decision(&input, &[4], "unused-assets").unwrap_err(),
+                    ] {
+                        assert!(error.contains("requires two known own discards"), "{model}: {error}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn modern_pegging_rejects_duplicate_or_conflicting_private_discards() {
+        for (discards, expected) in [
+            ("0,0", "distinct"), ("0,4", "overlap"), ("0,8", "overlap"),
+            ("0,9", "overlap"), ("0,2", "overlap"),
+        ] {
+            let input = parse_decision_input(&format!(
+                "kind=peg;model={MODEL_28_4};role=pone;aiHand=4;aiTable=8;humanTable=9;ownDiscards={discards};turnCard=2"
+            )).unwrap();
+            let error = evaluate_decision(&input, "unused-assets").unwrap_err();
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn modern_valid_forced_actions_and_reviews_still_need_no_assets() {
+        for (count, action, selected) in [(10, "play", vec![4]), (31, "go", vec![])] {
+            let input = parse_decision_input(&format!(
+                "kind=peg;model={MODEL_28_4};role=pone;aiHand=4;ownDiscards=0,1;turnCard=2;count={count}"
+            )).unwrap();
+            let decision = evaluate_decision(&input, "unused-assets").unwrap();
+            assert!(matches!(&decision, Decision::Peg { action: actual, win_probability: None, .. } if actual == action));
+            // Saved review supports selected plays; live go remains valid.
+            if !selected.is_empty() {
+                let review = review_decision(&input, &selected, "unused-assets").unwrap();
+                assert_eq!(format!("{decision:?}"), format!("{:?}", review.selected));
+                assert_eq!(format!("{decision:?}"), format!("{:?}", review.recommended));
+            }
+        }
+    }
+
+    #[test]
+    fn discard_probability_rejects_empty_or_invalid_support_instead_of_half_wp() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+        let tables = RuntimeTables::new(root.to_str().unwrap());
+        let crib_rank = tables.crib_rank().unwrap();
+        let full_hand = cards_from_ids(&[0, 4, 8, 12, 16, 20]).unwrap();
+        let cuts = cards_from_ids(&[24, 25]).unwrap();
+        let mut pegging = Model13PeggingOption {
+            my_ev: 0.0, opponent_ev: 0.0, best_lead: -1,
+            hist: WeightedPairI32::default(), total_weight: 1.0,
+        };
+        add_weight_pair_i32(&mut pegging.hist, (0, 0), 1.0);
+        for ordered in [false, true] {
+            for (hands, cribs, peg_weight, expected) in [
+                (vec![vec![], vec![]], vec![vec![(0, 1.0)]; 2], 1.0, "opponent hand"),
+                (vec![vec![(0, 1.0)]; 2], vec![vec![], vec![(0, 1.0)]], 1.0, "crib"),
+                (vec![vec![(0, 1.0)]; 2], vec![vec![(0, f64::NAN)]; 2], 1.0, "invalid probability weight"),
+                (vec![vec![(0, 1.0)]; 2], vec![vec![(0, -1.0)]; 2], 1.0, "invalid probability weight"),
+                (vec![vec![(0, 1.0)]; 2], vec![vec![(0, 1.0)]; 2], 0.0, "pegging"),
+            ] {
+                pegging.hist.entries[0].1 = peg_weight;
+                let show = Model20ShowOutcomes { opponent_hands: &hands, cribs };
+                let error = model13_discard_candidate_win_probability(
+                    &full_hand, &full_hand[2..], &full_hand[..2], &cuts, Role::Dealer,
+                    &pegging, 0, 0, crib_rank, &mut BoardModel::new(), ordered, Some(&show),
+                ).unwrap_err();
+                assert!(error.contains(expected), "{error}");
+            }
+        }
     }
 
     #[test]
