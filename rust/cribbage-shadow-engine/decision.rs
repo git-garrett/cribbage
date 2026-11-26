@@ -57,6 +57,8 @@ pub fn choose_peg_for_side_with_caches(
     ensure_native_model(model_id)?;
     if matches!(model_id, ModelId::Schell204 | ModelId::Schell205 | ModelId::Schell206 | ModelId::Schell207 | ModelId::Schell283 | ModelId::Schell283Fast | ModelId::Schell284 | ModelId::Schell205Pegging | ModelId::Schell205Pegging2) {
         if let Some(action) = forced_rank_action(&game.player(side).hand, game.count) {
+            let input = decision_input(game, side, model_id, DecisionKind::Peg, peg_lead);
+            model::validate_modern_pegging_input(&input)?;
             return Ok(action);
         }
     }
@@ -392,6 +394,8 @@ mod tests {
         // Two fives are playable; the king is not. Preserve hand order across
         // suits, exactly as select_peg_model1323's first rank match does.
         game.player_mut(Side::Left).hand = crate::cards::cards_from_ids(&[17, 4, 12]).unwrap();
+        game.player_mut(Side::Left).discarded_to_crib = crate::cards::cards_from_ids(&[6, 7]).unwrap();
+        game.turn_card = crate::cards::Card::new(50).unwrap();
         game.count = 26;
         assert_eq!(
             choose_peg_for_side_with_caches(
@@ -450,6 +454,8 @@ mod tests {
     fn model204_forced_rank_choice_ignores_opponent_private_cards() {
         let mut game = CribbageGame::new_with_seed(42, Side::Right);
         game.player_mut(Side::Left).hand = crate::cards::cards_from_ids(&[26, 0, 39, 13]).unwrap();
+        game.player_mut(Side::Left).discarded_to_crib = crate::cards::cards_from_ids(&[6, 7]).unwrap();
+        game.turn_card = crate::cards::Card::new(50).unwrap();
         game.count = 0;
         for ids in [[1, 2, 3, 4], [8, 9, 10, 11]] {
             game.player_mut(Side::Right).hand = crate::cards::cards_from_ids(&ids).unwrap();
@@ -468,6 +474,36 @@ mod tests {
                 .unwrap(),
                 PegAction::Play { card_id: 26 }
             );
+        }
+    }
+
+    #[test]
+    fn native_modern_forced_actions_validate_private_discards_for_either_side() {
+        use crate::cards::cards_from_ids;
+        for model in [ModelId::Schell204, ModelId::Schell205, ModelId::Schell206,
+            ModelId::Schell207, ModelId::Schell283, ModelId::Schell283Fast,
+            ModelId::Schell284, ModelId::Schell205Pegging, ModelId::Schell205Pegging2]
+        {
+            for side in [Side::Left, Side::Right] {
+                for count in [0, 31] {
+                    let mut game = CribbageGame::new_with_seed(42, Side::Right);
+                    game.player_mut(side).hand = cards_from_ids(&[4, 17]).unwrap();
+                    game.turn_card = crate::cards::Card::new(50).unwrap();
+                    game.count = count;
+                    for discards in [&[][..], &[0][..], &[0, 0][..], &[0, 4][..], &[0, 50][..]] {
+                        game.player_mut(side).discarded_to_crib = cards_from_ids(discards).unwrap();
+                        let error = choose_peg_for_side_with_caches(
+                            &game, side, model, None, "/unused-assets", None, None,
+                        ).unwrap_err();
+                        assert!(error.contains("own discards") || error.contains("ownDiscards"), "{error}");
+                    }
+                    game.player_mut(side).discarded_to_crib = cards_from_ids(&[0, 1]).unwrap();
+                    let action = choose_peg_for_side_with_caches(
+                        &game, side, model, None, "/unused-assets", None, None,
+                    ).unwrap();
+                    assert_eq!(action, if count == 31 { PegAction::Go } else { PegAction::Play { card_id: 4 } });
+                }
+            }
         }
     }
 

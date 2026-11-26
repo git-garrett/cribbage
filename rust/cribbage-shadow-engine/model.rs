@@ -760,7 +760,7 @@ pub fn evaluate_selected_decision(
     Ok(selected)
 }
 
-fn validate_modern_pegging_input(input: &DecisionInput) -> Result<(), String> {
+pub(crate) fn validate_modern_pegging_input(input: &DecisionInput) -> Result<(), String> {
     if input.kind != DecisionKind::Peg
         || !matches!(input.model.as_str(), MODEL_20_3 | MODEL_20_4 | MODEL_20_5
             | MODEL_20_6 | MODEL_20_7 | MODEL_28_3 | MODEL_28_3_FAST | MODEL_28_4
