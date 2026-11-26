@@ -1,6 +1,6 @@
 """Continue the verified Ace replay corpus with a single SQLite writer."""
 from collections import deque
-from hybrid import worker_limit, reserve_workers
+from hybrid import worker_limit, reserve_workers, native_worker_limit
 import gzip
 import json
 import os
@@ -28,6 +28,7 @@ class Capacity:
     def __init__(self):
         self.telemetry = MacTelemetry()
         self.samples = deque(maxlen=32)
+        self.backend_workers = max(1, (os.cpu_count() or 12) - 1)
 
     def sample(self):
         if not self.samples or time.time() - self.samples[-1]["time"] >= 2:
@@ -41,12 +42,13 @@ class Capacity:
                 raise InterruptedError("Collection stop requested")
             time.sleep(3)
             latest = self.sample()
-        return worker_limit(list(self.samples), os.cpu_count() or 12)
+        return min(self.backend_workers, worker_limit(list(self.samples), os.cpu_count() or 12))
 
 class AdaptiveTeacher(Native):
     def __init__(self, capacity):
         super().__init__(teacher / "teacher-env")
         self.capacity = capacity
+        self.capacity.backend_workers = native_worker_limit(super().call, max(1, (os.cpu_count() or 12) - 1))
 
     def call(self, value):
         if value["kind"] == "teach":

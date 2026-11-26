@@ -122,3 +122,21 @@ def reserve_workers(ledger, prefix, maximum, cpu_count):
                     save(ledger, data)
         finally:
             signal.signal(signal.SIGTERM, previous)
+
+
+def native_worker_limit(call, maximum):
+    """Negotiate with old/new teacher binaries using empty, non-learning calls."""
+    low, high = 0, maximum
+    while low < high:
+        probe = (low + high + 1) // 2
+        try:
+            result = call(dict(kind='teach', workers=probe, ids=[]))
+        except RuntimeError as error:
+            if 'invalid teacher workers' not in str(error):
+                raise
+            high = probe - 1
+        else:
+            assert result['labels'] == []
+            low = probe
+    assert low > 0, 'Native teacher accepts no CPU workers'
+    return low
