@@ -121,7 +121,12 @@ class HybridTests(unittest.TestCase):
         h.save(self.root / 'config.json', dict(archive=str(self.root / 'archive')))
         (self.root / 'model31/data').mkdir(parents=True)
         (work / 'trace.bin').write_bytes(b'complete games')
-        manifest = dict(identity=active, settings=dict(gamesPerPhase=4))
+        old_working = self.root / 'model31/data/checkpoint-previous-ace'
+        old_working.mkdir()
+        (old_working / 'old.npz').write_bytes(b'old working state')
+        anchor = self.root / 'model31/data/round-7-checkpoint'
+        anchor.mkdir()
+        manifest = dict(identity=active, settings=dict(gamesPerPhase=4), source=str(old_working))
         h.save(work / 'trained.json', dict(output=str(output), files=sp.files(output)))
         dest = sp.archive(self.root, work, manifest)
         self.assertTrue((dest / 'trace.bin').exists())
@@ -131,6 +136,8 @@ class HybridTests(unittest.TestCase):
         result = sp.publish(self.root, work, manifest, target)
         self.assertEqual(h.read(self.root / 'model31/data/current.json')['folder'], target.name)
         sp.cleanup(work, result)
+        self.assertFalse(old_working.exists())
+        self.assertTrue(anchor.exists())
         with patch.object(sp, 'prepare', side_effect=AssertionError('must not relearn')):
             self.assertEqual(sp.run(self.root), result)
         h.finish(self.root, active)
