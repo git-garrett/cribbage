@@ -60,6 +60,19 @@ class HybridTests(unittest.TestCase):
         self.assertEqual(h.worker_limit([sample(thermal=2)], 12), 0)
         self.assertEqual(h.worker_limit([sample(pressure=2), sample(10)], 12), 4)
 
+    def test_native_cpu_limit_negotiation_handles_old_and_new_binaries(self):
+        def backend(limit):
+            def call(value):
+                self.assertEqual(value['ids'], [])
+                if value['workers'] > limit:
+                    raise RuntimeError({'error': 'invalid teacher workers', 'ok': False})
+                return {'labels': []}
+            return call
+        self.assertEqual(h.native_worker_limit(backend(8), 11), 8)
+        self.assertEqual(h.native_worker_limit(backend(12), 11), 11)
+        with self.assertRaisesRegex(RuntimeError, 'worker exited'):
+            h.native_worker_limit(lambda _: (_ for _ in ()).throw(RuntimeError('native worker exited')), 11)
+
     def test_failed_training_restart_still_resumes_collector(self):
         jobs = [dict(name='gpu', flag='STOP-TRAIN', receipt='gpu-stopped.json'),
                 dict(name='ace', flag='STOP-COLLECT', receipt='collector-stopped.json')]
@@ -87,6 +100,9 @@ class HybridTests(unittest.TestCase):
             h.save(ledger, data)
         self.assertEqual(h.read(ledger)['allocations'], {'other': 9, 'gpu': 1})
         self.assertEqual(h.read(ledger)['workers'], 10)
+        h.save(ledger, dict(workers=2, allocations={'user-workday-headroom': 1, 'gpu': 1}))
+        with h.reserve_workers(ledger, 'ace', 11, 12) as workers:
+            self.assertEqual(workers, 10, 'Do not double-reserve foreground headroom')
         h.save(ledger, dict(workers=11, allocations={'other': 11}))
         with h.reserve_workers(ledger, 'ace', 11, 12) as workers:
             self.assertEqual(workers, 0)

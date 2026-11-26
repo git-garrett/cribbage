@@ -100,7 +100,8 @@ def reserve_workers(ledger, prefix, maximum, cpu_count):
             fcntl.flock(lock, fcntl.LOCK_EX)
             data = read(ledger)
             assert data['workers'] == sum(data['allocations'].values())
-            count = max(0, min(maximum, max(1, cpu_count - 1) - data['workers']))
+            headroom = 0 if data['allocations'].get('user-workday-headroom', 0) else int(cpu_count > 1)
+            count = max(0, min(maximum, cpu_count - headroom - data['workers']))
             proposed = [f'{prefix}-{i}' for i in range(count)]
             assert not any(key in data['allocations'] for key in proposed), 'Collector reservations already owned'
             for key in proposed:
@@ -122,3 +123,21 @@ def reserve_workers(ledger, prefix, maximum, cpu_count):
                     save(ledger, data)
         finally:
             signal.signal(signal.SIGTERM, previous)
+
+
+def native_worker_limit(call, maximum):
+    """Negotiate with old/new teacher binaries using empty, non-learning calls."""
+    low, high = 0, maximum
+    while low < high:
+        probe = (low + high + 1) // 2
+        try:
+            result = call(dict(kind='teach', workers=probe, ids=[]))
+        except RuntimeError as error:
+            if 'invalid teacher workers' not in str(error):
+                raise
+            high = probe - 1
+        else:
+            assert result['labels'] == []
+            low = probe
+    assert low > 0, 'Native teacher accepts no CPU workers'
+    return low

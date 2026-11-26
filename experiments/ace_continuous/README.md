@@ -52,3 +52,14 @@ scripts/run-quiet.sh 'Hybrid coordinator checks' python3 -m unittest discover -s
 Native pilot: gradients and Adam steps advance for both models; WP advances by
 the exact greedy-game count with the expected recency decay; Ace cursors stay
 unchanged; repeating a completed transaction makes no additional updates.
+
+The frozen Ace Rust teacher also originally rejected requests above eight
+workers. `native_teacher.py` changes that validation/default to the machine's
+CPU count, leaving the frozen game rules, policy and assets intact. It builds
+and tests through persistent one-shot stages and verifies identical discard and
+pegging actions against the original executable. `upgrade_teacher.py` waits for
+the collector's committed boundary, exercises the full parallel budget, records
+the new executable hash and resumes collection while GPU training continues.
+Startup also probes the backend with empty teacher requests, so an older binary
+safely retains its supported worker limit instead of crashing at its first
+larger batch. Unexpected native errors still fail and notify.
