@@ -208,20 +208,27 @@ def publish(root, folder, manifest, output):
         publish32(root, identity['aceRound'], target, 'self-play')
     result = dict(status='complete', identity=identity, checkpoint=str(target), cursors=identity['cursors'],
                   gamesPerPhase=manifest['settings']['gamesPerPhase'], wpHalfLifeGames=2_000_000,
-                  archive=read(folder / 'archive.json')['archive'], completedAt=time.time())
+                  archive=read(folder / 'archive.json')['archive'], sourceCheckpoint=manifest.get('source'), completedAt=time.time())
     # Receipt precedes cleanup, so a restart after publication never learns again.
     save(folder / 'receipt.json', result)
     return result
 
 
 def cleanup(folder, result):
-    # Only this completed transaction's staging copies and superseded self-play
-    # outputs are releasable. Original/frozen/Ace checkpoints stay untouched.
+    # Release staging and superseded working checkpoints after publication.
+    # Named round snapshots, frozen references and periodic archives remain.
     folder = Path(folder)
     for child in folder.iterdir():
         if child.is_dir():
             shutil.rmtree(child)
     target = Path(result['checkpoint'])
+    source = result.get('sourceCheckpoint')
+    if source:
+        prior = Path(source)
+        if (target.parent.parent.name == 'model31' and prior.parent == target.parent
+                and prior != target and prior.name.startswith('checkpoint-')
+                and prior.is_dir() and not prior.is_symlink()):
+            shutil.rmtree(prior)
     for prior in target.parent.glob('selfplay-*'):
         if prior != target and prior.is_dir():
             shutil.rmtree(prior)
