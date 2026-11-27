@@ -20,6 +20,7 @@ npm run --silent test:opening-assets
 npm run --silent test:correction-inputs
 npm run --silent test:late-beliefs
 npm run --silent test:early-ablation
+npm run --silent test:score-segments
 npm run --silent typecheck
 npm run --silent test:web
 npm test --silent
