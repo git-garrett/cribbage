@@ -77,6 +77,10 @@ The minimum is not uniquely established: common break 111 wins 64.5% of selectio
 
 In the fixed 100–120 test window, the common split helps dealer composite prediction (delta −0.02711 [−0.03880, −0.01552]), while pone remains inconclusive (+0.00154 [−0.00614, +0.00911]). The late-pone advantage still needs confirmation.
 
+There are material component tradeoffs. Pone composite NLL at 100–110 worsens by 0.01515 [0.00664, 0.02495], and pone discard NLL across 100–120 worsens by 0.01238 [0.00342, 0.02176]. Holding improvements drive the aggregate benefit; it is not an across-the-board improvement in discard beliefs.
+
+The predeclared secondary selection objective, restricted to scores 100–120, also chooses common break 111. Its individual minima are dealer 111 and pone 103, with pone 106 virtually tied. These descriptive secondary minima were not separately confirmed or substituted for the primary selections. The differing pone result further limits any claim of one universally optimal boundary.
+
 **Recommendation:** retain separate dealer/pone probability tables and use **one shared experimental break after 111**. The earlier pilot began late mode at 111; the selected shared break begins it at 112. This is the best tested prediction boundary in this model family and cohort, not a proven win-rate optimum. Production remains unchanged.
 
 This differs from simply discarding late observations: the segmented candidate retains them in its late update. The preceding early-only test assessed scores 0–110; this search evaluates a complete routed model on a fixed all-score population and uses separate smoothing and selection folds. Neither test literally reconstructs the full historical production asset.
