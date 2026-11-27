@@ -408,7 +408,11 @@ def verify(root, directory=None):
     for name, expected in summary['files'].items():
         if h.file_digest(output/'prepared'/name) != expected:
             raise ValueError('prepared data differs')
-    b.write_json(output/'verified.json', dict(complete=True, reportSha256=h.file_digest(output/'report.json')))
+    marker = dict(complete=True, reportSha256=h.file_digest(output/'report.json'))
+    if directory is None:
+        b.write_json(output/'verified.json', marker)
+    elif json.loads((output/'verified.json').read_bytes()) != marker:
+        raise ValueError('durable verification marker differs')
 
 
 def main():
