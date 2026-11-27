@@ -51,7 +51,6 @@ impl Model203DiscardAsset {
         Self::decode_for_model(bytes, "20.3")
     }
 
-    #[cfg(test)]
     pub(crate) fn decode_model284_candidate(bytes: &[u8]) -> Result<Self, String> {
         Self::decode_for_model(bytes, "28.4")
     }

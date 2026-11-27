@@ -514,6 +514,7 @@ fn initialize_db(db_path: &Path, config: &Config, started_at: &str) -> Result<()
                 "model16PolicyMode": model16_policy_mode_name(config.model16_policy_mode),
                 "sourceCommit": env::var("SOURCE_COMMIT").unwrap_or_default(),
                 "runnerSha256": env::var("EXPECTED_RUNNER_SHA256").unwrap_or_default(),
+                "segmentedBeliefsManifestSha256": env::var("EXPECTED_BELIEFS_MANIFEST_SHA256").unwrap_or_default(),
                 "frozenEngine": config.frozen_engine.as_ref().map(|(binary, root, model)| serde_json::json!({
                     "model": model, "binary": binary, "modelRoot": root,
                     "sourceCommit": env::var("OPPONENT_SOURCE_COMMIT").unwrap_or_default(),

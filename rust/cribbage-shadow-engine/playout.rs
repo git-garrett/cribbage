@@ -556,6 +556,11 @@ impl ModelPlayout {
             model: self.model(side).as_str().to_string(),
             player: PlayerKey::Ai,
             role: self.role(side),
+            hand_start_scores: self.record.hands.last().map(|hand| {
+                let scores = [hand.start_left_score, hand.start_right_score];
+                [scores[self.game.dealer.index()], scores[self.game.pone.index()]]
+            }),
+            model284_segment: None,
             ai_score: self.game.player(side).score,
             human_score: self.game.player(opponent).score,
             ai_hand: self.game.player(side).hand.clone(),
@@ -849,6 +854,20 @@ fn elapsed_micros(started: Instant) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn belief_regimes_use_recorded_hand_start_scores_after_points_change() {
+        let mut playout = ModelPlayout::new_at_hand(
+            284, Side::Left, 2, 109, 111, ModelId::Schell284, ModelId::Schell283Fast,
+        ).unwrap();
+        let expected = if playout.game.dealer == Side::Left { [109, 111] } else { [111, 109] };
+        playout.game.player_mut(Side::Left).score += 2;
+        playout.game.player_mut(Side::Right).score += 3;
+        for side in [Side::Left, Side::Right] {
+            let input = playout.decision_input(side, DecisionKind::Peg);
+            assert_eq!(input.hand_start_scores, Some(expected));
+        }
+    }
 
     #[test]
     fn playout_accepts_native_models() {

@@ -86,6 +86,10 @@ pub struct DecisionInput {
     pub model: String,
     pub player: PlayerKey,
     pub role: Role,
+    /// Public hand-start scores, ordered dealer then pone; required by segmented beliefs.
+    pub hand_start_scores: Option<[i32; 2]>,
+    /// Internal execution routing, never accepted from serialized decision text.
+    pub(crate) model284_segment: Option<usize>,
     pub ai_score: i32,
     pub human_score: i32,
     pub ai_hand: Vec<Card>,
@@ -247,6 +251,7 @@ struct RuntimeTables {
     policy_assets203: OnceLock<Model1323PolicyAssets>,
     policy_assets204: OnceLock<Model1323PolicyAssets>,
     policy_assets205: OnceLock<Model1323PolicyAssets>,
+    policy_assets284: OnceLock<Result<Vec<Model1323PolicyAssets>, String>>,
     verified_board1323: OnceLock<Arc<BoardWinMatrix>>,
     beliefs91: OnceLock<Model91EmpiricalBeliefs>,
     decline_factors1322: OnceLock<Model1322DeclineFactors>,
@@ -627,6 +632,12 @@ pub fn parse_decision_input(input_text: &str) -> Result<DecisionInput, String> {
         }.to_string(),
         player: parse_player(fields.get("player").copied().unwrap_or("ai"))?,
         role,
+        hand_start_scores: match (fields.get("dealerStartScore"), fields.get("poneStartScore")) {
+            (Some(d), Some(p)) => Some([parse_i32(d)?, parse_i32(p)?]),
+            (None, None) => None,
+            _ => return Err("both hand-start scores are required".into()),
+        },
+        model284_segment: None,
         ai_score: parse_i32(fields.get("aiScore").copied().unwrap_or("0"))?,
         human_score: parse_i32(fields.get("humanScore").copied().unwrap_or("0"))?,
         ai_hand,
@@ -661,17 +672,26 @@ pub fn parse_decision_input(input_text: &str) -> Result<DecisionInput, String> {
 // 28.4 starts as an exact copy of production Ace, including optional opening
 // acceleration. Future 28.4 strategy changes must branch here and bind assets
 // to the changed policy before removing this baseline delegation.
-fn with_execution_model(input: &DecisionInput) -> Option<DecisionInput> {
+fn with_execution_model(input: &DecisionInput) -> Result<Option<DecisionInput>, String> {
     let baseline284 = input.model == MODEL_28_4
         && (input.kind == DecisionKind::Peg || crate::model284_corrections::configured_manifest().is_none());
     let accelerated283 = input.kind == DecisionKind::Peg && input.model == MODEL_28_3
+        && input.model284_segment.is_none()
         && std::env::var_os("CRIBBAGE_283_FAST_ASSET").is_some_and(|p| !p.is_empty());
     if !baseline284 && !accelerated283 {
-        return None;
+        return Ok(None);
     }
     let mut accelerated = input.clone();
-    accelerated.model = MODEL_28_3_FAST.into();
-    Some(accelerated)
+    if input.model == MODEL_28_4 && input.kind == DecisionKind::Peg
+        && crate::model284_beliefs::configured_manifest().is_some() {
+        accelerated.model284_segment = Some(crate::model284_beliefs::segment(input.hand_start_scores)?);
+        // Old opening books bind to old beliefs. Use the identical executable
+        // strategy with the selected new priors and no opening book.
+        accelerated.model = MODEL_28_3.into();
+    } else {
+        accelerated.model = MODEL_28_3_FAST.into();
+    }
+    Ok(Some(accelerated))
 }
 
 pub fn evaluate_decision(input: &DecisionInput, root: &str) -> Result<Decision, String> {
@@ -693,7 +713,7 @@ pub fn evaluate_decision_with_caches(
     model13_cache: Option<&Model13HandCache>,
 ) -> Result<Decision, String> {
     validate_modern_pegging_input(input)?;
-    let accelerated = with_execution_model(input);
+    let accelerated = with_execution_model(input)?;
     let input = accelerated.as_ref().unwrap_or(input);
     match input.kind {
         DecisionKind::Discard => recommend_discard(input, root),
@@ -708,7 +728,7 @@ pub fn review_decision(
     root: &str,
 ) -> Result<DecisionReview, String> {
     validate_modern_pegging_input(input)?;
-    let accelerated = with_execution_model(input);
+    let accelerated = with_execution_model(input)?;
     let input = accelerated.as_ref().unwrap_or(input);
     if input.kind == DecisionKind::Peg
         && input.player == PlayerKey::Ai
@@ -748,7 +768,7 @@ pub fn evaluate_selected_decision(
     root: &str,
 ) -> Result<Decision, String> {
     validate_modern_pegging_input(input)?;
-    let accelerated = with_execution_model(input);
+    let accelerated = with_execution_model(input)?;
     let input = accelerated.as_ref().unwrap_or(input);
     if input.model == MODEL_28_4 && input.kind == DecisionKind::Discard {
         return review_discard_model13(input, selected_card_ids, root);
@@ -1454,6 +1474,8 @@ pub fn model16_policy_action_from_rank_state(
         } else {
             Role::Pone
         },
+        hand_start_scores: None,
+        model284_segment: None,
         ai_score: state.scores[actor.index()],
         human_score: state.scores[actor.other().index()],
         ai_hand: cards_for_rank_counts_for_scoring(&state.hands[actor.index()]),
@@ -6769,6 +6791,7 @@ impl RuntimeTables {
             policy_assets203: OnceLock::new(),
             policy_assets204: OnceLock::new(),
             policy_assets205: OnceLock::new(),
+            policy_assets284: OnceLock::new(),
             verified_board1323: OnceLock::new(),
             beliefs91: OnceLock::new(),
             decline_factors1322: OnceLock::new(),
@@ -6854,6 +6877,12 @@ impl RuntimeTables {
     }
 
     fn pegging_policy_assets(&self, input: &DecisionInput) -> Result<&Model1323PolicyAssets, String> {
+        if let Some(index) = input.model284_segment {
+            let assets = self.policy_assets284.get_or_init(|| {
+                crate::model284_beliefs::load(&self.asset_path(""))
+            }).as_ref().map_err(Clone::clone)?;
+            return assets.get(index).ok_or_else(|| "invalid 28.4 belief segment".into());
+        }
         if matches!(input.model.as_str(), MODEL_20_5 | MODEL_20_6 | MODEL_20_7 | MODEL_28_3 | MODEL_28_3_FAST | MODEL_20_5_PEGGING | MODEL_20_5_PEGGING2) {
             load_cached(&self.policy_assets205, "policy_assets205", || {
                 Model1323PolicyAssets::load_model205(&self.asset_path(""))
@@ -7229,6 +7258,54 @@ fn round_ev(value: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn segmented_execution_never_reenters_production_opening_acceleration() {
+        let mut input = super::parse_decision_input(
+            "kind=peg;model=schell_table-peg_table-28.3;role=dealer;aiHand=0,4"
+        ).unwrap();
+        input.model284_segment = Some(0);
+        assert!(super::with_execution_model(&input).unwrap().is_none());
+    }
+
+    #[test]
+    #[ignore = "requires pinned segmented belief manifest"]
+    fn model284_segmented_profiles_route_both_roles_and_value_legal_choices() {
+        use super::*;
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+        let tables = RuntimeTables::new(root.to_str().unwrap());
+        let mut different = 0;
+        for (index, scores) in [[109, 111], [110, 111], [109, 112], [110, 112]].into_iter().enumerate() {
+            for role in ["dealer", "pone"] {
+                let (own, other) = if role == "dealer" { (scores[0], scores[1]) } else { (scores[1], scores[0]) };
+                let history = if role == "dealer" {
+                    "aiHand=0,4;aiTable=3,9;humanTable=2,5,13;humanHandCount=1;plays=2,3,5,9,13;count=24;last=human;pegHistory=o2,s3,o5,s9,o0"
+                } else {
+                    "aiHand=4,9;aiTable=0,3;humanTable=2,5;humanHandCount=2;plays=0,2,3,5;count=14;last=human;pegHistory=s0,o2,s3,o5"
+                };
+                let input = parse_decision_input(&format!(
+                    "model=28.4;kind=peg;role={role};ownDiscards=1,6;turnCard=11;dealerStartScore={};poneStartScore={};aiScore={};humanScore={};{history}",
+                    scores[0], scores[1], own+1, other+1,
+                )).unwrap();
+                let routed = with_execution_model(&input).unwrap().unwrap();
+                assert_eq!(routed.model284_segment, Some(index));
+                assert_eq!(routed.model, MODEL_28_3);
+                let mut reference = routed.clone();
+                reference.model284_segment = None;
+                let candidate = recommend_peg_model1323(&routed, &routed.ai_hand, &tables, None).unwrap();
+                let baseline = recommend_peg_model1323(&reference, &reference.ai_hand, &tables, None).unwrap();
+                if format!("{candidate:?}") != format!("{baseline:?}") { different += 1; }
+                match candidate {
+                    Decision::Peg { card_id: Some(card), win_probability: Some(wp), ev: Some(ev), .. } => {
+                        assert!(routed.ai_hand.iter().any(|c| c.id == card && routed.count+c.value <= 31));
+                        assert!((0.0..=1.0).contains(&wp) && ev.is_finite());
+                    }
+                    _ => panic!("expected a valued legal choice"),
+                }
+            }
+        }
+        assert!(different > 0, "segmented priors must reach the native forecast");
+    }
+
     #[test]
     fn model284_discard_and_selected_review_use_the_separate_correction_table() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
@@ -8367,6 +8444,8 @@ mod tests {
             model: MODEL_16_0.to_string(),
             player: PlayerKey::Ai,
             role: Role::Pone,
+            hand_start_scores: None,
+            model284_segment: None,
             ai_score: 120,
             human_score: 116,
             ai_hand: cards_from_ids(&[4, 5]).unwrap(),

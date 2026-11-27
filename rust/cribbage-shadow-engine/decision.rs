@@ -332,6 +332,8 @@ pub(crate) fn decision_input(
         model: model_id.as_str().to_string(),
         player: PlayerKey::Ai,
         role: role_for_side(game, side),
+        hand_start_scores: None,
+        model284_segment: None,
         ai_score: game.player(side).score,
         human_score: game.player(opponent).score,
         ai_hand: game.player(side).hand.clone(),

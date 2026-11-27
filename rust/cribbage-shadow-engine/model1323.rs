@@ -274,14 +274,19 @@ impl PolicyAssets {
             }
         }
         let discard_bytes = fs::read(candidate.join("late-discards.bin")).map_err(|e| e.to_string())?;
-        let packed = crate::model203_discards::Model203DiscardAsset::decode_model284_candidate(&discard_bytes)?;
-        assets.beliefs = Model91EmpiricalBeliefs::load_model203(&hold_path)?;
+        Self::with_model284_beliefs(directory, &hold_path, &discard_bytes)
+    }
+
+    pub(crate) fn with_model284_beliefs(directory: &Path, hold: &Path, discards: &[u8]) -> Result<Self, String> {
+        let mut assets = Self::load_model205(directory)?;
+        let packed = crate::model203_discards::Model203DiscardAsset::decode_model284_candidate(discards)?;
+        assets.beliefs = Model91EmpiricalBeliefs::load_model203(hold)?;
         assets.suit_rates = Some(packed.suits.clone());
         assets.discards = OpponentDiscardPrior::Smoothed(packed);
         let mut fingerprint = Sha256::new();
         fingerprint.update(assets.discard_asset_sha256);
-        fingerprint.update(fs::read(hold_path).map_err(|e| e.to_string())?);
-        fingerprint.update(discard_bytes);
+        fingerprint.update(fs::read(hold).map_err(|e| e.to_string())?);
+        fingerprint.update(discards);
         assets.discard_asset_sha256 = fingerprint.finalize().into();
         Ok(assets)
     }
