@@ -47,3 +47,35 @@ every missing game-index interval and preserve out-of-order completed games.
 Implementation: `scripts/prepare_model284_role_benchmark.py`,
 `scripts/model284_role_benchmark_stage.py`, and the opt-in native loader
 `rust/cribbage-shadow-engine/model284_beliefs.rs`.
+
+## Early role result and execution
+
+Role separation helps in the early asset for both roles. Negative log-loss
+deltas favor separate role tables; these are prediction losses, not win rates.
+
+| Early role | Player-hands | Composite NLL delta | Paired 95% interval |
+| --- | ---: | ---: | ---: |
+| Dealer, 0–109 | 11,934 | −0.13444 | −0.14316 to −0.12616 |
+| Pone, 0–111 | 11,918 | −0.14948 | −0.15725 to −0.14108 |
+
+Holding and discard prediction each improve for both roles; their individual
+intervals also exclude zero. The fixed 0–99 window gives the same conclusion.
+See the [matched assessment](model284-early-role-assessment.json).
+
+The job is `ace284-roles-vs-ace-20261126-v1`, rooted at
+`/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ace284-roles-vs-ace-20261126-v1`.
+Its 11 ordered stages include 512 games per orientation. Engine source is
+`42c86b99b6de3208184e069dc77db427d9cab66c`; numeric game seeds start at
+`3038634487`, disjoint from 50,127 retained numeric seeds. Historical nonnumeric
+seed IDs are recorded separately and cannot establish numerical RNG-range
+disjointness. Durable output is scheduled for
+`benchmarks/model284/roles-vs-ace-20261126-v1` in the shared project checkout.
+
+Preparation's exact-equality guard caught a second hold quantization before any
+games. Offline patch `e6ebc5d3877c500b15bcf034ba41032707013d67` now copies the
+selected integer records unchanged. The original failed preparation and hashes
+are retained in the runtime's repair receipt; the engine revision, job
+specification, seeds, cutoffs and sample size did not change. All four packaged
+profiles pass exact probability equality. [Preparation identity](model284-role-prepared.json).
+
+The paired gameplay result is pending; production remains unchanged.
