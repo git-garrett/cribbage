@@ -1,6 +1,7 @@
 import sys
 import json
 import sqlite3
+import struct
 import unittest
 from pathlib import Path
 
@@ -41,6 +42,22 @@ class ResumeCoverage(unittest.TestCase):
         for indices in ([-1], [3]):
             with self.assertRaises(ValueError):
                 missing_ranges(indices, 3)
+
+
+class IntegerHoldPackaging(unittest.TestCase):
+    def test_role_splice_preserves_selected_integer_weights(self):
+        # Deliberately unequal totals would change if probabilities were
+        # normalized and quantized again. Include both roles in each input.
+        import prepare_model284_role_benchmark as prepare
+
+        def binary(dealer_weight, pone_weight):
+            directory = b''.join(struct.pack('<B13BII', role, *([0]*13), role, 1) for role in (0, 1))
+            records = b''.join(struct.pack('<13BQ', *([1]+[0]*12), weight)
+                               for weight in (dealer_weight, pone_weight))
+            return b'M203HB01'+struct.pack('<5I', 1, 2, 2, 22, 21)+directory+records
+
+        combined = prepare.combine_hold_roles(binary(123456789, 2), binary(3, 987654321))
+        self.assertEqual(combined, binary(123456789, 987654321))
 
 
 if __name__ == '__main__':

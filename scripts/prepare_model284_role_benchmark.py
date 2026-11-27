@@ -3,6 +3,7 @@
 import argparse
 import json
 from pathlib import Path
+import struct
 
 import numpy as np
 
@@ -10,6 +11,29 @@ import model284_score_segments as s
 
 b, h, a = s.b, s.h, s.a
 CUTS = dict(dealer=109, pone=111)
+
+
+def combine_hold_roles(dealer_bytes, pone_bytes):
+    """Copy selected integer records; a second quantization can change weights."""
+    directory, records = bytearray(), bytearray()
+    contexts = first = 0
+    for wanted, body in enumerate((dealer_bytes, pone_bytes)):
+        magic, version, count, _, cb, rb = struct.unpack_from('<8s5I', body)
+        if (magic, version, cb, rb) != (b'M203HB01', 1, 22, 21):
+            raise ValueError('unsupported hold format')
+        for i in range(count):
+            role, *entry = struct.unpack_from('<B13BII', body, 28+i*cb)
+            if role != wanted:
+                continue
+            prefix, offset, size = entry[:13], entry[13], entry[14]
+            blob = body[28+count*cb+offset*rb:28+count*cb+(offset+size)*rb]
+            if len(blob) != size*rb:
+                raise ValueError('truncated hold records')
+            directory.extend(struct.pack('<B13BII', role, *prefix, first, size))
+            records.extend(blob)
+            first += size
+            contexts += 1
+    return b'M203HB01'+struct.pack('<5I', 1, contexts, first, 22, 21)+directory+records
 
 
 def early_role_control(sweep, output):
@@ -75,7 +99,10 @@ def package(sweep, output, model_root):
             segmentationSelectionSha256=h.file_digest(sweep/'output/selection.json'),
             dealerLastEarly=109, poneLastEarly=111, profileIndex=index, suitPriorSha256=b.sha(dbytes),
             prior='neutral foundation; early role fit, late update; unchanged verified suit evidence')
-        payloads = dict(hold=h.pack(combined['hold'])[0],
+        hold_sources = [(sweep/'output/fits'/str(CUTS[role])/
+                         (('late' if index & bit else 'early')+'-hold.bin')).read_bytes()
+                        for role, bit in [('dealer', 1), ('pone', 2)]]
+        payloads = dict(hold=combine_hold_roles(*hold_sources),
                         discards=b.pack_discards(combined['discards'], suits, metadata))
         profile = dict(index=index, dealerLate=bool(index & 1), poneLate=bool(index & 2))
         for kind, body in payloads.items():
