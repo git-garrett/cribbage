@@ -39,7 +39,7 @@ actual wins, paired uncertainty, score margin, phase outcomes, calibration,
 timing and integrity. An inconclusive interval is not evidence of equal strength.
 
 The one-shot job builds a frozen PGO binary with exact decision/value parity,
-validates the native routing and probabilities, plays two independent smoke
+validates the native routing and probabilities, plays two reciprocal smoke
 games, then runs both orientations. Verification, reports, durable synchronization
 and read-only archive verification are separate ordered stages. Resumes enumerate
 every missing game-index interval and preserve out-of-order completed games.

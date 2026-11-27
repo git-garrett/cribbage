@@ -35,6 +35,18 @@ def missing_ranges(indices, count):
     return ranges
 
 
+def check_existing_provenance(db, run_id, matchup_id, seed, expected):
+    rows = db.execute('SELECT run_id,git_commit,run_seed,metadata_json FROM ai_runs').fetchall()
+    if len(rows) != 1 or rows[0][:3] != (run_id, expected['sourceCommit'], str(seed)):
+        raise ValueError('existing run identity differs from the frozen contract')
+    metadata = json.loads(rows[0][3])
+    if any(metadata.get(key) != value for key, value in expected.items()):
+        raise ValueError('existing source/binary/belief provenance differs')
+    if db.execute('SELECT COUNT(*) FROM compact_games WHERE run_id != ? OR matchup_id != ?',
+                  (run_id, matchup_id)).fetchone()[0]:
+        raise ValueError('existing game belongs to another run or matchup')
+
+
 def main():
     root, mode = Path(sys.argv[1]).resolve(), sys.argv[2]
     cfg = json.loads((root/'experiment.json').read_bytes())
@@ -73,6 +85,13 @@ def main():
     labels = [('28.4-left', cfg['candidate'], cfg['opponent']),
               ('ace-left', cfg['opponent'], cfg['candidate'])]
 
+    def check_run(db, label, left, right, seed, smoke):
+        env = candidate_env()
+        check_existing_provenance(db, ('smoke-' if smoke else 'model284-')+label, cfg['jobId'], seed,
+            dict(sourceCommit=cfg['sourceCommit'], runnerSha256=env['EXPECTED_RUNNER_SHA256'],
+                 segmentedBeliefsManifestSha256=env['EXPECTED_BELIEFS_MANIFEST_SHA256'],
+                 left=left, right=right, workers=1 if smoke else cfg['workers']))
+
     def verify_games(base, count, seed):
         for label, left, right in labels:
             path = base/label/'games.db'
@@ -86,11 +105,7 @@ def main():
                 expected = [(i, str(seed+i), left, right, 1, 1) for i in range(count)]
                 if rows != expected:
                     raise ValueError('game coverage/paired seed/engine identity mismatch: '+label)
-                metadata = json.loads(db.execute('SELECT metadata_json FROM ai_runs').fetchone()[0])
-                if (metadata['sourceCommit'] != cfg['sourceCommit']
-                    or metadata['runnerSha256'] != sha(root/'target/release/cribbage-runner')
-                    or metadata['segmentedBeliefsManifestSha256'] != candidate_env()['EXPECTED_BELIEFS_MANIFEST_SHA256']):
-                    raise ValueError('recorded benchmark provenance mismatch')
+                check_run(db, label, left, right, seed, base.name == 'smoke')
 
     if mode == 'prepare':
         run([python, source/'scripts/prepare_model284_role_benchmark.py',
@@ -126,6 +141,7 @@ def main():
             indices = []
             if dbpath.exists():
                 with sqlite3.connect(dbpath.as_uri()+'?mode=ro', uri=True) as db:
+                    check_run(db, label, left, right, seed, smoke)
                     rows = db.execute('SELECT game_index,random_seed,left_engine,right_engine FROM compact_games').fetchall()
                     for i, observed_seed, observed_left, observed_right in rows:
                         if (observed_seed, observed_left, observed_right) != (str(seed+i), left, right):
