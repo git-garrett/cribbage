@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "seed": "181008104527989295178175738591318340517",
+  "sourceRevision": "c467e92caced7d958560a85b987e01c35f2629f4",
+  "frozenFiles": {
+    "corpus/manifest.json": "7d4e7fef3f422fe915f7e32bedabc513237918953f79777fa80480d5ebda9f6c",
+    "corpus/evidence.json.gz": "dd76e304ce55c8b3239e40c1f5e4f04dd444b11e20b447774f20392780b47e41",
+    "scripts/learning_model_policy.py": "9c3dbc60951fcbeee16670ab36e16ac83400f3f5665232047f0669bc1c35e60f",
+    "scripts/build_model284_late_beliefs.py": "c9ee4003b7e4e857d5a5c4a4aefc0332a1bfd2d1a39b52e25a501deb5fea31d8",
+    "scripts/model284_early_ablation.py": "3e55718d5dadd10f729d9219381df982fd6ebf720670111c67a2ab5f3aef91a1",
+    "scripts/model284_score_segments.py": "0fbfab3f6d25495a9cf731d6aed2535239408755b763adb1cfcc2a5dd9bee0e2",
+    "scripts/build_model203_hold.py": "21537022b113edc12405029a62ba8fabbdc87e76b8d725b274428de931e49239",
+    "docs/research/model284-late-beliefs-manifest.json": "7d4e7fef3f422fe915f7e32bedabc513237918953f79777fa80480d5ebda9f6c"
+  },
+  "environment": {
+    "python": "3.13.2 (main, Feb  4 2025, 14:51:09) [Clang 16.0.0 (clang-1600.0.26.6)]",
+    "numpy": "2.5.2",
+    "numpyPath": "/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ace284-segments-20261126-v1/env/lib/python3.13/site-packages/numpy/__init__.py"
+  },
+  "lastEarlyScores": [
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109,
+    110,
+    111,
+    112,
+    113,
+    114,
+    115,
+    116,
+    117,
+    118,
+    119,
+    120
+  ],
+  "definition": "break B: early0..B, lateB+1..120; B120 is no split",
+  "sourceCorpus": "same reviewed ten-source corpus; all role labels retained",
+  "partitions": "original train; original tune split by seeded hash into smoothing/selection; original test only selected-model assessment",
+  "objective": "all-score fixed population; equal roles; per player-hand half discard NLL + half mean hold-prefix NLL",
+  "caveat": "Prior pilot examined this corpus; current confirmation excludes test from fitting/selection but is not new blind data."
+}
