@@ -390,15 +390,43 @@ def finish(root):
     (root/'output/report.txt').write_text('\n'.join(lines)+'\n')
 
 
+def verify(root, directory=None):
+    output = directory or root/'output'
+    report = json.loads((output/'report.json').read_bytes())
+    if not report['complete'] or not report['confirmation']['complete']:
+        raise ValueError('experiment incomplete')
+    protocol = json.loads((root/'protocol.json').read_bytes())
+    if report['protocol'] != protocol:
+        raise ValueError('report protocol differs')
+    for name in [str(cut) for cut in BREAKS]+['role-pooled']:
+        folder = output/'fits'/name
+        load_profile(folder)
+        meta = json.loads((folder/'metadata.json').read_bytes())
+        if h.file_digest(folder/'selection.npz') != meta['selectionSha256']:
+            raise ValueError('fitted selection output differs')
+    summary = json.loads((output/'prepared/summary.json').read_bytes())
+    for name, expected in summary['files'].items():
+        if h.file_digest(output/'prepared'/name) != expected:
+            raise ValueError('prepared data differs')
+    b.write_json(output/'verified.json', dict(complete=True, reportSha256=h.file_digest(output/'report.json')))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('stage', choices=['prepare', 'fit', 'select', 'confirm', 'finish'])
+    parser.add_argument('stage', choices=['prepare', 'fit', 'select', 'confirm', 'finish', 'verify'])
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--name')
+    parser.add_argument('--directory',type=Path)
     args = parser.parse_args()
     np.seterr(all='raise')
+    protocol = json.loads((args.root/'protocol.json').read_bytes())
+    for name, expected in protocol.get('frozenFiles',{}).items():
+        if h.file_digest(args.root/'frozen'/name) != expected:
+            raise ValueError('frozen code/configuration differs')
     if args.stage == 'fit':
         fit(args.root, args.name)
+    elif args.stage == 'verify':
+        verify(args.root,args.directory)
     else:
         globals()[args.stage](args.root)
     print(args.stage+' complete'+(' '+args.name if args.name else ''))
