@@ -68,7 +68,7 @@ Its 11 ordered stages include 512 games per orientation. Engine source is
 `42c86b99b6de3208184e069dc77db427d9cab66c`; numeric game seeds start at
 `3038634487`, disjoint from 50,127 retained numeric seeds. Historical nonnumeric
 seed IDs are recorded separately and cannot establish numerical RNG-range
-disjointness. Durable output is scheduled for
+disjointness. Verified durable output is retained at
 `benchmarks/model284/roles-vs-ace-20261126-v1` in the shared project checkout.
 
 Preparation's exact-equality guard caught a second hold quantization before any
@@ -78,4 +78,42 @@ are retained in the runtime's repair receipt; the engine revision, job
 specification, seeds, cutoffs and sample size did not change. All four packaged
 profiles pass exact probability equality. [Preparation identity](model284-role-prepared.json).
 
-The paired gameplay result is pending; production remains unchanged.
+## Complete-game result
+
+All 11 supervised stages completed at `2026-11-27T09:04:58Z`, including both
+512-game orientations, full game-index/seed/provenance verification, final
+reports, synchronization and read-only archive verification. The two reciprocal
+smoke games are separate and excluded from the 1,024-game result.
+
+- Candidate 28.4 won **519**, versus **505** for Ace: **50.68%**.
+- Paired-seed 95% interval: **48.88%–52.49%**. This does **not establish a playing-strength
+  improvement**; the interval includes 50%.
+- Candidate-left: 257/512 wins (50.20%); candidate-right: 262/512 (51.17%).
+- Of 512 seed pairs: 48 candidate sweeps, 423 splits, 41 Ace sweeps.
+- Mean candidate score margin: **−0.181 points/game**; the reporter's unpaired
+  normal interval is −1.337 to +0.975. More wins here did not yield a positive
+  average point margin.
+- Realized dealer pegging: −0.079 points per recorded dealer hand; pone pegging:
+  +0.053 points per recorded pone hand. These are descriptive role averages on
+  the models' resulting trajectories, not controlled role-specific strength tests.
+- Whole pegging-hand model computation was slower: dealer 0.918s versus 0.794s; pone
+  11.384s versus 9.912s (roughly 15–16%). Both orientations used six workers;
+  neither engine used production opening books. Candidate and opponent use
+  different exact execution paths, so this measures the implemented candidates
+  rather than isolating the computational effect of the probability tables.
+- No engine or paired-seed mismatches, integrity errors or warnings.
+
+The aggregate WP-calibration and EV tables in the saved report are descriptive.
+They use different resulting positions and repeated observations within games;
+they do not establish a controlled calibration improvement or answer a separate
+end-of-early-regime WP question.
+
+**Decision:** retain role separation and the selected cutoffs as an experimental
+candidate. The predictive evidence supports separate early tables, but this
+fixed game sample does not justify promoting 28.4 on strength. Production remains
+unchanged. No additional games, cutoff changes or production activation were
+triggered from these results.
+
+Review copies: [full assessment](model284-role-benchmark-results.json) and
+[archive identities](model284-role-benchmark-verification.json). The durable
+archive also contains the human-readable paired report and both complete databases.
