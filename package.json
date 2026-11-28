@@ -1,5 +1,5 @@
 {
-  "version": "28.3.0",
+  "version": "28.4.0",
   "scripts": {
     "build": "scripts/run-quiet.sh --show-warnings \"Client build\" scripts/build-client.sh",
     "build:training-drills": "python3 scripts/build_training_drills.py",
@@ -26,8 +26,14 @@
     "test:workbench": "scripts/run-quiet.sh \"Benchmark workbench tests\" python3 -m unittest discover -s scripts -p 'test_benchmark_workbench*.py'",
     "build:benchmark": "scripts/run-quiet.sh --show-warnings \"Benchmark release build\" python3 scripts/build_rust_release.py benchmark",
     "test:opening-assets": "scripts/run-quiet.sh \"Opening asset pipeline tests\" python3 -m unittest discover -s scripts -p test_opening_asset_pipeline.py",
+    "test:correction-inputs": "scripts/run-quiet.sh \"Correction input preparation\" python3 -m unittest scripts/test_prepare_model284_corrections.py",
+    "test:late-beliefs": "scripts/run-quiet.sh \"Late-game belief preparation\" python3 -m unittest scripts/test_build_model284_late_beliefs.py",
+    "test:early-ablation": "scripts/run-quiet.sh \"Early-game belief comparison\" python3 -m unittest scripts/test_model284_early_ablation.py",
+    "test:score-segments": "scripts/run-quiet.sh \"Score segmentation tests\" python3 -m unittest scripts/test_model284_score_segments.py",
     "build:opening-assets": "scripts/run-quiet.sh --show-warnings \"Opening asset builder\" python3 scripts/build_rust_release.py opening",
-    "test:history": "scripts/run-quiet.sh \"History review tests\" python3 -m unittest scripts/test_history_review_inputs.py scripts/test_player_history.py"
+    "test:history": "scripts/run-quiet.sh \"History review tests\" python3 -m unittest scripts/test_history_review_inputs.py scripts/test_player_history.py",
+    "test:role-benchmark": "scripts/run-quiet.sh \"Role benchmark resume tests\" python3 -m unittest scripts/test_model284_role_benchmark.py",
+    "test:sequential-benchmark": "scripts/run-quiet.sh \"Sequential paired benchmark tests\" /bin/bash scripts/test-model284-sequential.sh"
   },
   "dependencies": {
     "@capacitor/core": "^7.4.4"

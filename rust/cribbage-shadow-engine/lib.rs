@@ -10,6 +10,10 @@ pub mod joint_scores;
 pub mod model;
 pub mod model132;
 pub mod model1323;
+mod model284_corrections;
+mod model284_beliefs;
+#[cfg(test)]
+mod model284_late_tests;
 mod model20_discards;
 mod model203_discards;
 mod model203_crib;

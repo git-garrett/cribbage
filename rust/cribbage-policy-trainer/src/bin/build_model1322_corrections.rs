@@ -457,8 +457,21 @@ fn build(config: &BuildConfig) -> Result<(), String> {
         config.normalize_discard_rows,
     )?;
     let baseline = config.baseline_pairs.as_deref().map(load_baseline_pairs).transpose()?;
-    let beliefs = Model91EmpiricalBeliefs::load(&config.beliefs)?;
-    let factors = Model1322DeclineFactors::load(&config.factors)?;
+    let clean_inputs = fs::read(&config.beliefs).map_err(|e| e.to_string())?.starts_with(b"M203HB01");
+    if clean_inputs && !config.normalize_discard_rows {
+        return Err("complete smoothed inputs require --model20-normalized-discards".into());
+    }
+    if clean_inputs {
+        let factors: serde_json::Value = serde_json::from_slice(
+            &fs::read(&config.factors).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        validate_clean_factor_snapshot(&factors)?;
+    }
+    let beliefs = if clean_inputs {
+        Model91EmpiricalBeliefs::load_model203(&config.beliefs)?
+    } else { Model91EmpiricalBeliefs::load(&config.beliefs)? };
+    let factors = if clean_inputs {
+        Model1322DeclineFactors::load_model203(&config.factors)?
+    } else { Model1322DeclineFactors::load(&config.factors)? };
     let policy = Model911Policy::new_with_evidence_cache(
         Some(beliefs.clone()),
         factors,
@@ -466,6 +479,8 @@ fn build(config: &BuildConfig) -> Result<(), String> {
         config.evidence_cache_outcome_limit,
         config.future_cache_limit,
     )?;
+    let policy = if clean_inputs { policy.with_positive_soft_evidence() } else { policy };
+    if clean_inputs { policy.use_empirical_depletion(); }
     let verification_policy = (config.verify_first_worlds > 0)
         .then(|| {
             Model911Policy::new_with_evidence_cache(
@@ -477,6 +492,13 @@ fn build(config: &BuildConfig) -> Result<(), String> {
             )
         })
         .transpose()?;
+    let verification_policy = verification_policy.map(|policy| {
+        if clean_inputs {
+            let policy = policy.with_positive_soft_evidence();
+            policy.use_empirical_depletion();
+            policy
+        } else { policy }
+    });
     let expected_state = new_state(config, &checksums);
     let partial_path = config.output.join(PARTIAL_FILE);
     let checkpoint_path = config.output.join(CHECKPOINT_FILE);
@@ -574,6 +596,7 @@ fn build(config: &BuildConfig) -> Result<(), String> {
             "baselineChecksumSemantics": "zero means no external baseline; traces use the recorded belief and factor inputs",
             "durableOutput": if config.joint_distributions { "exact joint own/opponent terminal pegging distributions, first moments, and diagnostic pone lead masks" } else { "weighted terminal six-card/discard summaries and pone lead cut masks only" },
             "offlineObjective": "net pegging points; executable Model911Policy with legal-information dead-card and decline inference",
+            "cleanSmoothedInputs": clean_inputs,
             "boardConditioning": false,
             "discardNormalization": discard_normalization_description(&partial.state),
             "dealerRange": {"start": config.dealer_start, "count": config.dealer_count},
@@ -1074,6 +1097,19 @@ fn validate_model20_factor_provenance(factors: &serde_json::Value) -> Result<(),
                 "Model 20 correction build rejects decline source {name:?} (ADR-0002)"
             ));
         }
+    }
+    Ok(())
+}
+
+fn validate_clean_factor_snapshot(factors: &serde_json::Value) -> Result<(), String> {
+    // Preparation validates source-specific ADR-0003 eligibility, corrected
+    // 13.1 hashes, and source-count reconciliation. Freeze that exact qualified
+    // snapshot here; a broad model-version allowlist cannot establish this.
+    let pinned: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../cribbage-shadow-engine/assets/model284-correction-inputs.json"
+    )).map_err(|e| e.to_string())?;
+    if pinned["qualifiedDeclineFactors"].is_null() || *factors != pinned["qualifiedDeclineFactors"] {
+        return Err("clean correction build requires the pinned ADR-0003-qualified decline snapshot".into());
     }
     Ok(())
 }
@@ -1932,6 +1968,30 @@ mod tests {
         fs::write(reference_path, reference).unwrap();
         config.output = root.join("wrong-reference");
         assert!(build(&config).unwrap_err().contains("differs from baseline cell"));
+
+        // Exercise the modern loader and support-preserving policy through the
+        // same bounded full-builder case. Priors here are synthetic test data;
+        // the production export's complete support is checked separately.
+        config.baseline_pairs = None;
+        config.output = root.join("clean-inputs");
+        config.beliefs = assets.join("model203-hold.bin");
+        let pinned: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../cribbage-shadow-engine/assets/model284-correction-inputs.json")).unwrap();
+        let factors = pinned["qualifiedDeclineFactors"].clone();
+        validate_clean_factor_snapshot(&factors).unwrap();
+        let mut forbidden = factors.clone();
+        forbidden["modelCohort"]["includedModels"] = json!(["schell_table-peg_table-13.22"]);
+        assert!(validate_clean_factor_snapshot(&forbidden).is_err());
+        config.factors = root.join("clean-factors.json");
+        atomic_json(&config.factors, &factors).unwrap();
+        build(&config).unwrap();
+        let clean = read_partial(&config.output.join(PARTIAL_FILE)).unwrap();
+        assert_eq!(clean.state.compatible_pairs, 1);
+        let checkpoint: BuildState = serde_json::from_slice(
+            &fs::read(config.output.join(CHECKPOINT_FILE)).unwrap()).unwrap();
+        assert_eq!(checkpoint.verified_worlds, DEFAULT_GENERATED_VERIFY_WORLDS as u64);
+        assert!(clean.dealer.iter().any(|row| row.weight > 0));
+        assert!(clean.pone.iter().any(|row| row.weight > 0));
         fs::remove_dir_all(root).unwrap();
     }
 

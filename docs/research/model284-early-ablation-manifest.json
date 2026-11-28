@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "artifactDirectory": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model284/early-ablation-20261126-v1",
+  "assessmentSha256": "c939da27f8df84c65ba63cffc0b00c2ca0aaf22c39c1a62e2829d78cab6971f9",
+  "assets": {
+    "allScores-discards.json.gz": {
+      "bytes": 3661332,
+      "sha256": "4ffbc04d3ad6dc28f1528883ea81e906c23d75def9403e1e9c60de8baf7e3fd8"
+    },
+    "allScores-hold.bin": {
+      "bytes": 945770,
+      "sha256": "6463a4ecade246818542a2833b6879ce304cb8607cbd87347b0ae8c86168bda9"
+    },
+    "assessment.json": {
+      "bytes": 54178,
+      "sha256": "c939da27f8df84c65ba63cffc0b00c2ca0aaf22c39c1a62e2829d78cab6971f9"
+    },
+    "early-test-cases.json.gz": {
+      "bytes": 844375,
+      "sha256": "31d03ced5006b64dcbd274d1ef3fc0496d3b495a0290c129e34853cb26a069b0"
+    },
+    "earlyOnly-discards.json.gz": {
+      "bytes": 3671374,
+      "sha256": "b2b372ecf17ffbbb92293be24fc7da73c2c59b863b7df40b6e2e3c05c4a35f1b"
+    },
+    "earlyOnly-hold.bin": {
+      "bytes": 945770,
+      "sha256": "737d248e9eb3b62cb01de9862f901886cab34d626875ad45ec86d7ed618a97b0"
+    },
+    "experiment.json": {
+      "bytes": 831,
+      "sha256": "cb1cbbf404a9400b60d4ebd353cea07d2bda3ec8458334d12f3a576011fc712b"
+    }
+  },
+  "productionActivated": false,
+  "wholeGamesRun": 0
+}

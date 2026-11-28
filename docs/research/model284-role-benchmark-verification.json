@@ -1,0 +1,28 @@
+{
+  "complete": true,
+  "sourceCommit": "42c86b99b6de3208184e069dc77db427d9cab66c",
+  "jobId": "ace284-roles-vs-ace-20261126-v1",
+  "stages": 11,
+  "games": 1024,
+  "pairedSeeds": 512,
+  "durableRoot": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model284/roles-vs-ace-20261126-v1",
+  "files": {
+    "benchmark/28.4-left/games.db": "99fafa6621b24bee4d5f5be42a8d7e5cb9911bce27628ccbf535437cbd3b8da0",
+    "benchmark/ace-left/games.db": "9d738cb9f55e736a6fe873bfc5a486611146cd74a241cf511a8f642f6979ae44",
+    "benchmark/full-report.json": "06cef31a93f0f3bc1c27dbc94723a41e5a9c1d70dd5c1649bb9bceb1a2dabd12",
+    "benchmark/paired-summary.json": "ceadfa6b0b7874115fa808d28ebac0b8de2468d08b6a1ae298edff1edbdb6144",
+    "beliefs/manifest.json": "0de3b019dfc9fb08fa0d028006d94c382df0d10ba49b7eed252a49cee00ed408",
+    "game-integrity.json": "6ac02f7d255e61237da3ea7c5c30f31790742aa02364c26cf48caac7269743a1"
+  },
+  "gameIntegrity": {
+    "complete": true,
+    "games": 1024,
+    "pairedSeeds": true,
+    "runnerSha256": "29d79f8f55d905947ce6dcaf50e6d2ed902764286ba4e120d5aedd2dc02a02a9",
+    "manifestSha256": "0de3b019dfc9fb08fa0d028006d94c382df0d10ba49b7eed252a49cee00ed408"
+  },
+  "durableVerification": {
+    "complete": true,
+    "durableRoot": "/Volumes/TerraMasterWDBlue/Dev/cribbage/benchmarks/model284/roles-vs-ace-20261126-v1"
+  }
+}

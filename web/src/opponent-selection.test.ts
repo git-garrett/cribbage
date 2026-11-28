@@ -1,11 +1,17 @@
 // @ts-expect-error The app intentionally omits Node typings; Vitest runs this file in Node.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { isAceOpponent, PRODUCTION_ACE_OPPONENT } from "./ace-opponent";
 
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const source = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 
 describe("curated opponent selection", () => {
+  it("keeps experimental Ace 28.4 separate from production Ace", () => {
+    expect(PRODUCTION_ACE_OPPONENT).toBe("schell_table-peg_table-28.3.fast");
+    expect(isAceOpponent("schell_table-peg_table-28.4")).toBe(false);
+  });
+
   it("keeps the AI selector unavailable in both browser and mobile markup", () => {
     expect(html).toMatch(/class="opponent-control" hidden[\s\S]*<select id="opponent" disabled>/);
   });

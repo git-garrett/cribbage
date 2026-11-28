@@ -3,7 +3,28 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { summarizeProgress, summarizeGames, renderMarkdown } = require("./report-paired-live-benchmark.cjs");
+const { summarizeProgress, summarizeGames, renderMarkdown, readSequential } = require("./report-paired-live-benchmark.cjs");
+
+test("sequential reporting requires the same ordered paired prefix and stopping decision", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "paired-sequential-test-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, "sequential.json");
+  const value = {method: "paired-fixed-bet-mixture-v1", alpha: .05, pairs: 1, maximumGames: 10000,
+    bets: [.01, .02, .04, .08, .16, .32, .64, 1], reason: "continue",
+    anytime95: [0, 1], opponentSweeps: 0, splits: 1, candidateSweeps: 0, winner: null, finished: false};
+  const games = [{game_index: 0, random_seed: "7", winner: 0}];
+  assert.equal(readSequential(root, games, games), null);
+  fs.writeFileSync(file, JSON.stringify(value));
+  assert.deepEqual(readSequential(root, games, games), value);
+  assert.throws(() => readSequential(root, games, []), /ordered paired prefix/);
+  fs.writeFileSync(file, JSON.stringify({...value, winner: "candidate", finished: true}));
+  assert.throws(() => readSequential(root, games, games), /stopping decision/);
+  fs.writeFileSync(file, JSON.stringify({...value, anytime95: [.6,.7], winner: "candidate", finished: true}));
+  assert.throws(() => readSequential(root, games, games), /recomputed confidence sequence/);
+  // A later live publication cannot invalidate the earlier captured record.
+  fs.writeFileSync(file, JSON.stringify({...value, pairs: 100}));
+  assert.deepEqual(readSequential(root, games, games, value), value);
+});
 
 function fixture(t, overrides = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "paired-eta-test-"));
@@ -120,4 +141,9 @@ test("markdown includes a prominent Pacific completion time and remaining durati
   assert.match(markdown, /Opening play \/ hand/);
   assert.match(markdown, /Total \/ pegging hand/);
   assert.doesNotMatch(markdown, /\| pegging \|/);
+  report.sequentialInference = {anytime95: [.48, .54], pairs: 100, maximumGames: 10000,
+    reason: "continue", winner: null};
+  const sequential = renderMarkdown(report);
+  assert.match(sequential, /Anytime-valid 95% paired confidence sequence: 48.00% to 54.00%/);
+  assert.match(sequential, /descriptive fixed-sample summaries/);
 });

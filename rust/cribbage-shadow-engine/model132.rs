@@ -499,7 +499,7 @@ pub struct Model1322DeclineFactors {
 }
 
 impl Model1322DeclineFactors {
-    pub(crate) fn load_model203(path: &Path) -> Result<Self, String> {
+    pub fn load_model203(path: &Path) -> Result<Self, String> {
         #[derive(serde::Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Asset {
@@ -976,11 +976,11 @@ impl Model911Policy {
         self.lock_inner().cache_wp_actions_for_role(role);
     }
 
-    pub(crate) fn use_empirical_depletion(&self) {
+    pub fn use_empirical_depletion(&self) {
         self.lock_inner().use_empirical_depletion();
     }
 
-    pub(crate) fn with_positive_soft_evidence(mut self) -> Self {
+    pub fn with_positive_soft_evidence(mut self) -> Self {
         self.preserve_soft_support = true;
         self
     }

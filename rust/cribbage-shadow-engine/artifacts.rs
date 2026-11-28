@@ -174,10 +174,33 @@ impl Model1323CorrectionTable {
     }
 
     fn decode(bytes: Vec<u8>) -> Result<Self, String> {
+        Self::decode_with_magic(bytes, b"M1323C01")
+    }
+
+    /// Read a normalized candidate only with its independently recorded SHA-256
+    /// and frozen builder-input identities. Historical readers remain strict.
+    pub fn load_normalized(
+        path: impl AsRef<Path>,
+        sha256: &str,
+        inputs: [u64; 5],
+    ) -> Result<Self, String> {
+        use sha2::{Digest, Sha256};
+        let bytes = fs::read(path.as_ref()).map_err(|e| format!("read normalized corrections: {e}"))?;
+        if format!("{:x}", Sha256::digest(&bytes)) != sha256 {
+            return Err("normalized correction SHA-256 mismatch".into());
+        }
+        let table = Self::decode_with_magic(bytes, b"M20DC001")?;
+        if table.input_checksums() != inputs {
+            return Err("normalized correction input provenance mismatch".into());
+        }
+        Ok(table)
+    }
+
+    fn decode_with_magic(bytes: Vec<u8>, magic: &[u8; 8]) -> Result<Self, String> {
         const PREFIX: usize = MODEL1322_HEADER_BYTES
             + 2 * MODEL1322_ROLE_ROWS * MODEL1322_ACCUMULATOR_BYTES
             + MODEL1322_ROLE_ROWS * 13 * 2;
-        if bytes.len() < PREFIX || &bytes[..8] != b"M1323C01" {
+        if bytes.len() < PREFIX || &bytes[..8] != magic {
             return Err(
                 "Model 13.23 requires a joint-distribution asset, not a means-only table".into(),
             );
@@ -2486,6 +2509,28 @@ mod model91_tests {
     use super::*;
     use std::env;
     use std::process;
+
+    #[test]
+    fn normalized_correction_reader_requires_exact_bytes_inputs_and_complete_rows() {
+        use sha2::{Digest, Sha256};
+        let mut table = Model1323CorrectionTable::fixture(&[]);
+        table.bytes[..8].copy_from_slice(b"M20DC001");
+        let inputs = table.input_checksums();
+        let path = env::temp_dir().join(format!("normalized-corrections-{}.bin", process::id()));
+        fs::write(&path, &table.bytes).unwrap();
+        let digest = format!("{:x}", Sha256::digest(&table.bytes));
+        assert!(Model1323CorrectionTable::load_normalized(&path, &digest, inputs).is_ok());
+        assert!(Model1323CorrectionTable::load(&path).is_err());
+        assert!(Model1323CorrectionTable::load_normalized(&path, &"0".repeat(64), inputs).is_err());
+        let mut wrong_inputs = inputs;
+        wrong_inputs[0] ^= 1;
+        assert!(Model1323CorrectionTable::load_normalized(&path, &digest, wrong_inputs).is_err());
+        table.bytes[32..36].copy_from_slice(&1819_u32.to_le_bytes());
+        fs::write(&path, &table.bytes).unwrap();
+        let digest = format!("{:x}", Sha256::digest(&table.bytes));
+        assert!(Model1323CorrectionTable::load_normalized(&path, &digest, inputs).is_err());
+        fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn model1323_reader_validates_complete_joint_outcomes_and_role_orientation() {

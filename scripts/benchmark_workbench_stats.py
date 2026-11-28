@@ -180,3 +180,12 @@ def metric_histories(pairs):
                         snapshot['fixed95'] = [max(-2, snapshot['fixed95'][0]), min(2, snapshot['fixed95'][1])]
                     histories[key].append(snapshot)
     return histories
+
+
+if __name__ == '__main__':
+    import json
+    import sys
+    counts = json.load(sys.stdin)
+    if not isinstance(counts, list) or len(counts) != 3 or any(type(n) is not int or n < 0 for n in counts):
+        raise ValueError('three nonnegative integer paired outcome counts required')
+    print(json.dumps(dict(bets=list(BETS), anytime95=confidence_sequence(counts))))

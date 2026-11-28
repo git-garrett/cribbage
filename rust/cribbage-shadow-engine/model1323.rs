@@ -259,6 +259,38 @@ impl PreparedDecision<'_> {
 }
 
 impl PolicyAssets {
+    /// Candidate-position validation only; never selected by production dispatch.
+    #[cfg(test)]
+    pub(crate) fn with_model284_test_beliefs(directory: &Path, candidate: &Path) -> Result<Self, String> {
+        let mut assets = Self::load_model205(directory)?;
+        let hold_path = candidate.join("late-hold.bin");
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(candidate.join("manifest.json")).map_err(|e| e.to_string())?
+        ).map_err(|e| e.to_string())?;
+        for name in ["late-hold.bin", "late-discards.bin"] {
+            let bytes=fs::read(candidate.join(name)).map_err(|e| e.to_string())?;
+            if manifest["assets"][name]["sha256"] != format!("{:x}", Sha256::digest(bytes)) {
+                return Err("candidate asset differs from its manifest".into());
+            }
+        }
+        let discard_bytes = fs::read(candidate.join("late-discards.bin")).map_err(|e| e.to_string())?;
+        Self::with_model284_beliefs(directory, &hold_path, &discard_bytes)
+    }
+
+    pub(crate) fn with_model284_beliefs(directory: &Path, hold: &Path, discards: &[u8]) -> Result<Self, String> {
+        let mut assets = Self::load_model205(directory)?;
+        let packed = crate::model203_discards::Model203DiscardAsset::decode_model284_candidate(discards)?;
+        assets.beliefs = Model91EmpiricalBeliefs::load_model203(hold)?;
+        assets.suit_rates = Some(packed.suits.clone());
+        assets.discards = OpponentDiscardPrior::Smoothed(packed);
+        let mut fingerprint = Sha256::new();
+        fingerprint.update(assets.discard_asset_sha256);
+        fingerprint.update(fs::read(hold).map_err(|e| e.to_string())?);
+        fingerprint.update(discards);
+        assets.discard_asset_sha256 = fingerprint.finalize().into();
+        Ok(assets)
+    }
+
     pub(crate) fn prepare_decision<'a>(
         &'a self,
         observation: &'a Model132Observation,

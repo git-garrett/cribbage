@@ -87,6 +87,46 @@ function readGames(databasePath) {
   }
 }
 
+function captureSequential(root) {
+  const file = path.join(root, "sequential.json");
+  if (!fs.existsSync(file)) return null;
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function readSequential(root, candidateGames, opponentGames, captured) {
+  const value = captured === undefined ? captureSequential(root) : captured;
+  if (value === null) return null;
+  if (value.method !== "paired-fixed-bet-mixture-v1" || value.alpha !== 0.05 ||
+      !Number.isInteger(value.pairs) || value.pairs < 0 || value.pairs > 5000 ||
+      value.maximumGames !== 10000 || !Array.isArray(value.anytime95) || value.anytime95.length !== 2 ||
+      !value.anytime95.every((x) => Number.isFinite(x) && x >= 0 && x <= 1) ||
+      value.anytime95[0] > value.anytime95[1]) throw new Error("invalid sequential inference record");
+  const counts = [0, 0, 0];
+  for (let i = 0; i < value.pairs; ++i) {
+    const a = candidateGames[i], b = opponentGames[i];
+    if (!a || !b || a.game_index !== i || b.game_index !== i || a.random_seed !== b.random_seed ||
+        ![0, 1].includes(a.winner) || ![0, 1].includes(b.winner)) throw new Error("sequential inference lacks its ordered paired prefix");
+    counts[Number(a.winner === 0) + Number(b.winner === 1)]++;
+  }
+  if (counts[0] !== value.opponentSweeps || counts[1] !== value.splits || counts[2] !== value.candidateSweeps)
+    throw new Error("sequential inference counts differ from the database snapshot");
+  const checked = spawnSync(process.env.CRIBBAGE_REPORT_PYTHON || "python3",
+    [path.join(__dirname, "benchmark_workbench_stats.py")], {
+      input: JSON.stringify(counts), encoding: "utf8", maxBuffer: 1024 * 1024,
+    });
+  if (checked.error || checked.status !== 0)
+    throw new Error(checked.error?.message || checked.stderr.trim() || "sequential inference verification failed");
+  const computed = JSON.parse(checked.stdout);
+  if (JSON.stringify(computed.bets) !== JSON.stringify(value.bets) ||
+      !computed.anytime95.every((x, i) => x === value.anytime95[i]))
+    throw new Error("sequential interval or bets differ from the recomputed confidence sequence");
+  const winner = value.anytime95[0] > .5 ? "candidate" : value.anytime95[1] < .5 ? "opponent" : null;
+  const reason = winner ? "confidence_boundary" : value.pairs === 5000 ? "game_cap" : "continue";
+  if (value.winner !== winner || value.finished !== Boolean(winner || value.pairs === 5000) || value.reason !== reason)
+    throw new Error("sequential stopping decision differs from its confidence sequence");
+  return value;
+}
+
 function summarizeProgress(root, orientations, expectedPerOrientation) {
   const statuses = orientations.map(({ label, runId, savedGames }) => {
     let current = {};
@@ -254,11 +294,17 @@ function combineScoring(analyses, rowsFor, candidate, opponent) {
 function buildReport(options) {
   const snapshotRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cribbage-paired-report-"));
   try {
+    // Capture inference first: database coverage only grows afterwards, so the
+    // two snapshots must contain every pair used by this immutable record.
+    const sequentialRecord = captureSequential(options.root);
     for (const label of [options.candidateLeft, options.opponentLeft]) snapshotDatabase(path.join(options.root, label, "games.db"), path.join(snapshotRoot, label, "games.db"));
     const candidateAnalysis = analyze(snapshotRoot, options.candidateLeft, options.candidateLeftRunId);
     const opponentAnalysis = analyze(snapshotRoot, options.opponentLeft, options.opponentLeftRunId);
     const analyses = [candidateAnalysis, opponentAnalysis];
-    const games = summarizeGames(readGames(path.join(snapshotRoot, options.candidateLeft, "games.db")), readGames(path.join(snapshotRoot, options.opponentLeft, "games.db")), options.candidate, options.opponent);
+    const candidateGames = readGames(path.join(snapshotRoot, options.candidateLeft, "games.db"));
+    const opponentGames = readGames(path.join(snapshotRoot, options.opponentLeft, "games.db"));
+    const games = summarizeGames(candidateGames, opponentGames, options.candidate, options.opponent);
+    const sequential = readSequential(options.root, candidateGames, opponentGames, sequentialRecord);
     const manifest = readManifest(options.root);
     // Resumed databases can retain an old ai_runs.out_dir. Read status from
     // the explicitly selected run root, and count saved games in the snapshot.
@@ -284,6 +330,7 @@ function buildReport(options) {
       candidate: options.candidate,
       opponent: options.opponent,
       manifest,
+      sequentialInference: sequential,
       progress: {
         observedGames: games.observedGames,
         expectedGames: Number(manifest.totalGames) || null,
@@ -357,6 +404,14 @@ function renderMarkdown(report) {
     "",
     `- Experiment: ${report.manifest.experiment || "n/a"}`,
     `- Seed pairing: ${report.manifest.orientationPairing || "n/a"}`,
+    ...(report.sequentialInference ? [
+      "",
+      "## Sequential inference and stopping",
+      "",
+      `- Anytime-valid 95% paired confidence sequence: ${percent(report.sequentialInference.anytime95[0])} to ${percent(report.sequentialInference.anytime95[1])}, using ${report.sequentialInference.pairs} ordered seed pairs.`,
+      `- Stopping decision: ${report.sequentialInference.reason}; winner: ${report.sequentialInference.winner || "not established"}. Maximum: ${report.sequentialInference.maximumGames} games.`,
+      "- This confidence sequence controls repeated checking. The Wilson and normal intervals below are descriptive fixed-sample summaries and are not the stopping rule or sequentially adjusted confidence intervals.",
+    ] : []),
     "",
     "## Progress and result",
     "",
@@ -436,4 +491,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { buildReport, parseArgs, summarizeGames, summarizeProgress, renderMarkdown, combineRows };
+module.exports = { buildReport, parseArgs, summarizeGames, summarizeProgress, renderMarkdown, combineRows, readSequential };

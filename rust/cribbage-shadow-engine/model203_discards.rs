@@ -48,6 +48,14 @@ impl Model203DiscardAsset {
     }
 
     fn decode(bytes: &[u8]) -> Result<Self, String> {
+        Self::decode_for_model(bytes, "20.3")
+    }
+
+    pub(crate) fn decode_model284_candidate(bytes: &[u8]) -> Result<Self, String> {
+        Self::decode_for_model(bytes, "28.4")
+    }
+
+    fn decode_for_model(bytes: &[u8], model: &str) -> Result<Self, String> {
         let mut reader = Reader { bytes, position: 0 };
         if reader.take(8)? != b"M203OD01" {
             return Err("unsupported Model 20.3 discard asset".into());
@@ -64,7 +72,7 @@ impl Model203DiscardAsset {
             return Err("Model 20.3 discard payload checksum/length mismatch".into());
         }
         let metadata: serde_json::Value = serde_json::from_slice(reader.take(metadata_len)?).map_err(|e| e.to_string())?;
-        if metadata["schemaVersion"] != version || metadata["modelVersion"] != "20.3" {
+        if metadata["schemaVersion"] != version || metadata["modelVersion"] != model {
             return Err("invalid Model 20.3 discard provenance".into());
         }
         let pairs = enumerate_rank_count_keys(2).iter().map(|key| {
