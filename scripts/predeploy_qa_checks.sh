@@ -22,6 +22,7 @@ npm run --silent test:late-beliefs
 npm run --silent test:early-ablation
 npm run --silent test:score-segments
 npm run --silent test:role-benchmark
+npm run --silent test:sequential-benchmark
 npm run --silent typecheck
 npm run --silent test:web
 npm test --silent

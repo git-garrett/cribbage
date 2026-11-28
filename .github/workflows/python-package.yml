@@ -42,6 +42,7 @@ jobs:
       - run: npm run --silent test:early-ablation
       - run: npm run --silent test:score-segments
       - run: npm run --silent test:role-benchmark
+      - run: npm run --silent test:sequential-benchmark
       - run: npm run --silent typecheck
       - run: npm run --silent test:web
       - run: npm test --silent

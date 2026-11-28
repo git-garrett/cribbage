@@ -32,7 +32,8 @@
     "test:score-segments": "scripts/run-quiet.sh \"Score segmentation tests\" python3 -m unittest scripts/test_model284_score_segments.py",
     "build:opening-assets": "scripts/run-quiet.sh --show-warnings \"Opening asset builder\" python3 scripts/build_rust_release.py opening",
     "test:history": "scripts/run-quiet.sh \"History review tests\" python3 -m unittest scripts/test_history_review_inputs.py scripts/test_player_history.py",
-    "test:role-benchmark": "scripts/run-quiet.sh \"Role benchmark resume tests\" python3 -m unittest scripts/test_model284_role_benchmark.py"
+    "test:role-benchmark": "scripts/run-quiet.sh \"Role benchmark resume tests\" python3 -m unittest scripts/test_model284_role_benchmark.py",
+    "test:sequential-benchmark": "scripts/run-quiet.sh \"Sequential paired benchmark tests\" /bin/bash scripts/test-model284-sequential.sh"
   },
   "dependencies": {
     "@capacitor/core": "^7.4.4"
