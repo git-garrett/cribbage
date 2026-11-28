@@ -61,3 +61,27 @@ subsequent stage skips and verified early-stop coverage. The existing confidence
 sequence tests exactly enumerate repeated-look null paths and check the
 martingale's unit expectation. Reporter tests reject mismatched inference
 prefixes and stopping decisions and require the sequential-interval caveat.
+
+## Execution identity
+
+The one-shot job is `ace284-roles-vs-ace-10k-20261127-v1`, rooted at
+`/Users/garrett/Library/Application Support/StrongCribbage/runtimes/ace284-roles-vs-ace-10k-20261127-v1`.
+It has 105 ordered stages and an explicit persistent supervisor root;
+`KeepAlive` is false. Preflight passed and the first paired batch started.
+
+- New numeric seed range: **1865618938–1865623937**, zero overlap with
+  50,640 retained numeric seeds, including the pilot and its smoke seed.
+- Engine source: `42c86b99b6de3208184e069dc77db427d9cab66c`.
+- Runner SHA-256: `29d79f8f55d905947ce6dcaf50e6d2ed902764286ba4e120d5aedd2dc02a02a9`.
+- Belief-manifest SHA-256: `0de3b019dfc9fb08fa0d028006d94c382df0d10ba49b7eed252a49cee00ed408`.
+- Original orchestration revision: `de9ac484f61c8d818cd13a0904de6d59ed5d7a00`.
+- Archival-only patch: `9f974609767a27e0ee1b5fe4087d6cb4374c58b8`, recorded with
+  original frozen hashes in `orchestration-patch.json`; it retains and verifies
+  the protocol, seed receipt, executable and other copied inputs in the archive.
+  It changes no game or inference settings.
+- Durable output: `benchmarks/model284/roles-vs-ace-10k-20261127-v1` in the shared
+  project checkout. Final verification must bind its actual early-stop or cap
+  count to the recomputed terminal confidence sequence and complete indices.
+
+No new confirmation outcome has been used to modify the experiment. The pilot
+result and its ordinary fixed-sample interval remain separate.
