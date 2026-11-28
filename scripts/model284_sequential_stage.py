@@ -223,13 +223,22 @@ def main():
         destination = Path(cfg['durableRoot'])
         destination.mkdir(parents=True,exist_ok=True)
         subprocess.run(['/usr/bin/rsync','-a',str(output)+'/',str(destination)+'/'],check=True)
-        for name in ('experiment.json','job.json','frozen-inputs.json'):
-            shutil.copy2(root/name,destination/name)
-        for name in ('scripts','pilot-provenance','beliefs'):
+        for name in ('experiment.json','job.json','frozen-inputs.json','protocol.md','seed-exclusion.json',
+                     'orchestration-patch.json'):
+            if (root/name).exists():
+                shutil.copy2(root/name,destination/name)
+        for name in ('scripts','pilot-provenance','beliefs','bin'):
             shutil.copytree(root/name,destination/name,dirs_exist_ok=True)
         atomic_json(root/'synced.json',dict(complete=True))
     elif mode == 'verify-sync':
         destination = Path(cfg['durableRoot'])
+        frozen = json.loads((root/'frozen-inputs.json').read_bytes())
+        for name, expected in frozen.items():
+            if name in ('experiment.json','job.json','protocol.md','seed-exclusion.json','orchestration-patch.json') or name.startswith(('scripts/','pilot-provenance/','beliefs/','bin/')):
+                if sha(destination/name) != expected:
+                    raise ValueError('archived runtime input differs: '+name)
+        if sha(destination/'frozen-inputs.json') != sha(root/'frozen-inputs.json'):
+            raise ValueError('archived frozen input manifest differs')
         for path in output.rglob('*'):
             if path.is_file() and not path.name.endswith(('-wal','-shm')):
                 copied = destination/path.relative_to(output)
